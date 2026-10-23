@@ -1,0 +1,100 @@
+[
+  {
+    "path": "sl/Scripts/game/src/City.java",
+    "line": 177,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/City.java",
+    "line": 494,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/GameLogic.java",
+    "line": 136,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Garage.java",
+    "line": 344,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Garage.java",
+    "line": 532,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Garage.java",
+    "line": 689,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Init.java",
+    "line": 164,
+    "terms": [
+      "runDLL"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Init.java",
+    "line": 166,
+    "terms": [
+      "runDLL"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Init.java",
+    "line": 167,
+    "terms": [
+      "runDLL"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/Init.java",
+    "line": 168,
+    "terms": [
+      "runDLL"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/MainMenu.java",
+    "line": 41,
+    "terms": [
+      "CMD_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/MainMenu.java",
+    "line": 287,
+    "terms": [
+      "CMD_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/MainMenu.java",
+    "line": 501,
+    "terms": [
+      "CMD_MULTIPLAYER"
+    ]
+  },
+  {
+    "path": "sl/Scripts/game/src/MainMenu.java",
+    "line": 510,
+    "terms": [
+      "GM_MULTIPLAYER"
+    ]
+  }
+]

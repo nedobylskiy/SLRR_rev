@@ -1,0 +1,7150 @@
+{
+  "generated": "2026-10-23T21:41:50.203Z",
+  "totalFiles": 25105,
+  "extensions": {
+    ".exe": {
+      "count": 10,
+      "bytes": 9232885
+    },
+    ".rpk": {
+      "count": 147,
+      "bytes": 498181072
+    },
+    ".rdb": {
+      "count": 118,
+      "bytes": 12419685
+    },
+    ".scx": {
+      "count": 6033,
+      "bytes": 702979884
+    },
+    ".cfg": {
+      "count": 3194,
+      "bytes": 3735022
+    },
+    ".ptx": {
+      "count": 67,
+      "bytes": 2038343
+    },
+    ".dds": {
+      "count": 3296,
+      "bytes": 557744784
+    },
+    ".3ds": {
+      "count": 1,
+      "bytes": 1504
+    },
+    ".psd": {
+      "count": 8,
+      "bytes": 23434324
+    },
+    ".bat": {
+      "count": 46,
+      "bytes": 3530
+    },
+    ".png": {
+      "count": 1685,
+      "bytes": 141506373
+    },
+    ".class": {
+      "count": 2921,
+      "bytes": 8433322
+    },
+    ".java": {
+      "count": 3454,
+      "bytes": 5068042
+    },
+    ".wav": {
+      "count": 337,
+      "bytes": 106351197
+    },
+    "(none)": {
+      "count": 175,
+      "bytes": 534337
+    },
+    ".1": {
+      "count": 143,
+      "bytes": 1312475
+    },
+    ".10": {
+      "count": 134,
+      "bytes": 737784
+    },
+    ".11": {
+      "count": 132,
+      "bytes": 835478
+    },
+    ".12": {
+      "count": 106,
+      "bytes": 636101
+    },
+    ".13": {
+      "count": 94,
+      "bytes": 649729
+    },
+    ".14": {
+      "count": 82,
+      "bytes": 525608
+    },
+    ".15": {
+      "count": 78,
+      "bytes": 515773
+    },
+    ".16": {
+      "count": 52,
+      "bytes": 485552
+    },
+    ".17": {
+      "count": 37,
+      "bytes": 277321
+    },
+    ".18": {
+      "count": 31,
+      "bytes": 298548
+    },
+    ".19": {
+      "count": 27,
+      "bytes": 258264
+    },
+    ".2": {
+      "count": 143,
+      "bytes": 652448
+    },
+    ".20": {
+      "count": 21,
+      "bytes": 163468
+    },
+    ".21": {
+      "count": 19,
+      "bytes": 167313
+    },
+    ".3": {
+      "count": 140,
+      "bytes": 550961
+    },
+    ".4": {
+      "count": 142,
+      "bytes": 614992
+    },
+    ".5": {
+      "count": 140,
+      "bytes": 532671
+    },
+    ".6": {
+      "count": 140,
+      "bytes": 731524
+    },
+    ".7": {
+      "count": 140,
+      "bytes": 610708
+    },
+    ".8": {
+      "count": 138,
+      "bytes": 680091
+    },
+    ".9": {
+      "count": 136,
+      "bytes": 810312
+    },
+    ".22": {
+      "count": 9,
+      "bytes": 90216
+    },
+    ".23": {
+      "count": 8,
+      "bytes": 51802
+    },
+    ".24": {
+      "count": 4,
+      "bytes": 20246
+    },
+    ".25": {
+      "count": 3,
+      "bytes": 18964
+    },
+    ".26": {
+      "count": 1,
+      "bytes": 3604
+    },
+    ".spl": {
+      "count": 49,
+      "bytes": 193083
+    },
+    ".ini": {
+      "count": 19,
+      "bytes": 1291
+    },
+    ".bak": {
+      "count": 3,
+      "bytes": 38124
+    },
+    ".txt": {
+      "count": 18,
+      "bytes": 41443
+    },
+    ".dll": {
+      "count": 6,
+      "bytes": 5801431
+    },
+    ".avi": {
+      "count": 2,
+      "bytes": 91293500
+    },
+    ".dat": {
+      "count": 4,
+      "bytes": 247
+    },
+    ".mp3": {
+      "count": 25,
+      "bytes": 193113649
+    },
+    ".tga": {
+      "count": 86,
+      "bytes": 55525414
+    },
+    ".jpg": {
+      "count": 82,
+      "bytes": 18777665
+    },
+    ".bon": {
+      "count": 19,
+      "bytes": 89412
+    },
+    ".matrixdata": {
+      "count": 17,
+      "bytes": 306486
+    },
+    ".skl": {
+      "count": 17,
+      "bytes": 88317
+    },
+    ".scy": {
+      "count": 35,
+      "bytes": 181592
+    },
+    ".box": {
+      "count": 114,
+      "bytes": 482450
+    },
+    ".scm": {
+      "count": 24,
+      "bytes": 98945
+    },
+    ".rest": {
+      "count": 1,
+      "bytes": 55573
+    },
+    ".trc": {
+      "count": 1,
+      "bytes": 843301
+    },
+    ".walk": {
+      "count": 1,
+      "bytes": 992240
+    },
+    ".dle": {
+      "count": 2,
+      "bytes": 192512
+    },
+    ".zmf": {
+      "count": 1,
+      "bytes": 24576
+    },
+    ".zip": {
+      "count": 1,
+      "bytes": 1378982
+    },
+    ".rep": {
+      "count": 1,
+      "bytes": 248733
+    },
+    ".hdr": {
+      "count": 1,
+      "bytes": 591
+    },
+    ".smb": {
+      "count": 17,
+      "bytes": 1045068
+    },
+    ".tex": {
+      "count": 866,
+      "bytes": 30939
+    },
+    ".vax": {
+      "count": 70,
+      "bytes": 11688
+    },
+    ".vaz": {
+      "count": 23,
+      "bytes": 4747
+    },
+    ".scx2": {
+      "count": 2,
+      "bytes": 2568
+    },
+    ".tex2": {
+      "count": 2,
+      "bytes": 28
+    },
+    ".scxdump": {
+      "count": 1,
+      "bytes": 4055
+    },
+    ".bmp": {
+      "count": 1,
+      "bytes": 263222
+    },
+    ".vdf": {
+      "count": 2,
+      "bytes": 104
+    }
+  },
+  "signatures": {
+    ".rpk": {
+      "RPAK:512": 147
+    },
+    ".scx": {
+      "INVO:3": 3532,
+      "INVO:4": 2500,
+      ":?": 1
+    },
+    ".class": {
+      "TUFA:151453": 2757,
+      "TUFA:151388": 159,
+      "TUFA:72417": 5
+    }
+  },
+  "packages": [
+    {
+      "path": "cars.rpk",
+      "size": 28068,
+      "sha256": "58bc76251913129789f48db33b37ed02a5e8f04599322cc00f6510d015a20510",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 366,
+      "types": [
+        5,
+        14,
+        7,
+        6,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/fake_racers.rpk",
+      "size": 3218,
+      "sha256": "94101382af1dc53fe6cafe1ce85a3ff10b0de3132a0305d609708d7c51be71c1",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 18,
+      "types": [
+        7,
+        6,
+        5,
+        8,
+        9,
+        14,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/fake_racers/Badge.rpk",
+      "size": 5281,
+      "sha256": "69929bf8c50fbe6059ed4c4b3768ce2a5d725e00f27296aba214cb938d68ce81",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\fake_racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 38,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/fake_racers/Ninja.rpk",
+      "size": 5284,
+      "sha256": "290d003e57430b43cd9593ac0bfdd329d437c53c5609e61fcf2eddcc1e019a3e",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\fake_racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 38,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/fake_racers/Stallion.rpk",
+      "size": 5335,
+      "sha256": "0044df5cb1193850bca85e3df0593500ed644eabdbe99842c8e480b31f07da37",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\fake_racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 38,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/fake_racers/Sunset.rpk",
+      "size": 5303,
+      "sha256": "850f370fdc1fb3acc1fcbe456bdb5de1c5afefa30d12b7648503557511ca10a0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\fake_racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 38,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/fake_racers/Teg.rpk",
+      "size": 5241,
+      "sha256": "6bac8f9b688a78ccd613d0dbd7dfe01efc887e134daf2aa2aeba1b2390beb354",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\fake_racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 38,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/misc.rpk",
+      "size": 328,
+      "sha256": "73d3d056864681348bfa2755851aadbc52ce93f11d34186e78784d53822c203b",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 6,
+      "types": [
+        7,
+        6,
+        5,
+        8,
+        9,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/misc/Police.rpk",
+      "size": 5577,
+      "sha256": "cebbadf43d014b98cd70adb6f0b485c834d9158cadd74215af9c73286771db09",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\misc.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 57,
+      "types": [
+        8,
+        5,
+        6,
+        14,
+        7,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers.rpk",
+      "size": 24750,
+      "sha256": "91a67cbee5d21f9cbe0b77a0006f5bc95036f7406b61408af33d4974dad16329",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 93,
+      "types": [
+        7,
+        6,
+        5,
+        8,
+        9,
+        14,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Axis.rpk",
+      "size": 36044,
+      "sha256": "3df1f41c503943253fb54d99b5cdbb95f7fe490fdaf0a0e313e8a7d54a7e2079",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 340,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Badge.rpk",
+      "size": 34161,
+      "sha256": "884514f5f96a9382ae8c1521ecc93868c9a49e037af9593402c3fc67fc3e3ef2",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 329,
+      "types": [
+        6,
+        8,
+        14,
+        5,
+        7,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Baiern.rpk",
+      "size": 79395,
+      "sha256": "0a3de7144b624f06118ba882557d3711fb3757f53a8f2f11dabcbe4fb1a4a08a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 563,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Codrac.rpk",
+      "size": 45233,
+      "sha256": "37c91718d59555a251b2e67942e92aac3c16901bc301e65dee34ae5094d440e6",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 417,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        9,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Coyot.rpk",
+      "size": 40271,
+      "sha256": "289a983e18b53b0804a39e2bd98a7cd3b4b0d9a2872666054caa0cd3106c69df",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 375,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Duhen.rpk",
+      "size": 42860,
+      "sha256": "60d3cd455a005ea26ccb037128ef5d2c3ff8c7ba3e27462ce42ddc23b00b0cf0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 395,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Einvagen.rpk",
+      "size": 63834,
+      "sha256": "15584148b4e6535296505959993064d3b4d6cd9624259d046723c8c7d1e0a338",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 450,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Enula.rpk",
+      "size": 45493,
+      "sha256": "5bbfd8e0ced04a3da5fe9e143644b3329bc6b66e98f873de989d260cb447e9ee",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 427,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Focer.rpk",
+      "size": 44984,
+      "sha256": "f3b0898cf7bcf6cc2426508ffdd93baeab66b36c4ae9af15e2d718a43e935bb5",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 408,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Furrano.rpk",
+      "size": 47537,
+      "sha256": "63d7ec06f22b2176d476980e1fa66df823e9a6e8bac915474c9f292c622b89ec",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 336,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Kurumma.rpk",
+      "size": 35881,
+      "sha256": "72de0a90ab5bd237bb7bce1bd7f916beabc70305a0d7f155e4215c336e43f3e5",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 325,
+      "types": [
+        5,
+        9,
+        7,
+        14,
+        6,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/MC.rpk",
+      "size": 47360,
+      "sha256": "2ed046086759a1f3f262dedaab802951b01fee597350da35361f9dbf8cec3105",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 359,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Naxas.rpk",
+      "size": 40275,
+      "sha256": "a01eff0fdfdd253557b6bb2baca9153cc0502caaf312ff05296c51367a5b33cf",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 367,
+      "types": [
+        6,
+        8,
+        9,
+        5,
+        7,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Ninja.rpk",
+      "size": 39593,
+      "sha256": "4114223d6f9c40ce095a6aacbe15b5db26dd0bdcf15cececb1607b1d5d42d2fd",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 367,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Nonus.rpk",
+      "size": 64263,
+      "sha256": "b8f7a35a27da5604be0f5e90f4fb495ce92d35b140aba0cd9715116714d35d4c",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 452,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Prime.rpk",
+      "size": 51225,
+      "sha256": "0b979102642fd7b283113c80fb30ea0b8dbf7d1c048cd2e55bb2e2f6644ee18a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\wings.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 380,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Remo.rpk",
+      "size": 33484,
+      "sha256": "7ed47a3b6a65dd7ba86b14019954119c6aa628a364eb5ab90ad931f6d02c548a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\interior.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 307,
+      "types": [
+        5,
+        7,
+        14,
+        8,
+        6,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/ST9.rpk",
+      "size": 36299,
+      "sha256": "1ecee4e447bebed4feb4ac95be703deed949eac3e4e6309588b66e2df9657f9e",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\wings.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 344,
+      "types": [
+        8,
+        9,
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Stallion.rpk",
+      "size": 38193,
+      "sha256": "94db603c5c704744c42095ef39eb4cc169c015bbafcccd9aca999ab691854b8d",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 339,
+      "types": [
+        5,
+        6,
+        7,
+        14,
+        9,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Sunset.rpk",
+      "size": 42395,
+      "sha256": "b2c618d900b3bacacf3ebd968a00ebac9eab3b20436d2683eaf62f6d9f3dc3d6",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 389,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/SuperDuty.rpk",
+      "size": 47590,
+      "sha256": "305cd8597137e8987b95dd0dd37a1100835b79e3f0b10b73e462a9603160a555",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 332,
+      "types": [
+        9,
+        6,
+        5,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Teg.rpk",
+      "size": 35092,
+      "sha256": "f8d7eb8090d62d8f9d31b64ba2ab0e9dbb9b07ae448525dd7d2ed9d11f78fb59",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 339,
+      "types": [
+        6,
+        8,
+        9,
+        5,
+        7,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Whisper.rpk",
+      "size": 41653,
+      "sha256": "bf9c86b56db1152c22e5ccdd9d62ab0f02f7a2f45939e2f90dfaf263d73acf1a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\wings.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 379,
+      "types": [
+        6,
+        8,
+        9,
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Yotta.rpk",
+      "size": 38144,
+      "sha256": "5e3691567ef6dd53060c98653f82f2e29b1638ce50fe768a70e1fad709f4bff5",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 354,
+      "types": [
+        6,
+        8,
+        9,
+        5,
+        14,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/racers/Zed.rpk",
+      "size": 31724,
+      "sha256": "05532acb73aba68053f33fe39752b53c401ef6fee82e9dbbc1fb00c5bb5a7343",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "parts\\wings.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 589824,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 655360,
+          "path": "parts\\engines\\Einvagen_Duhen_Ishima_Focer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 720896,
+          "path": "parts\\engines\\GMC_Nissan_Honda_Hyundai_Opel.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 786432,
+          "path": "parts\\engines\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 851968,
+          "path": "parts\\engines\\Lama_Performance_V12.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 917504,
+          "path": "parts\\engines\\Callaway_Cadillac_Bugatti_V16.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 983040,
+          "path": "parts\\wheels.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 298,
+      "types": [
+        6,
+        8,
+        14,
+        5,
+        7,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic.rpk",
+      "size": 2386,
+      "sha256": "b53c9ed93393a6e15cb709709c47ffd457a0ddec49e2604ff829dcd01685f22d",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 20,
+      "types": [
+        7,
+        6,
+        5,
+        8,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Ambulance.rpk",
+      "size": 3905,
+      "sha256": "73ca8004ffb4a118eb5b83a0fe266f5c72958feb855fa8b27f201b8a7ffe42b4",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 35,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/ArmoredVan.rpk",
+      "size": 6107,
+      "sha256": "c74ce883afa96c5774cb4f664bc4568e871a2eef36567d811c121bbb4cea5edb",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 55,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/CivilVan.rpk",
+      "size": 3835,
+      "sha256": "26e88b721c598824f157d43aa5b2a666c5f53fec2511a9515f93e6863af55003",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 36,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Civilvan_2.rpk",
+      "size": 3883,
+      "sha256": "d212067dfe78ec06e83cbcf878d24a9b7f2780c6ad6d89bca2a746877b1180fa",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 36,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Civilvan_3.rpk",
+      "size": 3883,
+      "sha256": "f0374f1dd5f9b7da8aabcc030cfc04992ccb19087fa70652ab598df0453cfeaa",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 36,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Coach.rpk",
+      "size": 1861,
+      "sha256": "d26ac2ac7125cbbc3ff9c281d6ebaf67122f06bde2e4bff0ee94fb4ba8c230fc",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 18,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Erbilac.rpk",
+      "size": 5043,
+      "sha256": "07d2de6ba6d36c3df86315160e7af38697cec6d1bacd61cafcccee88ce711874",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 46,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Erbilac_2.rpk",
+      "size": 5268,
+      "sha256": "ec50ec750a9d28b3ddb552c9a100b80a4faf35f01d16f80104ec871f741ea0f8",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 47,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Erbilac_3.rpk",
+      "size": 5268,
+      "sha256": "f9814ab53558133169c6ea362c09c32d89287ba066dd61d3955baa60b84a98f1",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 47,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/FireEngine.rpk",
+      "size": 2649,
+      "sha256": "665b83e18b47f7caf80b57f6462c7ea3406b35708d70ba26f5669c3b77d9a12e",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 23,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Peterbild.rpk",
+      "size": 3013,
+      "sha256": "67330bac6857ac0c9d7cebfa77042a4ebfb7caeb4a55a52c4e3dc6b2337d8a62",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 26,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Peterbild_2.rpk",
+      "size": 3091,
+      "sha256": "05293f74ad1cd0290a6b364f00e78462c233b20ea132f24f44b4fa0457e1c7dc",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 26,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Peterbild_3.rpk",
+      "size": 3079,
+      "sha256": "c31b06f5b4a1c0a96e4adcd6ffcbdf6971401c561f0eb62c44c15ba73ceeeddd",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 26,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Pickup.rpk",
+      "size": 3602,
+      "sha256": "7e962c058955d2004de5793b2cc8c2792f6988c7bd592195b4309f96b579bd68",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 35,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Pickup_2.rpk",
+      "size": 3650,
+      "sha256": "0b87ce2a368e8af77ad443f1764a905d50c426d147b2f4505da8b2ac8c42b360",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 35,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Pickup_3.rpk",
+      "size": 3650,
+      "sha256": "e3b931db977635a0d0998e2b706f1731e36187ec028b8bd1befd4dceca6c554a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 35,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Schoolbus.rpk",
+      "size": 2218,
+      "sha256": "f473c10493edd692377de5c42e2193d04e10566a5b83109fad8b034ebfa5bc46",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 20,
+      "types": [
+        5,
+        6,
+        14,
+        7,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Taxi.rpk",
+      "size": 5268,
+      "sha256": "1550bb39460a1aaa3be257909a82dfc0152432080c63d6c715220efdcfa8a7f0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 48,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "cars/traffic/Wagon.rpk",
+      "size": 5583,
+      "sha256": "fe8cc60d90cade518d131ec9933cf490d3276a2c7d4b9423736dceeec4b8708f",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\traffic.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "sound.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 53,
+      "types": [
+        5,
+        9,
+        6,
+        14,
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "decals.rpk",
+      "size": 576,
+      "sha256": "21d82809f1e7f2210b9dbfbf4ae949adc2846f327722df89ff6f360717476e82",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 7,
+      "types": [
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "frontend.rpk",
+      "size": 60577,
+      "sha256": "d4f301076f02c50c24c7db0023524b05ee5503f15482b0cb297bd99bb88d8434",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "misc\\garage.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 580,
+      "types": [
+        7,
+        14,
+        6,
+        8,
+        5,
+        13,
+        3,
+        9,
+        11
+      ],
+      "warnings": []
+    },
+    {
+      "path": "humans.rpk",
+      "size": 6680,
+      "sha256": "d433f89001c47168b63b48d5fb9eb2437e6815f356e07f6769c156a194794573",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 82,
+      "types": [
+        14,
+        5,
+        6,
+        7,
+        8,
+        19
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps.rpk",
+      "size": 452,
+      "sha256": "f2992d9752cb7d8acff33bc666fb1155ddd8dbb80c2c3e1354563e16b15865cb",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 6,
+      "types": [
+        5,
+        7,
+        14,
+        13,
+        12,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/ROC_track.rpk",
+      "size": 7494429,
+      "sha256": "46f3a24ded242c864d01d741ff84deae094f49378e28c476fc94bd3848d63bac",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps\\textures.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 38,
+      "types": [
+        1,
+        14,
+        5,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/ROC_track/smallmap.rpk",
+      "size": 5330,
+      "sha256": "5ce8370976b1249600b12ed677066e80fd73668b0027150924294b0986bd44ab",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "frontend.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 67,
+      "types": [
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/city.rpk",
+      "size": 32248997,
+      "sha256": "7f91a0c4abc6be8c3cb2bfdda73b90b15e0a76baec6569c830ebd5e6f9a07d54",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "maps\\city2.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps\\textures.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 309,
+      "types": [
+        1,
+        8,
+        13,
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/city2.rpk",
+      "size": 38048490,
+      "sha256": "6665cd18027c4609270e11175d37a2e39fc654dbe595114928dd9f5e99284c2f",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "maps\\city.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps\\textures.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 362,
+      "types": [
+        1,
+        8,
+        13,
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/city/smallmap.rpk",
+      "size": 5005,
+      "sha256": "9162306287746ea790235f9b0c484f0e56fab998624c52fe794033af4c5d9f34",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "frontend.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 67,
+      "types": [
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/skydome.rpk",
+      "size": 6325,
+      "sha256": "7297e854cd45a66833f2e720b047df81c2f1511fc2c7328f643e5adf0b3a33e3",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "obstacles\\common.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "obstacles\\test_track.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "obstacles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 60,
+      "types": [
+        14,
+        5,
+        7,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/test_track.rpk",
+      "size": 9870111,
+      "sha256": "8878cb95b628f43a5d2e0aeb57ff37843e90a8b37d9755d68eb1702250c20f31",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "obstacles\\common.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "obstacles\\test_track.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "obstacles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "maps\\textures.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 344,
+      "types": [
+        1,
+        14,
+        5,
+        13,
+        8,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/test_track/smallmap.rpk",
+      "size": 5491,
+      "sha256": "93bb1bb2fca9ef45269e28e1b5414f1ea6aad24cd28f0b14f46a1d99f859d1c9",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "frontend.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 67,
+      "types": [
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "maps/textures.rpk",
+      "size": 43722,
+      "sha256": "442a213c6af35dd6e6961d5d9aa7da5793f2cdb5600a2c66d17b2cf0cf169c19",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "maps\\city2.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 551,
+      "types": [
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/carlot.rpk",
+      "size": 7912602,
+      "sha256": "b9e1d4a32d2c1051f49745bd24c8b4e93810eaa30d948a27303dafddaf768f82",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 35,
+      "types": [
+        1,
+        14,
+        5,
+        8,
+        7,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/catalog.rpk",
+      "size": 1490,
+      "sha256": "b056098af22a9456860f377df468d14a08199a76a305760aa4681faf374ac685",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "frontend.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 16,
+      "types": [
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/dealer.rpk",
+      "size": 77656,
+      "sha256": "a81988f4f215867d123f8d19dfa2e9a73c2655ccc81e1e62552254828ea8282c",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "frontend.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "maps\\test_track.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "buildings.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 37,
+      "types": [
+        1,
+        14,
+        5,
+        8,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/dealer2.rpk",
+      "size": 123608,
+      "sha256": "c0dfbdb5c47d15a15a30c7d4ea3cecd60ac36e80ef0154baa83bcd46cb8bde7a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "frontend.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "maps\\test_track.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "buildings.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 42,
+      "types": [
+        1,
+        14,
+        5,
+        8,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/dealer3.rpk",
+      "size": 4940658,
+      "sha256": "69ba45cddd7aa0ec014c5b071bd519ba4f5ea30262194cbef88350c0a33f9a14",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "objects.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 47,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        13,
+        8,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/garage.rpk",
+      "size": 650949,
+      "sha256": "42e4a354620e4c2c9ac41b043d74fdf4603e0ac6a8e1aeaa5bf544941a0a8486",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 135,
+      "types": [
+        7,
+        14,
+        1,
+        8,
+        5,
+        13,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/garage_objects.rpk",
+      "size": 2671,
+      "sha256": "8b652fcba9fb71ca7171cda1a45df308f7c36494997f7017f16c36a28f3b0494",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 20,
+      "types": [
+        5,
+        9,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "misc/paintbooth.rpk",
+      "size": 4194943,
+      "sha256": "03e59a312157f23c9969d6ad68301f797d5bf882e342d7c4a812585af6f3fd85",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "objects.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 17,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "modding_tools/Map tools/maps/sample.rpk",
+      "size": 768,
+      "sha256": "003b788ffe5e3a4d5b427c643ce57eb39e6fb5ef5ea8c92ad5227877020a301c",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "maps.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 7,
+      "types": [
+        1,
+        14,
+        5,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "mrm.rpk",
+      "size": 3834,
+      "sha256": "873f670a7a9bbef2c8a18383970ddf21e12a70517fc3024850a6915f6ea01152",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 44,
+      "types": [
+        8,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/gfx_complex.rpk",
+      "size": 2090,
+      "sha256": "31750c89c78f3331a2eb593027ca242031e8a124e97e6ca813f4fba569870c26",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 15,
+      "types": [
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/instances.rpk",
+      "size": 805,
+      "sha256": "cb1fe1a0f86c117ff9a64d50b15fda49e451d76290489eb8cd170670584af22c",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "maps\\textures.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "mrm.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 7,
+      "types": [
+        8,
+        5,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps.rpk",
+      "size": 452,
+      "sha256": "f2992d9752cb7d8acff33bc666fb1155ddd8dbb80c2c3e1354563e16b15865cb",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 6,
+      "types": [
+        5,
+        7,
+        14,
+        13,
+        12,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/A1Ring.rpk",
+      "size": 14686016,
+      "sha256": "5ed3069d2ec5ff3e10c4ad2a26cb90ef17ed7e7a65a544c2adf22271e105ca04",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\A1Ring.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 93,
+      "types": [
+        1,
+        14,
+        5,
+        7,
+        13,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/A1Ring/t_data.rpk",
+      "size": 385,
+      "sha256": "a89a3a08f0220fb92d4834622abc25687979fb300df9a19ad789317217e6601d",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/DerbyArena.rpk",
+      "size": 7821951,
+      "sha256": "48ec4da276fc58ae5c628d3c9027629b86d796ab14efc3ac34bd05571c84ef04",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\DerbyArena.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 31,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/DerbyArena/t_data.rpk",
+      "size": 397,
+      "sha256": "6f4a5ed82a30f25aba9a45ec327312aa759509cbdcba57dcadfcd694619abe10",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/DragStrip.rpk",
+      "size": 26605331,
+      "sha256": "2543c11ecea1eebf1c39de619d12442b38b2404f8adf3d9a9b834cdab29f750a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\DragStrip.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 71,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/DragStrip/t_data.rpk",
+      "size": 394,
+      "sha256": "ae7ab836b04d7b0e6113cd7b16ff8bffc9ff9ec40bb82fa092e4e5f6c49737bb",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/GatewayRoad.rpk",
+      "size": 17269900,
+      "sha256": "1737dbaa62676f8e04b7aac9753b6c893b7c106bdd3e671dddaf991b33659953",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\GatewayRoad.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 64,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/GatewayRoad/t_data.rpk",
+      "size": 400,
+      "sha256": "25bb5b69dd4e8bc7991017dbee5a7f3b6d2a9f563a2e55d1973aee96fdb592a8",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/HockenheimGP.rpk",
+      "size": 27849487,
+      "sha256": "d77759a1b4fff9e3fa4a7403d4e0c5c5e392da716ba06351d2bea326c4a1992b",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\HockenheimGP.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 130,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/HockenheimGP/t_data.rpk",
+      "size": 403,
+      "sha256": "116a1bb8c44d8a47ff18954fe1cf062fcb060c057f86f5771759ecadd299e8aa",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/LagunaSeca.rpk",
+      "size": 31272545,
+      "sha256": "f4f0f63e4a777233bf38929e05412c885bc1e3c059c1b89fd68d854123840753",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\LagunaSeca.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 83,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/LagunaSeca/t_data.rpk",
+      "size": 397,
+      "sha256": "8dc29bbf102961785ab1ee40ffdb5dd2846eaa6f8e6e4b919ebe4f7d6e073cd0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/NationalDirtRaceway.rpk",
+      "size": 17668830,
+      "sha256": "4a5f06cd1737e27b0512e7a6d3d4d26bc0c372e444f40e9181ecc8b7681deab6",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\NationalDirtRaceway.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 75,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/NationalDirtRaceway/t_data.rpk",
+      "size": 424,
+      "sha256": "c21811dcf3ba2c313d9c546c0b1cbeb623529d7f629ab864b17e361fe71711ae",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Norisring.rpk",
+      "size": 17551160,
+      "sha256": "43be84b7ae819b267cad3354d6a892b75cb8c2d0490c30a486d29b134f1ac4d9",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\Norisring.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 100,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Norisring/t_data.rpk",
+      "size": 394,
+      "sha256": "68f6f022ed897215528109bef90ebabbd2d5da211941898aa5b392ba2c9dc234",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Nurburgring.rpk",
+      "size": 18247237,
+      "sha256": "cbe2f809eb1d74977f07207337c54f22fb47df8d593fd441b7c609c22dd9f695",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\Nurburgring.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 128,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Nurburgring/t_data.rpk",
+      "size": 400,
+      "sha256": "ca878968e920e4c5cff532da063538b734215f0a37e6e61778586b9cf14699a0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/OranPark.rpk",
+      "size": 14937801,
+      "sha256": "87548fa600e146c72ee310cfad9e45a8290c20a86c30fe1e19e5a1522333dbb2",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\OranPark.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 41,
+      "types": [
+        1,
+        14,
+        5,
+        7,
+        13,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/OranPark/t_data.rpk",
+      "size": 391,
+      "sha256": "773e1e977bc23f9f0a956332a7aacde285336e925d4702a23c3cd841a13ad221",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/OultonPark.rpk",
+      "size": 16989061,
+      "sha256": "b4d8f59c6e0b20db6e96907c0c6c4f1e4aa8c22a65904f6e876dd9f8eaeddb8f",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\OultonPark.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 58,
+      "types": [
+        1,
+        14,
+        5,
+        7,
+        13,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/OultonPark/t_data.rpk",
+      "size": 397,
+      "sha256": "ca116c000147f4614f74d93dc1831348ec5e855df5f8560df9f20dc4c84842bb",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/ROCTrack/t_data.rpk",
+      "size": 391,
+      "sha256": "e8c8049f190d8b4ebe652d8d6a1ac58a5d406f1ad5e28d18b5937cfc1d63b613",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/SPAFrankoohapsGPCircuit.rpk",
+      "size": 23504313,
+      "sha256": "f6d75aa1242d824b5e470804c1d5ccc25c3b183eced38e991178759d29965a96",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\SPAFrankoohapsGPCircuit.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 102,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/SPAFrankoohapsGPCircuit/t_data.rpk",
+      "size": 436,
+      "sha256": "c5d85257be9313de8c6ed6975f000b7ab22c542cb8ecc7c87eba546817895d00",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Sandown.rpk",
+      "size": 17078628,
+      "sha256": "b47e4fed2608766db7005b905d08eead13257de9e892cd9cd92f37e368239439",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\Sandown.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 62,
+      "types": [
+        1,
+        14,
+        5,
+        7,
+        13,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Sandown/t_data.rpk",
+      "size": 388,
+      "sha256": "07e79b5b5c2394b2e2c17d2cee47fc0ef3a01d6339573e9b22b7cc6dea4189d0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/TestTrack/t_data.rpk",
+      "size": 394,
+      "sha256": "04436fcfff8e06836db64507d8777f3e7f5d46776f6353c2ef7c82fd326661b5",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/UKRallyStage1.rpk",
+      "size": 42617654,
+      "sha256": "a79a08dfbebefc2cad5a3ddb75dbfe3a34c84bd0e07b74af35c0090be113c119",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\UKRallyStage1.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 64,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/UKRallyStage1/t_data.rpk",
+      "size": 406,
+      "sha256": "f08bb7f1af062e33656b47a3525a1a193fbb9ac2b7233737be5fc1bdfde28412",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/UKRallyStage2.rpk",
+      "size": 13052974,
+      "sha256": "adddad3634dbfea33d593f0b9a6743ea3081dba72672076a61ff6e6a27edf119",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\UKRallyStage2.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 58,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/UKRallyStage2/t_data.rpk",
+      "size": 406,
+      "sha256": "36b5cdaff8eed455892e6e59548f5a8fb49e98782e3e42ab93ac3a61e5fbdcc0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/UKRallyStage3.rpk",
+      "size": 33994204,
+      "sha256": "10b91e9d9e7a03fd680e234a45f67aebf6b790c2ba9e01ac1e4d180b75c1dc50",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\UKRallyStage3.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 65,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/UKRallyStage3/t_data.rpk",
+      "size": 406,
+      "sha256": "4f820a419becca724f6a4648fca09b7814fafb61cf8b378115b1d57c9fc0593f",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Vallelunga.rpk",
+      "size": 14917807,
+      "sha256": "bc77ca17e9e0bcd88b34074a60d378a71fef91bbd5b1da8d89977611119bd8b7",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\Vallelunga.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 107,
+      "types": [
+        1,
+        14,
+        5,
+        7,
+        13,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Vallelunga/t_data.rpk",
+      "size": 397,
+      "sha256": "a8c4e17de3b4e5ae8d4298a4b8f8ea357e717bc2ebaea5bf56dab58571b90ea0",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/ValoCity/t_data.rpk",
+      "size": 391,
+      "sha256": "6f05abc2a89446860ab3e1e79ad4105763430f5142a3f6181a102f34f940a513",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Zandvoort.rpk",
+      "size": 22045777,
+      "sha256": "84e95b2590e87f4c886a9d778d2303dbd8d5331b72d34dd33e898fe44ab60595",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\Zandvoort.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 87,
+      "types": [
+        1,
+        5,
+        7,
+        14,
+        8,
+        9,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/Zandvoort/t_data.rpk",
+      "size": 394,
+      "sha256": "4970c27c1fad0b4667f95edac99f5134a7e4cd5abc6a26d13af56e1f7f21b91a",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/maps/test.rpk",
+      "size": 12037194,
+      "sha256": "71ff52767805c8805029847b94d689d7fea1d4717da6ed0e0b69c05bcb616597",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "multibot\\maps.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "multibot\\maps\\test.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "objects.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\scripts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 24,
+      "types": [
+        1,
+        14,
+        5,
+        7,
+        13,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/scripts.rpk",
+      "size": 5538,
+      "sha256": "0609d17b05535a5191ab32a792a29590cbe839e38bde09d218b5a09bd7232e2c",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "mrm.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "multibot\\gfx_complex.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "multibot\\sounds.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 42,
+      "types": [
+        8,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "multibot/sounds.rpk",
+      "size": 14654,
+      "sha256": "8c43c78fc1b839e75c40d555f72a8bc636f45240c6de8b996c61e30ac1c3a50f",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "mrm.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 114,
+      "types": [
+        6
+      ],
+      "warnings": []
+    },
+    {
+      "path": "objects.rpk",
+      "size": 362348,
+      "sha256": "e09e26299395d4c77781987e83d0369cfb6cf59ce116595047cfcbf482e5c0cc",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "maps\\textures.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 1560,
+      "types": [
+        14,
+        5,
+        6,
+        7,
+        8,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "particles.rpk",
+      "size": 7755,
+      "sha256": "3c39fee4c6d471a5054323839f5aac78b37b2d224185219f87e5607f13bbad94",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 50,
+      "types": [
+        14,
+        5,
+        7,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts.rpk",
+      "size": 97428,
+      "sha256": "8ade87e0276591071073b21259bcbaaa5a2302a242b5ca0df56f18060d44247d",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\running_gear.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "sound.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 909,
+      "types": [
+        8,
+        7,
+        14,
+        5,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines.rpk",
+      "size": 379,
+      "sha256": "37eab5f02d4c4c7bdbb6ae2d792cfce086a58af0fd7f55b9d13b06226221e4fb",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 5,
+      "types": [
+        5,
+        6,
+        7,
+        9,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/Baiern_Emer.rpk",
+      "size": 39170,
+      "sha256": "6b8f658dff91e5803c316b3a39d3db160e8863653d3fd31465b58abf5fc00a8e",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 295,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/Callaway_Cadillac_Bugatti_V16.rpk",
+      "size": 29690,
+      "sha256": "e3837040522089558274865180522460a3b731566e97e06ceb80078a0014ce89",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 207,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/Dodge_BMW_Racing_V10.rpk",
+      "size": 40013,
+      "sha256": "20335d1940d22326ac741e983cf30c043c70787bc1ce4f318fdaced475f67867",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "cars\\racers\\Dodge_BMW_Racing_V10.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 282,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/Einvagen_Duhen_Ishima_Focer.rpk",
+      "size": 57758,
+      "sha256": "7e145dd02630994a69e6ade35fb3a846e1491f5fdea52aa608557cae069d388d",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "parts\\engines\\MC_Prime_SuperDuty.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts\\engines\\Baiern_Emer.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 524288,
+          "path": "sound.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 354,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/GMC_Nissan_Honda_Hyundai_Opel.rpk",
+      "size": 46668,
+      "sha256": "c619a9e0cc933775fc047dc67df8fba8231fa8e33bfc1b56a3fed9c1a10565d2",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 302,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/Lama_Performance_V12.rpk",
+      "size": 53291,
+      "sha256": "3c317835a006c04d07e0a416a850010e28d20facfb00f7bf8523644e6606a934",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 371,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/engines/MC_Prime_SuperDuty.rpk",
+      "size": 39148,
+      "sha256": "bf423107e4486643c692c581c4fa88a532ce41bab27482018c340dd7c6fdbaa5",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "parts\\engines.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "cars\\racers\\Prime.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 289,
+      "types": [
+        6,
+        8,
+        5,
+        7,
+        14,
+        9
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/interior.rpk",
+      "size": 8055,
+      "sha256": "3920d5301413ba7799fffcc781547a0e5258060aa1e959db348c75d113c1e18b",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 77,
+      "types": [
+        5,
+        6,
+        7,
+        9,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/mufflers.rpk",
+      "size": 14761,
+      "sha256": "9baeacc8c2323740374e975e8f46784081839a6e654e4a1eb22d473191cdfe26",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 458752,
+          "path": "parts.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 112,
+      "types": [
+        5,
+        9,
+        14,
+        8,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/neons.rpk",
+      "size": 7710,
+      "sha256": "91627b7ebbbc09a43debdca0dc824207b4d8274bb842ec05be278359e4115ac2",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 87,
+      "types": [
+        5,
+        6,
+        7,
+        9,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/nos_bottles.rpk",
+      "size": 11645,
+      "sha256": "b5e73b32cf1ab7aa2d1a4ba107702d2d52d039d18b40a320bdb0725b4d37f1fd",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 105,
+      "types": [
+        5,
+        9,
+        7,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/pedals.rpk",
+      "size": 10636,
+      "sha256": "64bb75f27fdb1d9dd4c05b56899d2d99e98602e50a6e9a4f0cebf9476e22a494",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 77,
+      "types": [
+        8,
+        5,
+        9,
+        7,
+        14
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/wheels.rpk",
+      "size": 148903,
+      "sha256": "0d55443bd5bf9452cc9536a7a9f0525d309a5569fc512fabcccb85d2da752ddf",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 1266,
+      "types": [
+        5,
+        6,
+        7,
+        9,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "parts/wings.rpk",
+      "size": 5176,
+      "sha256": "055a58aef5ca5217b1e867e9206620e25650e4cd246ceb439fc4bacac516cbc7",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "cars\\racers.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 327680,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 393216,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 46,
+      "types": [
+        5,
+        6,
+        7,
+        9,
+        14,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "racers.rpk",
+      "size": 24750,
+      "sha256": "91a67cbee5d21f9cbe0b77a0006f5bc95036f7406b61408af33d4974dad16329",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "parts.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "particles.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 93,
+      "types": [
+        7,
+        6,
+        5,
+        8,
+        9,
+        14,
+        13
+      ],
+      "warnings": []
+    },
+    {
+      "path": "sl.rpk",
+      "size": 531,
+      "sha256": "960617b1b2b358315c631c843963ed11a9d468648afe9abb7085a9d7a6bf30ba",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 131072,
+          "path": "misc\\garage.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 196608,
+          "path": "cars.rpk",
+          "trailer": 0
+        },
+        {
+          "id": 262144,
+          "path": "multibot.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 4,
+      "types": [
+        8,
+        4
+      ],
+      "warnings": []
+    },
+    {
+      "path": "sl/Scripts/game/CareerEvents/stdpack_231.rpk",
+      "size": 12561,
+      "sha256": "b26568235946ec71eb1fb343c32f936eb9ea0fb3d0de9ee8d2a1add089de5363",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 119,
+      "types": [
+        7,
+        8
+      ],
+      "warnings": []
+    },
+    {
+      "path": "sl/Scripts/game/Gamemodes/stdpack_231.rpk",
+      "size": 1743,
+      "sha256": "a317eceb079bb8ad97d106f7a8d75c9111295b66f24a70a98389323962242eee",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 17,
+      "types": [
+        8,
+        7
+      ],
+      "warnings": []
+    },
+    {
+      "path": "sound.rpk",
+      "size": 5343,
+      "sha256": "e1a71ebf9e12f7027eeb97980760b32a538119c023e4bdb778144db3d58dd7bd",
+      "dependencies": [
+        {
+          "id": 65536,
+          "path": "system.rpk",
+          "trailer": 0
+        }
+      ],
+      "entries": 55,
+      "types": [
+        6
+      ],
+      "warnings": []
+    },
+    {
+      "path": "system.rpk",
+      "size": 1836,
+      "sha256": "bd4cb003ce2d79b29697b7f73c141d7edd9d611e0994598280437ac83405191a",
+      "dependencies": [],
+      "entries": 33,
+      "types": [
+        8,
+        9,
+        14,
+        1,
+        2,
+        3,
+        5,
+        7,
+        6,
+        4,
+        13,
+        12,
+        10,
+        11,
+        19,
+        18,
+        15,
+        16,
+        17,
+        20
+      ],
+      "warnings": []
+    }
+  ],
+  "binaries": [
+    {
+      "path": "StreetLegal_Redline.exe",
+      "size": 2446848,
+      "sha256": "f44fb88a4335c657e20701cdb84afb8d1d85f7c3aceb93d30113e6e6e44fefc2",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "WorkshopInstaller.exe",
+      "size": 669184,
+      "sha256": "fc1dd9a1a0303de9144be87744a4bd176253eff12de8dcaff21ce00e1d71ac36",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "d3dx9_32.dll",
+      "size": 3426072,
+      "sha256": "e96693794daa05a75a83c11df2e7b42f2de61567c6ad0b69e353b50f6c88119f",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "glut32.dll",
+      "size": 237568,
+      "sha256": "722b8d2c4912ab640fc766424fe1bffd45a0e735293ac2d763eb4031684bb468",
+      "machine": "0x14c",
+      "imageBase": "0x10000000"
+    },
+    {
+      "path": "libcall.dll",
+      "size": 1397055,
+      "sha256": "3c45b26a08ab3af8c6e474b79ca1463a8d57eb87aaae1cbdcd6c0e3d39b9d7eb",
+      "machine": "0x14c",
+      "imageBase": "0x6f740000"
+    },
+    {
+      "path": "modding_tools/Map tools/glut32.dll",
+      "size": 237568,
+      "sha256": "722b8d2c4912ab640fc766424fe1bffd45a0e735293ac2d763eb4031684bb468",
+      "machine": "0x14c",
+      "imageBase": "0x10000000"
+    },
+    {
+      "path": "modding_tools/Map tools/resconvert.exe",
+      "size": 188478,
+      "sha256": "c9d271445a895965b45e5c69c247686a723f020f0061b04e6f75724d697cfff0",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "modding_tools/NVIDIA DDS plugin for Photoshop/DDS_7.83.0629.1500.exe",
+      "size": 3898730,
+      "sha256": "52dc76cf089c47f32654bb354f9f594d06118bb7a79f895ed055159ffe0426ca",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "modding_tools/Resource tools/resconvert.exe",
+      "size": 151614,
+      "sha256": "94a3cd864db6b6cc3ce6e677ed7a3b2b57f0b622a31b0a1bdd19d58dab625dff",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "modding_tools/Resource tools/resdecode.exe",
+      "size": 131072,
+      "sha256": "50e6c3330f40c7df60ac86fcfc48c0539f970fcd848f89ff41cde16c9fab6190",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "modding_tools/Resource tools/resgui.exe",
+      "size": 10752,
+      "sha256": "b06942590eb057ab70d52f03dd6dfe31b14c894e96490174b2b0e1791fb499e5",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "modding_tools/Workshop uploader/steam_api.dll",
+      "size": 225056,
+      "sha256": "af17df745250d1814eaa274fff7b0faeb43381e6762e026267e5859778477abd",
+      "machine": "0x14c",
+      "imageBase": "0x3b400000"
+    },
+    {
+      "path": "modding_tools/Workshop uploader/workshop_uploader.exe",
+      "size": 35328,
+      "sha256": "5473bf7d4f71db40e9a79b47953f3840dc367b0205ff38c275e8c5533a4d7bca",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "modding_tools/ZModeler 1.07b/ZModeler_v107.exe",
+      "size": 1487819,
+      "sha256": "f2758a359372e0b2d0939cb99c62e9cf3edadcda5360bbf528de51fed0894459",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "objects/meshes/fa12a/dump_scx.exe",
+      "size": 213060,
+      "sha256": "0bfea86ac8d8598259b172ffa4925a2ce3ebb15aa851a7cb236523c8aff21295",
+      "machine": "0x14c",
+      "imageBase": "0x400000"
+    },
+    {
+      "path": "steam_api.dll",
+      "size": 278112,
+      "sha256": "970abcf7343219511de595b84af3215a0254c42c2881cb29b136c61564509b4f",
+      "machine": "0x14c",
+      "imageBase": "0x3b400000"
+    }
+  ],
+  "errors": []
+}

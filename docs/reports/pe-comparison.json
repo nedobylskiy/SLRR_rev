@@ -1,0 +1,340 @@
+[
+  {
+    "file": "StreetLegal_Redline.exe",
+    "bytes": 2441216,
+    "sha256": "4052c78d499a765f3b063080f836db4ecfbae67d798bf1229b6357a2711afdb8",
+    "machine": "0x14c",
+    "timestamp": 1475186530,
+    "coffSymbolTable": 0,
+    "coffSymbolCount": 0,
+    "imageBase": "0x400000",
+    "sections": [
+      {
+        "name": ".text",
+        "rva": 4096,
+        "virtualSize": 1749432,
+        "rawSize": 1753088,
+        "rawOffset": 4096
+      },
+      {
+        "name": ".rdata",
+        "rva": 1757184,
+        "virtualSize": 88722,
+        "rawSize": 90112,
+        "rawOffset": 1757184
+      },
+      {
+        "name": ".data",
+        "rva": 1847296,
+        "virtualSize": 1628824,
+        "rawSize": 114688,
+        "rawOffset": 1847296
+      },
+      {
+        "name": ".rsrc",
+        "rva": 3477504,
+        "virtualSize": 377856,
+        "rawSize": 380928,
+        "rawOffset": 1961984
+      },
+      {
+        "name": ".reloc",
+        "rva": 3858432,
+        "virtualSize": 94430,
+        "rawSize": 98304,
+        "rawOffset": 2342912
+      }
+    ],
+    "debug": [],
+    "exports": [],
+    "stringEvidence": {
+      "runDLL": [
+        1919848
+      ],
+      "runMethod": [
+        1919900,
+        1919956,
+        1920028,
+        1920084
+      ],
+      "libcall.dll": [
+        1903788
+      ],
+      "callFunction": [
+        1903848
+      ],
+      "getAngvel": [
+        1877964
+      ],
+      "httpRequest": [
+        1920212
+      ]
+    }
+  },
+  {
+    "file": "StreetLegal_Redline.exe",
+    "bytes": 2446848,
+    "sha256": "f44fb88a4335c657e20701cdb84afb8d1d85f7c3aceb93d30113e6e6e44fefc2",
+    "machine": "0x14c",
+    "timestamp": 1765733043,
+    "coffSymbolTable": 0,
+    "coffSymbolCount": 0,
+    "imageBase": "0x400000",
+    "sections": [
+      {
+        "name": ".text",
+        "rva": 4096,
+        "virtualSize": 1643542,
+        "rawSize": 1644032,
+        "rawOffset": 1024
+      },
+      {
+        "name": ".rdata",
+        "rva": 1650688,
+        "virtualSize": 290064,
+        "rawSize": 290304,
+        "rawOffset": 1645056
+      },
+      {
+        "name": ".data",
+        "rva": 1941504,
+        "virtualSize": 1904652,
+        "rawSize": 50688,
+        "rawOffset": 1935360
+      },
+      {
+        "name": ".gfids",
+        "rva": 3850240,
+        "virtualSize": 260,
+        "rawSize": 512,
+        "rawOffset": 1986048
+      },
+      {
+        "name": ".tls",
+        "rva": 3854336,
+        "virtualSize": 9,
+        "rawSize": 512,
+        "rawOffset": 1986560
+      },
+      {
+        "name": "_RDATA",
+        "rva": 3858432,
+        "virtualSize": 1760,
+        "rawSize": 2048,
+        "rawOffset": 1987072
+      },
+      {
+        "name": ".rsrc",
+        "rva": 3862528,
+        "virtualSize": 378304,
+        "rawSize": 378368,
+        "rawOffset": 1989120
+      },
+      {
+        "name": ".reloc",
+        "rva": 4243456,
+        "virtualSize": 79092,
+        "rawSize": 79360,
+        "rawOffset": 2367488
+      }
+    ],
+    "debug": [
+      {
+        "type": 13,
+        "size": 1004,
+        "rva": 1913076,
+        "rawOffset": 1907444
+      }
+    ],
+    "exports": [
+      {
+        "name": "AmdPowerXpressRequestHighPerformance",
+        "ordinal": 1,
+        "rva": 1978628
+      },
+      {
+        "name": "NvOptimusEnablement",
+        "ordinal": 2,
+        "rva": 1978624
+      }
+    ],
+    "stringEvidence": {
+      "runDLL": [
+        1706300
+      ],
+      "runMethod": [
+        1706364,
+        1706440,
+        1706524,
+        1706580
+      ],
+      "libcall.dll": [
+        1724092
+      ],
+      "callFunction": [
+        1724212
+      ],
+      "getAngvel": [
+        1682152
+      ],
+      "httpRequest": [
+        1706612
+      ]
+    }
+  },
+  {
+    "file": "libcall.dll",
+    "bytes": 1397055,
+    "sha256": "3c45b26a08ab3af8c6e474b79ca1463a8d57eb87aaae1cbdcd6c0e3d39b9d7eb",
+    "machine": "0x14c",
+    "timestamp": 1472072758,
+    "coffSymbolTable": 866304,
+    "coffSymbolCount": 12855,
+    "imageBase": "0x6f740000",
+    "sections": [
+      {
+        "name": ".text",
+        "rva": 4096,
+        "virtualSize": 539336,
+        "rawSize": 539648,
+        "rawOffset": 1536
+      },
+      {
+        "name": ".data",
+        "rva": 544768,
+        "virtualSize": 25900,
+        "rawSize": 26112,
+        "rawOffset": 541184
+      },
+      {
+        "name": ".rdata",
+        "rva": 573440,
+        "virtualSize": 34748,
+        "rawSize": 34816,
+        "rawOffset": 567296
+      },
+      {
+        "name": "/4",
+        "rva": 610304,
+        "virtualSize": 1284,
+        "rawSize": 1536,
+        "rawOffset": 602112
+      },
+      {
+        "name": ".bss",
+        "rva": 614400,
+        "virtualSize": 3968,
+        "rawSize": 0,
+        "rawOffset": 0
+      },
+      {
+        "name": ".edata",
+        "rva": 618496,
+        "virtualSize": 75,
+        "rawSize": 512,
+        "rawOffset": 603648
+      },
+      {
+        "name": ".idata",
+        "rva": 622592,
+        "virtualSize": 3560,
+        "rawSize": 3584,
+        "rawOffset": 604160
+      },
+      {
+        "name": ".CRT",
+        "rva": 626688,
+        "virtualSize": 48,
+        "rawSize": 512,
+        "rawOffset": 607744
+      },
+      {
+        "name": ".tls",
+        "rva": 630784,
+        "virtualSize": 32,
+        "rawSize": 512,
+        "rawOffset": 608256
+      },
+      {
+        "name": ".reloc",
+        "rva": 634880,
+        "virtualSize": 18692,
+        "rawSize": 18944,
+        "rawOffset": 608768
+      },
+      {
+        "name": "/14",
+        "rva": 655360,
+        "virtualSize": 1496,
+        "rawSize": 1536,
+        "rawOffset": 627712
+      },
+      {
+        "name": "/29",
+        "rva": 659456,
+        "virtualSize": 106765,
+        "rawSize": 107008,
+        "rawOffset": 629248
+      },
+      {
+        "name": "/41",
+        "rva": 770048,
+        "virtualSize": 18365,
+        "rawSize": 18432,
+        "rawOffset": 736256
+      },
+      {
+        "name": "/55",
+        "rva": 790528,
+        "virtualSize": 23409,
+        "rawSize": 23552,
+        "rawOffset": 754688
+      },
+      {
+        "name": "/67",
+        "rva": 815104,
+        "virtualSize": 9432,
+        "rawSize": 9728,
+        "rawOffset": 778240
+      },
+      {
+        "name": "/80",
+        "rva": 827392,
+        "virtualSize": 562,
+        "rawSize": 1024,
+        "rawOffset": 787968
+      },
+      {
+        "name": "/91",
+        "rva": 831488,
+        "virtualSize": 73637,
+        "rawSize": 73728,
+        "rawOffset": 788992
+      },
+      {
+        "name": "/102",
+        "rva": 905216,
+        "virtualSize": 3576,
+        "rawSize": 3584,
+        "rawOffset": 862720
+      }
+    ],
+    "debug": [],
+    "exports": [
+      {
+        "name": "callFunction",
+        "ordinal": 1,
+        "rva": 7968
+      }
+    ],
+    "stringEvidence": {
+      "libcall.dll": [
+        603698
+      ],
+      "callFunction": [
+        603710,
+        1098384
+      ]
+    }
+  }
+]

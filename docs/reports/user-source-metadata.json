@@ -1,0 +1,22 @@
+[
+  {
+    "file": "Object.java",
+    "bytes": 753,
+    "sha256": "c799716750b5c3c5fc54d327ac53bafab377d121687a440ac30a216726eaaea2"
+  },
+  {
+    "file": "dllmain.cpp",
+    "bytes": 4778,
+    "sha256": "70c0880f2837de72cf551dc35b3f6eedfbacd70bbef3a0f1091aad568fd7daad"
+  },
+  {
+    "file": "dll.h",
+    "bytes": 274,
+    "sha256": "66dc21941e17582403be1303ef053c8ea2405414736f7c6e2d4dfdfb991b4530"
+  },
+  {
+    "file": "main.cpp",
+    "bytes": 2126,
+    "sha256": "70b3aff1c34cabfcdfde426051e2766c99c9f92007e6d64b19fc18f697bab3b2"
+  }
+]

@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseConstants, parseTufa, parseTrees } from '../src/formats/tufa';
+import { parseScx } from '../src/formats/scx';
+import { parseRpk, parseProperties, parseRdb } from '../src/formats/rpk';
+import { normalizePath } from '../src/assets';
+
+function u32(...n: number[]) { const b = Buffer.alloc(n.length * 4); n.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b; }
+function chunk(tag: string, data: Uint8Array) { return Buffer.concat([Buffer.from(tag), u32(data.length), data]); }
+function str(s: string) { return Buffer.concat([u32(0, s.length), Buffer.from(s), Buffer.from([0])]); }
+function fixtureClass() {
+  const cons = Buffer.concat([u32(2), str('test.Probe'), u32(4, 0)]);
+  return Buffer.concat([chunk('TUFA', u32(151453)), chunk('CONS', cons), chunk('CLSS', u32(0xffffffff, 0, 1, 0xffffffff, 0)), chunk('MTHD', u32(0, 0)), chunk('TREE', u32(0))]);
+}
+
+test('typed CONS handles short strings without consuming the next type tag', () => {
+  const b = Buffer.concat([u32(5), str('I'), str('log'), u32(4, 0), u32(3, 1, 0x123), u32(7, 0, 1)]);
+  assert.deepEqual(parseConstants(b), [{ kind: 0, value: 'I' }, { kind: 0, value: 'log' }, { kind: 4, value: 0 }, { kind: 3, a: 1, b: 0x123 }, { kind: 7, a: 0, b: 1 }]);
+});
+test('TUFA supports concatenated classes and rejects all truncated prefixes', () => {
+  const b = fixtureClass(); assert.equal(parseTufa(Buffer.concat([b, b])).length, 2);
+  assert.equal(parseTufa(b)[0].name, 'test.Probe');
+  // Complete prefix at a section boundary can be another valid TUFA; truncate inside the CONS payload.
+  for (let i = 1; i < 25; i++) assert.throws(() => parseTufa(b.subarray(0, i)));
+});
+test('TREE consumes short and wide nodes, rejects count overflows and leftovers', () => {
+  const b = Buffer.concat([u32(1, 2), Buffer.from([0x0b, 7, 0]), u32(42), Buffer.from([0x2b, 7, 0])]);
+  assert.deepEqual(parseTrees(b)[0].map(n => [n.op, n.operand]), [[11, 42], [43, undefined]]);
+  assert.throws(() => parseTrees(u32(0xffffffff)));
+  assert.throws(() => parseTrees(Buffer.concat([b, Buffer.from([0])])));
+});
+test('RPAK follows variable aliases and preserves the exact payload range', () => {
+  const text = Buffer.from('sourcefile model.scx\r\n');
+  const row = Buffer.concat([u32(0x10003, 7), Buffer.from([5, 0]), u32(0x3f800000, 57, text.length), Buffer.from([2, 120, 0])]);
+  const b = Buffer.concat([Buffer.from('RPAK'), u32(512, 0, 0, row.length, 1, 0, 1), row, text]);
+  const pack = parseRpk(b); assert.equal(pack.entries[0].alias, 'x'); assert.equal(Buffer.from(pack.entries[0].data).toString(), text.toString());
+  assert.throws(() => parseRpk(b.subarray(0, b.length - 1)));
+});
+test('SCX valid empty placeholders are distinct from missing/invalid files', () => {
+  for (const version of [3, 4]) assert.equal(parseScx(Buffer.concat([Buffer.from('INVO'), u32(version, 0)])).meshes.length, 0);
+  assert.throws(() => parseScx(Buffer.alloc(0))); assert.throws(() => parseScx(Buffer.concat([Buffer.from('INVO'), u32(999)])));
+});
+test('properties and RDB preserve duplicate texture/slot rows', () => {
+  assert.deepEqual(parseProperties('texture 0x01\r\ntexture 0x02 ; note').map(p => p.value), ['0x01', '0x02']);
+  assert.equal(parseRdb('<FILE 01.rsd >\ntexture 1\ntexture 2\n</FILE>')[0].properties.length, 2);
+});
+test('virtual paths are case-insensitive without accepting traversal', () => {
+  assert.equal(normalizePath('Cars\\Foo.SCX'), 'cars/foo.scx');
+  for (const p of ['../x', '/x', 'C:/x', 'a/../x']) assert.throws(() => normalizePath(p));
+});
