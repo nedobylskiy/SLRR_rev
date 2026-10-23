@@ -14,6 +14,8 @@
 | [Прочие форматы](formats/other.md) | CFG, текстуры, карты, анимация, неизвестное |
 | [Состояние автомобиля](vehicle-serialization.md) | Старый SDAT, save/load, новый буферный формат |
 | [Архитектура](architecture.md) | Реализованные модули и планируемая структура |
+| [Мир движка](engine-world.md) | Фабрика RPK/CFG, экземпляры, сборка, трансформы и границы |
+| [Part source runtime](part-runtime.md) | Оригинальные save/load через память и ограничения проверки |
 | [Мультиплеер](multiplayer.md) | Авторитет сервера, snapshots, жизненный цикл |
 | [DLL и бинарники](legacy-extensions.md) | runDLL/runMethod, промежуточный EXE, ошибки моста |
 | [Дорожная карта](roadmap.md) | Этапы с критериями приёмки |

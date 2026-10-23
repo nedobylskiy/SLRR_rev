@@ -28,13 +28,20 @@ export class Assets {
     if (!this.packs.has(key)) this.packs.set(key, this.read(path).then(parseRpk));
     return this.packs.get(key)!;
   }
-  async resource(packPath: string, id: number): Promise<{ packPath: string; entry: RpkEntry }> {
+  /** Resolve a RID's namespace without requiring a concrete resource (CFG may name abstract compatibility types). */
+  async resourceLocation(packPath: string, id: number): Promise<{ packPath: string; id: number }> {
     const pack = await this.pack(packPath), slot = id >>> 16;
     if (slot) {
       const dep = pack.dependencies.find(d => d.id >>> 16 === slot);
       if (!dep) throw new Error(`Resource dependency slot ${slot} missing in ${packPath}`);
-      return this.resource(dep.path, id & 0xffff);
+      return { packPath: dep.path, id: id & 0xffff };
     }
+    return { packPath, id };
+  }
+  async resource(packPath: string, id: number): Promise<{ packPath: string; entry: RpkEntry }> {
+    const location = await this.resourceLocation(packPath, id);
+    packPath = location.packPath; id = location.id;
+    const pack = await this.pack(packPath);
     const entry = pack.entries.find(e => e.typeId === id);
     if (!entry) throw new Error(`Resource 0x${id.toString(16)} missing in ${packPath}`);
     return { packPath, entry };

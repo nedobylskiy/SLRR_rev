@@ -5,14 +5,36 @@ import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
+import { PartFactory, type EngineWorld } from './engine/world';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Подключение…</span><label class="button">Открыть папку игры<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
+<header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Подключение…</span><button id="memory-lab">Поток в памяти</button><label class="button">Открыть папку игры<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
 <main><aside><div class="eyebrow">ОРИГИНАЛЬНЫЕ РЕСУРСЫ</div><h1>Под капотом.</h1><p class="intro">Ресурсы SLRR в новом окружении. Без запуска оригинального EXE.</p><div id="counts"></div><input id="search" type="search" placeholder="Поиск: Baiern, chassis, GameLogic…" aria-label="Поиск ресурсов"><nav id="filters"><button data-kind="scx" class="active">Модели</button><button data-kind="rpk">Пакеты</button><button data-kind="class">Скрипты</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Машины</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
 <section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">WEBGL / RESOURCE LAB</span><div id="filename">Выбери ресурс слева</div></div><span class="badge" id="state">Ожидание</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">ЛКМ — вращение &nbsp; · &nbsp; Колесо — масштаб &nbsp; · &nbsp; ПКМ — перемещение</div><div class="detail"><div class="eyebrow">ДИАГНОСТИКА</div><div id="details">Загрузка каталога игры…</div></div></section></main><footer><span>TYPE SCRIPT / WEBGL 2</span><span>Геометрия и ресурсы: оригинальная установка · Игровая логика ещё не запускается</span><span id="total"></span></footer>`;
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0;
+let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
+let engineWorld: EngineWorld | undefined;
+const worldButton = textElement('button', 'Собрать Baiern');
+el('memory-lab').before(worldButton);
+worldButton.onclick = () => { void openWorld('cars/racers/Baiern.rpk', 6); };
+async function openWorld(pack: string, id: number) {
+  if (!assets) return;
+  const request = ++sequence;
+  disposeMemoryLab?.(); disposeMemoryLab = undefined;
+  engineWorld?.dispose(); engineWorld = undefined; viewer?.clear();
+  el('filename').textContent = `${pack} : 0x${id.toString(16)} · сборка CFG`; el('format').textContent = 'ENGINE / WORLD'; status('Сборка…');
+  el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
+  try {
+    const built = await new PartFactory(assets).stock({ pack, id });
+    if (request !== sequence) { built.world.dispose(); return; }
+    engineWorld = built.world;
+    const warnings = viewer ? await viewer.showWorld(built.world, assets) : ['WebGL недоступен'];
+    if (request !== sequence) return;
+    el('details').textContent = `${built.world.parts.size} объектов · ${built.root.definition.cfgPath}\nСборка по stockpart/slot/attach, включая вложенные детали. Java-конструкторы и физика ещё не запускаются.\n${[...built.warnings, ...warnings].join('\n')}`;
+    status('Мир собран');
+  } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Ошибка сборки', true); el('details').textContent = String(error); } }
+}
 try { viewer = new Viewer(el('viewport')); }
 catch (e) { el('details').textContent = `WebGL недоступен: ${e}`; }
 
@@ -32,7 +54,8 @@ async function connect() {
       return new Uint8Array(await result.arrayBuffer());
     }), 'Локальная установка');
     const example = files.find(f => /baiern_data\/meshes\/chassis\.scx$/i.test(f.path)) ?? files.find(f => /steeringwheel_4spoke_01\.scx$/i.test(f.path));
-    if (example) await openAsset(example);
+    if (assets.byPath.has('cars/racers/baiern.rpk')) await openWorld('cars/racers/Baiern.rpk', 6);
+    else if (example) await openAsset(example);
   } catch (e) {
     el('connection').textContent = 'Выбери папку игры';
     el('details').textContent = `Каталог игры недоступен. Выбери установленную игру кнопкой «Открыть папку игры». ${e}`;
@@ -84,6 +107,8 @@ async function showModel(path: string, textures: string[] = [], request = sequen
 }
 
 async function openAsset(file: Asset) {
+  engineWorld?.dispose(); engineWorld = undefined; viewer?.clear();
+  disposeMemoryLab?.(); disposeMemoryLab = undefined;
   const request = ++sequence;
   el('filename').textContent = file.path; el('format').textContent = (isSavedVehiclePath(file.path) ? 'SDAT' : file.path.split('.').at(-1)!.toUpperCase()) + ' / ORIGINAL ASSET';
   status('Загрузка…'); el('details').textContent = '';
@@ -106,6 +131,10 @@ async function openAsset(file: Asset) {
           row.append(textElement('summary', `0x${entry.typeId.toString(16).padStart(8, '0')}  ${entry.alias}  · type ${entry.type} · ${entry.size} B`));
           const props = entryProperties(entry);
           row.append(textElement('pre', props.length ? props.map(p => `${p.key} ${p.value}`).join('\n') : entry.data.length ? 'Бинарный payload: декодер этого типа пока отсутствует.' : 'Пустой payload'));
+          if (props.some(p => p.key === 'native' && /^(car|part)\s/i.test(p.value))) {
+            const spawn = textElement('button', 'Создать в мире');
+            spawn.onclick = () => { void openWorld(file.path, entry.typeId); }; row.append(spawn);
+          }
           if (props.some(p => ['mesh', 'render'].includes(p.key) || p.key === 'sourcefile' && /\.scx$/i.test(p.value))) {
             const button = textElement('button', 'Открыть связанную модель');
             button.onclick = async () => {
@@ -162,4 +191,21 @@ el<HTMLInputElement>('folder').onchange = event => {
   status('Каталог подключён');
 };
 void connect();
-if (import.meta.hot) import.meta.hot.dispose(() => { sequence++; viewer?.dispose(); });
+el('memory-lab').onclick = async () => {
+  if (!assets) { status('Нет каталога', true); return; }
+  const request = ++sequence;
+  engineWorld?.dispose(); engineWorld = undefined; viewer?.clear();
+  disposeMemoryLab?.(); disposeMemoryLab = undefined;
+  el('viewport').hidden = true; el('scene-help').hidden = true;
+  const inspector = el('inspector'); inspector.hidden = false; inspector.replaceChildren(textElement('p', 'Чтение оригинальных Java-методов…'));
+  el('filename').textContent = 'Part.save/load · MemoryFile'; el('format').textContent = 'SOURCE RUNTIME / MEMORY STREAM'; status('Загрузка исходников…');
+  try {
+    const { mountMemoryLab } = await import('./memory-lab');
+    if (request !== sequence) return;
+    const dispose = await mountMemoryLab(inspector, assets, () => request === sequence);
+    if (request !== sequence) { dispose(); return; }
+    disposeMemoryLab = dispose; status('Поток готов');
+    el('details').textContent = 'Оригинальные исходные методы исполняет ограниченный Java-интерпретатор. TUFA этих методов ещё не исполняется. Данные сборки проходят через собственную модель слотов и поток в памяти.';
+  } catch (e) { if (request === sequence) { status('Ошибка исходников', true); el('details').textContent = String(e); } }
+};
+if (import.meta.hot) import.meta.hot.dispose(() => { sequence++; engineWorld?.dispose(); disposeMemoryLab?.(); viewer?.dispose(); });

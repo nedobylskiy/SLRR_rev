@@ -384,3 +384,10 @@ header{
 }
 
 }
+
+.memory-controls{display:flex;gap:18px;flex-wrap:wrap;margin:18px 0}
+.memory-controls label{font-size:12px;color:#a8b5bf;min-width:160px}
+.memory-controls input{display:block;margin-top:8px;max-width:200px}
+.memory-buttons{display:flex;gap:10px;flex-wrap:wrap}
+button:disabled{opacity:.45;cursor:default}
+#memory-result{line-height:1.8!important}

@@ -11,16 +11,20 @@
 | `src/formats/scx.ts` | Геометрия SCX v3/v4 |
 | `src/formats/tufa.ts` | TUFA, типизированные CONS, методы, TREE |
 | `src/formats/sdat.ts` | SDAT envelope, embedded blobs, заголовок Vehicle |
+| `src/formats/cfg.ts` | Поднабор CFG, слоты, stockpart, body/wheel, неизвестные команды |
+| `src/engine/world.ts` | Фабрика ресурсов, экземпляры мира, дерево слотов, матрицы, lifecycle |
 | `src/assets.ts` | VFS, нормализация путей, pack-local resource graph |
 | `src/render/viewer.ts` | GPU-геометрия, камера, текстуры, освобождение объектов |
 | `src/runtime/tree-machine.ts` | Проверенный минимальный leaf-поднабор TREE |
 | `src/runtime/native-registry.ts` | Descriptor-aware native calls, контракт runDLL |
 | `src/runtime/memory-file.ts` | Примитивный поток в памяти |
+| `src/runtime/java-source.ts` | Ограниченный интерпретатор выбранных Java-методов |
+| `src/runtime/part-assembly.ts` | Host Part/save/load и транзакционное восстановление в памяти |
 | `src/runtime/vehicle-state.ts` | Проверяемый SRVS snapshot codec |
 | `src/runtime/fixed-clock.ts` | Фиксированный шаг с явным backlog |
 | `tools/` | Воспроизводимые исследования и проверки корпуса |
 
-Snapshot codec, clock и native registry — отдельные библиотеки; они пока не образуют интегрированный игровой мир. Просмотрщик не выдаётся за гонку/гараж.
+Появился [первый CFG-мир](engine-world.md) с рендером сборки. Snapshot codec, native registry и [Part source runtime](part-runtime.md) ещё требуют интеграции с ним. Физика и общий запуск скриптов отсутствуют.
 
 ## Целевая структура — проектное решение
 

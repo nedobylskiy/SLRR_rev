@@ -1,0 +1,20 @@
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { Assets } from '../src/assets';
+import { PartFactory } from '../src/engine/world';
+import { gameRoot, walk, relativeGamePath, safeGamePath } from './game-files';
+
+const files = (await walk(gameRoot)).map(file => ({ path: relativeGamePath(file), size: 0 }));
+const assets = new Assets(files, async path => new Uint8Array(await readFile(await safeGamePath(path))));
+const { world, root, warnings } = await new PartFactory(assets).stock({ pack: 'cars/racers/Baiern.rpk', id: 6 });
+assert.ok(world.parts.size > 20, 'Stock CFG should assemble the body');
+assert.match(root.definition.model!.path, /chassis\.scx$/i);
+const hood = [...world.parts.values()].find(p => p.definition.key.id === 0x10d)!;
+assert.equal(hood.parent, root); assert.equal(hood.parentSlot, 601);
+assert.ok(hood.matrix().elements.every(Number.isFinite));
+const before = hood.matrix(); world.detach(hood); assert.deepEqual(hood.matrix().elements, before.elements);
+world.install(root, 601, hood, 601);
+const report = { parts: world.parts.size, warnings, root: root.definition.cfgPath, instances: [...world.parts.values()].map(p => ({ id: p.id, resource: p.definition.key, parent: p.parent?.id, parentSlot: p.parentSlot, ownSlot: p.ownSlot, model: p.definition.model?.path })), ticks: world.advance(1 / 60) };
+await mkdir('local', { recursive: true }); await writeFile('local/world-verification.json', JSON.stringify(report, null, 2));
+world.dispose(); assert.equal(world.parts.size, 0);
+console.log(JSON.stringify({ parts: report.parts, warnings, ticks: report.ticks, disposedParts: world.parts.size }, null, 2));

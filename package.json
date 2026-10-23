@@ -11,7 +11,9 @@
     "verify:game": "tsx tools/verify-game.ts",
     "verify:saves": "tsx tools/verify-saves.ts",
     "inspect:class": "tsx tools/inspect-class.ts",
-    "verify:vm": "tsx tools/verify-vm.ts"
+    "verify:vm": "tsx tools/verify-vm.ts",
+    "verify:parts": "tsx tools/verify-parts.ts",
+    "verify:world": "tsx tools/verify-world.ts"
   },
   "dependencies": { "three": "^0.180.0" },
   "devDependencies": { "@types/node": "^24.0.0", "@types/three": "^0.180.0", "tsx": "^4.20.0", "typescript": "^5.9.0", "vite": "^7.1.0" }

@@ -4,6 +4,8 @@ import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import type { ScxModel } from '../formats/scx';
 import type { Assets } from '../assets';
+import { parseScx } from '../formats/scx';
+import type { EngineWorld } from '../engine/world';
 
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
@@ -34,10 +36,13 @@ export class Viewer {
   }
   clear() {
     this.generation++;
-    for (const obj of [...this.model.children]) {
-      const mesh = obj as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-      mesh.geometry.dispose(); mesh.material.map?.dispose(); mesh.material.dispose(); this.model.remove(mesh);
-    }
+    this.model.traverse(obj => {
+      if (!(obj instanceof THREE.Mesh)) return;
+      obj.geometry.dispose();
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      materials.forEach(material => { material.map?.dispose(); material.dispose(); });
+    });
+    this.model.clear();
   }
   dispose() {
     this.renderer.setAnimationLoop(null); this.observer.disconnect(); this.controls.dispose(); this.clear();
@@ -48,6 +53,26 @@ export class Viewer {
   }
   async show(model: ScxModel, assets: Assets, textures: string[]): Promise<string[]> {
     this.clear(); const generation = this.generation;
+    const warnings = await this.append(model, assets, textures, this.model, generation);
+    if (generation === this.generation) this.fit();
+    return warnings;
+  }
+  async showWorld(world: EngineWorld, assets: Assets): Promise<string[]> {
+    this.clear(); const generation = this.generation, warnings: string[] = [];
+    for (const part of world.parts.values()) {
+      const model = part.definition.model;
+      if (!model) continue;
+      const parsed = parseScx(await assets.read(model.path));
+      if (generation !== this.generation || world.disposed) return warnings;
+      const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
+      group.matrixAutoUpdate = false; group.matrix.copy(part.matrix()); this.model.add(group);
+      warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
+      if (generation !== this.generation) return warnings;
+    }
+    if (generation === this.generation) this.fit();
+    return warnings;
+  }
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     for (const part of model.meshes) {
@@ -59,7 +84,7 @@ export class Viewer {
       if (!part.normals.some(n => n !== 0)) geometry.computeVertexNormals();
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
       const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; this.model.add(mesh);
+      const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       const file = textures[part.textureIndex];
       if (file) {
         try {
@@ -71,13 +96,15 @@ export class Viewer {
       }
       if (generation !== this.generation) return warnings;
     }
+    return warnings;
+  }
+  private fit() {
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1);
     const bounds = new THREE.Box3().setFromObject(this.model), center = bounds.getCenter(new THREE.Vector3());
     const size = bounds.getSize(new THREE.Vector3()), extent = Math.max(size.x, size.y, size.z, 0.001);
     // Fit asset to inspection space. This is not a claim about the game's metre scale.
     this.model.scale.setScalar(5 / extent); this.model.position.copy(center.multiplyScalar(-5 / extent));
     this.controls.target.set(0, 0, 0); this.camera.position.set(6, 3.5, 6); this.controls.update();
-    return warnings;
   }
   private async texture(bytes: Uint8Array, path: string): Promise<THREE.Texture> {
     const buffer = bytes.slice().buffer;
