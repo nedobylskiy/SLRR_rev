@@ -95,7 +95,7 @@ export class Vehicle3D extends CarCrashDemo {
     const root = this.soft.get(this.root);
     const total = candidates.reduce((sum, c) => sum + c.weight, 0), energy = impulse.lengthSq() / (2 * this.body.mass);
     const structuralShare = Math.max(0, Math.min(1, (energy - 2500) / 15000));
-    root?.panel.impulseAt(impulse.clone().multiplyScalar(0.5 * structuralShare).toArray() as Triple, point.toArray() as Triple, 0.4);
+    root?.panel.impulseAt(impulse.clone().multiplyScalar(1.0 * structuralShare).toArray() as Triple, point.toArray() as Triple, 0.65);
     for (const c of candidates) {
       const share = c.weight / Math.max(1, total);
       c.panel?.impulseAt(impulse.clone().multiplyScalar(0.3 * share * structuralShare).toArray() as Triple, c.point.toArray() as Triple, 0.3);
