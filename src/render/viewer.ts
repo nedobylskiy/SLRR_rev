@@ -18,6 +18,7 @@ import { mapRenderIds } from '../engine/map';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
 import { mapObjectPlacements, parseIcfg } from '../engine/map-objects';
+import { textureAlphaMode } from './texture-alpha';
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -348,15 +349,19 @@ export class Viewer {
       geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
       if (!part.normals.some(n => n !== 0)) geometry.computeVertexNormals();
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
-      const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide });
+      const opacity = Math.max(0, Math.min(1, part.diffuse[3] ?? 1));
+      const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide, opacity, transparent: opacity < 1, depthWrite: opacity === 1 });
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       const file = textures[part.textureIndex];
       if (file) {
         try {
-          const texture = await this.texture(await assets.read(file), file);
+          const bytes = await assets.read(file), alpha = textureAlphaMode(bytes, file);
+          const texture = await this.texture(bytes, file);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
+          if (alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
+          else if (alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
       }
       if (generation !== this.generation) return warnings;
