@@ -347,7 +347,9 @@ export class Viewer {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
       geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));
-      geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
+      const uv = part.textureMap?.channel === 1 ? part.uv2 : part.textureMap?.channel === 2 ? part.uv3 : part.uv;
+      geometry.setAttribute('uv', new THREE.BufferAttribute(uv ?? part.uv, 2));
+      if (!uv) warnings.push(`SCX ${part.name}: UV channel ${part.textureMap?.channel} missing; using UV1`);
       geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
       if (!part.normals.some(n => n !== 0)) geometry.computeVertexNormals();
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
@@ -360,6 +362,10 @@ export class Viewer {
           const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
           const texture = await this.texture(selected.bytes, selected.path);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
+          if (part.textureMap) {
+            texture.repeat.set(part.textureMap.scaleU, part.textureMap.scaleV);
+            texture.offset.set(part.textureMap.offsetU, part.textureMap.offsetV);
+          }
           const alphaKey = selected.path.toLowerCase();
           let alpha = this.alphaModes.get(alphaKey);
           if (!alpha) { alpha = textureAlphaMode(selected.bytes, selected.path, texture.image); this.alphaModes.set(alphaKey, alpha); }

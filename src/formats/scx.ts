@@ -2,7 +2,9 @@ import { BinaryReader } from '../binary';
 
 export interface ScxMesh {
   name: string; positions: Float32Array; normals: Float32Array;
-  uv: Float32Array; indices: Uint32Array; diffuse: number[]; textureIndex: number;
+  uv: Float32Array; uv2?: Float32Array; uv3?: Float32Array;
+  indices: Uint32Array; diffuse: number[]; textureIndex: number;
+  textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
 }
 export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string[] }
 
@@ -58,6 +60,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const vertices = current.positions.length / 3;
       const mesh: ScxMesh = { name: current.name ?? `material_${meshes.length}`, positions: current.positions,
         normals: current.normals ?? new Float32Array(vertices * 3), uv: current.uv ?? new Float32Array(vertices * 2),
+        uv2: current.uv2, uv3: current.uv3, textureMap: current.textureMap,
         indices: current.indices, diffuse: current.diffuse ?? [0.6, 0.65, 0.7, 1], textureIndex: current.textureIndex ?? 0xffff };
       validate(mesh); meshes.push(mesh);
     };
@@ -81,11 +84,12 @@ export function parseScx(bytes: Uint8Array): ScxModel {
             }
             else if (type >= 0x06000000 && type <= 0x06000005) {
               const index = r.u32();
+              const map = { channel: r.u32(), tiling: r.u32(), scaleU: r.f32(), scaleV: r.f32(), offsetU: r.f32(), offsetV: r.f32() };
               // Some v4 materials (including Test Track containers) contain only DiffuseMixSecond.
               // Keep DiffuseMap authoritative when both entries are present, regardless of their order.
-              if (type === 0x06000000) current.textureIndex = index;
-              else if (type === 0x06000001 && current.textureIndex === undefined) current.textureIndex = index;
-              r.skip(24);
+              if (type === 0x06000000 || (type === 0x06000001 && current.textureIndex === undefined)) {
+                current.textureIndex = index; current.textureMap = map;
+              }
             }
             else if (type === 0x08000000) current.name = r.cstring(32);
             else throw new Error(`SCX v4: unknown material entry 0x${type.toString(16)}`);
@@ -94,13 +98,15 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       } else if (item.type === 4) {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
-          const { name, diffuse, textureIndex } = current;
-          finish(); current = { name, diffuse, textureIndex };
+          const { name, diffuse, textureIndex, textureMap } = current;
+          finish(); current = { name, diffuse, textureIndex, textureMap };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);
         r.count(n, 12);
         current.positions = new Float32Array(n * 3); current.normals = new Float32Array(n * 3); current.uv = new Float32Array(n * 2);
+        if (flags & 0x400) current.uv2 = new Float32Array(n * 2);
+        if (flags & 0x800) current.uv3 = new Float32Array(n * 2);
         for (let i = 0; i < n; i++) {
           for (let j = 0; j < 3; j++) current.positions[i * 3 + j] = r.f32();
           // Weight flag encodes 1..4 influences; the last weight is implicit.
@@ -109,7 +115,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
           if (flags & 0x40) for (let j = 0; j < 3; j++) current.normals[i * 3 + j] = r.f32();
           if (flags & 0x80) r.skip(4); if (flags & 0x100) r.skip(4);
           if (flags & 0x200) { current.uv[i * 2] = r.f32(); current.uv[i * 2 + 1] = r.f32(); }
-          if (flags & 0x400) r.skip(8); if (flags & 0x800) r.skip(8); if (flags & 0x40000) r.skip(12);
+          if (current.uv2) { current.uv2[i * 2] = r.f32(); current.uv2[i * 2 + 1] = r.f32(); }
+          if (current.uv3) { current.uv3[i * 2] = r.f32(); current.uv3[i * 2 + 1] = r.f32(); }
+          if (flags & 0x40000) r.skip(12);
         }
       } else if (item.type === 5) {
         if (!current) throw new Error('SCX v4: indices before mesh');

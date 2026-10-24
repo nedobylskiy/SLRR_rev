@@ -52,6 +52,30 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].textureIndex, 1);
   assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].textureIndex, 1);
 });
+test('SCX v4 preserves diffuse UV channel and atlas scale/offset across a vertex group', () => {
+  const textureProperty = (type: number, index: number, channel: number, scaleU: number, scaleV: number, offsetU: number, offsetV: number) => {
+    const bytes = Buffer.alloc(32);
+    bytes.writeUInt32LE(type, 0); bytes.writeUInt32LE(index, 4); bytes.writeUInt32LE(channel, 8); bytes.writeUInt32LE(3, 12);
+    [scaleU, scaleV, offsetU, offsetV].forEach((value, i) => bytes.writeFloatLE(value, 16 + i * 4));
+    return bytes;
+  };
+  const material = Buffer.concat([u32(0, 0, 2),
+    textureProperty(0x06000001, 3, 0, 1, 1, 0, 0),
+    textureProperty(0x06000000, 1, 1, 1, 0.125, 0, 0.5)]);
+  const vertex = Buffer.alloc(48);
+  [1, 2, 3].forEach((value, i) => vertex.writeFloatLE(value, i * 4));
+  [0.1, 0.2, 0.3, 0.4, 0.5, 0.6].forEach((value, i) => vertex.writeFloatLE(value, 24 + i * 4));
+  const chunks = [Buffer.concat([u32(0, material.length + 8), material]),
+    Buffer.concat([u32(4, 64, 1, 0xe41), vertex]), u32(5, 12, 0)];
+  let offset = 12 + chunks.length * 8;
+  const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
+  const mesh = parseScx(Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks])).meshes[0];
+  assert.equal(mesh.textureIndex, 1);
+  assert.deepEqual(mesh.textureMap, { channel: 1, tiling: 3, scaleU: 1, scaleV: 0.125, offsetU: 0, offsetV: 0.5 });
+  assert.deepEqual(Array.from(mesh.uv).map(x => Number(x.toFixed(3))), [0.1, 0.2]);
+  assert.deepEqual(Array.from(mesh.uv2!).map(x => Number(x.toFixed(3))), [0.3, 0.4]);
+  assert.deepEqual(Array.from(mesh.uv3!).map(x => Number(x.toFixed(3))), [0.5, 0.6]);
+});
 test('properties and RDB preserve duplicate texture/slot rows', () => {
   assert.deepEqual(parseProperties('texture 0x01\r\ntexture 0x02 ; note').map(p => p.value), ['0x01', '0x02']);
   assert.equal(parseRdb('<FILE 01.rsd >\ntexture 1\ntexture 2\n</FILE>')[0].properties.length, 2);
