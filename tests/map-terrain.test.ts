@@ -14,3 +14,18 @@ test('map terrain samples original triangle height and slope in metres', () => {
   assert.ok(terrain.normal(2, 3).y > 0.99);
   assert.equal(terrain.height(9, 9), -1000);
 });
+
+test('overlapping ground meshes support a ramp above the road without lifting a body below it', () => {
+  const mesh = (name: string, positions: number[]) => ({ name,
+    positions: new Float32Array(positions), normals: new Float32Array(9), uv: new Float32Array(6),
+    indices: new Uint32Array([0, 1, 2]), diffuse: [1, 1, 1, 1], textureIndex: 0,
+  });
+  const terrain = new MapTerrain();
+  terrain.add({ version: 3, warnings: [], meshes: [
+    mesh('road', [0, 0, 0, 1000, 0, 0, 0, 0, 1000]),
+    mesh('ramp', [0, 100, 0, 1000, 100, 0, 0, 200, 1000]),
+  ] });
+  assert.ok(Math.abs(terrain.height(2, 3, 2) - 1.3) < 1e-6);
+  assert.equal(terrain.height(2, 3, 0.1), 0);
+  assert.ok(terrain.normal(2, 3, 2).y < 1);
+});

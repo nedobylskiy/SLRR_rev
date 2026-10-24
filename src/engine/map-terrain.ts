@@ -46,7 +46,10 @@ export class MapTerrain implements Terrain {
       const v = ((f.cz - f.az) * (x - f.cx) + (f.ax - f.cx) * (z - f.cz)) / denominator;
       if (u < -1e-5 || v < -1e-5 || u + v > 1.00001) continue;
       const h = u * f.ay + v * f.by + (1 - u - v) * f.cy;
-      if (!best || Math.abs(h) < Math.abs(best.height)) best = { height: h, normal: f.normal };
+      // A ground child (such as a ramp) can overlap the road; ray support uses
+      // the highest reachable deck, while a body below it stays on the road.
+      if (fromY !== undefined && h > fromY + 0.5) continue;
+      if (!best || h > best.height) best = { height: h, normal: f.normal };
     }
     if (fromY !== undefined) {
       const box = this.objects?.support(x, z, fromY + 0.5);

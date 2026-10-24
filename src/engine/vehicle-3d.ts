@@ -259,8 +259,8 @@ export class Vehicle3D extends CarCrashDemo {
     if (shape) { const delta = matrix.clone().multiply(previous.clone().invert()); for (let i = 0; i < shape.length; i += 3) points.push(new Vector3().fromArray(shape, i).applyMatrix4(delta)); }
     else points.push(...body.corners());
     for (const point of points) {
-      const height = this.terrain.height(point.x, point.z);
-      if (point.y < height) solve(point, this.terrain.normal(point.x, point.z), height - point.y);
+      const height = this.terrain.height(point.x, point.z, point.y);
+      if (point.y < height) solve(point, this.terrain.normal(point.x, point.z, point.y), height - point.y);
       if (!nearBody) continue;
       const old = point.clone().applyMatrix4(inverse).applyMatrix4(previous), projected = new Float64Array(point.toArray());
       const hit = this.rigidSurface?.project(projected, new Float64Array(old.toArray()), 0);
@@ -279,8 +279,8 @@ export class Vehicle3D extends CarCrashDemo {
       const obstacle = new Box3(new Vector3(...this.obstacle.min), new Vector3(...this.obstacle.max));
       for (let iteration = 0; iteration < 4; iteration++) {
         for (const p of this.body.corners()) {
-          const height = this.terrain.height(p.x, p.z); if (p.y < height) {
-            const j = this.body.contact(p, this.terrain.normal(p.x, p.z), height - p.y, 0.12);
+          const height = this.terrain.height(p.x, p.z, p.y); if (p.y < height) {
+            const j = this.body.contact(p, this.terrain.normal(p.x, p.z, p.y), height - p.y, 0.12);
             if (j.length() > 40) this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.08).toArray() as Triple, p.toArray() as Triple);
           }
           const wall = this.mapCollision?.contact(p);
@@ -350,12 +350,12 @@ export class Vehicle3D extends CarCrashDemo {
           if (r.part.parent && r.part.condition === 0) { this.root.world.detach(r.part); detached = true; }
         }
         if (r.part.parent) for (const point of r.body.corners()) {
-          const h = this.terrain.height(point.x, point.z);
-          if (point.y < h) { const j = r.body.contact(point, this.terrain.normal(point.x, point.z), h - point.y); r.peakForce = Math.max(r.peakForce, load(j, point)); r.part.condition = Math.min(r.part.condition, Math.max(0, 1 - r.peakForce / 1800)); if (r.part.condition === 0) { this.root.world.detach(r.part); detached = true; break; } }
+          const h = this.terrain.height(point.x, point.z, point.y);
+          if (point.y < h) { const j = r.body.contact(point, this.terrain.normal(point.x, point.z, point.y), h - point.y); r.peakForce = Math.max(r.peakForce, load(j, point)); r.part.condition = Math.min(r.part.condition, Math.max(0, 1 - r.peakForce / 1800)); if (r.part.condition === 0) { this.root.world.detach(r.part); detached = true; break; } }
         }
         if (!r.part.parent) {
           for (const point of r.body.corners()) {
-            const h = this.terrain.height(point.x, point.z); if (point.y < h) r.body.contact(point, this.terrain.normal(point.x, point.z), h - point.y);
+            const h = this.terrain.height(point.x, point.z, point.y); if (point.y < h) r.body.contact(point, this.terrain.normal(point.x, point.z, point.y), h - point.y);
           }
           const corners = r.body.corners(), old = r.previous;
           for (const p of corners) {
