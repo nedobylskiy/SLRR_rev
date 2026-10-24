@@ -14,6 +14,7 @@ import type { PartDefinition } from '../engine/world';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
+import { mapRenderIds } from '../engine/map';
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -58,6 +59,8 @@ export class Viewer {
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear();
     this.internalView = false;
     this.generation++;
+    this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
+    this.camera.near = 0.01; this.camera.far = 1000; this.camera.updateProjectionMatrix();
     this.model.traverse(obj => {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
@@ -106,6 +109,31 @@ export class Viewer {
     }
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void) {
+    this.clear(); const generation = this.generation;
+    const pack = await assets.pack(packPath), ids = mapRenderIds(pack), warnings: string[] = [];
+    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, warnings };
+    this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
+    this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
+    this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
+    this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
+    let loaded = 0, triangles = 0;
+    for (const id of ids) {
+      if (generation !== this.generation) break;
+      try {
+        const resource = await assets.modelForResource(packPath, id);
+        const parsed = parseScx(await assets.read(resource.path));
+        if (generation !== this.generation) break;
+        const group = new THREE.Group(); group.name = `${id.toString(16)}: ${pack.entries.find(e => e.typeId === id)?.alias ?? ''}`;
+        group.scale.setScalar(0.01); this.model.add(group);
+        warnings.push(...await this.append(parsed, assets, resource.textures, group, generation));
+        triangles += parsed.meshes.reduce((sum, mesh) => sum + mesh.indices.length / 3, 0);
+        loaded++;
+      } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
+      progress?.(loaded, ids.length);
+    }
+    return { loaded, total: ids.length, triangles, warnings };
   }
   showInternals(value: boolean) {
     this.internalView = value;

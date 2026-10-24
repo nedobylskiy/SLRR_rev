@@ -18,6 +18,7 @@ let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
 let beforeDrivingDetails = '';
 const worldButton = textElement('button', 'Собрать Baiern');
+const mapButton = textElement('button', 'Тестовый трек');
 const driveButton = textElement('button', 'Пробная поездка') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Испытание капота'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Машина и препятствие'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
@@ -51,7 +52,24 @@ const resetHood = textElement('button', 'Новый капот'); resetHood.oncl
 const cageLabel = textElement('label', ' Физический каркас');
 const cage = document.createElement('input'); cage.type = 'checkbox'; cage.onchange = () => hood?.wireframe(cage.checked); cageLabel.prepend(cage); hoodControls.append(cageLabel);
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
-el('memory-lab').before(worldButton, driveButton);
+el('memory-lab').before(worldButton, driveButton, mapButton);
+mapButton.onclick = async () => {
+  if (!assets || !viewer) return;
+  const request = ++sequence;
+  stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined;
+  disposeMemoryLab?.(); disposeMemoryLab = undefined;
+  el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
+  el('filename').textContent = 'test_track · оригинальная геометрия'; el('format').textContent = 'MAP / WEBGL';
+  status('Загрузка трассы…'); el('details').textContent = 'Чтение SCX и текстур из maps/test_track.rpk…';
+  try {
+    const result = await viewer.showMap('maps/test_track.rpk', assets, (done, total) => {
+      if (request === sequence) status(`Трасса ${done}/${total}`);
+    });
+    if (request !== sequence) return;
+    el('details').textContent = `${result.loaded}/${result.total} моделей · ${result.triangles.toLocaleString('ru')} треугольников. Геометрия и текстуры из оригинальных RPK/SCX; позиции сохранены из самих мешей. Физические столкновения с дорогой и объекты из бинарных блоков карты пока не восстановлены.\n${result.warnings.slice(0, 12).join('\n')}`;
+    status(result.loaded ? 'Трасса загружена' : 'Нет геометрии', !result.loaded);
+  } catch (error) { if (request === sequence) { viewer.clear(); status('Ошибка карты', true); el('details').textContent = String(error); } }
+};
 function stopDrive() {
   el('viewport').parentElement?.classList.remove('physics-scene');
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
