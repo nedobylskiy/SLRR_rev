@@ -22,6 +22,7 @@ const mass = (p: EnginePart) => {
   return Math.max(minimum, p.definition.config.bodies.reduce((s, b) => s + b.mass, 0));
 };
 const FREE_PANEL_WAKE_SPEED = 2.5;
+export const DEFAULT_CHASSIS_CRUMPLE = 1.25;
 const boundsOf = (samples: ArrayLike<number>) => { const box = new Box3(); for (let i = 0; i < samples.length; i += 3) box.expandByPoint(new Vector3().fromArray(samples, i)); return box; };
 const centerOf = (p: ArrayLike<number>) => { const out = new Vector3(); for (let i = 0; i < p.length; i += 3) out.add(new Vector3().fromArray(p, i)); return out.multiplyScalar(3 / p.length); };
 function basis(panel: DeformablePanel) {
@@ -52,7 +53,7 @@ export class Vehicle3D extends CarCrashDemo {
   private wheelMounts: DeformedFrame[] = [];
   private engineHull = new Box3();
   private surfaceTick = -4;
-  private chassisCrumple = 1;
+  private chassisCrumple = DEFAULT_CHASSIS_CRUMPLE;
   setChassisCrumple(value: number) {
     if (!Number.isFinite(value) || value < 0.5 || value > 1.5) throw new Error('Invalid chassis crumple multiplier');
     this.chassisCrumple = value;

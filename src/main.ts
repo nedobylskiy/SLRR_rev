@@ -6,6 +6,7 @@ import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
+import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
@@ -29,8 +30,8 @@ let crashSession: ReturnType<Viewer['drive']> | undefined;
 for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 50 км/ч', 50 / 3.6], ['Сброс', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
-const crumpleLabel = textElement('label', 'Смятие кузова'), crumpleSlider = document.createElement('input'), crumpleValue = textElement('output', '×1.00');
-crumpleLabel.className = 'crumple-control'; crumpleSlider.type = 'range'; crumpleSlider.min = '0.5'; crumpleSlider.max = '1.5'; crumpleSlider.step = '0.05'; crumpleSlider.value = '1';
+const crumpleLabel = textElement('label', 'Смятие кузова'), crumpleSlider = document.createElement('input'), crumpleValue = textElement('output', `×${DEFAULT_CHASSIS_CRUMPLE.toFixed(2)}`);
+crumpleLabel.className = 'crumple-control'; crumpleSlider.type = 'range'; crumpleSlider.min = '0.5'; crumpleSlider.max = '1.5'; crumpleSlider.step = '0.05'; crumpleSlider.value = String(DEFAULT_CHASSIS_CRUMPLE);
 crumpleSlider.setAttribute('aria-label', 'Смятие кузова'); crumpleSlider.title = 'Изменяет смятие несущего кузова при следующем ударе';
 crumpleSlider.oninput = () => { const value = Number(crumpleSlider.value); crumpleValue.textContent = `×${value.toFixed(2)}`; crashSession?.chassisCrumple(value); };
 crumpleLabel.append(crumpleSlider, crumpleValue); crashControls.append(crumpleLabel);
