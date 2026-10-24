@@ -25,9 +25,9 @@ export class Suspension3D {
     this.wheels = cfg.slots.filter(s => s.type !== undefined && s.type >= 101 && s.type < 200).map(slot => {
       const wheel = cfg.wheels[slot.type! - 101], part = root.children.get(slot.id);
       if (!wheel?.radius || !part) throw new Error('3D suspension needs installed wheels and CFG radii');
-      const [rest, bump, droop] = wheel.spring ?? [0.29, 0.1, 0.05], center = new Vector3(...wheel.position);
+      const [rest, bump, droop] = wheel.spring ?? [0.29, 0.1, 0.05], frame = root.slotFrame(slot), center = new Vector3().setFromMatrixPosition(frame);
       const hardpoint = center.clone().add(new Vector3(0, rest, 0));
-      return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius, rest, bump, droop, length: rest, contact: false, force: 0, frame: slotMatrix(cfg, slot), inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0 };
+      return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius, rest, bump, droop, length: rest, contact: false, force: 0, frame, inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0 };
     });
     if (this.wheels.length !== 4) throw new Error('3D prototype requires four configured wheels');
     for (const part of root.children.values()) {

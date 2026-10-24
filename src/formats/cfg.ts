@@ -1,18 +1,18 @@
 export type Triple = [number, number, number];
 export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
-export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number }
+export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; maxSteer?: number;
+  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; maxSteer?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
 /** Ordered CFG subset. Unknown commands remain visible; attach is compatibility, not an instance. */
 export function parsePartConfig(source: string): PartConfig {
-  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], unknown: [] };
+  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], links: [], unknown: [] };
   let slot: CfgSlot | undefined, deformable: number | undefined, render: number | undefined;
   let renderPose: CfgPose | undefined, deformablePose: CfgPose | undefined, radius: number | undefined;
   let spring: Triple | undefined;
@@ -40,6 +40,10 @@ export function parsePartConfig(source: string): PartConfig {
       case 'slottype':
         if (!slot) throw new Error(`CFG line ${line}: slottype before slot`);
         slot.type = integer(0); break;
+      case 'bonepos':
+        if (!slot) throw new Error(`CFG line ${line}: bonepos before slot`);
+        slot.bonePosition = [number(0), number(1), number(2)]; break;
+      case 'linked': result.links.push(args.map((_, i) => integer(i))); break;
       case 'stockpart': result.stock.push(rid()); break;
       case 'render': if (render === undefined) { render = rid(); renderPose = args.length === 4 ? { position: [number(1), number(2), number(3)], rotation: [0, 0, 0] } : args.length > 1 ? pose(1) : undefined; } break;
       case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;

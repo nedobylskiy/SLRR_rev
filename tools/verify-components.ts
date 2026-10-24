@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { Assets } from '../src/assets';
 import { PartFactory } from '../src/engine/world';
 import { MechanicalSystem } from '../src/engine/mechanical-system';
+import { parseScx } from '../src/formats/scx';
 import { Vector3 } from 'three';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './game-files';
 
@@ -20,6 +21,13 @@ try {
       assert.ok(Math.abs(x - wheelX) < 0.25, `${part.definition.cfgPath} must mount beside wheel ${index}`);
     }
     assert.match(corner.brake!.definition.model?.path ?? '', new RegExp(`disc_brake_${['FL', 'FR', 'RL', 'RR'][index]}\\.scx$`, 'i'));
+    const wheel = built.root.children.get(101 + index)!;
+    assert.ok(Math.abs(new Vector3().setFromMatrixPosition(wheel.matrix()).x - wheelX - built.root.slotPositions.get(101 + index)![0]) < 1e-10);
+    const shock = corner.shock!, spring = corner.spring!, model = parseScx(await assets.read(shock.definition.model!.path));
+    const topY = Math.max(...model.meshes.flatMap(mesh => Array.from(mesh.positions).filter((_, i) => i % 3 === 1))) * 0.01;
+    const shockTop = new Vector3(0, topY, 0).applyMatrix4(shock.renderAdjustment).applyMatrix4(shock.matrix());
+    const springTop = new Vector3().setFromMatrixPosition(spring.matrix());
+    assert.ok(Math.hypot(shockTop.x - springTop.x, shockTop.z - springTop.z) < 0.04, `shock ${index} meets its spring at the upper mount`);
   }
   assert.equal(mechanics.engine.length, 20);
   assert.ok(Math.abs(mechanics.displacement - 0.002714336) < 1e-7);

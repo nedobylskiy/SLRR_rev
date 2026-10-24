@@ -26,6 +26,16 @@ test('brake profile reads the original corner-specific render IDs', async () => 
   });
 });
 
+test('suspension profile reads native wheel and brake slot positions without executing Java', async () => {
+  const path = 'parts/running_gear/scripts/fl_susp/src/sample.java';
+  const source = 'public class sample extends Suspension { void updatevariables() { the_car.setSlotPos(101+wheelID, new Vector3(-0.124,0,0), null); the_car.setSlotPos(111+wheelID, new Vector3(-0.113,0,0), null); } }';
+  const assets = new Assets([{ path, size: source.length }], async () => new TextEncoder().encode(source));
+  const definition: PartDefinition = { key: { pack: 'parts.rpk', id: 1 }, alias: 'sample', cfgPath: 'fl_strut.cfg', script: 'parts/running_gear/scripts/fl_susp/sample.class', config: parsePartConfig('slot 0 0 0 0 0 0 1') };
+  assert.deepEqual((await new OriginalStock(assets).profile(definition))?.slotPositions, [
+    { base: 101, position: [-0.124, 0, 0] }, { base: 111, position: [-0.113, 0, 0] },
+  ]);
+});
+
 test('installed original component condition changes support, damping, braking and delivered torque', () => {
   const world = new EngineWorld(); world.mechanical = true;
   const def = (id: number, kind?: MechanicalProfile['kind'], values: Record<string, number> = {}, drive?: string): PartDefinition => ({

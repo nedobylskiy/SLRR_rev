@@ -1,9 +1,12 @@
-import { Matrix4 } from 'three';
+import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Assets, normalizePath } from '../assets';
 import { entryProperties } from '../formats/rpk';
-import { parsePartConfig, type CfgSlot, type PartConfig } from '../formats/cfg';
+import { parsePartConfig, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
+import { parseScx } from '../formats/scx';
 import { slotMatrix } from './slot-frames';
+import { SCX_TO_WORLD } from './model-transform';
+import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
 export { poseMatrix } from './transforms';
 
@@ -19,7 +22,9 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 export class EnginePart {
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
-  slotFrame(slot: CfgSlot) { return slotMatrix(this.definition.config, slot); }
+  readonly renderAdjustment = new Matrix4();
+  readonly slotPositions = new Map<number, Triple>();
+  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id); return slotMatrix(this.definition.config, position ? { ...slot, position } : slot); }
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
@@ -177,6 +182,43 @@ export class PartFactory {
         if (!progress) break;
       }
       for (const part of pending) warnings.push(`Uninstalled stockpart ${resourceKey(part.key)} (${part.alias}): compatible slot not resolved`);
+      if (options.mechanical) for (const part of world.parts.values()) {
+        if (part.definition.mechanics?.kind !== 'suspension' || part.parent !== root) continue;
+        const mount = root.definition.config.slots.find(s => s.id === part.parentSlot), type = mount?.type;
+        if (type === undefined || type < 201 || type > 204) continue;
+        for (const command of part.definition.mechanics.slotPositions ?? []) {
+          const id = command.base + type - 201, slot = root.definition.config.slots.find(s => s.id === id);
+          if (!slot) continue;
+          root.slotPositions.set(id, command.position);
+          const child = root.children.get(id), own = child?.definition.config.slots.find(s => s.id === child.ownSlot);
+          if (child && own) child.local.copy(root.slotFrame(slot)).multiply(child.slotFrame(own).invert());
+        }
+      }
+      if (options.mechanical) for (const part of world.parts.values()) {
+        if (part.definition.mechanics?.kind !== 'shock' || part.parent !== root) continue;
+        const slot = root.definition.config.slots.find(s => s.id === part.parentSlot);
+        const type = slot?.type, model = part.definition.model;
+        if (!slot?.bonePosition || type === undefined || !(type >= 201 && type <= 204 || type >= 301 && type <= 304) || !model || !part.definition.config.links.some(link => link[0] === slot.id - (type % 100 - 1))) continue;
+        const wheel = root.definition.config.wheels[type % 100 - 1];
+        if (!wheel) continue;
+        const inverse = part.local.clone().invert();
+        const lower = new Vector3().setFromMatrixPosition(root.slotFrame(slot)).applyMatrix4(inverse);
+        const upper = new Vector3(...slot.bonePosition).applyMatrix4(poseMatrix(wheel)).applyMatrix4(inverse);
+        const axis = upper.sub(lower), length = axis.length();
+        if (length < 0.01) continue;
+        const geometry = parseScx(await this.assets.read(model.path)), renderPose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);
+        let minY = Infinity, maxY = -Infinity;
+        for (const mesh of geometry.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {
+          const point = new Vector3().fromArray(mesh.positions, i).multiplyScalar(SCX_TO_WORLD);
+          if (renderPose) point.applyMatrix4(renderPose);
+          minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
+        }
+        if (maxY - minY < 0.01) continue;
+        part.renderAdjustment.makeTranslation(lower.x, lower.y, lower.z)
+          .multiply(new Matrix4().makeRotationFromQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), axis.normalize())))
+          .multiply(new Matrix4().makeScale(1, length / (maxY - minY), 1))
+          .multiply(new Matrix4().makeTranslation(0, -minY, 0));
+      }
       return { world, root, warnings };
     } catch (error) { world.dispose(); throw error; }
   }

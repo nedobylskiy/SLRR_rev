@@ -1,8 +1,9 @@
 import { Assets, normalizePath } from '../assets';
+import type { Triple } from '../formats/cfg';
 import type { PartDefinition, ResourceKey } from './world';
 
 export type WheelCorner = 'FL' | 'FR' | 'RL' | 'RR';
-export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string; renderVariants?: Partial<Record<WheelCorner, ResourceKey>> }
+export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string; renderVariants?: Partial<Record<WheelCorner, ResourceKey>>; slotPositions?: { base: number; position: Triple }[] }
 const clean = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 const mask = (s: string) => s.replace(/"(?:\\.|[^"\\])*"/g, m => ' '.repeat(m.length));
 function closing(s: string, start: number, open = '{', close = '}') { let depth = 1; for (let i = start + 1; i < s.length; i++) { if (s[i] === open) depth++; if (s[i] === close && --depth === 0) return i; } throw new Error('Unbalanced original source'); }
@@ -98,6 +99,11 @@ export class OriginalStock {
     if (kind === 'brake') for (const match of source.matchAll(/\brenderID_(FL|FR|RL|RR)\s*=\s*([\w.]+):0x([\da-f]+)r\s*;/gi)) {
       renderVariants[match[1].toUpperCase() as WheelCorner] = { pack: match[2].replaceAll('.', '/') + '.rpk', id: Number.parseInt(match[3], 16) };
     }
-    return { kind, source: def.script!, values, hub: call('setHub'), arm: call('setArm'), drive: /\bdrive_type\s*=\s*(\w+)/.exec(source)?.[1], renderVariants: Object.keys(renderVariants).length ? renderVariants : undefined };
+    const slotPositions: { base: number; position: Triple }[] = [];
+    if (kind === 'suspension') for (const match of source.matchAll(/\bthe_car\.setSlotPos\s*\(\s*(\d+)\s*\+\s*wheelID\s*,\s*new\s+Vector3\s*\(([^)]+)\)\s*,\s*null\s*\)/g)) {
+      const numbers = match[2].split(',').map(originalNumber);
+      if (numbers.length === 3 && numbers.every(n => n !== undefined)) slotPositions.push({ base: Number(match[1]), position: numbers as Triple });
+    }
+    return { kind, source: def.script!, values, hub: call('setHub'), arm: call('setArm'), drive: /\bdrive_type\s*=\s*(\w+)/.exec(source)?.[1], renderVariants: Object.keys(renderVariants).length ? renderVariants : undefined, slotPositions: slotPositions.length ? slotPositions : undefined };
   }
 }

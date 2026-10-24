@@ -29,6 +29,13 @@ test('CFG preserves ordered stock, repeated attachments, physical data and unkno
   assert.equal(cfg.unknown[0].command, 'eof');
   for (const source of ['slot 0 0 0 0 0 0 1\nslot 0 0 0 0 0 0 1', 'attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
 });
+test('CFG retains linked suspension anchors and the slot bone position', () => {
+  const chassis = parsePartConfig('slot 0.1 0 0 0 0 0 301\nslottype 201\nbonepos 0.2 0.4 0');
+  const shock = parsePartConfig('linked 301 501\nlinked 302 502\nslot 0 0 0 0 0 0 1');
+  assert.deepEqual(chassis.slots[0].bonePosition, [0.2, 0.4, 0]);
+  assert.deepEqual(shock.links, [[301, 501], [302, 502]]);
+  assert.throws(() => parsePartConfig('bonepos 0 0 0'), /before slot/);
+});
 const definition = (id: number, cfg: string): PartDefinition => ({ key: { pack: 'test.rpk', id }, alias: String(id), cfgPath: `${id}.cfg`, config: parsePartConfig(cfg) });
 
 test('world aligns both mount frames, moves descendants, detaches in place and rejects broken ownership', () => {

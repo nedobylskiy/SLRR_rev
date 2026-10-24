@@ -15,6 +15,8 @@ import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
 
+const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
+
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
@@ -87,7 +89,7 @@ export class Viewer {
       const collision = await loadPartCollision(assets, part.definition);
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
-      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose))); this.model.add(group);
+      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
@@ -106,7 +108,7 @@ export class Viewer {
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
-      group.matrix.copy(modelMatrix(part.matrix(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)));
+      group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
     }
   }
