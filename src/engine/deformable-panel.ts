@@ -4,6 +4,7 @@ interface Beam { a: number; b: number; initial: number; rest: number; lambda: nu
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
 export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number }
+export interface PanelCollider { min: [number, number, number]; max: [number, number, number] }
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Generated two-layer cage; XPBD distance/anchor constraints, plastic rest lengths and force-driven mount failure. */
@@ -15,6 +16,9 @@ export class DeformablePanel {
   private previous: Float64Array; private anchorLambda: Float64Array;
   private minX = Infinity; private maxX = -Infinity; private minZ = Infinity; private maxZ = -Infinity;
   private inverseMass: number;
+  private template: Float64Array;
+  private anchorVelocities: Float64Array;
+  readonly colliders: PanelCollider[] = [];
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
     if (samples.length < 9 || samples.length % 3 || !Number.isFinite(options.mass) || options.mass <= 0 || !options.mount.every(Number.isFinite)) throw new Error('Invalid panel data');
@@ -28,7 +32,7 @@ export class DeformablePanel {
     if (![this.yieldStrain, this.mountStrength, stiffness].every(v => Number.isFinite(v) && v > 0)) throw new Error('Invalid panel material');
     const count = this.nx * this.nz * 2;
     this.positions = new Float64Array(count * 3); this.rest = new Float64Array(count * 3); this.velocities = new Float64Array(count * 3);
-    this.previous = new Float64Array(count * 3); this.anchorLambda = new Float64Array(count * 3); this.inverseMass = count / options.mass;
+    this.previous = new Float64Array(count * 3); this.anchorLambda = new Float64Array(count * 3); this.anchorVelocities = new Float64Array(count * 3); this.inverseMass = count / options.mass;
     for (let z = 0; z < this.nz; z++) for (let x = 0; x < this.nx; x++) {
       const px = this.minX + x / (this.nx - 1) * (this.maxX - this.minX), pz = this.minZ + z / (this.nz - 1) * (this.maxZ - this.minZ);
       let sum = 0, weight = 0;
@@ -59,13 +63,24 @@ export class DeformablePanel {
       }
       this.mounts.push({ nodes, broken: false, force: 0, overload: 0 });
     }
-    this.reset();
+    this.template = this.rest.slice(); this.reset();
   }
   private index(x: number, z: number, l: number) { return (l * this.nz + z) * this.nx + x; }
   get attached() { return this.mounts.some(m => !m.broken); }
+  /** Move anchor targets, not simulated nodes. Existing node velocity supplies inertia on release. */
+  setAnchorFrame(e: ArrayLike<number>) {
+    if (e.length !== 16 || !Array.from(e).every(Number.isFinite)) throw new Error('Invalid anchor frame');
+    for (let i = 0; i < this.rest.length; i += 3) {
+      const x = this.template[i], y = this.template[i + 1], z = this.template[i + 2];
+      for (let axis = 0; axis < 3; axis++) {
+        const next = e[axis] * x + e[axis + 4] * y + e[axis + 8] * z + e[axis + 12];
+        this.anchorVelocities[i + axis] = (next - this.rest[i + axis]) / this.clock.dt; this.rest[i + axis] = next;
+      }
+    }
+  }
   get plasticBeams() { return this.beams.filter(b => Math.abs(b.rest - b.initial) > b.initial * 0.001).length; }
   reset() {
-    this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.clock = new FixedClock(240, 32);
+    this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(240, 32);
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
   }
@@ -74,7 +89,7 @@ export class DeformablePanel {
     const u = clamp((point[0] - this.minX) / (this.maxX - this.minX), 0, 1) * (this.nx - 1), v = clamp((point[2] - this.minZ) / (this.maxZ - this.minZ), 0, 1) * (this.nz - 1);
     const x = Math.min(Math.floor(u), this.nx - 2), z = Math.min(Math.floor(v), this.nz - 2), a = u - x, b = v - z;
     const nodes = [this.index(x, z, 0), this.index(x + 1, z, 0), this.index(x, z + 1, 0), this.index(x + 1, z + 1, 0)];
-    const w = [(1 - a) * (1 - b), a * (1 - b), (1 - a) * b, a * b], bottomY = nodes.reduce((s, n, i) => s + this.rest[n * 3 + 1] * w[i], 0);
+    const w = [(1 - a) * (1 - b), a * (1 - b), (1 - a) * b, a * b], bottomY = nodes.reduce((s, n, i) => s + this.template[n * 3 + 1] * w[i], 0);
     const t = (point[1] - bottomY) / this.thickness;
     return { nodes: [...nodes, ...nodes.map(n => n + this.nx * this.nz)], weights: [...w.map(n => n * (1 - t)), ...w.map(n => n * t)] };
   }
@@ -92,8 +107,12 @@ export class DeformablePanel {
   private step(dt: number) {
     const p = this.positions, inv = this.inverseMass, dt2 = dt * dt;
     this.previous.set(p); this.anchorLambda.fill(0);
-    const damping = Math.exp(-(this.attached ? 2 : 0.25) * dt);
-    for (let i = 0; i < p.length; i += 3) { this.velocities[i + 1] -= 9.81 * dt; for (let axis = 0; axis < 3; axis++) p[i + axis] += this.velocities[i + axis] * damping * dt; }
+    const attached = this.attached, damping = Math.exp(-(attached ? 2 : 0.25) * dt);
+    for (let i = 0; i < p.length; i += 3) {
+      this.velocities[i + 1] -= 9.81 * dt;
+      for (let axis = 0; axis < 3; axis++) { const target = attached ? this.anchorVelocities[i + axis] : 0; p[i + axis] += (target + (this.velocities[i + axis] - target) * damping) * dt; }
+    }
+    this.anchorVelocities.fill(0);
     for (const b of this.beams) b.lambda = 0;
     for (let iteration = 0; iteration < 12; iteration++) {
       for (const b of this.beams) {
@@ -107,6 +126,7 @@ export class DeformablePanel {
         this.anchorLambda[i] += dl; p[i] += inv * dl;
       }
       for (let i = 1; i < p.length; i += 3) p[i] = Math.max(0.015, p[i]);
+      for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) this.contactBox(i, box);
     }
     for (const m of this.mounts) if (!m.broken) {
       m.force = m.nodes.reduce((sum, n) => sum + Math.hypot(this.anchorLambda[n * 3], this.anchorLambda[n * 3 + 1], this.anchorLambda[n * 3 + 2]) / dt2, 0);
@@ -119,5 +139,23 @@ export class DeformablePanel {
     }
     for (let i = 0; i < p.length; i++) { this.velocities[i] = (p[i] - this.previous[i]) / dt; if (!Number.isFinite(p[i])) throw new Error('Non-finite panel state'); }
     for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= 0.015001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+  }
+  private contactBox(i: number, box: PanelCollider) {
+    const p = this.positions, previous = this.previous;
+    // Segment/slab entry catches even a fast node that crosses the entire obstacle in one step.
+    let enter = 0, exit = 1, normal = -1, boundary = 0;
+    for (let axis = 0; axis < 3; axis++) {
+      const delta = p[i + axis] - previous[i + axis], from = previous[i + axis];
+      if (Math.abs(delta) < 1e-12) { if (from < box.min[axis] || from > box.max[axis]) return; continue; }
+      const a = (box.min[axis] - from) / delta, b = (box.max[axis] - from) / delta, near = Math.min(a, b), far = Math.max(a, b);
+      if (near >= enter) { enter = near; normal = axis; boundary = delta > 0 ? box.min[axis] : box.max[axis]; }
+      exit = Math.min(exit, far); if (enter > exit) return;
+    }
+    if (normal >= 0 && enter >= 0 && enter <= 1 && exit >= 0) { p[i + normal] = boundary; return; }
+    if ([0, 1, 2].every(a => p[i + a] >= box.min[a] && p[i + a] <= box.max[a])) {
+      let distance = Infinity, axis = 0, face = 0;
+      for (let a = 0; a < 3; a++) for (const value of [box.min[a], box.max[a]]) { const d = Math.abs(p[i + a] - value); if (d < distance) { distance = d; axis = a; face = value; } }
+      p[i + axis] = face;
+    }
   }
 }

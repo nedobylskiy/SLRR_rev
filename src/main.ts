@@ -20,6 +20,16 @@ let beforeDrivingDetails = '';
 const worldButton = textElement('button', 'Собрать Baiern');
 const driveButton = textElement('button', 'Пробная поездка') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Испытание капота'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
+const crashButton = textElement('button', 'Машина и препятствие'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
+const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
+let crashSession: ReturnType<Viewer['drive']> | undefined;
+for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 50 км/ч', 50 / 3.6], ['Сброс', 0]] as const) {
+  const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
+}
+const crashCageLabel = textElement('label', ' Каркас капота'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
+crashCage.onchange = () => crashSession?.wireframe(crashCage.checked); crashCageLabel.prepend(crashCage); crashControls.append(crashCageLabel);
+const slowLabel = textElement('label', ' Замедление ×4'), slow = document.createElement('input'); slow.type = 'checkbox';
+slow.onchange = () => crashSession?.slowMotion(slow.checked); slowLabel.prepend(slow); crashControls.append(slowLabel);
 const hoodControls = textElement('div', '', 'hood-controls'); hoodControls.hidden = true;
 const hoodHud = textElement('div', '', 'hood-telemetry'); hoodHud.setAttribute('role', 'status'); hoodControls.append(hoodHud);
 el('scene-help').before(hoodControls);
@@ -33,11 +43,26 @@ const cage = document.createElement('input'); cage.type = 'checkbox'; cage.oncha
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
 el('memory-lab').before(worldButton, driveButton);
 function stopDrive() {
+  crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
   hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
   disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Пробная поездка';
   el('scene-help').textContent = 'ЛКМ — вращение · Колесо — масштаб · ПКМ — перемещение';
 }
+crashButton.onclick = async () => {
+  const opening = openWorld('cars/racers/Baiern.rpk', 6), request = sequence;
+  await opening;
+  if (request !== sequence || !engineRoot || !viewer) return;
+  try {
+    beforeDrivingDetails = el('details').textContent ?? '';
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
+    slow.checked = true; crashSession.slowMotion(true);
+    crashControls.hidden = false; crashCage.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
+    el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
+    el('details').textContent = 'Нажми «Заезд 10 км/ч» или «Заезд 50 км/ч», либо веди машину клавишами. Скорость задаётся машине и капоту вместе; повреждение рассчитывается только при контакте с жёлтым препятствием. После разрыва опор капот выходит из слота и остаётся самостоятельной деталью. Можно отъехать назад. Кузов пока жёсткий, подвески и столкновений капота с машиной ещё нет.';
+    el('filename').textContent = 'Baiern · столкновение с препятствием'; el('format').textContent = 'PHYSICS / CAR CRASH'; status('Испытание на машине');
+  } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }
+};
 hoodButton.onclick = async () => {
   if (!assets || !viewer) return;
   const request = ++sequence;

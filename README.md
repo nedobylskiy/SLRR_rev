@@ -23,6 +23,8 @@ C:\Program Files (x86)\Steam\steamapps\common\Street Legal Racing Redline
 
 «Испытание капота» слева открывает [прототип деформаций](docs/hood-prototype.md) на оригинальной модели: упругий удар, остаточная вмятина, разрушение опор и падение. Есть каркас и сброс; материал и физические опоры сгенерированы для нового solver.
 
+«Машина и препятствие» переносит этот [капот на штатную сборку](docs/car-crash-demo.md): контакт с перекладиной мнёт его, а физический разрыв освобождает настоящий слот EngineWorld. Заезды 10/50 км/ч, замедление и ручное управление позволяют сравнить вмятину и отделение самостоятельной детали.
+
 Другой путь:
 
 ```powershell
@@ -45,6 +47,7 @@ npm run verify:world
 npm run verify:gameplay
 npm run verify:mounts
 npm run verify:hood
+npm run verify:crash
 npm run audit
 ```
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DeformablePanel } from '../src/engine/deformable-panel';
+import { Matrix4 } from 'three';
 
 const samples = [-0.7, 1.3, -0.7, 0.7, 1.3, -0.7, -0.7, 1.3, 0.7, 0.7, 1.3, 0.7, 0, 1.35, 0];
 const create = () => new DeformablePanel(samples, { mass: 38.5, mount: [0, 1.3, 0.7] });
@@ -39,4 +40,26 @@ test('invalid panel input and impacts are rejected', () => {
   assert.throws(() => new DeformablePanel([0, 1, 0, 0, 2, 0, 0, 3, 0], { mass: 1, mount: [0, 1, 0] }));
   const p = create(); for (const impulse of [NaN, -1, Infinity, 1001]) assert.throws(() => p.hit(impulse));
   assert.throws(() => p.hit(1, -1)); assert.throws(() => p.bind([NaN, 0, 0]));
+});
+
+test('moving anchors do not teleport simulated mass; skin bindings stay in the original part frame', () => {
+  const p = create(), binding = p.bind([0, 1.35, 0]), original = p.positions.slice();
+  p.setAnchorFrame(new Matrix4().makeTranslation(2, 3, 4).elements);
+  assert.deepEqual(p.positions, original);
+  const laterBinding = p.bind([0, 1.35, 0]); assert.deepEqual(laterBinding, binding);
+  p.reset(); const out = [0, 0, 0]; p.skin(binding, out);
+  [2, 4.35, 4].forEach((v, i) => assert.ok(Math.abs(out[i] - v) < 1e-12));
+  p.setAnchorFrame(new Matrix4().makeTranslation(2, 3, 4.01).elements);
+  p.advance(1 / 240); assert.ok(p.velocities.some(v => Math.abs(v) > 0.1));
+});
+
+test('swept node contacts stop tunnelling through an obstacle, including entry from its surface', () => {
+  const p = create(); p.mounts.forEach(m => { m.broken = true; });
+  p.colliders.push({ min: [-100, -100, -0.2], max: [100, 100, 0.2] });
+  for (let i = 2; i < p.positions.length; i += 3) { p.positions[i] += 2; p.velocities[i] = -1000; }
+  p.advance(1 / 240);
+  for (let i = 2; i < p.positions.length; i += 3) assert.ok(p.positions[i] >= 0.2 - 1e-10);
+  for (let i = 2; i < p.positions.length; i += 3) p.velocities[i] = -1000;
+  p.advance(1 / 240);
+  for (let i = 2; i < p.positions.length; i += 3) assert.ok(p.positions[i] >= 0.2 - 1e-10);
 });

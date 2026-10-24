@@ -54,10 +54,14 @@ export class DrivingDemo {
     return this.root.world.clock.advance(seconds, () => {
       if (this.root.world.disposed || this.root.world.parts.get(this.root.id) !== this.root) throw new Error('Driving world disposed');
       for (const mount of this.mounts) if (mount.part.parent !== this.root) throw new Error('Driving wheel detached');
-      this.step(this.root.world.clock.dt, input);
+      this.tick(this.root.world.clock.dt, input);
     });
   }
-  private step(dt: number, input: DrivingInput) {
+  /** Shared fixed-step integration; a coupled physics session can own the clock. */
+  tick(dt: number, input: DrivingInput) {
+    if (this.root.world.disposed || this.root.world.parts.get(this.root.id) !== this.root) throw new Error('Driving world disposed');
+    if (![dt, input.throttle, input.steer].every(Number.isFinite) || dt <= 0 || dt > 0.1) throw new Error('Invalid driving step');
+    for (const m of this.mounts) if (m.part.parent !== this.root) throw new Error('Driving wheel detached');
     const throttle = clamp(input.throttle, -1, 1), oldSpeed = this.speed;
     this.steer = approach(this.steer, clamp(input.steer, -1, 1) * this.maxSteer, 1.8 * dt);
     // Demonstration handling constants are shared by every car, never a reconstructed drivetrain.
@@ -69,7 +73,7 @@ export class DrivingDemo {
     this.position.x -= Math.sin(middleYaw) * travel; this.position.z -= Math.cos(middleYaw) * travel;
     this.yaw += turn; this.distance += travel; this.sync();
   }
-  private sync() {
+  sync() {
     this.root.local.compose(this.position, new Quaternion().setFromEuler(new Euler(this.pitch, this.yaw, 0, 'YXZ')), new Vector3(1, 1, 1));
     for (const m of this.mounts) {
       m.part.local.copy(m.frame).multiply(new Matrix4().makeRotationY(this.steer * m.steering))
