@@ -4,6 +4,7 @@ export interface ScxMesh {
   name: string; positions: Float32Array; normals: Float32Array;
   uv: Float32Array; uv2?: Float32Array; uv3?: Float32Array;
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
+  layer2Index?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
 }
 export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string[] }
@@ -32,20 +33,25 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const diffuse = Array.from({ length: 4 }, () => r.f32());
       r.seek(start + 44);
       const textureIndex = r.u16();
+      r.skip(6);
+      const layer2Index = r.u16();
       r.seek(start + 104 <= start + size ? start + 104 : start + size);
       const name = size === 136 ? r.cstring(32) : `material_${meshes.length}`;
       r.seek(start + size);
       const count = r.count(r.u32(), size > 56 ? 64 : 44);
-      const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3), uv = new Float32Array(count * 2);
+      const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3), uv = new Float32Array(count * 2), uv2 = new Float32Array(count * 2);
+      const uv3 = size > 56 ? new Float32Array(count * 2) : undefined;
       for (let i = 0; i < count; i++) {
         for (let j = 0; j < 3; j++) positions[i * 3 + j] = r.f32();
         for (let j = 0; j < 3; j++) normals[i * 3 + j] = r.f32();
         uv[i * 2] = r.f32(); uv[i * 2 + 1] = r.f32();
-        r.skip(size > 56 ? 32 : 12);
+        uv2[i * 2] = r.f32(); uv2[i * 2 + 1] = r.f32();
+        r.skip(4);
+        if (uv3) { r.skip(8); uv3[i * 2] = r.f32(); uv3[i * 2 + 1] = r.f32(); r.skip(4); }
       }
       const triangles = r.count(r.u32(), 12);
       const indices = Uint32Array.from({ length: triangles * 3 }, () => r.u32());
-      const mesh = { name, positions, normals, uv, indices, diffuse, textureIndex };
+      const mesh = { name, positions, normals, uv, uv2, uv3, indices, diffuse, textureIndex, layer2Index };
       validate(mesh); meshes.push(mesh);
     }
     if (r.remaining > 0 && r.remaining < 4) throw new Error('SCX v3: truncated tail');

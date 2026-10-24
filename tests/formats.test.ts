@@ -40,6 +40,28 @@ test('SCX valid empty placeholders are distinct from missing/invalid files', () 
   for (const version of [3, 4]) assert.equal(parseScx(Buffer.concat([Buffer.from('INVO'), u32(version, 0)])).meshes.length, 0);
   assert.throws(() => parseScx(Buffer.alloc(0))); assert.throws(() => parseScx(Buffer.concat([Buffer.from('INVO'), u32(999)])));
 });
+test('SCX v3 preserves layer2 texture index and all three UV channels', () => {
+  const material = Buffer.alloc(56);
+  material.writeUInt32LE(56, 0);
+  material.writeUInt16LE(2, 44);
+  material.writeUInt16LE(5, 52);
+  const vertex = Buffer.alloc(44);
+  vertex.writeFloatLE(0.25, 24); vertex.writeFloatLE(0.5, 28);
+  vertex.writeFloatLE(0.75, 32); vertex.writeFloatLE(0.875, 36);
+  const data = Buffer.concat([Buffer.from('INVO'), u32(3), material, u32(1), vertex, u32(0), u32(0)]);
+  const mesh = parseScx(data).meshes[0];
+  assert.equal(mesh.textureIndex, 2);
+  assert.equal(mesh.layer2Index, 5);
+  assert.deepEqual(Array.from(mesh.uv), [0.25, 0.5]);
+  assert.deepEqual(Array.from(mesh.uv2!), [0.75, 0.875]);
+  const extended = Buffer.alloc(136);
+  extended.writeUInt32LE(136, 0); extended.writeUInt16LE(2, 44); extended.writeUInt16LE(5, 52);
+  const wideVertex = Buffer.alloc(64);
+  wideVertex.writeFloatLE(0.25, 24); wideVertex.writeFloatLE(0.5, 28);
+  wideVertex.writeFloatLE(12.5, 52); wideVertex.writeFloatLE(-7.5, 56);
+  const wide = parseScx(Buffer.concat([Buffer.from('INVO'), u32(3), extended, u32(1), wideVertex, u32(0), u32(0)])).meshes[0];
+  assert.deepEqual(Array.from(wide.uv3!), [12.5, -7.5]);
+});
 test('SCX v4 uses the secondary diffuse map only when the primary map is absent', () => {
   const fixture = (properties: Array<[number, number]>) => {
     const material = Buffer.concat([u32(0, 0), u32(properties.length), ...properties.map(([type, index]) => Buffer.concat([u32(type, index), Buffer.alloc(24)]))]);
