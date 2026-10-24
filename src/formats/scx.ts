@@ -79,7 +79,14 @@ export function parseScx(bytes: Uint8Array): ScxModel {
             else if (type === 0x05000000 || type === 0x07000000) {
               r.skip(4); warnings.push(`Material property 0x${type.toString(16)}: value read, shading semantics not implemented`);
             }
-            else if (type >= 0x06000000 && type <= 0x06000005) { const index = r.u32(); if (type === 0x06000000) current.textureIndex = index; r.skip(24); }
+            else if (type >= 0x06000000 && type <= 0x06000005) {
+              const index = r.u32();
+              // Some v4 materials (including Test Track containers) contain only DiffuseMixSecond.
+              // Keep DiffuseMap authoritative when both entries are present, regardless of their order.
+              if (type === 0x06000000) current.textureIndex = index;
+              else if (type === 0x06000001 && current.textureIndex === undefined) current.textureIndex = index;
+              r.skip(24);
+            }
             else if (type === 0x08000000) current.name = r.cstring(32);
             else throw new Error(`SCX v4: unknown material entry 0x${type.toString(16)}`);
           }

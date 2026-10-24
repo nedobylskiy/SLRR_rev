@@ -40,6 +40,18 @@ test('SCX valid empty placeholders are distinct from missing/invalid files', () 
   for (const version of [3, 4]) assert.equal(parseScx(Buffer.concat([Buffer.from('INVO'), u32(version, 0)])).meshes.length, 0);
   assert.throws(() => parseScx(Buffer.alloc(0))); assert.throws(() => parseScx(Buffer.concat([Buffer.from('INVO'), u32(999)])));
 });
+test('SCX v4 uses the secondary diffuse map only when the primary map is absent', () => {
+  const fixture = (properties: Array<[number, number]>) => {
+    const material = Buffer.concat([u32(0, 0), u32(properties.length), ...properties.map(([type, index]) => Buffer.concat([u32(type, index), Buffer.alloc(24)]))]);
+    const chunks = [Buffer.concat([u32(0, material.length + 8), material]), u32(4, 16, 0, 1), u32(5, 12, 0)];
+    let offset = 12 + chunks.length * 8;
+    const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
+    return Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks]);
+  };
+  assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].textureIndex, 3);
+  assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].textureIndex, 1);
+  assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].textureIndex, 1);
+});
 test('properties and RDB preserve duplicate texture/slot rows', () => {
   assert.deepEqual(parseProperties('texture 0x01\r\ntexture 0x02 ; note').map(p => p.value), ['0x01', '0x02']);
   assert.equal(parseRdb('<FILE 01.rsd >\ntexture 1\ntexture 2\n</FILE>')[0].properties.length, 2);

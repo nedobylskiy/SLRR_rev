@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { Assets } from '../src/assets';
+import { parseScx } from '../src/formats/scx';
 import { mapObjectPlacements, parseIcfg } from '../src/engine/map-objects';
 import { MapCollision } from '../src/engine/map-collision';
 import { poseMatrix } from '../src/engine/transforms';
@@ -38,4 +39,10 @@ const containers = placements.filter(placement => placement.typeId === 0x0006052
 if (containers.length !== 80 || resolved !== placements.length) throw new Error(`Incomplete map objects: ${resolved}/${placements.length}, containers ${containers.length}`);
 const first = containers[0].pose.position;
 if (!collision.contact(new Vector3(first[0] + 2.8, first[1], first[2]))) throw new Error('Container CFG box does not collide');
+const containerModel = await assets.modelForResource('objects.rpk', 0x522);
+const containerMaterial = parseScx(await assets.read(containerModel.path)).meshes[0];
+if (containerMaterial.textureIndex !== 0 || !/maps[/\\]textures[/\\]kontener\.dds$/i.test(containerModel.textures[0] ?? '')) {
+  throw new Error('Container SCX material did not resolve its original RPK texture');
+}
+await assets.read(containerModel.textures[containerMaterial.textureIndex]);
 console.log(`Resolved ${resolved} Test Track objects, including ${containers.length} containers and ${collision.boxes} original CFG boxes`);
