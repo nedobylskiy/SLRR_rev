@@ -1,7 +1,7 @@
 import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 import { CarCrashDemo } from './car-crash-demo';
 import { RigidBody3D, boxContact } from './rigid-body-3d';
-import { Suspension3D, TestTerrain } from './suspension-3d';
+import { Suspension3D, TestTerrain, type Terrain } from './suspension-3d';
 import { DeformablePanel, type PanelBinding, type Triple } from './deformable-panel';
 import { TriangleSurface } from './triangle-surface';
 import type { EnginePart } from './world';
@@ -29,7 +29,7 @@ function basis(panel: DeformablePanel) {
 /** Full rigid chassis motion with ray suspension and separate deformable or rigid detachable parts. */
 export class Vehicle3D extends CarCrashDemo {
   readonly body: RigidBody3D;
-  readonly terrain = new TestTerrain();
+  private spawn?: { position: Vector3; yaw: number };
   readonly suspension: Suspension3D;
   readonly soft = new Map<EnginePart, SoftBodyPart>();
   readonly rigid = new Map<EnginePart, RigidPart>();
@@ -110,7 +110,7 @@ export class Vehicle3D extends CarCrashDemo {
       part.condition = Math.max(0, Math.min(part.condition, 1 - energy * weight / threshold));
     }
   }
-  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3) {
+  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain()) {
     super(root, hood, samples, chassisBounds);
     this.clock = new FixedClock(240, 8);
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
@@ -190,6 +190,13 @@ export class Vehicle3D extends CarCrashDemo {
   override reset(speed = 0) {
     super.reset(speed);
     if (!this.body) return;
+    if (this.spawn) {
+      this.driving.position.x = this.spawn.position.x;
+      this.driving.position.z = this.spawn.position.z;
+      this.driving.position.y += this.spawn.position.y;
+      this.driving.yaw = this.spawn.yaw;
+      this.driving.sync();
+    }
     this.clock = new FixedClock(240, 8);
     for (const s of this.originalTree) if (s.parent && s.part.parent !== s.parent) { if (s.part.parent) this.root.world.detach(s.part); this.root.world.install(s.parent, s.parentSlot!, s.part, s.ownSlot!); }
     for (const s of this.originalTree) if (s.part !== this.root) s.part.local.copy(s.local);
@@ -202,6 +209,13 @@ export class Vehicle3D extends CarCrashDemo {
     for (const r of this.rigid.values()) { r.body.setMass(mass(r.part)); r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
     if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; }
     this.configureStructure();
+  }
+  placeAt(position: Vector3, yaw: number) { this.spawn = { position: position.clone(), yaw }; this.reset(); }
+  disableObstacle() {
+    this.originalObstacle.min.splice(0, 3, 100000, 100000, 100000);
+    this.originalObstacle.max.splice(0, 3, 100001, 100001, 100001);
+    this.obstacle.min.splice(0, 3, ...this.originalObstacle.min);
+    this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
   }
   jump() { this.reset(14); this.terrain.ramp = true; this.obstacle.min[0] += 20; this.obstacle.max[0] += 20; }
   rearCrash(speed = 50 / 3.6) { this.reset(speed); this.body.velocity.z = speed; const dz = 16; this.obstacle.min[2] += dz; this.obstacle.max[2] += dz; this.lastVelocity.copy(this.body.velocity); }

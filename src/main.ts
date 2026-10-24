@@ -6,6 +6,7 @@ import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
+import { Vector3 } from 'three';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Подключение…</span><button id="memory-lab">Поток в памяти</button><label class="button">Открыть папку игры<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -19,6 +20,7 @@ let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined
 let beforeDrivingDetails = '';
 const worldButton = textElement('button', 'Собрать Baiern');
 const mapButton = textElement('button', 'Тестовый трек');
+const trackDriveButton = textElement('button', 'Поездка по треку');
 const driveButton = textElement('button', 'Пробная поездка') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Испытание капота'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Машина и препятствие'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
@@ -52,7 +54,30 @@ const resetHood = textElement('button', 'Новый капот'); resetHood.oncl
 const cageLabel = textElement('label', ' Физический каркас');
 const cage = document.createElement('input'); cage.type = 'checkbox'; cage.onchange = () => hood?.wireframe(cage.checked); cageLabel.prepend(cage); hoodControls.append(cageLabel);
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
-el('memory-lab').before(worldButton, driveButton, mapButton);
+el('memory-lab').before(worldButton, driveButton, mapButton, trackDriveButton);
+trackDriveButton.onclick = async () => {
+  if (!assets || !viewer) return;
+  await openWorld('cars/racers/Baiern.rpk', 6);
+  const request = sequence;
+  if (!engineRoot || !viewer) return;
+  try {
+    status('Загрузка трека…');
+    const map = await viewer.showMap('maps/test_track.rpk', assets, (done, total) => {
+      if (request === sequence) status(`Трасса ${done}/${total}`);
+    }, true);
+    if (request !== sequence || !engineRoot) return;
+    const start = new Vector3(0, map.terrain.height(0, -1461.785) + 0.15, -1461.785);
+    if (start.y < -100) throw new Error('У стартовой линии нет поверхности карты');
+    beforeDrivingDetails = el('details').textContent ?? '';
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, position: start, yaw: Math.PI });
+    disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
+    el('viewport').parentElement?.classList.add('physics-scene');
+    el('filename').textContent = 'Test Track · поездка'; el('format').textContent = 'MAP / PHYSICS';
+    el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — вернуться на старт';
+    el('details').textContent = `${map.loaded} оригинальных моделей · ${map.terrain.faces} треугольников поверхности. Старт взят с прямой 1/4 мили из TestTrack.java. Колёса и кузов взаимодействуют с геометрией SCX; PHYS/POLY и столкновения со стенами пока не декодированы.`;
+    status('Поездка по треку');
+  } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Поездка недоступна', true); el('details').textContent = String(error); } }
+};
 mapButton.onclick = async () => {
   if (!assets || !viewer) return;
   const request = ++sequence;

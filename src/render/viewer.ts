@@ -15,6 +15,7 @@ import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
 import { mapRenderIds } from '../engine/map';
+import { MapTerrain } from '../engine/map-terrain';
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -110,10 +111,11 @@ export class Viewer {
     if (generation === this.generation) this.fit();
     return warnings;
   }
-  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void) {
-    this.clear(); const generation = this.generation;
+  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
+    if (!keepWorld) this.clear(); const generation = this.generation;
     const pack = await assets.pack(packPath), ids = mapRenderIds(pack), warnings: string[] = [];
-    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, warnings };
+    const terrain = new MapTerrain();
+    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, warnings, terrain };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
@@ -125,6 +127,7 @@ export class Viewer {
         const resource = await assets.modelForResource(packPath, id);
         const parsed = parseScx(await assets.read(resource.path));
         if (generation !== this.generation) break;
+        terrain.add(parsed);
         const group = new THREE.Group(); group.name = `${id.toString(16)}: ${pack.entries.find(e => e.typeId === id)?.alias ?? ''}`;
         group.scale.setScalar(0.01); this.model.add(group);
         warnings.push(...await this.append(parsed, assets, resource.textures, group, generation));
@@ -133,7 +136,7 @@ export class Viewer {
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
-    return { loaded, total: ids.length, triangles, warnings };
+    return { loaded, total: ids.length, triangles, warnings, terrain };
   }
   showInternals(value: boolean) {
     this.internalView = value;
@@ -180,7 +183,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; position: THREE.Vector3; yaw: number }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -200,7 +203,7 @@ export class Viewer {
       if (!hood) throw new Error('Installed hood required for crash demo');
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
-      crash = new Vehicle3D(root, hood, samples.flat(), bounds);
+      crash = new Vehicle3D(root, hood, samples.flat(), bounds, track?.terrain);
       const triangles: number[] = [], inverseRoot = root.matrix().invert();
       for (const part of root.world.parts.values()) {
         if (part === hood || !part.definition.model) continue;
@@ -221,13 +224,14 @@ export class Viewer {
         }
       }
       crash.setBodyTriangles(triangles);
+      if (track && crash instanceof Vehicle3D) { crash.disableObstacle(); crash.placeAt(track.position, track.yaw); }
       for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part)); panelViews.push(view); panelParts.set(view, s.part); }
       const rampGeometry = new THREE.BufferGeometry();
       rampGeometry.setAttribute('position', new THREE.Float32BufferAttribute([-1.8, 0, -4, 1.8, 0, -4, 1.8, 1.12, -8, -1.8, 0, -4, 1.8, 1.12, -8, -1.8, 1.12, -8], 3)); rampGeometry.computeVertexNormals();
-      ramp = new THREE.Mesh(rampGeometry, new THREE.MeshStandardMaterial({ color: 0x668d9d, side: THREE.DoubleSide })); ramp.visible = false; this.model.add(ramp);
+      ramp = new THREE.Mesh(rampGeometry, new THREE.MeshStandardMaterial({ color: 0x668d9d, side: THREE.DoubleSide })); ramp.visible = false; if (!track) this.model.add(ramp);
       const box = crash.obstacle, size = new THREE.Vector3(...box.max).sub(new THREE.Vector3(...box.min));
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
-      obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); this.model.add(obstacle);
+      obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); if (!track) this.model.add(obstacle);
     }
     const demo = crash?.driving ?? new DrivingDemo(root);
     let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1, paused = false;
@@ -245,7 +249,7 @@ export class Viewer {
     const focus = () => canvas.focus({ preventScroll: true });
     canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Управление автомобилем'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
     window.addEventListener('keyup', up); window.addEventListener('blur', release); document.addEventListener('visibilitychange', release);
-    this.ground.visible = true; this.grid.visible = false; this.driveGrid.visible = true;
+    this.ground.visible = !track; this.grid.visible = false; this.driveGrid.visible = !track;
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(softParts);
     const followed = demo.position.clone();
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
@@ -276,8 +280,10 @@ export class Viewer {
       panelViews.forEach(v => v.dispose()); crash?.dispose();
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
       if (ramp) { ramp.removeFromParent(); ramp.geometry.dispose(); (ramp.material as THREE.Material).dispose(); }
-      for (const { part, local } of original) part.local.copy(local);
-      this.ground.visible = false; this.grid.visible = true; this.driveGrid.visible = false; this.syncWorld(); this.fit();
+      if (!track) for (const { part, local } of original) part.local.copy(local);
+      this.ground.visible = false; this.grid.visible = !track; this.driveGrid.visible = false; this.syncWorld();
+      if (track) { this.controls.target.copy(track.position); this.camera.position.copy(track.position).add(new THREE.Vector3(12, 7, 12)); this.controls.update(); }
+      else this.fit();
     };
     this.stopDriving = stop; focus();
     const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(1 / 240, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
