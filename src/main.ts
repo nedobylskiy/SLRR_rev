@@ -74,7 +74,7 @@ trackDriveButton.onclick = async () => {
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · поездка'; el('format').textContent = 'MAP / PHYSICS';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — вернуться на старт';
-    el('details').textContent = `${map.loaded} оригинальных моделей · ${map.terrain.faces} треугольников опоры · ${map.collision.walls} боковых граней. Старт взят с прямой 1/4 мили из TestTrack.java. Дорога, ограждения и контактная геометрия извлечены из SCX; отдельные PHYS/POLY-блоки в этом RPK не обнаружены.`;
+    el('details').textContent = `${map.loaded} моделей карты · ${map.objects} объектов по RDB/CFG · ${map.collision.boxes} физических коробок · ${map.terrain.faces} треугольников опоры. Старт взят с прямой 1/4 мили из TestTrack.java. Для размещённых объектов используются исходные позиции RDB и формы box из CFG; остальная коллизия карты пока построена из SCX.`;
     status('Поездка по треку');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Поездка недоступна', true); el('details').textContent = String(error); } }
 };
@@ -91,7 +91,7 @@ mapButton.onclick = async () => {
       if (request === sequence) status(`Трасса ${done}/${total}`);
     });
     if (request !== sequence) return;
-    el('details').textContent = `${result.loaded}/${result.total} моделей · ${result.triangles.toLocaleString('ru')} треугольников. Геометрия и текстуры из оригинальных RPK/SCX; позиции сохранены из самих мешей. Физические столкновения с дорогой и объекты из бинарных блоков карты пока не восстановлены.\n${result.warnings.slice(0, 12).join('\n')}`;
+    el('details').textContent = `${result.loaded}/${result.total} моделей · ${result.objects} размещённых объектов по RDB/CFG · ${result.triangles.toLocaleString('ru')} треугольников карты. Геометрия и текстуры из оригинальных RPK/SCX; для объектов применены координаты RDB. Коллизия дороги пока приближённая.\n${result.warnings.slice(0, 12).join('\n')}`;
     status(result.loaded ? 'Трасса загружена' : 'Нет геометрии', !result.loaded);
   } catch (error) { if (request === sequence) { viewer.clear(); status('Ошибка карты', true); el('details').textContent = String(error); } }
 };

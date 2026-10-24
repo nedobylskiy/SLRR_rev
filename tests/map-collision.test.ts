@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { Vector3 } from 'three';
+import { Matrix4, Vector3 } from 'three';
 import { MapCollision } from '../src/engine/map-collision';
 import type { ScxModel } from '../src/formats/scx';
 
@@ -17,4 +17,14 @@ test('static map wall pushes from either side and ignores distant points', () =>
   assert.ok(front.normal.x > 0 && back.normal.x < 0);
   assert.ok(Math.abs(front.depth - 0.1) < 1e-6);
   assert.equal(collision.contact(new Vector3(2, 1, 1)), undefined);
+});
+
+test('original CFG box supplies rotated static contacts without the visual mesh', () => {
+  const collision = new MapCollision();
+  collision.addBox(new Matrix4().makeRotationY(Math.PI / 2).setPosition(4, 1.5, 2), new Vector3(2, 1.5, 1));
+  assert.equal(collision.boxes, 1);
+  const hit = collision.contact(new Vector3(5.1, 1.5, 2), 0.2);
+  assert.ok(hit && hit.normal.x > 0.99);
+  assert.ok(Math.abs(hit.depth - 0.1) < 1e-6);
+  assert.equal(collision.contact(new Vector3(8, 1.5, 2)), undefined);
 });

@@ -17,6 +17,7 @@ import { Vehicle3D } from '../engine/vehicle-3d';
 import { mapRenderIds } from '../engine/map';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
+import { mapObjectPlacements, parseIcfg } from '../engine/map-objects';
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -116,7 +117,7 @@ export class Viewer {
     if (!keepWorld) this.clear(); const generation = this.generation;
     const pack = await assets.pack(packPath), ids = mapRenderIds(pack), warnings: string[] = [];
     const terrain = new MapTerrain(), collision = new MapCollision();
-    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, warnings, terrain, collision };
+    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
@@ -138,7 +139,52 @@ export class Viewer {
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
-    return { loaded, total: ids.length, triangles, warnings, terrain, collision };
+    let objects = 0;
+    try {
+      const rdb = new TextDecoder('windows-1252').decode(await assets.read(packPath.replace(/\.rpk$/i, '.rdb')));
+      const placements = mapObjectPlacements(rdb, pack), byType = new Map<number, typeof placements>();
+      for (const placement of placements) {
+        const list = byType.get(placement.typeId) ?? [];
+        if (!list.length) byType.set(placement.typeId, list);
+        list.push(placement);
+      }
+      for (const [typeId, instances] of byType) {
+        if (generation !== this.generation) break;
+        try {
+          const resource = await assets.resource(packPath, typeId);
+          if (resource.entry.type !== 8) continue;
+          const cfg = parseIcfg(resource.entry.data);
+          let model: Awaited<ReturnType<Assets['modelForResource']>> | undefined;
+          let renderPose = new THREE.Matrix4();
+          for (const render of cfg.renders) {
+            try { model = await assets.modelForResource(resource.packPath, render.resource); renderPose = render.pose ? poseMatrix(render.pose) : new THREE.Matrix4(); break; }
+            catch { /* A game type can list abstract LOD render IDs before a concrete mesh. */ }
+          }
+          if (!model) continue;
+          const parsed = parseScx(await assets.read(model.path)), template = new THREE.Group();
+          warnings.push(...await this.append(parsed, assets, model.textures, template, generation));
+          if (generation !== this.generation) break;
+          for (const part of template.children) {
+            if (!(part instanceof THREE.Mesh)) continue;
+            const mesh = new THREE.InstancedMesh(part.geometry, part.material, instances.length);
+            mesh.name = `map object ${resource.entry.alias}: ${part.name}`;
+            for (let i = 0; i < instances.length; i++) {
+              mesh.setMatrixAt(i, modelMatrix(poseMatrix(instances[i].pose), renderPose));
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            mesh.computeBoundingSphere();
+            this.model.add(mesh);
+          }
+          for (const instance of instances) for (const body of cfg.bodies) {
+            if (body.collision === false || body.shape[0]?.toLowerCase() !== 'box') continue;
+            const half = body.shape.slice(1, 4).map(Number);
+            if (half.length === 3) collision.addBox(poseMatrix(instance.pose).multiply(poseMatrix(body)), new THREE.Vector3(half[0], half[1], half[2]));
+          }
+          objects += instances.length;
+        } catch (error) { warnings.push(`Object type 0x${typeId.toString(16)}: ${String(error)}`); }
+      }
+    } catch (error) { warnings.push(`Map objects: ${String(error)}`); }
+    return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
   showInternals(value: boolean) {
     this.internalView = value;

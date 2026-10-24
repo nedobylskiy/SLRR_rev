@@ -9,6 +9,7 @@
     "test": "tsx --test tests/*.test.ts",
     "audit": "tsx tools/audit.ts",
     "audit:map-physics": "tsx tools/audit-map-physics.ts",
+    "verify:map-objects": "tsx tools/verify-map-objects.ts",
     "verify:game": "tsx tools/verify-game.ts",
     "verify:saves": "tsx tools/verify-saves.ts",
     "inspect:class": "tsx tools/inspect-class.ts",
