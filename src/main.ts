@@ -27,9 +27,12 @@ for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
 const crashCageLabel = textElement('label', ' Каркас капота'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
+const dropButton = textElement('button', 'Капот на крышу'); dropButton.onclick = () => crashSession?.drop(); crashControls.append(dropButton);
 crashCage.onchange = () => crashSession?.wireframe(crashCage.checked); crashCageLabel.prepend(crashCage); crashControls.append(crashCageLabel);
 const slowLabel = textElement('label', ' Замедление ×4'), slow = document.createElement('input'); slow.type = 'checkbox';
 slow.onchange = () => crashSession?.slowMotion(slow.checked); slowLabel.prepend(slow); crashControls.append(slowLabel);
+const pauseLabel = textElement('label', ' Пауза'), pause = document.createElement('input'); pause.type = 'checkbox';
+pause.onchange = () => crashSession?.pause(pause.checked); pauseLabel.prepend(pause); crashControls.append(pauseLabel);
 const hoodControls = textElement('div', '', 'hood-controls'); hoodControls.hidden = true;
 const hoodHud = textElement('div', '', 'hood-telemetry'); hoodHud.setAttribute('role', 'status'); hoodControls.append(hoodHud);
 el('scene-help').before(hoodControls);
@@ -56,10 +59,10 @@ crashButton.onclick = async () => {
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
-    slow.checked = true; crashSession.slowMotion(true);
+    slow.checked = true; pause.checked = false; crashSession.slowMotion(true);
     crashControls.hidden = false; crashCage.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
-    el('details').textContent = 'Нажми «Заезд 10 км/ч» или «Заезд 50 км/ч», либо веди машину клавишами. Скорость задаётся машине и капоту вместе; повреждение рассчитывается только при контакте с жёлтым препятствием. После разрыва опор капот выходит из слота и остаётся самостоятельной деталью. Можно отъехать назад. Кузов пока жёсткий, подвески и столкновений капота с машиной ещё нет.';
+    el('details').textContent = 'Заезды 10/50 км/ч: деформация, отрыв и отскок машины от препятствия. Отделённый капот сталкивается с исходными треугольниками кузова. «Капот на крышу» — отдельная проверка: свободная деталь падает сверху на машину. Масса и контактный импульс дают отдачу кузову; движение пока ограничено плоскостью, подвески и переворотов ещё нет.';
     el('filename').textContent = 'Baiern · столкновение с препятствием'; el('format').textContent = 'PHYSICS / CAR CRASH'; status('Испытание на машине');
   } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }
 };

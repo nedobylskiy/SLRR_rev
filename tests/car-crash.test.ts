@@ -8,7 +8,8 @@ import { PartHost, PART_CLASS } from '../src/engine/part-host';
 
 function setup() {
   const world = new EngineWorld();
-  const cfg = parsePartConfig(`type 10 sphere 0.3
+  const cfg = parsePartConfig(`body 0 0 0 0 0 0 1000 sphere 1
+type 10 sphere 0.3
 wheel -0.7 -0.6 -1.3 0 0 0 1 0 1 0
 wheel 0.7 -0.6 -1.3 0 0 0 1 0 1 0
 wheel -0.7 -0.6 1.3 0 0 0 0 1 1 1
@@ -60,5 +61,25 @@ test('coupled driving/contact/deformation has the same state at different render
   for (let i = 0; i < 120; i++) a.demo.advance(1 / 60, input);
   for (let i = 0; i < 60; i++) b.demo.advance(1 / 30, input);
   assert.deepEqual(a.demo.panel.positions, b.demo.panel.positions); assert.deepEqual(a.demo.panel.velocities, b.demo.panel.velocities); assert.deepEqual(a.hood.local, b.hood.local); assert.equal(a.demo.impactSpeed, b.demo.impactSpeed); a.world.dispose(); b.world.dispose();
+});
+
+test('wall impulse rebounds the chassis and an off-centre impulse changes angular momentum', () => {
+  const { world, demo } = setup(); demo.reset(20);
+  for (let i = 0; i < 240 && !demo.impactSpeed; i++) demo.advance(1 / 240, input);
+  assert.ok(demo.impactSpeed > 10); assert.ok(demo.driving.speed < -1); assert.ok(demo.reboundSpeed > 1);
+  assert.ok(demo.velocity().length() < demo.impactSpeed);
+  demo.reset(); const point = demo.driving.position.clone().add(new Vector3(0, 0, 1));
+  demo.applyImpulse(new Vector3(1000, 0, 0), point);
+  assert.ok(Math.abs(demo.velocity().x - 1000 / demo.mass) < 1e-10); assert.ok(Math.abs(demo.yawVelocity - 1000 / demo.inertia) < 1e-10);
+  demo.applyImpulse(new Vector3(-1000, 0, 0), point); assert.ok(demo.velocity().length() < 1e-10); assert.ok(Math.abs(demo.yawVelocity) < 1e-10); world.dispose();
+});
+
+test('a detached hood contact gives the finite-mass chassis the opposite horizontal impulse', () => {
+  const { world, hood, demo } = setup();
+  demo.setBodyTriangles([0, -5, -10, 0, 5, -10, 0, 5, 10, 0, -5, -10, 0, 5, 10, 0, -5, 10]);
+  world.detach(hood); demo.panel.mounts.forEach(m => { m.broken = true; });
+  for (let i = 0; i < demo.panel.positions.length; i += 3) { demo.panel.positions[i] += 2; demo.panel.velocities[i] = -5; }
+  for (let i = 0; i < 240 && !demo.bodySurface!.hits; i++) demo.advance(1 / 240, input);
+  assert.ok(demo.bodySurface!.hits > 0); assert.ok(demo.velocity().x < -0.001); assert.ok(demo.panel.positions.every(Number.isFinite)); world.dispose();
 });
 

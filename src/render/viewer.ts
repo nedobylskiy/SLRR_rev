@@ -145,13 +145,25 @@ export class Viewer {
       if (!hood) throw new Error('Installed hood required for crash demo');
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
-      crash = new CarCrashDemo(root, hood, samples.flat(), bounds); panelView = new PanelView(this.proxies.get(hood)!, crash.panel, samples);
+      crash = new CarCrashDemo(root, hood, samples.flat(), bounds);
+      const triangles: number[] = [], inverseRoot = root.matrix().invert();
+      for (const part of root.world.parts.values()) {
+        if (part === hood || !part.definition.model) continue;
+        const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
+        if (type === 11 || type !== undefined && type >= 101 && type < 200) continue;
+        const transform = modelMatrix(inverseRoot.clone().multiply(part.matrix()), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose));
+        for (const mesh of this.proxies.get(part)?.children ?? []) if (mesh instanceof THREE.Mesh) {
+          const positions = mesh.geometry.getAttribute('position'), indices = mesh.geometry.getIndex();
+          if (indices) for (let i = 0; i < indices.count; i++) triangles.push(...new THREE.Vector3().fromBufferAttribute(positions, indices.getX(i)).applyMatrix4(transform).toArray());
+        }
+      }
+      crash.setBodyTriangles(triangles); panelView = new PanelView(this.proxies.get(hood)!, crash.panel, samples);
       const box = crash.obstacle, size = new THREE.Vector3(...box.max).sub(new THREE.Vector3(...box.min));
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); this.model.add(obstacle);
     }
     const demo = crash?.driving ?? new DrivingDemo(root);
-    let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1;
+    let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1, paused = false;
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
       if (!relevant.has(event.code)) return;
@@ -172,14 +184,14 @@ export class Viewer {
     this.frame = now => {
       if (document.hidden) { last = undefined; return; }
       // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
-      const seconds = last === undefined ? 0 : Math.min((now - last) / 1000, 0.1); last = now;
+      const seconds = last === undefined || paused ? 0 : Math.min((now - last) / 1000, 0.1); last = now;
       const input = { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space') };
       if (crash) { crash.advance(seconds * timeScale, input); panelView!.update(); } else demo.advance(seconds, input);
       this.syncWorld(crash?.hood);
       const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta); followed.copy(demo.position);
       if (now - lastHud > 100) {
         const intact = crash?.panel.mounts.filter(m => !m.broken).length;
-        telemetry(`${Math.round(Math.abs(demo.speed) * 3.6)} км/ч${crash ? ` · удар ${Math.round(crash.impactSpeed * 3.6)} км/ч\nКапот: ${crash.hood.parent ? 'на машине' : 'самостоятельная деталь'} · крепления ${intact}/3\n${crash.panel.plasticBeams ? 'Есть остаточная деформация' : 'Без остаточной деформации'} · объектов ${root.world.parts.size}` : ` · ${demo.speed < -0.1 ? 'задний ход' : 'вперёд'}`}`); lastHud = now;
+        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} км/ч${crash ? ` · удар ${Math.round(crash.impactSpeed * 3.6)} км/ч · отскок ${Math.round(crash.reboundSpeed * 3.6)}\nКапот: ${crash.hood.parent ? 'на машине' : 'самостоятельная деталь'} · крепления ${intact}/3\nКонтакты с кузовом: ${crash.bodySurface?.hits ? 'есть' : 'ещё нет'} · объектов ${root.world.parts.size}` : ` · ${demo.speed < -0.1 ? 'задний ход' : 'вперёд'}`}`); lastHud = now;
       }
     };
     const stop = () => {
@@ -194,7 +206,7 @@ export class Viewer {
       this.ground.visible = false; this.grid.visible = true; this.driveGrid.visible = false; this.syncWorld(); this.fit();
     };
     this.stopDriving = stop; focus();
-    return Object.assign(stop, { launch: (speed: number) => { crash?.reset(speed); keys.clear(); last = undefined; focus(); }, wireframe: (value: boolean) => panelView?.wireframe(value), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; } });
+    return Object.assign(stop, { launch: (speed: number) => { crash?.reset(speed); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); keys.clear(); last = undefined; focus(); }, wireframe: (value: boolean) => panelView?.wireframe(value), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];

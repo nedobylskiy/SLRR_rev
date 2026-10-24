@@ -4,7 +4,10 @@ interface Beam { a: number; b: number; initial: number; rest: number; lambda: nu
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
 export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number }
-export interface PanelCollider { min: [number, number, number]; max: [number, number, number] }
+export type Triple = [number, number, number];
+export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
+export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; impulse?: (impulse: Triple, point: Triple) => void }
+export interface PanelSurface { project(p: Float64Array, previous: Float64Array, offset: number): PanelContact | undefined }
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Generated two-layer cage; XPBD distance/anchor constraints, plastic rest lengths and force-driven mount failure. */
@@ -19,6 +22,8 @@ export class DeformablePanel {
   private template: Float64Array;
   private anchorVelocities: Float64Array;
   readonly colliders: PanelCollider[] = [];
+  readonly surfaces: PanelSurface[] = [];
+  contacts = 0;
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
     if (samples.length < 9 || samples.length % 3 || !Number.isFinite(options.mass) || options.mass <= 0 || !options.mount.every(Number.isFinite)) throw new Error('Invalid panel data');
@@ -83,6 +88,7 @@ export class DeformablePanel {
     this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(240, 32);
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
+    this.contacts = 0;
   }
   bind(point: ArrayLike<number>): PanelBinding {
     if (point.length !== 3 || !Array.from(point).every(Number.isFinite)) throw new Error('Invalid skin point');
@@ -113,6 +119,9 @@ export class DeformablePanel {
       for (let axis = 0; axis < 3; axis++) { const target = attached ? this.anchorVelocities[i + axis] : 0; p[i + axis] += (target + (this.velocities[i + axis] - target) * damping) * dt; }
     }
     this.anchorVelocities.fill(0);
+    const incoming = new Float64Array(p.length), contacts = new Map<number, PanelContact>();
+    for (let i = 0; i < p.length; i++) incoming[i] = (p[i] - this.previous[i]) / dt;
+    const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
     for (const b of this.beams) b.lambda = 0;
     for (let iteration = 0; iteration < 12; iteration++) {
       for (const b of this.beams) {
@@ -126,18 +135,33 @@ export class DeformablePanel {
         this.anchorLambda[i] += dl; p[i] += inv * dl;
       }
       for (let i = 1; i < p.length; i += 3) p[i] = Math.max(0.015, p[i]);
-      for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) this.contactBox(i, box);
+      for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
+      surfaces();
     }
     for (const m of this.mounts) if (!m.broken) {
       m.force = m.nodes.reduce((sum, n) => sum + Math.hypot(this.anchorLambda[n * 3], this.anchorLambda[n * 3 + 1], this.anchorLambda[n * 3 + 2]) / dt2, 0);
       m.overload = m.force > this.mountStrength ? m.overload + dt : 0;
       if (m.overload >= 2 * dt) m.broken = true;
     }
+    if (attached && !this.attached) surfaces(); // Sweep the release step too, before its history is discarded.
     for (const b of this.beams) {
       const a = b.a * 3, c = b.b * 3, length = Math.hypot(p[a] - p[c], p[a + 1] - p[c + 1], p[a + 2] - p[c + 2]), strain = (length - b.rest) / b.initial;
       if (Math.abs(strain) > this.yieldStrain) b.rest = clamp(b.rest + Math.sign(strain) * (Math.abs(strain) - this.yieldStrain) * b.initial * Math.min(1, 120 * dt), b.initial * 0.5, b.initial * 1.5);
     }
     for (let i = 0; i < p.length; i++) { this.velocities[i] = (p[i] - this.previous[i]) / dt; if (!Number.isFinite(p[i])) throw new Error('Non-finite panel state'); }
+    this.contacts = contacts.size;
+    for (const [i, contact] of contacts) {
+      const n = contact.normal, surface = contact.velocity ?? [0, 0, 0];
+      const before = n.reduce((sum, v, axis) => sum + v * (incoming[i + axis] - surface[axis]), 0);
+      const after = n.reduce((sum, v, axis) => sum + v * (this.velocities[i + axis] - surface[axis]), 0);
+      const target = before < -0.5 ? -before * (contact.restitution ?? 0) : 0;
+      const correction = Math.max(0, target - after), normalChange = Math.max(0, after + correction - before);
+      const tangent = n.map((v, axis) => this.velocities[i + axis] - surface[axis] - v * after);
+      const length = Math.hypot(...tangent), friction = Math.min(1, (contact.friction ?? 0.4) * normalChange / Math.max(length, 1e-10));
+      const impulse: Triple = [0, 0, 0];
+      for (let axis = 0; axis < 3; axis++) { this.velocities[i + axis] += n[axis] * correction - tangent[axis] * friction; impulse[axis] = (n[axis] * normalChange - tangent[axis] * friction) / inv; }
+      contact.impulse?.(impulse, contact.point);
+    }
     for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= 0.015001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
   }
   private contactBox(i: number, box: PanelCollider) {
@@ -151,11 +175,13 @@ export class DeformablePanel {
       if (near >= enter) { enter = near; normal = axis; boundary = delta > 0 ? box.min[axis] : box.max[axis]; }
       exit = Math.min(exit, far); if (enter > exit) return;
     }
-    if (normal >= 0 && enter >= 0 && enter <= 1 && exit >= 0) { p[i + normal] = boundary; return; }
+    const result = (axis: number, face: number): PanelContact => { const n: Triple = [0, 0, 0]; n[axis] = face === box.min[axis] ? -1 : 1; return { normal: n, point: [p[i], p[i + 1], p[i + 2]], restitution: box.restitution, friction: box.friction }; };
+    if (normal >= 0 && enter >= 0 && enter <= 1 && exit >= 0) { p[i + normal] = boundary; return result(normal, boundary); }
     if ([0, 1, 2].every(a => p[i + a] >= box.min[a] && p[i + a] <= box.max[a])) {
       let distance = Infinity, axis = 0, face = 0;
       for (let a = 0; a < 3; a++) for (const value of [box.min[a], box.max[a]]) { const d = Math.abs(p[i + a] - value); if (d < distance) { distance = d; axis = a; face = value; } }
       p[i + axis] = face;
+      return result(axis, face);
     }
   }
 }
