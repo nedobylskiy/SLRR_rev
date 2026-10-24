@@ -54,17 +54,25 @@ export class RigidBody3D {
 
 /** OBB / static AABB SAT including all cross axes; returns the minimum translation and contact patch centre. */
 export function boxContact(body: RigidBody3D, obstacle: Box3) {
-  const vertices = body.corners(), center = obstacle.getCenter(new Vector3()), size = obstacle.getSize(new Vector3()).multiplyScalar(0.5);
+  return orientedBoxContact(body, new Matrix4().setPosition(obstacle.getCenter(new Vector3())), obstacle.getSize(new Vector3()).multiplyScalar(0.5));
+}
+
+/** Full chassis OBB against a CFG body, including narrow obstacles between chassis corners. */
+export function orientedBoxContact(body: RigidBody3D, matrix: Matrix4, half: Vector3) {
+  const vertices = body.corners(), center = new Vector3().setFromMatrixPosition(matrix);
+  const rotation = new Quaternion(); matrix.decompose(new Vector3(), rotation, new Vector3());
   const local = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)].map(v => v.applyQuaternion(body.orientation));
-  const world = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)], axes = [...world, ...local];
+  const world = [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 1)].map(v => v.applyQuaternion(rotation)), axes = [...world, ...local];
   for (const a of local) for (const b of world) { const c = new Vector3().crossVectors(a, b); if (c.lengthSq() > 1e-10) axes.push(c.normalize()); }
   let depth = Infinity, normal = new Vector3();
   for (const axis of axes) {
-    const projections = vertices.map(p => p.dot(axis)), min = Math.min(...projections), max = Math.max(...projections), c = center.dot(axis), extent = Math.abs(axis.x) * size.x + Math.abs(axis.y) * size.y + Math.abs(axis.z) * size.z;
+    const projections = vertices.map(p => p.dot(axis)), min = Math.min(...projections), max = Math.max(...projections), c = center.dot(axis), extent = world.reduce((sum, direction, index) => sum + Math.abs(axis.dot(direction)) * half.getComponent(index), 0);
     if (max < c - extent || min > c + extent) return;
     const positive = c + extent - min, negative = max - (c - extent), d = Math.min(positive, negative);
     if (d < depth) { depth = d; normal.copy(axis).multiplyScalar(positive < negative ? 1 : -1); }
   }
-  const minimum = Math.min(...vertices.map(p => p.dot(normal))), support = vertices.filter(p => p.dot(normal) < minimum + 1e-5), point = support.reduce((a, b) => a.add(b), new Vector3()).multiplyScalar(1 / support.length).clamp(obstacle.min, obstacle.max);
+  const minimum = Math.min(...vertices.map(p => p.dot(normal))), support = vertices.filter(p => p.dot(normal) < minimum + 1e-5);
+  const inverse = matrix.clone().invert(), point = support.reduce((a, b) => a.add(b), new Vector3()).multiplyScalar(1 / support.length);
+  point.applyMatrix4(inverse).clamp(half.clone().negate(), half).applyMatrix4(matrix);
   return { normal, depth, point };
 }

@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { Matrix4, Vector3 } from 'three';
+import { Box3, Matrix4, Vector3 } from 'three';
 import { MapCollision } from '../src/engine/map-collision';
 import { MapTerrain } from '../src/engine/map-terrain';
+import { RigidBody3D } from '../src/engine/rigid-body-3d';
 import type { ScxModel } from '../src/formats/scx';
 
 test('static map wall pushes from either side and ignores distant points', () => {
@@ -44,4 +45,18 @@ test('wheels can stand on the top of an original rotated CFG box without a visua
   const inclined = slope.support(0, 0, 4);
   assert.ok(inclined && Math.abs(inclined.height - (2 + 0.2 / Math.cos(Math.PI / 6))) < 1e-6);
   assert.ok(Math.abs(inclined.normal.y - Math.cos(Math.PI / 6)) < 1e-6);
+});
+
+test('a narrow original tree body hits the chassis between its corner probes', () => {
+  const collision = new MapCollision();
+  collision.addBox(new Matrix4().setPosition(0, 3, 0), new Vector3(0.0501, 3, 0.0501));
+  const body = new RigidBody3D(1200, new Box3(new Vector3(-1, -0.5, -2), new Vector3(1, 0.5, 2)));
+  body.setFrame(new Matrix4().setPosition(0, 1, -2.03));
+  assert.ok(body.corners().every(point => !collision.contact(point)), 'corner-only contacts miss this trunk');
+  const hit = collision.bodyContact(body);
+  assert.ok(hit);
+  assert.ok(hit.normal.z < -0.99);
+  assert.ok(hit.depth > 0 && hit.depth < 0.1);
+  body.setFrame(new Matrix4().setPosition(4, 1, -2.03));
+  assert.equal(collision.bodyContact(body), undefined);
 });

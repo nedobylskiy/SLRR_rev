@@ -1,5 +1,6 @@
 import { Box3, Matrix4, Triangle, Vector3 } from 'three';
 import type { ScxModel } from '../formats/scx';
+import { orientedBoxContact, type RigidBody3D } from './rigid-body-3d';
 
 interface Wall { triangle: Triangle; normal: Vector3; minY: number; maxY: number }
 interface StaticBox { matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: Box3 }
@@ -78,9 +79,25 @@ export class MapCollision {
     }
     return best;
   }
-  contact(point: Vector3, radius = 0.2): { point: Vector3; normal: Vector3; depth: number } | undefined {
+  /** CFG bodies are tested against the complete chassis, so thin tree trunks cannot slip between corner probes. */
+  bodyContact(body: RigidBody3D): { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined {
+    const bounds = new Box3().setFromPoints(body.corners()), candidates = new Set<StaticBox>();
+    const x0 = Math.floor(bounds.min.x / this.size), x1 = Math.floor(bounds.max.x / this.size);
+    const z0 = Math.floor(bounds.min.z / this.size), z1 = Math.floor(bounds.max.z / this.size);
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      for (const box of this.boxCells.get(`${x},${z}`) ?? []) candidates.add(box);
+    }
+    let nearest: { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined;
+    for (const box of candidates) {
+      if (!bounds.intersectsBox(box.bounds)) continue;
+      const hit = orientedBoxContact(body, box.matrix, box.half);
+      if (hit && (!nearest || hit.depth > nearest.depth)) nearest = { ...hit, bounds: box.bounds };
+    }
+    return nearest;
+  }
+  contact(point: Vector3, radius = 0.2, includeBoxes = true): { point: Vector3; normal: Vector3; depth: number } | undefined {
     const list = this.cells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`);
-    const boxes = this.boxCells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`);
+    const boxes = includeBoxes ? this.boxCells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`) : undefined;
     if (!list && !boxes) return;
     let nearest: { point: Vector3; normal: Vector3; depth: number } | undefined;
     const closest = new Vector3();

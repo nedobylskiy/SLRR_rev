@@ -283,8 +283,16 @@ export class Vehicle3D extends CarCrashDemo {
             const j = this.body.contact(p, this.terrain.normal(p.x, p.z, p.y), height - p.y, 0.12);
             if (j.length() > 40) this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.08).toArray() as Triple, p.toArray() as Triple);
           }
-          const wall = this.mapCollision?.contact(p);
+          const wall = this.mapCollision?.contact(p, 0.2, false);
           if (wall) this.body.contact(wall.point, wall.normal, wall.depth, 0.18);
+        }
+        const mapBody = this.mapCollision?.bodyContact(this.body);
+        if (mapBody) {
+          const speed = Math.max(0, -this.body.pointVelocity(mapBody.point).dot(mapBody.normal));
+          const j = this.body.contact(mapBody.point, mapBody.normal, mapBody.depth, 0.22);
+          this.impactSpeed = Math.max(this.impactSpeed, speed);
+          this.reboundSpeed = Math.max(this.reboundSpeed, this.body.velocity.length());
+          this.damageImpact(j, mapBody.point, mapBody.bounds, predicted, previous);
         }
         const c = boxContact(this.body, obstacle);
         if (c) {
