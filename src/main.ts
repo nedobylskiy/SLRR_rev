@@ -27,6 +27,8 @@ for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
 const crashCageLabel = textElement('label', ' Каркасы деталей'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
+const internalsLabel = textElement('label', ' Внутренние узлы'), internals = document.createElement('input'); internals.type = 'checkbox';
+internals.onchange = () => viewer?.showInternals(internals.checked); internalsLabel.prepend(internals); crashControls.append(internalsLabel);
 const dropButton = textElement('button', 'Капот на крышу'); dropButton.onclick = () => crashSession?.drop(); crashControls.append(dropButton);
 const jumpButton = textElement('button', 'Трамплин'), rollButton = textElement('button', 'Боковой удар');
 const rearButton = textElement('button', 'Удар задом'); rearButton.onclick = () => crashSession?.rear(); crashControls.append(rearButton);
@@ -65,9 +67,9 @@ crashButton.onclick = async () => {
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
     el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
-    crashControls.hidden = false; crashCage.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
+    crashControls.hidden = false; crashCage.checked = false; internals.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
-    el('details').textContent = 'Шасси движется и вращается в 3D. Четыре опоры подвески используют точки, радиусы и spring из CFG; жёсткость/демпфирование настроены для прототипа. Заезды — удар о препятствие; «Трамплин» — прыжок; «Боковой удар» — внешний импульс, способный перевернуть машину. Металлические панели гнутся и отрываются, фары и стёкла отделяются жёсткими. Деформация кузова смещает крепления и опоры колёс. Перекос оси включается ниже 10% состояния опоры. Отдельные рычаги, стойки и двигатель ещё не установлены. R восстанавливает сборку; пауза позволяет осмотреть повреждения.';
+    el('details').textContent = 'Оригинальные стойки, пружины, амортизаторы, тормоза и двигатель установлены по Java addStockParts и CFG креплениям. Их состояние меняет опору колёс, демпфирование, торможение и тягу; перекос колеса начинается ниже 10% состояния стойки. Численная модель сил и переключения передач пока приближённая. «Внутренние узлы» скрывает кузов для осмотра деталей. R восстанавливает сборку.';
     el('filename').textContent = 'Baiern · подвеска и повреждения'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('Испытание в 3D');
   } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }
 };
@@ -110,13 +112,13 @@ async function openWorld(pack: string, id: number) {
   el('filename').textContent = `${pack} : 0x${id.toString(16)} · сборка CFG`; el('format').textContent = 'ENGINE / WORLD'; status('Сборка…');
   el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
   try {
-    const built = await new PartFactory(assets).stock({ pack, id });
+    const built = await new PartFactory(assets).stock({ pack, id }, { mechanical: id === 6 && /cars\/racers\/baiern\.rpk$/i.test(pack) });
     if (request !== sequence) { built.world.dispose(); return; }
     engineWorld = built.world;
     const warnings = viewer ? await viewer.showWorld(built.world, assets) : ['WebGL недоступен'];
     if (request !== sequence) return;
     engineRoot = built.root;
-    el('details').textContent = `${built.world.parts.size} объектов · ${built.root.definition.cfgPath}\nСборка по stockpart/slot/attach, включая вложенные детали. Java-конструкторы и физика ещё не запускаются.\n${[...built.warnings, ...warnings].join('\n')}`;
+    el('details').textContent = `${built.world.parts.size} объектов · ${built.root.definition.cfgPath}\n${built.world.mechanical ? 'Штатные узлы подвески и двигателя выбраны из оригинальных Java addStockParts и установлены по RPK/CFG. Физика и двигатель приближённые.' : 'Сборка по stockpart/slot/attach, включая вложенные детали.'}\n${[...built.warnings, ...warnings].join('\n')}`;
     status('Мир собран');
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Ошибка сборки', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }

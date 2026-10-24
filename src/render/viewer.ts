@@ -22,6 +22,7 @@ export class Viewer {
   private controls: OrbitControls;
   private model = new THREE.Group();
   private proxies = new Map<EnginePart, THREE.Group>();
+  private internalView = false;
   private collisionMeshes = new Map<EnginePart, number[]>();
   private grid = new THREE.GridHelper(12, 24, 0x46515a, 0x222c34);
   private driveGrid = new THREE.GridHelper(2000, 1000, 0x798893, 0x45535b);
@@ -53,6 +54,7 @@ export class Viewer {
   }
   clear() {
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear();
+    this.internalView = false;
     this.generation++;
     this.model.traverse(obj => {
       if (!(obj instanceof THREE.Mesh)) return;
@@ -93,6 +95,13 @@ export class Viewer {
     }
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  showInternals(value: boolean) {
+    this.internalView = value;
+    for (const [part, group] of this.proxies) {
+      const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
+      group.visible = !value || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200;
+    }
   }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
@@ -165,8 +174,10 @@ export class Viewer {
         }
         const physical = this.collisionMeshes.get(part) ?? [], collision = physical.length ? physical : ownTriangles;
         (crash as Vehicle3D).register(part, localPositions(part).flat(), collision);
-        const physicalFrame = inverseRoot.clone().multiply(part.matrix());
-        for (let i = 0; i < collision.length; i += 3) triangles.push(...new THREE.Vector3().fromArray(collision, i).applyMatrix4(physicalFrame).toArray());
+        if (!part.definition.mechanics) {
+          const physicalFrame = inverseRoot.clone().multiply(part.matrix());
+          for (let i = 0; i < collision.length; i += 3) triangles.push(...new THREE.Vector3().fromArray(collision, i).applyMatrix4(physicalFrame).toArray());
+        }
       }
       crash.setBodyTriangles(triangles);
       for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part)); panelViews.push(view); panelParts.set(view, s.part); }
@@ -181,7 +192,7 @@ export class Viewer {
     let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1, paused = false;
     let frameMs = 1000 / 60, backlogTicks = 0;
     const reportTelemetry = telemetry;
-    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nКузов ${Math.round(root.condition * 100)}% · опоры ${crash.suspension.wheels.map(w => Math.round(w.mountCondition * 100)).join('/')}%\n${Math.round(1000 / frameMs)} кадр/с · деформация активна: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${backlogTicks ? ` · отставание ${Math.round(backlogTicks / 240 * 1000)} мс` : ''}` : ''));
+    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nКузов ${Math.round(root.condition * 100)}% · опоры ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash instanceof Vehicle3D ? crash.suspension.mechanics?.support(i) ?? 1 : 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nДвигатель ${Math.round(crash.suspension.mechanics.power * 100)}% · ${Math.round(crash.suspension.mechanics.rpm)} об/мин · передача ${crash.suspension.mechanics.gear}` : ''}\n${Math.round(1000 / frameMs)} кадр/с · деформация активна: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${backlogTicks ? ` · отставание ${Math.round(backlogTicks / 240 * 1000)} мс` : ''}` : ''));
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
       if (!relevant.has(event.code)) return;

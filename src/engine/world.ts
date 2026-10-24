@@ -4,12 +4,15 @@ import { entryProperties } from '../formats/rpk';
 import { parsePartConfig, type CfgSlot, type PartConfig } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { slotMatrix } from './slot-frames';
+import { poseMatrix } from './transforms';
+import { OriginalStock, type MechanicalProfile } from './original-stock';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
 export interface PartDefinition {
   key: ResourceKey; alias: string; script?: string; cfgPath: string; config: PartConfig;
   model?: { path: string; textures: string[] };
+  mechanics?: MechanicalProfile;
 }
 export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${key.id}`;
 
@@ -17,6 +20,8 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 export class EnginePart {
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
+  readonly nativeFrames = new Map<number, Matrix4>();
+  slotFrame(slot: CfgSlot) { const native = this.nativeFrames.get(slot.type ?? 0); return native ? native.clone().multiply(poseMatrix(slot)) : slotMatrix(this.definition.config, slot); }
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
@@ -32,6 +37,7 @@ export class EngineWorld {
   readonly clock = new FixedClock();
   private nextId = 1;
   disposed = false;
+  mechanical = false;
   create(definition: PartDefinition) {
     if (this.disposed) throw new Error('World disposed');
     if (this.parts.size >= 10000) throw new Error('World part limit');
@@ -43,7 +49,7 @@ export class EngineWorld {
     if (child.parent || parent.children.has(parentSlot) || parent.ownSlot === parentSlot || child.children.has(ownSlot)) throw new Error('Occupied attachment');
     const a = parent.definition.config.slots.find(s => s.id === parentSlot), b = child.definition.config.slots.find(s => s.id === ownSlot);
     if (!a || !b) throw new Error('Missing attachment slot');
-    child.local.copy(slotMatrix(parent.definition.config, a)).multiply(slotMatrix(child.definition.config, b).invert());
+    child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
   }
   detach(child: EnginePart) {
@@ -71,7 +77,9 @@ export class PartFactory {
         const match = /^(?:car|part)\s+(.+\.cfg)$/i.exec(native ?? '');
         if (!match) throw new Error(`No native car/part CFG: ${cacheKey}`);
         const cfgPath = normalizePath(match[1]);
-        const config = parsePartConfig(new TextDecoder('windows-1252').decode(await this.assets.read(cfgPath)));
+        let config: PartConfig;
+        try { config = parsePartConfig(new TextDecoder('windows-1252').decode(await this.assets.read(cfgPath))); }
+        catch (error) { throw new Error(`${cfgPath}: ${String(error)}`); }
         const renderId = config.render ?? config.mesh;
         const model = renderId === undefined ? undefined : await this.assets.modelForResource(canonical.pack, renderId);
         return { key: canonical, alias: resolved.entry.alias, script: props.find(p => p.key === 'script')?.value, cfgPath, config, model };
@@ -129,10 +137,12 @@ export class PartFactory {
     }
   }
   /** Read ordered stockpart declarations; unresolved compatibility is reported, never guessed. */
-  async stock(key: ResourceKey) {
+  async stock(key: ResourceKey, options: { mechanical?: boolean } = {}) {
     const world = new EngineWorld(), warnings: string[] = [];
     try {
       const root = world.create(await this.definition(key));
+      const source = new OriginalStock(this.assets), env = options.mechanical ? await source.environment(root.definition) : {};
+      world.mechanical = !!options.mechanical;
       const pending: PartDefinition[] = [];
       const enqueue = async (parent: PartDefinition) => {
         for (const id of parent.config.stock) {
@@ -141,6 +151,18 @@ export class PartFactory {
         }
       };
       await enqueue(root.definition);
+      if (options.mechanical) {
+        for (const ref of await source.entries(root.definition, env, true)) {
+          const definition = await this.definition(ref), mechanics = await source.profile(definition); pending.push({ ...definition, mechanics });
+        }
+        const struts = pending.filter(d => d.mechanics?.kind === 'suspension');
+        struts.forEach((d, index) => {
+          const wheel = root.definition.config.wheels[index]; if (!wheel) throw new Error('Source stock suspension count exceeds CFG wheels');
+          const frame = poseMatrix(wheel), profile = d.mechanics!;
+          if (profile.hub) root.nativeFrames.set(201 + index, frame.clone().multiply(new Matrix4().makeTranslation(...profile.hub.slice(1, 4) as [number, number, number])));
+          if (profile.arm) root.nativeFrames.set(301 + index, frame.clone().multiply(new Matrix4().makeTranslation(...profile.arm.slice(1, 4) as [number, number, number])));
+        });
+      }
       while (pending.length) {
         let progress = false;
         for (let i = 0; i < pending.length;) {
@@ -148,6 +170,10 @@ export class PartFactory {
           if (!mount) { i++; continue; }
           const child = world.create(definition); world.install(mount.parent, mount.parentSlot, child, mount.ownSlot);
           pending.splice(i, 1); await enqueue(definition); progress = true;
+          if (options.mechanical && definition.mechanics) for (const ref of await source.entries(definition, env)) {
+            if (pending.length + world.parts.size >= 1000) throw new Error('Original stock expansion limit');
+            const d = await this.definition(ref); pending.push({ ...d, mechanics: await source.profile(d) });
+          }
         }
         if (!progress) break;
       }

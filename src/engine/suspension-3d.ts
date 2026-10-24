@@ -3,6 +3,7 @@ import type { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 import { RigidBody3D } from './rigid-body-3d';
 import type { DrivingInput } from './driving-demo';
+import { MechanicalSystem } from './mechanical-system';
 
 export interface Terrain { height(x: number, z: number): number; normal(x: number, z: number): Vector3 }
 export class TestTerrain implements Terrain {
@@ -12,11 +13,13 @@ export class TestTerrain implements Terrain {
 }
 export class Suspension3D {
   private springMass: number;
+  readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
   readonly wheels: { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; rest: number; bump: number; droop: number; length: number; contact: boolean; force: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number }[];
   steer = 0;
   constructor(readonly root: EnginePart, readonly body: RigidBody3D, readonly terrain: Terrain) {
     this.springMass = body.mass;
+    if (root.world.mechanical) this.mechanics = new MechanicalSystem(root);
     const cfg = root.definition.config;
     this.wheels = cfg.slots.filter(s => s.type !== undefined && s.type >= 101 && s.type < 200).map(slot => {
       const wheel = cfg.wheels[slot.type! - 101], part = root.children.get(slot.id);
@@ -42,37 +45,53 @@ export class Suspension3D {
   step(dt: number, input: DrivingInput) {
     const target = Math.max(-1, Math.min(1, input.steer)) * (this.root.definition.config.maxSteer ?? 0.6); this.steer += Math.max(-2 * dt, Math.min(2 * dt, target - this.steer));
     const frame = this.body.matrix(), count = this.wheels.length;
-    for (const w of this.wheels) {
-      const down = new Vector3(0, -1, 0).transformDirection(w.damage).applyQuaternion(this.body.orientation);
-      const hard = w.hardpoint.clone().applyMatrix4(frame), sag = Math.min(w.bump * 0.4, 0.04), k = this.springMass * 9.81 / count / sag, damping = 2 * 0.75 * Math.sqrt(k * this.springMass / count);
+    for (const [index, w] of this.wheels.entries()) {
+      const support = this.mechanics?.support(index) ?? 1;
+      const failure = Math.max(0, 1 - Math.min(w.mountCondition, support) / 0.1);
+      const side = index % 2 ? -1 : 1, alignment = w.damage.clone().multiply(new Matrix4().makeRotationZ(side * failure * 0.4));
+      const down = new Vector3(0, -1, 0).transformDirection(alignment).applyQuaternion(this.body.orientation);
+      const hard = w.hardpoint.clone().applyMatrix4(frame), sag = Math.min(w.bump * 0.4, 0.04);
+      const k = this.mechanics ? this.mechanics.spring(index) : this.springMass * 9.81 / count / sag;
+      const damping = this.mechanics ? this.mechanics.damper(index) : 2 * 0.75 * Math.sqrt(k * this.springMass / count);
       let length = w.rest + w.droop;
       if (down.y < -0.05) {
         let ray = (hard.y - this.terrain.height(hard.x, hard.z) - w.radius) / -down.y;
         for (let i = 0; i < 2; i++) { const p = hard.clone().addScaledVector(down, ray); ray = (hard.y - this.terrain.height(p.x, p.z) - w.radius) / -down.y; }
         length = ray;
       }
-      w.contact = w.part.parent === this.root && w.part.condition > 0 && w.mountCondition > 0 && length < w.rest + w.droop && down.y < -0.05; w.length = Math.max(w.rest - w.bump, Math.min(w.rest + w.droop, length)); w.force = 0;
+      w.contact = w.part.parent === this.root && w.part.condition > 0 && w.mountCondition > 0 && support > 0 && length < w.rest + w.droop && down.y < -0.05; w.length = Math.max(w.rest - w.bump, Math.min(w.rest + w.droop, length)); w.force = 0;
       if (w.contact) {
         const patch = hard.clone().addScaledVector(down, length).add(new Vector3(0, -w.radius, 0)), normal = this.terrain.normal(patch.x, patch.z), speed = this.body.pointVelocity(hard).dot(normal);
         w.force = Math.max(0, Math.min(this.body.mass * 9.81 * 3, (w.rest - length) * k - damping * speed + Math.max(0, w.rest - w.bump - length) * k * 8));
         this.body.addForce(normal.clone().multiplyScalar(w.force), hard);
-        const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), this.steer * w.steering).transformDirection(w.damage).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();
+        const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), this.steer * w.steering).transformDirection(alignment).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();
         const side = new Vector3().crossVectors(forward, normal).normalize(), velocity = this.body.pointVelocity(patch), longitudinal = velocity.dot(forward);
-        const drive = Math.max(-1, Math.min(1, input.throttle)) * this.body.mass * 5 / count;
-        const braking = input.brake ? -longitudinal * this.body.mass / count / dt : -longitudinal * this.body.mass * 0.08 / count;
+        const drive = this.mechanics ? this.mechanics.driveForce(index, longitudinal, w.radius, Math.max(-1, Math.min(1, input.throttle))) : Math.max(-1, Math.min(1, input.throttle)) * this.body.mass * 5 / count;
+        const braking = input.brake ? -longitudinal * this.body.mass / count / dt * (this.mechanics?.brake(index) ?? 1) : -longitudinal * this.body.mass * 0.08 / count;
         const lateral = -velocity.dot(side) * this.body.mass / count / (dt * 6), force = forward.multiplyScalar(drive + braking).addScaledVector(side, lateral), limit = w.force * 1.05 * Math.max(0.25, Math.pow(Math.abs(down.dot(normal)), 2));
         if (force.length() > limit) force.setLength(limit); this.body.addForce(force, patch); w.spin += longitudinal * dt / w.radius;
       }
     }
+    if (this.mechanics) for (const first of [0, 2]) {
+      const left = this.wheels[first], right = this.wheels[first + 1], tuning = this.mechanics.sway(first);
+      if (!tuning.force || !left.contact || !right.contact) continue;
+      const a = left.hardpoint.clone().applyMatrix4(frame), b = right.hardpoint.clone().applyMatrix4(frame);
+      const vy = this.body.pointVelocity(a).y - this.body.pointVelocity(b).y;
+      const force = Math.max(-this.body.mass * 9.81 * 0.5, Math.min(this.body.mass * 9.81 * 0.5, (right.length - left.length) * tuning.force - vy * tuning.damping));
+      this.body.addForce(new Vector3(0, force, 0), a);
+      this.body.addForce(new Vector3(0, -force, 0), b);
+    }
   }
   sync() {
-    for (const w of this.wheels) {
+    for (const [index, w] of this.wheels.entries()) {
       if (w.part.parent !== this.root) continue;
       const sign = new Vector3(1, 0, 0).transformDirection(w.frame).x < 0 ? -1 : 1;
-      const down = new Vector3(0, -1, 0).transformDirection(w.damage), rotation = new Quaternion().setFromRotationMatrix(w.damage);
+      const support = this.mechanics?.support(index) ?? 1, failure = Math.max(0, 1 - Math.min(w.mountCondition, support) / 0.1);
+      const damaged = w.damage.clone().multiply(new Matrix4().makeRotationZ((index % 2 ? -1 : 1) * failure * 0.4));
+      const down = new Vector3(0, -1, 0).transformDirection(damaged), rotation = new Quaternion().setFromRotationMatrix(damaged);
       const offset = new Vector3().setFromMatrixPosition(w.frame).sub(w.center).applyQuaternion(rotation);
       const position = w.hardpoint.clone().addScaledVector(down, w.length).add(offset);
-      w.part.local.copy(w.damage).multiply(w.frame).setPosition(position).multiply(new Matrix4().makeRotationY(this.steer * w.steering)).multiply(new Matrix4().makeRotationX(-w.spin * sign)).multiply(w.inverseOwn);
+      w.part.local.copy(damaged).multiply(w.frame).setPosition(position).multiply(new Matrix4().makeRotationY(this.steer * w.steering)).multiply(new Matrix4().makeRotationX(-w.spin * sign)).multiply(w.inverseOwn);
     }
     if (this.steering) this.steering.part.local.copy(this.steering.frame).multiply(new Matrix4().makeRotationZ(-this.steer * 14)).multiply(this.steering.inverseOwn);
   }

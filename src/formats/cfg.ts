@@ -41,7 +41,7 @@ export function parsePartConfig(source: string): PartConfig {
         if (!slot) throw new Error(`CFG line ${line}: slottype before slot`);
         slot.type = integer(0); break;
       case 'stockpart': result.stock.push(rid()); break;
-      case 'render': if (render === undefined) { render = rid(); renderPose = args.length > 1 ? pose(1) : undefined; } break;
+      case 'render': if (render === undefined) { render = rid(); renderPose = args.length === 4 ? { position: [number(1), number(2), number(3)], rotation: [0, 0, 0] } : args.length > 1 ? pose(1) : undefined; } break;
       case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;
       case 'mesh': result.mesh = rid(); break;
       case 'texture': result.texture = rid(); break;
