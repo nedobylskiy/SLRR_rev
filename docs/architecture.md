@@ -13,6 +13,7 @@
 | `src/formats/sdat.ts` | SDAT envelope, embedded blobs, заголовок Vehicle |
 | `src/formats/cfg.ts` | Поднабор CFG, слоты, stockpart, body/wheel, неизвестные команды |
 | `src/engine/world.ts` | Фабрика ресурсов, экземпляры мира, дерево слотов, матрицы, lifecycle |
+| `src/engine/part-host.ts` | Четыре Part native для обхода настоящего CFG-мира через script handles |
 | `src/assets.ts` | VFS, нормализация путей, pack-local resource graph |
 | `src/render/viewer.ts` | GPU-геометрия, камера, текстуры, освобождение объектов |
 | `src/runtime/tree-machine.ts` | Проверенный минимальный leaf-поднабор TREE |

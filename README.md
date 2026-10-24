@@ -38,6 +38,7 @@ npm run verify:saves
 npm run verify:vm
 npm run verify:parts
 npm run verify:world
+npm run verify:gameplay
 npm run audit
 ```
 

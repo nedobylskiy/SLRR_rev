@@ -14,6 +14,7 @@
 | Original VM leaf | Object.equals(self/other/null) выполняется из исходного class |
 | Original Java Part methods | 7 исходных классов; 10 тестовых деталей; 1000 memory round trips, rollback и cleanup |
 | CFG world | Baiern: 28 объектов из штатных конфигов; 5 stockpart остаются с диагностикой |
+| Part native ↔ CFG world | 4 descriptor-aware вызова; обход 28 объектов и проверка обратных связей |
 | Unit tests | Бинарные границы, граф машины, codec, повторные snapshots, clock, native overloads |
 | Build | TypeScript strict + production Vite build |
 
@@ -30,6 +31,7 @@ npm run verify:saves
 npm run verify:vm
 npm run verify:parts
 npm run verify:world
+npm run verify:gameplay
 npm run audit
 ```
 
