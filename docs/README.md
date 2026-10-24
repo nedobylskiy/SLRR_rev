@@ -28,6 +28,7 @@
 | [DLL и бинарники](legacy-extensions.md) | runDLL/runMethod, промежуточный EXE, ошибки моста |
 | [Дорожная карта](roadmap.md) | Этапы с критериями приёмки |
 | [Источники](sources.md) | Прямые ссылки, версии, достоверность |
+| [Рабочий архив Elias](elias-workspace-archive.md) | IDA, native ABI, физика колёс, границы стороннего host |
 
 ## Уровни достоверности
 
