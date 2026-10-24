@@ -162,8 +162,9 @@ test('a severe impact can still release the hood as one part', () => {
   }
   center.divideScalar(nodes); velocity.divideScalar(nodes);
   const outward = center.clone().sub(demo.body.position).normalize();
-  const separationSpeed = velocity.sub(demo.body.pointVelocity(center)).dot(outward);
+  const relative = velocity.sub(demo.body.pointVelocity(center)), separationSpeed = relative.dot(outward);
   assert.ok(separationSpeed > 0.5, `the released hood receives an outward velocity: ${separationSpeed}, center ${center.toArray()}, chassis ${demo.body.position.toArray()}`);
+  assert.ok(relative.z < -0.5 && relative.length() < 1.6, `release follows the incoming -Z motion without an excessive kick: ${relative.toArray()}`);
   const bounds = new Box3();
   for (let i = 0; i < demo.panel.positions.length; i += 3) bounds.expandByPoint(new Vector3().fromArray(demo.panel.positions, i));
   const probe = new RigidBody3D(demo.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());

@@ -45,7 +45,7 @@ export class Vehicle3D extends CarCrashDemo {
   private lastOmega = new Vector3();
   private surfaceDirty = false;
   private pendingShock = false;
-  private pendingReleaseSpeed = new Map<EnginePart, number>();
+  private pendingReleaseVelocity = new Map<EnginePart, Vector3>();
   private structuralMounts = new Map<EnginePart, { parent: EnginePart; field: DeformedFrame; ownInverse: Matrix4 }>();
   private wheelMounts: DeformedFrame[] = [];
   private engineHull = new Box3();
@@ -98,8 +98,8 @@ export class Vehicle3D extends CarCrashDemo {
       const share = c.weight / Math.max(1, total);
       c.panel?.impulseAt(impulse.clone().multiplyScalar(0.3 * share * structuralShare).toArray() as Triple, c.point.toArray() as Triple, 0.3);
       c.part.condition = Math.max(0, c.part.condition - energy * share / (mass(c.part) * 600));
-      const releaseSpeed = Math.min(5, impulse.length() / this.body.mass * 0.45 * Math.sqrt(c.weight) * structuralShare);
-      if (releaseSpeed > 0) this.pendingReleaseSpeed.set(c.part, Math.max(this.pendingReleaseSpeed.get(c.part) ?? 0, releaseSpeed));
+      const releaseVelocity = impulse.clone().multiplyScalar(-0.2 * Math.sqrt(c.weight) * structuralShare / this.body.mass).clampLength(0, 1.2);
+      if (releaseVelocity.lengthSq() > (this.pendingReleaseVelocity.get(c.part)?.lengthSq() ?? 0)) this.pendingReleaseVelocity.set(c.part, releaseVelocity);
     }
     if (root) root.part.condition = Math.max(0, root.part.condition - energy * 0.35 / (mass(root.part) * 150));
     // Transfer collision energy to nearby installed hardware. The engine is shielded by the body;
@@ -207,7 +207,7 @@ export class Vehicle3D extends CarCrashDemo {
     for (const s of this.originalTree) if (s.part !== this.root) s.part.local.copy(s.local);
     for (const s of this.originalTree) s.part.condition = 1;
     this.body.setMass([...this.root.world.parts.values()].reduce((s, p) => s + mass(p), 0)); this.body.setFrame(this.root.matrix()); this.body.velocity.z = -speed; this.suspension.reset(); this.terrain.ramp = false;
-    this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false; this.pendingReleaseSpeed.clear();
+    this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false; this.pendingReleaseVelocity.clear();
     this.surfaceTick = -4;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
     for (const s of this.soft.values()) { s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
@@ -278,7 +278,7 @@ export class Vehicle3D extends CarCrashDemo {
   private releasePanel(s: SoftBodyPart) {
     const bounds = new Box3(), point = new Vector3();
     for (let i = 0; i < s.panel.positions.length; i += 3) bounds.expandByPoint(point.fromArray(s.panel.positions, i));
-    const center = centerOf(s.panel.positions), chassisCenter = this.body.position.clone();
+    const center = centerOf(s.panel.positions);
     const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
     const probe = new RigidBody3D(s.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());
     const overlap = orientedBoxContact(probe, chassis, this.body.bounds.getSize(new Vector3()).multiplyScalar(0.5));
@@ -287,23 +287,11 @@ export class Vehicle3D extends CarCrashDemo {
       for (let i = 0; i < s.panel.positions.length; i += 3) for (let axis = 0; axis < 3; axis++) s.panel.positions[i + axis] += correction.getComponent(axis);
       center.add(correction);
     }
-    const speed = this.pendingReleaseSpeed.get(s.part) ?? 0;
-    this.pendingReleaseSpeed.delete(s.part);
-    const outward = center.clone().sub(chassisCenter);
-    if (outward.lengthSq() < 1e-6) outward.set(0, 1, 0);
-    outward.normalize();
-    const mean = new Vector3(), node = new Vector3(), count = s.panel.velocities.length / 3;
-    for (let i = 0; i < s.panel.velocities.length; i += 3) mean.add(node.fromArray(s.panel.velocities, i));
-    mean.divideScalar(count);
-    const carrier = this.body.pointVelocity(center), inward = mean.clone().sub(carrier).dot(outward);
-    // Anchor release can create a large numerical recoil into the chassis. Remove only
-    // that inward component; keep tangential motion and deformation of the free panel.
-    if (inward < 0.25) s.panel.impulseWhole(outward.clone().multiplyScalar((0.25 - inward) * s.panel.options.mass).toArray() as Triple);
-    if (speed > 0) {
-      const impulse = outward.multiplyScalar(speed * s.panel.options.mass);
-      s.panel.impulseWhole(impulse.toArray() as Triple);
-      this.body.impulse(impulse.negate(), center);
-    }
+    const releaseVelocity = this.pendingReleaseVelocity.get(s.part) ?? new Vector3();
+    this.pendingReleaseVelocity.delete(s.part);
+    const carrier = this.body.pointVelocity(center);
+    s.panel.setReleaseVelocity(carrier.add(releaseVelocity).toArray() as Triple);
+    if (releaseVelocity.lengthSq() > 0) this.body.impulse(releaseVelocity.clone().multiplyScalar(-s.panel.options.mass), center);
   }
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');

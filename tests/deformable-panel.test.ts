@@ -47,6 +47,18 @@ test('invalid panel input and impacts are rejected', () => {
   assert.throws(() => p.hit(1, -1)); assert.throws(() => p.bind([NaN, 0, 0]));
 });
 
+test('release velocity keeps the requested movement while limiting solver recoil', () => {
+  const p = create();
+  p.velocities.fill(0);
+  p.velocities[0] = -100;
+  p.setReleaseVelocity([1, 2, -3], 6);
+  const mean = [0, 0, 0], count = p.velocities.length / 3;
+  for (let i = 0; i < p.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) mean[axis] += p.velocities[i + axis] / count;
+  assert.ok(mean.every((value, axis) => Math.abs(value - [1, 2, -3][axis]) < 1e-10));
+  assert.ok(p.velocities.every(Number.isFinite));
+  assert.throws(() => p.setReleaseVelocity([NaN, 0, 0]));
+});
+
 test('moving anchors do not teleport simulated mass; skin bindings stay in the original part frame', () => {
   const p = create(), binding = p.bind([0, 1.35, 0]), original = p.positions.slice();
   p.setAnchorFrame(new Matrix4().makeTranslation(2, 3, 4).elements);

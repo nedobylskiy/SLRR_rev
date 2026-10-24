@@ -129,11 +129,19 @@ export class DeformablePanel {
     if (impulse.some(v => v !== 0)) this.impulseVersion++;
     weights.forEach((w, n) => { for (let a = 0; a < 3; a++) this.velocities[n * 3 + a] += impulse[a] * w / total * this.inverseMass; });
   }
-  /** Give a released panel one rigid-body impulse without changing its existing dents or spin. */
-  impulseWhole(impulse: Triple) {
-    if (!impulse.every(Number.isFinite)) throw new Error('Invalid panel impulse');
-    for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) this.velocities[i + axis] += impulse[axis] / this.options.mass;
-    if (impulse.some(v => v !== 0)) this.impulseVersion++;
+  /** Preserve local bending/spin while removing attachment-solver translation at release. */
+  setReleaseVelocity(velocity: Triple, maxInternalSpeed = 8) {
+    if (!velocity.every(Number.isFinite) || !Number.isFinite(maxInternalSpeed) || maxInternalSpeed <= 0) throw new Error('Invalid release velocity');
+    const mean: Triple = [0, 0, 0], count = this.velocities.length / 3;
+    for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) mean[axis] += this.velocities[i + axis] / count;
+    for (let i = 0; i < this.velocities.length; i += 3) {
+      const relative: Triple = [this.velocities[i] - mean[0], this.velocities[i + 1] - mean[1], this.velocities[i + 2] - mean[2]];
+      const length = Math.hypot(...relative), scale = Math.min(1, maxInternalSpeed / Math.max(length, 1e-10));
+      for (let axis = 0; axis < 3; axis++) this.velocities[i + axis] = velocity[axis] + relative[axis] * scale;
+    }
+    const corrected: Triple = [0, 0, 0];
+    for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) corrected[axis] += this.velocities[i + axis] / count;
+    for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) this.velocities[i + axis] += velocity[axis] - corrected[axis];
   }
   advance(seconds: number) { return this.clock.advance(seconds, (_, dt) => this.step(dt)); }
   /** Carry the existing (possibly dented) cage as one rigid shape. Plastic lengths stay intact. */
