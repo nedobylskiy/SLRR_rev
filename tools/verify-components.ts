@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { Assets } from '../src/assets';
 import { PartFactory } from '../src/engine/world';
 import { MechanicalSystem } from '../src/engine/mechanical-system';
+import { Vector3 } from 'three';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './game-files';
 
 const assets = new Assets((await walk(gameRoot)).map(path => ({ path: relativeGamePath(path), size: 0 })), async path => new Uint8Array(await readFile(await safeGamePath(path))));
@@ -11,6 +12,14 @@ try {
   assert.deepEqual(built.warnings, []);
   assert.equal(built.world.parts.size, 72);
   const mechanics = new MechanicalSystem(built.root);
+  for (const [index, corner] of mechanics.corners.entries()) {
+    const wheelX = built.root.definition.config.wheels[index].position[0];
+    for (const part of [corner.strut, corner.spring, corner.shock, corner.brake]) {
+      assert.ok(part, `corner ${index} is complete`);
+      const x = new Vector3().setFromMatrixPosition(part.matrix()).x;
+      assert.ok(Math.abs(x - wheelX) < 0.25, `${part.definition.cfgPath} must mount beside wheel ${index}`);
+    }
+  }
   assert.equal(mechanics.engine.length, 20);
   assert.ok(Math.abs(mechanics.displacement - 0.002714336) < 1e-7);
   assert.equal(mechanics.drive, 'DT_RWD');

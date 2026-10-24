@@ -63,7 +63,10 @@ export class Vehicle3D extends CarCrashDemo {
     if (soft.mountVersion === soft.panel.shapeVersion) return;
     soft.mountVersion = soft.panel.shapeVersion;
     const frame = parent.matrix();
-    for (const [child, mount] of this.structuralMounts) if (mount.parent === parent && child.parent === parent) child.local.copy(mount.field.local(frame)).multiply(mount.ownInverse);
+    for (const [child, mount] of this.structuralMounts) if (mount.parent === parent && child.parent === parent) {
+      child.local.copy(mount.field.local(frame)).multiply(mount.ownInverse);
+      if (parent === this.root) this.suspension.setMechanicalBase(child, child.local);
+    }
     if (parent !== this.root) return;
     this.wheelMounts.forEach((mount, index) => {
       const current = mount.local(frame), delta = current.clone().multiply(mount.original.clone().invert());

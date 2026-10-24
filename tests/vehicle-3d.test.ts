@@ -17,17 +17,21 @@ function setup(mechanical = false) {
   const hood = create(6, 'hood.cfg', 'slot 0 0.191 0.696 0 0 0 601\nbody 0 0 0 0 0 0 38.5 sphere 1'); world.install(root, 601, hood, 601);
   const door = create(7, 'door.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 15 sphere 1'); world.install(root, 602, door, 1);
   const lamp = create(8, 'headlights.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 1 sphere 0.2'); world.install(root, 603, lamp, 1);
-  let struts: ReturnType<typeof create>[] = [], block: ReturnType<typeof create> | undefined, crank: ReturnType<typeof create> | undefined;
+  let struts: ReturnType<typeof create>[] = [], sway: ReturnType<typeof create> | undefined, block: ReturnType<typeof create> | undefined, crank: ReturnType<typeof create> | undefined;
   if (mechanical) {
     world.mechanical = true;
     for (const [id, kind] of [[121, 'suspension'], [311, 'spring'], [301, 'shock']] as const) for (let index = 0; index < 4; index++) {
       const slot = id + index;
-      root.definition.config.slots.push({ id: slot, position: [index % 2 ? 0.7 : -0.7, -0.4, index < 2 ? -1.3 : 1.3], rotation: [0, 0, 0], attach: [], compatible: [] });
+      root.definition.config.slots.push({ id: slot, position: [index % 2 ? 0.7 : -0.7, -0.4, index < 2 ? -1.3 : 1.3], rotation: [0, 0, 0], attach: [], compatible: [], type: (kind === 'spring' ? 301 : 201) + index });
       const part = create(20 + slot, `${kind}.cfg`, 'slot 0 0 0 0 0 0 1');
       part.definition.mechanics = { kind, source: `${kind}.java`, values: kind === 'spring' ? { force: 71000 } : kind === 'shock' ? { damping: 3000 } : {} };
       world.install(root, slot, part, 1);
       if (kind === 'suspension') struts.push(part);
     }
+    root.definition.config.slots.push({ id: 701, position: [0, -0.3, 0], rotation: [0, 0, 0], attach: [], compatible: [] });
+    sway = create(702, 'sway.cfg', 'slot 0 0 0 0 0 0 1');
+    sway.definition.mechanics = { kind: 'sway', source: 'sway.java', values: { force: 9000 } };
+    world.install(root, 701, sway, 1);
     root.definition.config.slots.push({ id: 401, position: [0, -0.3, -1.4], rotation: [0, 0, 0], attach: [], compatible: [] });
     block = create(500, 'engine-block.cfg', 'slot 0 0 0 0 0 0 1\nslot 0 0 0.7 0 0 0 33\nbody 0 0 0 0 0 0 37 sphere 0.4');
     block.definition.mechanics = { kind: 'engine', source: 'block.java', values: { cylinders: 6, bore: 80 } }; world.install(root, 401, block, 1);
@@ -44,8 +48,23 @@ function setup(mechanical = false) {
     demo.register(crank!, box(0.2, 0.2, 0.2), []);
     demo.reset();
   }
-  return { world, root, hood, door, lamp, demo, struts, block, crank };
+  return { world, root, hood, door, lamp, demo, struts, sway, block, crank };
 }
+
+test('suspension hardware follows wheel travel without wheel spin, while the anti-roll bar stays on the chassis', () => {
+  const { world, root, demo, struts, sway } = setup(true);
+  const wheel = demo.suspension.wheels[0], spring = root.children.get(311)!, shock = root.children.get(301)!;
+  const position = (part: typeof spring) => new Vector3().setFromMatrixPosition(part.matrix());
+  const before = [wheel.part, struts[0], spring, shock, sway!].map(position);
+  wheel.length -= 0.08; demo.suspension.sync();
+  const after = [wheel.part, struts[0], spring, shock, sway!].map(position);
+  for (let i = 0; i < 4; i++) assert.ok(Math.abs(after[i].y - before[i].y - 0.08) < 1e-10);
+  assert.ok(after[4].distanceTo(before[4]) < 1e-12);
+  const strutFrame = struts[0].matrix(); wheel.spin = 1; demo.suspension.sync();
+  assert.ok(struts[0].matrix().elements.every((n, i) => Math.abs(n - strutFrame.elements[i]) < 1e-12));
+  demo.reset(); assert.ok(position(struts[0]).distanceTo(before[1]) < 1e-12);
+  world.dispose();
+});
 
 test('engine drops with its children as one rigid assembly, while a failed strut keeps its place and releases the wheel', () => {
   const { world, root, demo, struts, block, crank } = setup(true);

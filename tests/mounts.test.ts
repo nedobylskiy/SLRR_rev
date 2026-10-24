@@ -8,18 +8,20 @@ import { slotMatrix } from '../src/engine/slot-frames';
 import type { RpkPack } from '../src/formats/rpk';
 
 test('typed frames depend on slottype, preserve local offsets and do not inherit the preceding wheel accidentally', () => {
-  const cfg = parsePartConfig('steering -0.4 0.2 -0.6 0 -0.5 0\ntype 10 sphere 0.32\nwheel -0.8 -0.6 -1.4 0.1 0 0 1 0 1 0\nwheel 0.8 -0.6 -1.4 0 0 0 1 0 1 0\nslot 0.1 0 0 0 0 0 987\nslottype 101\nslot 0 0 0 3.142 0 0 333\nslottype 102\nslot 0 0 0 0 0 0 444\nslottype 11\nslot 1 2 3 0 0 0 123');
+  const cfg = parsePartConfig('steering -0.4 0.2 -0.6 0 -0.5 0\ntype 10 sphere 0.32\nwheel -0.8 -0.6 -1.4 0.1 0 0 1 0 1 0\nwheel 0.8 -0.6 -1.4 0 0 0 1 0 1 0\nslot 0.1 0 0 0 0 0 987\nslottype 101\nslot 0 0 0 3.142 0 0 333\nslottype 102\nslot 0 0 0 0 0 0 444\nslottype 11\nslot 1 2 3 0 0 0 123\nslot 0 0.15 0 0 0 0 2010\nslottype 201\nslot 0.2 0 0 0 0 0 3010\nslottype 301');
   const position = (i: number) => new Vector3().setFromMatrixPosition(slotMatrix(cfg, cfg.slots[i]));
   assert.ok(position(0).distanceTo(new Vector3(-0.8 + 0.1 * Math.cos(0.1), -0.6, -1.4 - 0.1 * Math.sin(0.1))) < 1e-12);
   assert.deepEqual(position(1).toArray(), [0.8, -0.6, -1.4]);
   assert.deepEqual(position(2).toArray(), [-0.4, 0.2, -0.6]);
   assert.deepEqual(position(3).toArray(), [1, 2, 3]);
+  assert.ok(position(4).distanceTo(new Vector3(-0.8, -0.45, -1.4)) < 1e-12);
+  assert.ok(position(5).distanceTo(new Vector3(-0.8 + 0.2 * Math.cos(0.1), -0.6, -1.4 - 0.2 * Math.sin(0.1))) < 1e-12);
   assert.equal(cfg.wheels[0].radius, 0.32);
   assert.ok(new Vector3(1, 0, 0).transformDirection(slotMatrix(cfg, cfg.slots[1])).x < -0.99);
   const render = parsePartConfig('render 0x000001r 0.1 0.2 0.3 3.142 0 0\nstockpart 0x000000002r');
   assert.deepEqual(render.renderPose!.position, [0.1, 0.2, 0.3]); assert.equal(render.stock[0], 2);
   assert.throws(() => slotMatrix(cfg, { ...cfg.slots[0], type: 105 }), /missing/);
-  assert.throws(() => slotMatrix(cfg, { ...cfg.slots[0], type: 201 }), /Unsupported/);
+  assert.throws(() => slotMatrix(cfg, { ...cfg.slots[0], type: 401 }), /Unsupported/);
 });
 
 test('compatible aliases are transitive, cycle safe, pack scoped, slot scoped and cannot create attachments alone', async () => {

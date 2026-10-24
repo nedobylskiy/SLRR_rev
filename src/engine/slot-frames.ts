@@ -9,8 +9,8 @@ export function slotMatrix(config: PartConfig, slot: CfgSlot) {
   if (type === 11) {
     if (!config.steering) throw new Error('slottype 11 requires a steering frame');
     frame = poseMatrix(config.steering);
-  } else if (type >= 101 && type <= 199) {
-    const wheel = config.wheels[type - 101];
+  } else if (type >= 101 && type <= 199 || type >= 201 && type <= 204 || type >= 301 && type <= 304) {
+    const wheel = config.wheels[(type % 100) - 1];
     if (!wheel) throw new Error(`slottype ${type}: wheel frame missing`);
     frame = poseMatrix(wheel);
   } else if (type !== 0) throw new Error(`Unsupported slot frame type ${type}`);

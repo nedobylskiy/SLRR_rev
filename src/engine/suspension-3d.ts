@@ -13,6 +13,7 @@ export class TestTerrain implements Terrain {
 }
 export class Suspension3D {
   private springMass: number;
+  private movingParts: { part: EnginePart; base: Matrix4 }[][] = [[], [], [], []];
   readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
   readonly wheels: { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; rest: number; bump: number; droop: number; length: number; contact: boolean; force: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number }[];
@@ -29,10 +30,23 @@ export class Suspension3D {
       return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius, rest, bump, droop, length: rest, contact: false, force: 0, frame: slotMatrix(cfg, slot), inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0 };
     });
     if (this.wheels.length !== 4) throw new Error('3D prototype requires four configured wheels');
+    for (const part of root.children.values()) {
+      const kind = part.definition.mechanics?.kind, slot = cfg.slots.find(s => s.id === part.parentSlot), type = slot?.type ?? 0;
+      if (!kind || kind === 'sway' || kind === 'engine') continue;
+      const index = type >= 201 && type <= 204 || type >= 301 && type <= 304 ? type % 100 - 1 : -1;
+      if (index >= 0) this.movingParts[index].push({ part, base: part.local.clone() });
+    }
     const slot = cfg.slots.find(s => s.type === 11), part = slot && root.children.get(slot.id);
     if (slot && part) this.steering = { part, frame: slotMatrix(cfg, slot), inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert() };
   }
-  reset() { this.steer = 0; this.wheels.forEach(w => { w.spin = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.hardpoint.copy(w.originalHardpoint); }); }
+  reset() { this.steer = 0; this.wheels.forEach(w => { w.spin = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.hardpoint.copy(w.originalHardpoint); }); this.movingParts.flat().forEach(m => m.base.copy(m.part.local)); }
+  /** A bent chassis moves the rest seat; the wheel travel is applied on top of it. */
+  setMechanicalBase(part: EnginePart, local: Matrix4) {
+    for (const corner of this.movingParts) {
+      const entry = corner.find(m => m.part === part);
+      if (entry) { entry.base.copy(local); return; }
+    }
+  }
   deform(index: number, delta: Matrix4, condition: number) {
     const w = this.wheels[index]; w.mountCondition = Math.min(w.mountCondition, condition);
     const rotation = new Quaternion().setFromRotationMatrix(delta);
@@ -91,7 +105,10 @@ export class Suspension3D {
       const down = new Vector3(0, -1, 0).transformDirection(damaged), rotation = new Quaternion().setFromRotationMatrix(damaged);
       const offset = new Vector3().setFromMatrixPosition(w.frame).sub(w.center).applyQuaternion(rotation);
       const position = w.hardpoint.clone().addScaledVector(down, w.length).add(offset);
-      w.part.local.copy(damaged).multiply(w.frame).setPosition(position).multiply(new Matrix4().makeRotationY(this.steer * w.steering)).multiply(new Matrix4().makeRotationX(-w.spin * sign)).multiply(w.inverseOwn);
+      const carrier = damaged.clone().multiply(w.frame).setPosition(position).multiply(new Matrix4().makeRotationY(this.steer * w.steering));
+      w.part.local.copy(carrier).multiply(new Matrix4().makeRotationX(-w.spin * sign)).multiply(w.inverseOwn);
+      const travel = carrier.multiply(w.frame.clone().invert());
+      for (const moving of this.movingParts[index]) if (moving.part.parent === this.root) moving.part.local.copy(travel).multiply(moving.base);
     }
     if (this.steering) this.steering.part.local.copy(this.steering.frame).multiply(new Matrix4().makeRotationZ(-this.steer * 14)).multiply(this.steering.inverseOwn);
   }

@@ -4,7 +4,6 @@ import { entryProperties } from '../formats/rpk';
 import { parsePartConfig, type CfgSlot, type PartConfig } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { slotMatrix } from './slot-frames';
-import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile } from './original-stock';
 export { poseMatrix } from './transforms';
 
@@ -20,8 +19,7 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 export class EnginePart {
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
-  readonly nativeFrames = new Map<number, Matrix4>();
-  slotFrame(slot: CfgSlot) { const native = this.nativeFrames.get(slot.type ?? 0); return native ? native.clone().multiply(poseMatrix(slot)) : slotMatrix(this.definition.config, slot); }
+  slotFrame(slot: CfgSlot) { return slotMatrix(this.definition.config, slot); }
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
@@ -155,13 +153,7 @@ export class PartFactory {
         for (const ref of await source.entries(root.definition, env, true)) {
           const definition = await this.definition(ref), mechanics = await source.profile(definition); pending.push({ ...definition, mechanics });
         }
-        const struts = pending.filter(d => d.mechanics?.kind === 'suspension');
-        struts.forEach((d, index) => {
-          const wheel = root.definition.config.wheels[index]; if (!wheel) throw new Error('Source stock suspension count exceeds CFG wheels');
-          const frame = poseMatrix(wheel), profile = d.mechanics!;
-          if (profile.hub) root.nativeFrames.set(201 + index, frame.clone().multiply(new Matrix4().makeTranslation(...profile.hub.slice(1, 4) as [number, number, number])));
-          if (profile.arm) root.nativeFrames.set(301 + index, frame.clone().multiply(new Matrix4().makeTranslation(...profile.arm.slice(1, 4) as [number, number, number])));
-        });
+        if (pending.filter(d => d.mechanics?.kind === 'suspension').length > root.definition.config.wheels.length) throw new Error('Source stock suspension count exceeds CFG wheels');
       }
       while (pending.length) {
         let progress = false;
