@@ -20,6 +20,7 @@ const mass = (p: EnginePart) => {
   const minimum = type !== undefined && type >= 101 && type <= 104 ? 14 : p.definition.mechanics ? ({ suspension: 12, spring: 3, shock: 3, brake: 8, sway: 4, engine: 4 }[p.definition.mechanics.kind]) : 0.1;
   return Math.max(minimum, p.definition.config.bodies.reduce((s, b) => s + b.mass, 0));
 };
+const FREE_PANEL_WAKE_SPEED = 2.5;
 const boundsOf = (samples: ArrayLike<number>) => { const box = new Box3(); for (let i = 0; i < samples.length; i += 3) box.expandByPoint(new Vector3().fromArray(samples, i)); return box; };
 const centerOf = (p: ArrayLike<number>) => { const out = new Vector3(); for (let i = 0; i < p.length; i += 3) out.add(new Vector3().fromArray(p, i)); return out.multiplyScalar(3 / p.length); };
 function basis(panel: DeformablePanel) {
@@ -343,7 +344,7 @@ export class Vehicle3D extends CarCrashDemo {
         if (!attached && !s.activity.deforming && !s.activity.freeBody) s.activity.wake();
         if (!attached && !s.activity.deforming) {
           const free = s.activity.freeBody!, old = free.matrix(); free.integrate(dt);
-          if (this.freeContacts(free, old, obstacle, false, s.panel.positions) > 0.8) s.activity.wake();
+          if (this.freeContacts(free, old, obstacle, false, s.panel.positions) > FREE_PANEL_WAKE_SPEED) s.activity.wake();
           else { this.freeContacts(free, old, obstacle, true, s.panel.positions); s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); }
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }

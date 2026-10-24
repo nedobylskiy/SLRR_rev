@@ -170,6 +170,9 @@ test('a severe impact can still release the hood as one part', () => {
   const probe = new RigidBody3D(demo.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());
   const chassis = demo.body.matrix().multiply(new Matrix4().setPosition(demo.body.bounds.getCenter(new Vector3())));
   assert.equal(orientedBoxContact(probe, chassis, demo.body.bounds.getSize(new Vector3()).multiplyScalar(0.5)), undefined, 'the released panel is outside the rigid chassis');
+  for (let i = 0; i < 6 * 240; i++) demo.advance(1 / 240, neutral);
+  const landed = demo.soft.get(hood)!.activity.motion();
+  assert.ok(landed.velocity.length() < 0.3 && landed.omega.length() < 0.3, 'a crashed hood eventually settles');
   world.dispose();
 });
 
@@ -210,6 +213,20 @@ test('a released panel becomes a rigid free body in flight and wakes again on la
     if (rigidFlight && activity.deforming) { wokeOnLanding = true; break; }
   }
   assert.ok(rigidFlight); assert.ok(wokeOnLanding); assert.equal(hood.parent, undefined); world.dispose();
+});
+
+test('a detached panel settles instead of gaining motion after landing', () => {
+  const { world, demo, hood } = setup();
+  demo.disableObstacle(); world.detach(hood);
+  demo.panel.mounts.forEach(m => { m.broken = true; });
+  for (let i = 0; i < demo.panel.positions.length; i += 3) { demo.panel.positions[i] += 5; demo.panel.positions[i + 1] += 3; }
+  for (let i = 0; i < 6 * 240; i++) {
+    demo.advance(1 / 240, neutral);
+  }
+  const activity = demo.soft.get(hood)!.activity, motion = activity.motion();
+  assert.equal(activity.deforming, false);
+  assert.ok(motion.velocity.length() < 0.1 && motion.omega.length() < 0.1 && motion.center.y < 0.1, 'a grounded panel stays at rest');
+  world.dispose();
 });
 
 test('bent chassis moves real attachment frames and suspension points, changing a straight drive', () => {
