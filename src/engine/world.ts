@@ -4,7 +4,7 @@ import { entryProperties } from '../formats/rpk';
 import { parsePartConfig, type CfgSlot, type PartConfig } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { slotMatrix } from './slot-frames';
-import { OriginalStock, type MechanicalProfile } from './original-stock';
+import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
@@ -160,7 +160,14 @@ export class PartFactory {
         for (let i = 0; i < pending.length;) {
           const definition = pending[i], mount = await this.attachment(world, definition);
           if (!mount) { i++; continue; }
-          const child = world.create(definition); world.install(mount.parent, mount.parentSlot, child, mount.ownSlot);
+          let installed = definition;
+          if (definition.mechanics?.kind === 'brake' && definition.mechanics.renderVariants) {
+            const type = mount.parent.definition.config.slots.find(s => s.id === mount.parentSlot)?.type;
+            const corner = type !== undefined && type >= 201 && type <= 204 ? (['FL', 'FR', 'RL', 'RR'] as WheelCorner[])[type - 201] : undefined;
+            const variant = corner && definition.mechanics.renderVariants[corner];
+            if (variant) installed = { ...definition, model: await this.assets.modelForResource(variant.pack, variant.id) };
+          }
+          const child = world.create(installed); world.install(mount.parent, mount.parentSlot, child, mount.ownSlot);
           pending.splice(i, 1); await enqueue(definition); progress = true;
           if (options.mechanical && definition.mechanics) for (const ref of await source.entries(definition, env)) {
             if (pending.length + world.parts.size >= 1000) throw new Error('Original stock expansion limit');

@@ -19,6 +19,7 @@ try {
       const x = new Vector3().setFromMatrixPosition(part.matrix()).x;
       assert.ok(Math.abs(x - wheelX) < 0.25, `${part.definition.cfgPath} must mount beside wheel ${index}`);
     }
+    assert.match(corner.brake!.definition.model?.path ?? '', new RegExp(`disc_brake_${['FL', 'FR', 'RL', 'RR'][index]}\\.scx$`, 'i'));
   }
   assert.equal(mechanics.engine.length, 20);
   assert.ok(Math.abs(mechanics.displacement - 0.002714336) < 1e-7);

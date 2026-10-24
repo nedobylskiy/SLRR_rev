@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Assets } from '../src/assets';
 import { EngineWorld, type PartDefinition } from '../src/engine/world';
 import { MechanicalSystem } from '../src/engine/mechanical-system';
-import { originalNumber, selectStockBranches, type MechanicalProfile } from '../src/engine/original-stock';
+import { OriginalStock, originalNumber, selectStockBranches, type MechanicalProfile } from '../src/engine/original-stock';
 import { parsePartConfig } from '../src/formats/cfg';
 
 test('original numeric units and conditional stock selection stay bounded and literal', () => {
@@ -12,6 +13,17 @@ test('original numeric units and conditional stock selection stay bounded and li
   assert.equal(originalNumber('process.exit(1)'), undefined);
   assert.equal(selectStockBranches('if(desc.power < 1.3) { addPart(low); } else { addPart(high); }', { 'desc.power': 1 }), ' addPart(low); ');
   assert.deepEqual(parsePartConfig('render 0x70 0 -0.245662 0').renderPose?.rotation, [0, 0, 0]);
+});
+
+test('brake profile reads the original corner-specific render IDs', async () => {
+  const path = 'parts/running_gear/scripts/brakes/src/sample.java';
+  const source = 'public class sample extends DiscBrake { renderID_FL = parts:0xA1r; renderID_FR = parts:0xC1r; renderID_RL = parts:0xC3r; renderID_RR = parts:0xC5r; }';
+  const assets = new Assets([{ path, size: source.length }], async () => new TextEncoder().encode(source));
+  const definition: PartDefinition = { key: { pack: 'parts.rpk', id: 1 }, alias: 'sample', cfgPath: 'disc_brake.cfg', script: 'parts/running_gear/scripts/brakes/sample.class', config: parsePartConfig('slot 0 0 0 0 0 0 1') };
+  assert.deepEqual((await new OriginalStock(assets).profile(definition))?.renderVariants, {
+    FL: { pack: 'parts.rpk', id: 0xa1 }, FR: { pack: 'parts.rpk', id: 0xc1 },
+    RL: { pack: 'parts.rpk', id: 0xc3 }, RR: { pack: 'parts.rpk', id: 0xc5 },
+  });
 });
 
 test('installed original component condition changes support, damping, braking and delivered torque', () => {

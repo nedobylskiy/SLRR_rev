@@ -1,7 +1,8 @@
 import { Assets, normalizePath } from '../assets';
 import type { PartDefinition, ResourceKey } from './world';
 
-export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string }
+export type WheelCorner = 'FL' | 'FR' | 'RL' | 'RR';
+export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string; renderVariants?: Partial<Record<WheelCorner, ResourceKey>> }
 const clean = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 const mask = (s: string) => s.replace(/"(?:\\.|[^"\\])*"/g, m => ' '.repeat(m.length));
 function closing(s: string, start: number, open = '{', close = '}') { let depth = 1; for (let i = start + 1; i < s.length; i++) { if (s[i] === open) depth++; if (s[i] === close && --depth === 0) return i; } throw new Error('Unbalanced original source'); }
@@ -93,6 +94,10 @@ export class OriginalStock {
     const values: Record<string, number> = {};
     for (const m of source.matchAll(/\b(\w+(?:\[\d+\])?)\s*=\s*([^;{}]+);/g)) { const n = originalNumber(m[2]); if (n !== undefined && values[m[1]] === undefined) values[m[1]] = n; }
     const call = (name: string) => { const args = new RegExp(`wheel\\.${name}\\s*\\(([^)]+)\\)`).exec(source)?.[1]; if (!args) return; const a = args.split(',').map(originalNumber); return a.every(n => n !== undefined) ? a as number[] : undefined; };
-    return { kind, source: def.script!, values, hub: call('setHub'), arm: call('setArm'), drive: /\bdrive_type\s*=\s*(\w+)/.exec(source)?.[1] };
+    const renderVariants: Partial<Record<WheelCorner, ResourceKey>> = {};
+    if (kind === 'brake') for (const match of source.matchAll(/\brenderID_(FL|FR|RL|RR)\s*=\s*([\w.]+):0x([\da-f]+)r\s*;/gi)) {
+      renderVariants[match[1].toUpperCase() as WheelCorner] = { pack: match[2].replaceAll('.', '/') + '.rpk', id: Number.parseInt(match[3], 16) };
+    }
+    return { kind, source: def.script!, values, hub: call('setHub'), arm: call('setArm'), drive: /\bdrive_type\s*=\s*(\w+)/.exec(source)?.[1], renderVariants: Object.keys(renderVariants).length ? renderVariants : undefined };
   }
 }
