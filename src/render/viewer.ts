@@ -8,6 +8,8 @@ import { parseScx } from '../formats/scx';
 import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { DrivingDemo } from '../engine/driving-demo';
+import { HoodLab } from './hood-lab';
+import type { PartDefinition } from '../engine/world';
 
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
@@ -90,6 +92,37 @@ export class Viewer {
       group.matrix.copy(modelMatrix(part.matrix(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)));
       group.matrixWorldNeedsUpdate = true;
     }
+  }
+  async hood(definition: PartDefinition, assets: Assets, telemetry: (text: string) => void) {
+    this.clear(); const generation = this.generation;
+    if (!definition.model) throw new Error('У капота нет модели');
+    const parsed = parseScx(await assets.read(definition.model.path));
+    if (generation !== this.generation) return;
+    const transform = modelMatrix(new THREE.Matrix4().makeTranslation(0, 1.25, 0), definition.config.renderPose && poseMatrix(definition.config.renderPose));
+    for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {
+      const point = new THREE.Vector3().fromArray(mesh.positions, i).applyMatrix4(transform); point.toArray(mesh.positions, i);
+    }
+    await this.append(parsed, assets, definition.model.textures, this.model, generation);
+    if (generation !== this.generation) return;
+    const slot = definition.config.slots.find(s => s.attach.length);
+    if (!slot) throw new Error('У капота нет слота крепления');
+    const lab = new HoodLab(this.model, definition.config.bodies.reduce((sum, b) => sum + b.mass, 0), [slot.position[0], slot.position[1] + 1.25, slot.position[2]], telemetry);
+    this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.ground.visible = true;
+    this.controls.target.set(0, 0.9, 0); this.camera.position.set(1.9, 2.5, -2.5); this.controls.update();
+    this.frame = now => {
+      lab.frame(now);
+      if (!lab.panel.attached) {
+        const center = new THREE.Vector3(), p = lab.panel.positions;
+        for (let i = 0; i < p.length; i += 3) center.add(new THREE.Vector3(p[i], p[i + 1], p[i + 2]));
+        center.multiplyScalar(0.6 / (p.length / 3)).add(new THREE.Vector3(0, 0.36, 0));
+        const delta = center.sub(this.controls.target).multiplyScalar(0.06);
+        this.camera.position.add(delta); this.controls.target.add(delta);
+      }
+    };
+    let stopped = false;
+    const stop = () => { if (stopped) return; stopped = true; this.frame = undefined; this.stopDriving = undefined; this.ground.visible = false; lab.dispose(); };
+    this.stopDriving = stop;
+    return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
   drive(root: EnginePart, telemetry: (text: string) => void) {
     this.stopDriving?.();

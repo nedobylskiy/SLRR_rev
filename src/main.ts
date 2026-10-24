@@ -19,13 +19,41 @@ let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined
 let beforeDrivingDetails = '';
 const worldButton = textElement('button', 'Собрать Baiern');
 const driveButton = textElement('button', 'Пробная поездка') as HTMLButtonElement;
+const hoodButton = textElement('button', 'Испытание капота'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
+const hoodControls = textElement('div', '', 'hood-controls'); hoodControls.hidden = true;
+const hoodHud = textElement('div', '', 'hood-telemetry'); hoodHud.setAttribute('role', 'status'); hoodControls.append(hoodHud);
+el('scene-help').before(hoodControls);
+let hood: Awaited<ReturnType<Viewer['hood']>>;
+for (const [label, impulse] of [['Слабый удар', 5], ['Вмятина', 65], ['Перегрузка', 650]] as const) {
+  const button = textElement('button', label); button.onclick = () => hood?.hit(impulse); button.title = `${impulse} Н·с`; hoodControls.append(button);
+}
+const resetHood = textElement('button', 'Новый капот'); resetHood.onclick = () => hood?.reset(); hoodControls.append(resetHood);
+const cageLabel = textElement('label', ' Физический каркас');
+const cage = document.createElement('input'); cage.type = 'checkbox'; cage.onchange = () => hood?.wireframe(cage.checked); cageLabel.prepend(cage); hoodControls.append(cageLabel);
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
 el('memory-lab').before(worldButton, driveButton);
 function stopDrive() {
+  hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
   disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Пробная поездка';
   el('scene-help').textContent = 'ЛКМ — вращение · Колесо — масштаб · ПКМ — перемещение';
 }
+hoodButton.onclick = async () => {
+  if (!assets || !viewer) return;
+  const request = ++sequence;
+  stopDrive(); driveButton.disabled = false; engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined;
+  disposeMemoryLab?.(); disposeMemoryLab = undefined; viewer.clear();
+  el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
+  el('filename').textContent = 'Baiern · оригинальный капот'; el('format').textContent = 'DEFORMABLE / IMPACT LAB'; status('Подготовка капота…');
+  try {
+    const definition = await new PartFactory(assets).definition({ pack: 'cars/racers/Baiern.rpk', id: 0x10d });
+    if (request !== sequence) return;
+    const result = await viewer.hood(definition, assets, text => { if (request === sequence) { hoodHud.textContent = text; status(text.startsWith('Капот оторван') ? 'Капот оторван' : 'Испытание'); } });
+    if (request !== sequence) { result?.dispose(); return; }
+    hood = result; hoodControls.hidden = false; cage.checked = false;
+    el('details').textContent = 'Оригинальные SCX и масса из CFG. Слабый удар — упругий прогиб; «Вмятина» — остаточная деформация; «Перегрузка» — разрыв опор и падение. Удары можно повторять. Зелёные точки — целые опоры, красные — разрушенные. Каркас, три опоры и материал построены для прототипа: это новая модель физики, а не восстановленный алгоритм SLRR. Столкновения пока только с полом по узлам каркаса.';
+  } catch (error) { if (request === sequence) { viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); } }
+};
 driveButton.onclick = async () => {
   if (disposeDriving) { stopDrive(); status('Мир собран'); return; }
   if (!engineRoot) await openWorld('cars/racers/Baiern.rpk', 6);

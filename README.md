@@ -21,6 +21,8 @@ C:\Program Files (x86)\Steam\steamapps\common\Street Legal Racing Redline
 
 «Пробная поездка»: W/S — разгон/торможение/задний ход, A/D — руль, пробел — тормоз, R — сброс. Поддержаны стрелки. Щёлкни по сцене для ввода. Кнопка «Завершить поездку» возвращает просмотр сборки. Демо пока без столкновений и подвески.
 
+«Испытание капота» слева открывает [прототип деформаций](docs/hood-prototype.md) на оригинальной модели: упругий удар, остаточная вмятина, разрушение опор и падение. Есть каркас и сброс; материал и физические опоры сгенерированы для нового solver.
+
 Другой путь:
 
 ```powershell
@@ -42,6 +44,7 @@ npm run verify:parts
 npm run verify:world
 npm run verify:gameplay
 npm run verify:mounts
+npm run verify:hood
 npm run audit
 ```
 
