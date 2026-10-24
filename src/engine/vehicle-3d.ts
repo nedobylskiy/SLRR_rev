@@ -95,7 +95,7 @@ export class Vehicle3D extends CarCrashDemo {
     const root = this.soft.get(this.root);
     const total = candidates.reduce((sum, c) => sum + c.weight, 0), energy = impulse.lengthSq() / (2 * this.body.mass);
     const structuralShare = Math.max(0, Math.min(1, (energy - 2500) / 15000));
-    root?.panel.impulseAt(impulse.clone().multiplyScalar(0.28 * structuralShare).toArray() as Triple, point.toArray() as Triple, 0.5);
+    root?.panel.impulseAt(impulse.clone().multiplyScalar(0.5 * structuralShare).toArray() as Triple, point.toArray() as Triple, 0.4);
     for (const c of candidates) {
       const share = c.weight / Math.max(1, total);
       c.panel?.impulseAt(impulse.clone().multiplyScalar(0.3 * share * structuralShare).toArray() as Triple, c.point.toArray() as Triple, 0.3);
@@ -158,7 +158,7 @@ export class Vehicle3D extends CarCrashDemo {
     const rigid = isWheel || isEngine && part === engineBlock || !!part.definition.mechanics && !isEngine || /headlight|taillight|window|windshield/i.test(file);
     if (metal && part !== this.hood) {
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot);
-      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 1500000 : 750000, yieldStrain: isRoot ? 0.006 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000), gravity: isRoot ? 0 : 9.81 });
+      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 900000 : 750000, yieldStrain: isRoot ? 0.003 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000), gravity: isRoot ? 0 : 9.81, anchorLayout: isRoot ? 'central-four' : 'panel' });
       this.addSoft(part, panel, isRoot); panel.setAnchorFrame(part.matrix().elements); panel.reset();
     } else if (rigid && samples.length && !this.rigid.has(part)) {
       const body = new RigidBody3D(mass(part), isEngine && !this.engineHull.isEmpty() ? this.engineHull.clone() : boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });

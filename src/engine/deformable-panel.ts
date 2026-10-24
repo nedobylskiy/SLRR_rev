@@ -3,7 +3,7 @@ import { FixedClock } from '../runtime/fixed-clock';
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
-export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number }
+export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four' }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
 export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; impulse?: (impulse: Triple, point: Triple) => void }
@@ -66,10 +66,19 @@ export class DeformablePanel {
       for (const [dx, dz] of [[1, 0], [0, 1], [1, 1], [-1, 1], [2, 0], [0, 2]]) if (x + dx >= 0 && x + dx < this.nx && z + dz < this.nz) connect(a, this.index(x + dx, z + dz, l), Math.abs(dx) + dz === 2 && (dx === 0 || dz === 0) ? 0.3 : 1);
       if (l === 0) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) if (x + dx >= 0 && x + dx < this.nx && z + dz >= 0 && z + dz < this.nz) connect(a, this.index(x + dx, z + dz, 1));
     }
-    // Generated closed-panel fixture: two clamps around the CFG slot and one latch opposite it. Not original bolt data.
+    // The body is supported near its middle so both crumple zones can yield.
+    // Other panels keep the generated CFG-slot clamps and opposite latch.
     const used = new Set<number>();
-    const targets = [-1, 1].map(sign => [options.mount[0] + sign * (this.maxX - this.minX) * 0.32, options.mount[1], options.mount[2]]);
-    targets.push([(this.minX + this.maxX) / 2, options.mount[1], Math.abs(options.mount[2] - this.minZ) > Math.abs(options.mount[2] - this.maxZ) ? this.minZ : this.maxZ]);
+    const targets: Triple[] = [];
+    if (options.anchorLayout === 'central-four') {
+      const centerX = (this.minX + this.maxX) / 2, centerZ = (this.minZ + this.maxZ) / 2;
+      for (const z of [-1, 1]) for (const x of [-1, 1]) {
+        targets.push([centerX + x * (this.maxX - this.minX) * 0.32, options.mount[1], centerZ + z * (this.maxZ - this.minZ) * 0.12]);
+      }
+    } else {
+      for (const sign of [-1, 1]) targets.push([options.mount[0] + sign * (this.maxX - this.minX) * 0.32, options.mount[1], options.mount[2]]);
+      targets.push([(this.minX + this.maxX) / 2, options.mount[1], Math.abs(options.mount[2] - this.minZ) > Math.abs(options.mount[2] - this.maxZ) ? this.minZ : this.maxZ]);
+    }
     for (const target of targets) {
       const nodes: number[] = [];
       for (let l = 0; l < 2; l++) {

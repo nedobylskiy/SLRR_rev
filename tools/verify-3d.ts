@@ -56,12 +56,21 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
     assert.ok(demo.body.position.toArray().every(Number.isFinite));
     if (i % 240 === 0) console.log(scenario, i / 240, 'position', demo.driving.position.toArray(), 'up', new Vector3(0, 1, 0).applyQuaternion(demo.body.orientation).y, 'wheel', demo.suspension.wheels.map(w => w.force.toFixed(0)));
   }
-  const report = { scenario, maxY, minUp, airborne, position: demo.driving.position.toArray(), soft: demo.soft.size, rigid: demo.rigid.size, detached: [...demo.soft.keys(), ...demo.rigid.keys()].filter(p => p !== root && !p.parent).map(p => p.definition.cfgPath.split('/').at(-1)), damaged: [...demo.soft.values()].filter(s => s.panel.plasticBeams > 0).map(s => s.part.definition.cfgPath.split('/').at(-1)), wheelForces: demo.suspension.wheels.map(w => w.force), springs: root.definition.config.wheels.map(w => w.spring) };
+  const chassisPanel = demo.soft.get(root)!.panel;
+  let chassisMaxDent = 0;
+  for (let n = 0; n < chassisPanel.positions.length; n += 3) {
+    chassisMaxDent = Math.max(chassisMaxDent, Math.hypot(
+      chassisPanel.positions[n] - chassisPanel.rest[n],
+      chassisPanel.positions[n + 1] - chassisPanel.rest[n + 1],
+      chassisPanel.positions[n + 2] - chassisPanel.rest[n + 2],
+    ));
+  }
+  const report = { scenario, maxY, minUp, airborne, chassisMaxDent, position: demo.driving.position.toArray(), soft: demo.soft.size, rigid: demo.rigid.size, detached: [...demo.soft.keys(), ...demo.rigid.keys()].filter(p => p !== root && !p.parent).map(p => p.definition.cfgPath.split('/').at(-1)), damaged: [...demo.soft.values()].filter(s => s.panel.plasticBeams > 0).map(s => s.part.definition.cfgPath.split('/').at(-1)), wheelForces: demo.suspension.wheels.map(w => w.force), springs: root.definition.config.wheels.map(w => w.spring) };
   const structure = { condition: root.condition, wheels: demo.suspension.wheels.map(w => ({ shift: w.hardpoint.distanceTo(w.originalHardpoint), condition: w.mountCondition })), partConditions: [...world.parts.values()].map(p => ({ cfg: p.definition.cfgPath, condition: p.condition })) };
   if (scenario === 'idle') { assert.equal(report.detached.length, 0); assert.equal(report.damaged.length, 0); assert.ok(demo.suspension.wheels.every(w => w.contact && w.force > 0)); }
   if (scenario === 'crash') { assert.equal(hood.parent, undefined); assert.ok(report.damaged.length > 1); assert.ok([...demo.rigid.keys()].some(p => /headlight/i.test(p.definition.cfgPath) && !p.parent)); }
   if (scenario === 'crash') assert.ok(maxGuardIntrusion < 0.15, `detached panels penetrated ${maxGuardIntrusion.toFixed(3)} m past their release side`);
-  if (scenario === 'crash' || scenario === 'rear') { assert.ok(demo.soft.get(root)!.panel.plasticBeams > 0); assert.ok(structure.wheels.some(w => w.shift > 0.005)); }
+  if (scenario === 'crash' || scenario === 'rear') { assert.ok(chassisPanel.plasticBeams > 0); assert.ok(chassisMaxDent > 0.1 && chassisMaxDent < 0.4, `chassis deformation ${chassisMaxDent.toFixed(3)} m`); assert.ok(structure.wheels.some(w => w.shift > 0.005)); }
   if (scenario === 'rear') assert.ok(report.damaged.some(p => /r_bumper|trunk/.test(p ?? '')));
   if (scenario === 'roof') assert.ok(demo.bodySurface!.hits > 0);
   if (scenario === 'jump') { assert.ok(maxY > 1.5); assert.ok(airborne > 20); }
