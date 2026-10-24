@@ -1,14 +1,27 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Assets } from '../src/assets';
-import { PartFactory } from '../src/engine/world';
+import { PartFactory, poseMatrix, type EnginePart } from '../src/engine/world';
 import { MechanicalSystem } from '../src/engine/mechanical-system';
 import { parseScx } from '../src/formats/scx';
+import { SCX_TO_WORLD } from '../src/engine/model-transform';
 import { Vector3 } from 'three';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './game-files';
 
 const assets = new Assets((await walk(gameRoot)).map(path => ({ path: relativeGamePath(path), size: 0 })), async path => new Uint8Array(await readFile(await safeGamePath(path))));
 const built = await new PartFactory(assets).stock({ pack: 'cars/racers/Baiern.rpk', id: 6 }, { mechanical: true });
+const visualAxis = async (part: EnginePart) => {
+  const model = parseScx(await assets.read(part.definition.model!.path));
+  const pose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);
+  const points = model.meshes.flatMap(mesh => Array.from({ length: mesh.positions.length / 3 }, (_, i) => {
+    const point = new Vector3().fromArray(mesh.positions, i * 3).multiplyScalar(SCX_TO_WORLD);
+    return pose ? point.applyMatrix4(pose) : point;
+  }));
+  const centerX = (Math.min(...points.map(p => p.x)) + Math.max(...points.map(p => p.x))) / 2;
+  const centerZ = (Math.min(...points.map(p => p.z)) + Math.max(...points.map(p => p.z))) / 2;
+  const matrix = part.matrix().multiply(part.renderAdjustment);
+  return [Math.min(...points.map(p => p.y)), Math.max(...points.map(p => p.y))].map(y => new Vector3(centerX, y, centerZ).applyMatrix4(matrix));
+};
 try {
   assert.deepEqual(built.warnings, []);
   assert.equal(built.world.parts.size, 72);
@@ -20,14 +33,15 @@ try {
       const x = new Vector3().setFromMatrixPosition(part.matrix()).x;
       assert.ok(Math.abs(x - wheelX) < 0.25, `${part.definition.cfgPath} must mount beside wheel ${index}`);
     }
+    if (index < 2) assert.match(corner.strut!.definition.additionalModels?.[0]?.model.path ?? '', new RegExp(`${['FL', 'FR'][index]}_lower_arm\\.scx$`, 'i'));
+    else assert.ok(corner.strut!.definition.additionalModels?.length, `rear suspension ${index} keeps its additional CFG render meshes`);
     assert.match(corner.brake!.definition.model?.path ?? '', new RegExp(`disc_brake_${['FL', 'FR', 'RL', 'RR'][index]}\\.scx$`, 'i'));
     const wheel = built.root.children.get(101 + index)!;
     assert.ok(Math.abs(new Vector3().setFromMatrixPosition(wheel.matrix()).x - wheelX - built.root.slotPositions.get(101 + index)![0]) < 1e-10);
-    const shock = corner.shock!, spring = corner.spring!, model = parseScx(await assets.read(shock.definition.model!.path));
-    const topY = Math.max(...model.meshes.flatMap(mesh => Array.from(mesh.positions).filter((_, i) => i % 3 === 1))) * 0.01;
-    const shockTop = new Vector3(0, topY, 0).applyMatrix4(shock.renderAdjustment).applyMatrix4(shock.matrix());
-    const springTop = new Vector3().setFromMatrixPosition(spring.matrix());
-    assert.ok(Math.hypot(shockTop.x - springTop.x, shockTop.z - springTop.z) < 0.04, `shock ${index} meets its spring at the upper mount`);
+    const [shockBottom, shockTop] = await visualAxis(corner.shock!);
+    const [springBottom, springTop] = await visualAxis(corner.spring!);
+    assert.ok(shockBottom.distanceTo(springBottom) < 0.04, `shock ${index} stays inside its spring at the lower mount: ${shockBottom.toArray()} vs ${springBottom.toArray()}`);
+    assert.ok(shockTop.distanceTo(springTop) < 0.04, `shock ${index} meets its spring at the upper mount: ${shockTop.toArray()} vs ${springTop.toArray()}`);
   }
   assert.equal(mechanics.engine.length, 20);
   assert.ok(Math.abs(mechanics.displacement - 0.002714336) < 1e-7);

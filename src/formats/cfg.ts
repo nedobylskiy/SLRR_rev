@@ -6,13 +6,13 @@ export interface CfgWheel extends CfgPose { radius?: number; parameters: number[
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; maxSteer?: number; links: number[][];
+  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose }[]; maxSteer?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
 /** Ordered CFG subset. Unknown commands remain visible; attach is compatibility, not an instance. */
 export function parsePartConfig(source: string): PartConfig {
-  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], links: [], unknown: [] };
+  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], renders: [], links: [], unknown: [] };
   let slot: CfgSlot | undefined, deformable: number | undefined, render: number | undefined;
   let renderPose: CfgPose | undefined, deformablePose: CfgPose | undefined, radius: number | undefined;
   let spring: Triple | undefined;
@@ -45,7 +45,12 @@ export function parsePartConfig(source: string): PartConfig {
         slot.bonePosition = [number(0), number(1), number(2)]; break;
       case 'linked': result.links.push(args.map((_, i) => integer(i))); break;
       case 'stockpart': result.stock.push(rid()); break;
-      case 'render': if (render === undefined) { render = rid(); renderPose = args.length === 4 ? { position: [number(1), number(2), number(3)], rotation: [0, 0, 0] } : args.length > 1 ? pose(1) : undefined; } break;
+      case 'render': {
+        const resource = rid(), poseValue = args.length === 4 ? { position: [number(1), number(2), number(3)] as Triple, rotation: [0, 0, 0] as Triple } : args.length > 1 ? pose(1) : undefined;
+        result.renders.push({ resource, pose: poseValue });
+        if (render === undefined) { render = resource; renderPose = poseValue; }
+        break;
+      }
       case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;
       case 'mesh': result.mesh = rid(); break;
       case 'texture': result.texture = rid(); break;

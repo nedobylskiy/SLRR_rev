@@ -1,7 +1,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Assets, normalizePath } from '../assets';
 import { entryProperties } from '../formats/rpk';
-import { parsePartConfig, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
+import { parsePartConfig, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { parseScx } from '../formats/scx';
 import { slotMatrix } from './slot-frames';
@@ -14,6 +14,7 @@ export interface ResourceKey { pack: string; id: number }
 export interface PartDefinition {
   key: ResourceKey; alias: string; script?: string; cfgPath: string; config: PartConfig;
   model?: { path: string; textures: string[] };
+  additionalModels?: { model: { path: string; textures: string[] }; pose?: CfgPose }[];
   mechanics?: MechanicalProfile;
 }
 export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${key.id}`;
@@ -85,7 +86,15 @@ export class PartFactory {
         catch (error) { throw new Error(`${cfgPath}: ${String(error)}`); }
         const renderId = config.render ?? config.mesh;
         const model = renderId === undefined ? undefined : await this.assets.modelForResource(canonical.pack, renderId);
-        return { key: canonical, alias: resolved.entry.alias, script: props.find(p => p.key === 'script')?.value, cfgPath, config, model };
+        const extraRenders = config.render === config.renders[0]?.resource ? config.renders.slice(1) : [];
+        const additionalModels = (await Promise.all(extraRenders.map(async render => {
+          try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose }; }
+          catch (error) {
+            if (/has no external SCX\/render\/mesh/.test(String(error))) return undefined;
+            throw error;
+          }
+        }))).filter(model => model !== undefined);
+        return { key: canonical, alias: resolved.entry.alias, script: props.find(p => p.key === 'script')?.value, cfgPath, config, model, additionalModels };
       })();
       this.definitions.set(cacheKey, pending);
       pending.catch(() => { if (this.definitions.get(cacheKey) === pending) this.definitions.delete(cacheKey); });
@@ -195,29 +204,40 @@ export class PartFactory {
         }
       }
       if (options.mechanical) for (const part of world.parts.values()) {
-        if (part.definition.mechanics?.kind !== 'shock' || part.parent !== root) continue;
+        const kind = part.definition.mechanics?.kind;
+        if (kind !== 'shock' && kind !== 'spring' || part.parent !== root) continue;
         const slot = root.definition.config.slots.find(s => s.id === part.parentSlot);
         const type = slot?.type, model = part.definition.model;
-        if (!slot?.bonePosition || type === undefined || !(type >= 201 && type <= 204 || type >= 301 && type <= 304) || !model || !part.definition.config.links.some(link => link[0] === slot.id - (type % 100 - 1))) continue;
+        if (!slot || type === undefined || !(type >= 201 && type <= 204 || type >= 301 && type <= 304) || !model) continue;
+        const corner = type % 100 - 1;
+        const linked = part.definition.config.links.find(link => link.length >= 2 &&
+          root.definition.config.slots.some(s => s.id === link[0] + corner && s.bonePosition) &&
+          root.definition.config.slots.some(s => s.id === link[1] + corner));
+        if (!linked) continue;
+        const lowerSlot = root.definition.config.slots.find(s => s.id === linked[0] + corner)!;
         const wheel = root.definition.config.wheels[type % 100 - 1];
         if (!wheel) continue;
+        // linked identifies the two chassis anchors. A spring can mount at a separate
+        // CFG slot while its mesh follows the damper's lower anchor.
         const inverse = part.local.clone().invert();
-        const lower = new Vector3().setFromMatrixPosition(root.slotFrame(slot)).applyMatrix4(inverse);
-        const upper = new Vector3(...slot.bonePosition).applyMatrix4(poseMatrix(wheel)).applyMatrix4(inverse);
+        const lower = new Vector3().setFromMatrixPosition(root.slotFrame(lowerSlot)).applyMatrix4(inverse);
+        const upper = new Vector3(...lowerSlot.bonePosition!).applyMatrix4(poseMatrix(wheel)).applyMatrix4(inverse);
         const axis = upper.sub(lower), length = axis.length();
         if (length < 0.01) continue;
         const geometry = parseScx(await this.assets.read(model.path)), renderPose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);
-        let minY = Infinity, maxY = -Infinity;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
         for (const mesh of geometry.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {
           const point = new Vector3().fromArray(mesh.positions, i).multiplyScalar(SCX_TO_WORLD);
           if (renderPose) point.applyMatrix4(renderPose);
+          minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
           minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y);
+          minZ = Math.min(minZ, point.z); maxZ = Math.max(maxZ, point.z);
         }
         if (maxY - minY < 0.01) continue;
         part.renderAdjustment.makeTranslation(lower.x, lower.y, lower.z)
           .multiply(new Matrix4().makeRotationFromQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), axis.normalize())))
           .multiply(new Matrix4().makeScale(1, length / (maxY - minY), 1))
-          .multiply(new Matrix4().makeTranslation(0, -minY, 0));
+          .multiply(new Matrix4().makeTranslation(-(minX + maxX) / 2, -minY, -(minZ + maxZ) / 2));
       }
       return { world, root, warnings };
     } catch (error) { world.dispose(); throw error; }

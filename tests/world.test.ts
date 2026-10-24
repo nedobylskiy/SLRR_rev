@@ -27,6 +27,12 @@ test('CFG preserves ordered stock, repeated attachments, physical data and unkno
   assert.deepEqual(cfg.stock, [16, 16]); assert.equal(cfg.slots[0].attach.length, 2);
   assert.equal(cfg.render, 2); assert.equal(cfg.bodies[0].mass, 12.5); assert.equal(cfg.wheels.length, 1);
   assert.equal(cfg.unknown[0].command, 'eof');
+  const multiRender = parsePartConfig('render 0x01\nrender 0x02 0 1 0');
+  assert.equal(multiRender.render, 1);
+  assert.deepEqual(multiRender.renders, [
+    { resource: 1, pose: undefined },
+    { resource: 2, pose: { position: [0, 1, 0], rotation: [0, 0, 0] } },
+  ]);
   for (const source of ['slot 0 0 0 0 0 0 1\nslot 0 0 0 0 0 0 1', 'attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
 });
 test('CFG retains linked suspension anchors and the slot bone position', () => {

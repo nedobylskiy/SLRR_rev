@@ -94,6 +94,15 @@ export class Viewer {
       this.collisionMeshes.set(part, collision);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
       if (generation !== this.generation) return warnings;
+      const primaryPose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
+      for (const extra of part.definition.additionalModels ?? []) {
+        const submodel = new THREE.Group();
+        submodel.matrixAutoUpdate = false;
+        submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
+        group.add(submodel);
+        warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation));
+        if (generation !== this.generation) return warnings;
+      }
     }
     if (generation === this.generation) this.fit();
     return warnings;
