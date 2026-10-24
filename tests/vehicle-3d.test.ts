@@ -176,6 +176,30 @@ test('a severe impact can still release the hood as one part', () => {
   world.dispose();
 });
 
+test('released panel nodes cannot sink deeper through their original chassis side', () => {
+  const { world, root, hood, demo } = setup();
+  const shell: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
+  demo.register(root, shell, []); demo.reset(50 / 3.6);
+  for (let i = 0; i < 2 * 240 && hood.parent; i++) demo.advance(1 / 240, neutral);
+  const state = demo.soft.get(hood)!, guard = state.guard;
+  assert.ok(guard && guard.axis === 1 && guard.sign === 1);
+  for (let i = 1; i < state.panel.velocities.length; i += 3) state.panel.velocities[i] -= 3;
+  let guardedTicks = 0;
+  for (let tick = 0; tick < 24; tick++) {
+    demo.advance(1 / 240, neutral);
+    if (!state.guard) break;
+    guardedTicks++;
+    const inverse = demo.body.matrix().invert();
+    for (let n = 0; n < state.panel.positions.length; n += 3) {
+      const local = new Vector3().fromArray(state.panel.positions, n).applyMatrix4(inverse);
+      assert.ok(state.guard.minimum[n / 3] - state.guard.sign * local.getComponent(state.guard.axis) < 0.15, 'a detached node remains on its release side');
+    }
+  }
+  assert.ok(guardedTicks > 5);
+  world.dispose();
+});
+
 
 test('many contact points cannot launch one rigid detached panel upward', () => {
   const { world, demo } = setup();

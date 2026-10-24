@@ -32,6 +32,7 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
   demo.setBodyTriangles(triangles);
   if (scenario === 'crash') demo.reset(50 / 3.6); else if (scenario === 'rear') demo.rearCrash(); else if (scenario === 'roof') demo.dropOnRoof(); else if (scenario === 'jump') demo.jump(); else if (scenario === 'roll') demo.roll(); else demo.reset();
   let maxY = -Infinity, minUp = 1, airborne = 0;
+  let maxGuardIntrusion = 0;
   const stepTimes: number[] = [];
   for (let i = 0; i < 240 * 4; i++) {
     const start = performance.now();
@@ -41,6 +42,13 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
       const state = demo.soft.get(before.part)!, delta = state.activity.motion().center.distanceTo(before.center);
       if (before.attached && !before.part.parent) assert.ok(delta < 0.35, `${before.part.definition.cfgPath} jumped ${delta.toFixed(3)} m on release`);
       if (!before.rigid && !state.activity.deforming) assert.ok(delta < 0.2, `${before.part.definition.cfgPath} jumped ${delta.toFixed(3)} m on rigid transition`);
+    }
+    if (scenario === 'crash') for (const state of demo.soft.values()) if (state.guard && !state.part.parent) {
+      const guard = state.guard, inverse = demo.body.matrix().invert();
+      for (let n = 0; n < state.panel.positions.length; n += 3) {
+        const local = new Vector3().fromArray(state.panel.positions, n).applyMatrix4(inverse);
+        maxGuardIntrusion = Math.max(maxGuardIntrusion, guard.minimum[n / 3] - guard.sign * local.getComponent(guard.axis));
+      }
     }
     stepTimes.push(performance.now() - start);
     maxY = Math.max(maxY, demo.driving.position.y); minUp = Math.min(minUp, new Vector3(0, 1, 0).applyQuaternion(demo.body.orientation).y);
@@ -52,6 +60,7 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
   const structure = { condition: root.condition, wheels: demo.suspension.wheels.map(w => ({ shift: w.hardpoint.distanceTo(w.originalHardpoint), condition: w.mountCondition })), partConditions: [...world.parts.values()].map(p => ({ cfg: p.definition.cfgPath, condition: p.condition })) };
   if (scenario === 'idle') { assert.equal(report.detached.length, 0); assert.equal(report.damaged.length, 0); assert.ok(demo.suspension.wheels.every(w => w.contact && w.force > 0)); }
   if (scenario === 'crash') { assert.equal(hood.parent, undefined); assert.ok(report.damaged.length > 1); assert.ok([...demo.rigid.keys()].some(p => /headlight/i.test(p.definition.cfgPath) && !p.parent)); }
+  if (scenario === 'crash') assert.ok(maxGuardIntrusion < 0.15, `detached panels penetrated ${maxGuardIntrusion.toFixed(3)} m past their release side`);
   if (scenario === 'crash' || scenario === 'rear') { assert.ok(demo.soft.get(root)!.panel.plasticBeams > 0); assert.ok(structure.wheels.some(w => w.shift > 0.005)); }
   if (scenario === 'rear') assert.ok(report.damaged.some(p => /r_bumper|trunk/.test(p ?? '')));
   if (scenario === 'roof') assert.ok(demo.bodySurface!.hits > 0);

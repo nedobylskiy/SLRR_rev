@@ -41,7 +41,7 @@ export class CarCrashDemo {
     const size = chassisBounds.getSize(new Vector3()); this.inertia = this.mass * (size.x * size.x + size.z * size.z) / 12;
   }
   setBodyTriangles(triangles: ArrayLike<number>, includeAttached = false) {
-    if (!this.bodySurface) this.panel.surfaces.push(this.hoodSurface);
+    if (!this.bodySurface) this.panel.surfaces.unshift(this.hoodSurface);
     this.bodySurface = new TriangleSurface(triangles, () => includeAttached || !this.panel.attached, point => this.pointVelocity(point), (impulse, point) => this.applyImpulse(new Vector3(...impulse).negate(), new Vector3(...point)));
     this.bodySurface.setFrames(this.root.matrix(), this.root.matrix());
   }

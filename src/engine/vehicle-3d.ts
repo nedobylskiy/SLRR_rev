@@ -12,7 +12,8 @@ import { slotMatrix } from './slot-frames';
 import { FixedClock } from '../runtime/fixed-clock';
 import type { MapCollision } from './map-collision';
 
-export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean; mountVersion?: number }
+interface ReleaseGuard { axis: 0 | 1 | 2; sign: number; minimum: Float64Array; frame: Matrix4; inverse: Matrix4; normal: Vector3 }
+export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean; guard?: ReleaseGuard; mountVersion?: number }
 export interface RigidPart { part: EnginePart; body: RigidBody3D; previous: Matrix4; peakForce: number }
 interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[] }
 const mass = (p: EnginePart) => {
@@ -137,10 +138,11 @@ export class Vehicle3D extends CarCrashDemo {
     const old = panel.positions.slice(); panel.reset();
     if (part === this.hood) { const inverse = part.matrix().invert(); for (let i = 0; i < panel.positions.length; i += 3) new Vector3().fromArray(panel.positions, i).applyMatrix4(inverse).toArray(panel.positions, i); }
     const activity = new PanelActivity(panel); activity.reset(part.matrix());
-    const soft = { part, panel, activity, center: centerOf(panel.positions), inverseBasis: basis(panel).invert(), root };
+    const soft: SoftBodyPart = { part, panel, activity, center: centerOf(panel.positions), inverseBasis: basis(panel).invert(), root };
     panel.positions.set(old); this.soft.set(part, soft);
     if (panel !== this.panel) panel.colliders.push(this.obstacle);
     if (!root && panel !== this.panel) panel.surfaces.push({ project: (p, previous, i) => !part.parent ? this.rigidSurface?.project(p, previous, i) : undefined });
+    if (!root) panel.surfaces.push({ project: (p, _previous, i) => this.guardContact(soft, p, i) });
   }
   register(part: EnginePart, samples: number[], triangles: number[]) {
     const file = part.definition.cfgPath.split('/').at(-1) ?? '';
@@ -211,7 +213,7 @@ export class Vehicle3D extends CarCrashDemo {
     this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false; this.pendingReleaseVelocity.clear();
     this.surfaceTick = -4;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
-    for (const s of this.soft.values()) { s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
+    for (const s of this.soft.values()) { s.guard = undefined; s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
     for (const r of this.rigid.values()) { r.body.setMass(mass(r.part)); r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
     if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; }
     this.configureStructure();
@@ -250,7 +252,7 @@ export class Vehicle3D extends CarCrashDemo {
     return released;
   }
   /** Probe first so a hard impact can wake XPBD before any rigid proxy impulse is applied. */
-  private freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape?: Float64Array) {
+  private freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape?: Float64Array, guard?: ReleaseGuard) {
     let speed = 0;
     const solve = (point: Vector3, normal: Vector3, depth: number, carrier = false, correctPosition = true) => {
       const relative = body.pointVelocity(point); if (carrier) relative.sub(this.body.pointVelocity(point));
@@ -270,9 +272,17 @@ export class Vehicle3D extends CarCrashDemo {
     const points: Vector3[] = [];
     let ground: { point: Vector3; normal: Vector3; depth: number } | undefined;
     let surface: { point: Vector3; normal: Vector3; depth: number } | undefined;
+    let guarded: { point: Vector3; depth: number } | undefined;
     if (shape) { const delta = matrix.clone().multiply(previous.clone().invert()); for (let i = 0; i < shape.length; i += 3) points.push(new Vector3().fromArray(shape, i).applyMatrix4(delta)); }
     else points.push(...body.corners());
-    for (const point of points) {
+    for (const [index, point] of points.entries()) {
+      if (guard) {
+        const local = point.clone().applyMatrix4(guard.inverse), depth = guard.minimum[index] - guard.sign * local.getComponent(guard.axis);
+        if (depth > 0) {
+          if (!apply) solve(point, guard.normal, depth, true);
+          else if (!guarded || depth > guarded.depth) guarded = { point, depth };
+        }
+      }
       const height = this.terrain.height(point.x, point.z, point.y);
       if (point.y < height) {
         const normal = this.terrain.normal(point.x, point.z, point.y), depth = height - point.y;
@@ -292,15 +302,45 @@ export class Vehicle3D extends CarCrashDemo {
     // sums the same penetration repeatedly and can launch it metres into the air.
     if (ground) body.position.addScaledVector(ground.normal, Math.max(0, ground.depth - 0.001) * 0.6);
     if (surface) body.position.addScaledVector(surface.normal, Math.max(0, surface.depth - 0.001) * 0.6);
+    if (guarded && guard) solve(guarded.point, guard.normal, Math.min(guarded.depth, 0.08), true);
     return speed;
   }
   private releasePanel(s: SoftBodyPart) {
     const center = centerOf(s.panel.positions);
+    const name = s.part.definition.cfgPath.split('/').at(-1) ?? '';
+    const axis: 0 | 1 | 2 = /hood|trunk/i.test(name) ? 1 : /bumper/i.test(name) ? 2 : /quarterpanel|door|sideskirt/i.test(name) ? 0 : (() => {
+      const size = boundsOf(s.panel.positions).getSize(new Vector3()).toArray();
+      return size.indexOf(Math.min(...size)) as 0 | 1 | 2;
+    })();
+    const frame = this.body.matrix(), inverse = frame.clone().invert(), bodyCenter = this.body.bounds.getCenter(new Vector3());
+    const sign = center.clone().applyMatrix4(inverse).getComponent(axis) >= bodyCenter.getComponent(axis) ? 1 : -1;
+    const face = sign * this.body.bounds[sign > 0 ? 'max' : 'min'].getComponent(axis), minimum = new Float64Array(s.panel.positions.length / 3);
+    for (let i = 0; i < minimum.length; i++) {
+      const local = new Vector3().fromArray(s.panel.positions, i * 3).applyMatrix4(inverse);
+      minimum[i] = Math.min(sign * local.getComponent(axis), face);
+    }
+    const normal = new Vector3().setComponent(axis, sign).transformDirection(frame);
+    s.guard = { axis, sign, minimum, frame, inverse, normal };
     const releaseVelocity = this.pendingReleaseVelocity.get(s.part) ?? new Vector3();
     this.pendingReleaseVelocity.delete(s.part);
     const carrier = this.body.pointVelocity(center);
     s.panel.setReleaseVelocity(carrier.add(releaseVelocity).toArray() as Triple);
     if (releaseVelocity.lengthSq() > 0) this.body.impulse(releaseVelocity.clone().multiplyScalar(-s.panel.options.mass), center);
+  }
+  private updateGuard(s: SoftBodyPart) {
+    const guard = s.guard; if (!guard) return;
+    guard.frame.copy(this.body.matrix()); guard.inverse.copy(guard.frame).invert();
+    guard.normal.set(0, 0, 0).setComponent(guard.axis, guard.sign).transformDirection(guard.frame);
+    const local = centerOf(s.panel.positions).applyMatrix4(guard.inverse), face = this.body.bounds[guard.sign > 0 ? 'max' : 'min'].getComponent(guard.axis);
+    if (guard.sign * (local.getComponent(guard.axis) - face) > 0.3 || [0, 1, 2].some(axis => axis !== guard.axis && (local.getComponent(axis) < this.body.bounds.min.getComponent(axis) - 0.3 || local.getComponent(axis) > this.body.bounds.max.getComponent(axis) + 0.3))) s.guard = undefined;
+  }
+  private guardContact(s: SoftBodyPart, positions: Float64Array, offset: number) {
+    const guard = s.guard; if (!guard || s.part.parent) return;
+    const point = new Vector3().fromArray(positions, offset).applyMatrix4(guard.inverse), axis = guard.axis;
+    const depth = guard.minimum[offset / 3] - guard.sign * point.getComponent(axis);
+    if (depth <= 0) return;
+    point.setComponent(axis, point.getComponent(axis) + guard.sign * depth).applyMatrix4(guard.frame).toArray(positions, offset);
+    return { normal: guard.normal.toArray() as Triple, point: point.toArray() as Triple, velocity: this.body.pointVelocity(point).toArray() as Triple, restitution: 0, friction: 0.5, impulse: (impulse: Triple, at: Triple) => this.applyImpulse(new Vector3(...impulse).negate(), new Vector3(...at)) };
   }
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');
@@ -345,6 +385,7 @@ export class Vehicle3D extends CarCrashDemo {
       let freeSurfaceUpdated = false;
       for (const s of ordered) {
         const attached = !!s.part.parent || s.root, frame = s.part.matrix();
+        if (!attached) this.updateGuard(s);
         if ((!attached || s.part === this.hood && (s.activity.deforming || s.activity.forced)) && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         if (!s.root && s.part.condition === 0) s.panel.mounts.forEach(m => { m.broken = true; });
         if (attached) s.panel.setAnchorFrame(frame.elements);
@@ -352,8 +393,8 @@ export class Vehicle3D extends CarCrashDemo {
         if (!attached && !s.activity.deforming && !s.activity.freeBody) s.activity.wake();
         if (!attached && !s.activity.deforming) {
           const free = s.activity.freeBody!, old = free.matrix(); free.integrate(dt);
-          if (this.freeContacts(free, old, obstacle, false, s.panel.positions) > FREE_PANEL_WAKE_SPEED) s.activity.wake();
-          else { this.freeContacts(free, old, obstacle, true, s.panel.positions); s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); }
+          if (this.freeContacts(free, old, obstacle, false, s.panel.positions, s.guard) > FREE_PANEL_WAKE_SPEED) s.activity.wake();
+          else { this.freeContacts(free, old, obstacle, true, s.panel.positions, s.guard); s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); }
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }
         s.panel.advance(dt); if (attached) this.surfaceDirty = true;
