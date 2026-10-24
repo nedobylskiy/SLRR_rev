@@ -31,6 +31,7 @@ export class Viewer {
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
   private collisionMeshes = new Map<EnginePart, number[]>();
+  private alphaModes = new Map<string, ReturnType<typeof textureAlphaMode>>();
   private grid = new THREE.GridHelper(12, 24, 0x46515a, 0x222c34);
   private driveGrid = new THREE.GridHelper(2000, 1000, 0x798893, 0x45535b);
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
@@ -60,7 +61,7 @@ export class Viewer {
     this.renderer.setAnimationLoop(now => { this.frame?.(now); this.controls.update(); this.renderer.render(this.scene, this.camera); });
   }
   clear() {
-    this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear();
+    this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.internalView = false;
     this.generation++;
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
@@ -355,9 +356,12 @@ export class Viewer {
       const file = textures[part.textureIndex];
       if (file) {
         try {
-          const bytes = await assets.read(file), alpha = textureAlphaMode(bytes, file);
+          const bytes = await assets.read(file);
           const texture = await this.texture(bytes, file);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
+          const alphaKey = file.toLowerCase();
+          let alpha = this.alphaModes.get(alphaKey);
+          if (!alpha) { alpha = textureAlphaMode(bytes, file, texture.image); this.alphaModes.set(alphaKey, alpha); }
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
           if (alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }

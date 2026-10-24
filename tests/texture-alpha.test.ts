@@ -25,4 +25,9 @@ test('PNG and TGA alpha-bearing headers request blending', () => {
   const tga = new Uint8Array(18); tga[16] = 32;
   assert.equal(textureAlphaMode(png, 'window.png'), 'blend');
   assert.equal(textureAlphaMode(tga, 'window.tga'), 'blend');
+  const image = (alpha: number[]) => ({ width: alpha.length, height: 1, data: Uint8Array.from(alpha.flatMap(value => [255, 255, 255, value])) });
+  assert.equal(textureAlphaMode(png, 'default_white.png', image([255, 255])), 'opaque');
+  assert.equal(textureAlphaMode(png, 'foliage.png', image([0, 255])), 'cutout');
+  assert.equal(textureAlphaMode(png, 'window.png', image([96, 255])), 'blend');
+  assert.equal(textureAlphaMode(tga, 'paint.tga', image([255, 255])), 'opaque');
 });
