@@ -151,10 +151,15 @@ test('a severe impact can still release the hood as one part', () => {
   for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
   demo.register(root, shell, []);
   demo.reset(50 / 3.6);
-  for (let i = 0; i < 2 * 240 && hood.parent; i++) demo.advance(1 / 240, neutral);
+  let beforeRelease = demo.soft.get(hood)!.activity.motion().center;
+  for (let i = 0; i < 2 * 240 && hood.parent; i++) {
+    beforeRelease = demo.soft.get(hood)!.activity.motion().center;
+    demo.advance(1 / 240, neutral);
+  }
   assert.ok(demo.impactSpeed > 10);
   assert.equal(hood.parent, undefined);
   assert.ok(demo.panel.mounts.every(m => m.broken));
+  assert.ok(demo.soft.get(hood)!.activity.motion().center.distanceTo(beforeRelease) < 0.5, `breaking mounts must not teleport the whole panel: ${demo.soft.get(hood)!.activity.motion().center.distanceTo(beforeRelease)}`);
   const center = new Vector3(), velocity = new Vector3(), nodes = demo.panel.positions.length / 3;
   for (let i = 0; i < demo.panel.positions.length; i += 3) {
     center.add(new Vector3().fromArray(demo.panel.positions, i));
@@ -165,11 +170,6 @@ test('a severe impact can still release the hood as one part', () => {
   const relative = velocity.sub(demo.body.pointVelocity(center)), separationSpeed = relative.dot(outward);
   assert.ok(separationSpeed > 0.5, `the released hood receives an outward velocity: ${separationSpeed}, center ${center.toArray()}, chassis ${demo.body.position.toArray()}`);
   assert.ok(relative.z < -0.5 && relative.length() < 1.6, `release follows the incoming -Z motion without an excessive kick: ${relative.toArray()}`);
-  const bounds = new Box3();
-  for (let i = 0; i < demo.panel.positions.length; i += 3) bounds.expandByPoint(new Vector3().fromArray(demo.panel.positions, i));
-  const probe = new RigidBody3D(demo.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());
-  const chassis = demo.body.matrix().multiply(new Matrix4().setPosition(demo.body.bounds.getCenter(new Vector3())));
-  assert.equal(orientedBoxContact(probe, chassis, demo.body.bounds.getSize(new Vector3()).multiplyScalar(0.5)), undefined, 'the released panel is outside the rigid chassis');
   for (let i = 0; i < 6 * 240; i++) demo.advance(1 / 240, neutral);
   const landed = demo.soft.get(hood)!.activity.motion();
   assert.ok(landed.velocity.length() < 0.3 && landed.omega.length() < 0.3, 'a crashed hood eventually settles');
@@ -187,6 +187,17 @@ test('many contact points cannot launch one rigid detached panel upward', () => 
   const before = body.position.y;
   (demo as unknown as { freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape: Float64Array): number }).freeContacts(body, body.matrix(), new Box3(new Vector3(100, 100, 100), new Vector3(101, 101, 101)), true, points);
   assert.ok(body.position.y - before < 0.05, `one shallow contact displaced the whole part by ${body.position.y - before} m`);
+  world.dispose();
+});
+
+test('detached panel is not ejected by an overlapping chassis bounding box', () => {
+  const { world, demo } = setup();
+  demo.disableObstacle();
+  const body = new RigidBody3D(20, new Box3(new Vector3(-0.3, -0.02, -0.3), new Vector3(0.3, 0.02, 0.3)));
+  body.setFrame(new Matrix4().makeTranslation(0, 0.8, 0));
+  const before = body.position.clone();
+  (demo as unknown as { freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape: Float64Array): number }).freeContacts(body, body.matrix(), new Box3(new Vector3(100, 100, 100), new Vector3(101, 101, 101)), true, new Float64Array([0, 0.8, 0]));
+  assert.ok(body.position.distanceTo(before) < 1e-10, 'only actual panel points and chassis triangles may cause contact');
   world.dispose();
 });
 

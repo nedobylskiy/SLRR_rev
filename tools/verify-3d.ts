@@ -35,7 +35,13 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
   const stepTimes: number[] = [];
   for (let i = 0; i < 240 * 4; i++) {
     const start = performance.now();
+    const beforePanels = scenario === 'crash' ? [...demo.soft.values()].map(s => ({ part: s.part, center: s.activity.motion().center, attached: !!s.part.parent, rigid: !s.activity.deforming })) : [];
     demo.advance(1 / 240, { throttle: 0, steer: 0, brake: false });
+    for (const before of beforePanels) {
+      const state = demo.soft.get(before.part)!, delta = state.activity.motion().center.distanceTo(before.center);
+      if (before.attached && !before.part.parent) assert.ok(delta < 0.35, `${before.part.definition.cfgPath} jumped ${delta.toFixed(3)} m on release`);
+      if (!before.rigid && !state.activity.deforming) assert.ok(delta < 0.2, `${before.part.definition.cfgPath} jumped ${delta.toFixed(3)} m on rigid transition`);
+    }
     stepTimes.push(performance.now() - start);
     maxY = Math.max(maxY, demo.driving.position.y); minUp = Math.min(minUp, new Vector3(0, 1, 0).applyQuaternion(demo.body.orientation).y);
     if (demo.suspension.wheels.every(w => !w.contact)) airborne++;

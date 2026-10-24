@@ -258,9 +258,13 @@ export class Vehicle3D extends CarCrashDemo {
       if (apply) { const impulse = body.contact(point, normal, depth, 0.18, 0.6, correctPosition); if (carrier) this.applyImpulse(impulse.negate(), point); }
     };
     const contact = boxContact(body, obstacle); if (contact) solve(contact.point, contact.normal, contact.depth);
-    const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
-    const shell = orientedBoxContact(body, chassis, this.body.bounds.getSize(new Vector3()).multiplyScalar(0.5));
-    if (shell) solve(shell.point, shell.normal, shell.depth, true);
+    // The detached panel may overlap the chassis proxy while its actual skin is
+    // still outside it. Use the physical surface for shaped panels instead.
+    if (!shape) {
+      const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
+      const shell = orientedBoxContact(body, chassis, this.body.bounds.getSize(new Vector3()).multiplyScalar(0.5));
+      if (shell) solve(shell.point, shell.normal, shell.depth, true);
+    }
     const matrix = body.matrix(), inverse = matrix.clone().invert();
     const swept = body.bounds.clone().applyMatrix4(matrix).union(body.bounds.clone().applyMatrix4(previous)), nearBody = this.rigidSurface?.intersectsWorld(swept);
     const points: Vector3[] = [];
@@ -291,17 +295,7 @@ export class Vehicle3D extends CarCrashDemo {
     return speed;
   }
   private releasePanel(s: SoftBodyPart) {
-    const bounds = new Box3(), point = new Vector3();
-    for (let i = 0; i < s.panel.positions.length; i += 3) bounds.expandByPoint(point.fromArray(s.panel.positions, i));
     const center = centerOf(s.panel.positions);
-    const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
-    const probe = new RigidBody3D(s.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());
-    const overlap = orientedBoxContact(probe, chassis, this.body.bounds.getSize(new Vector3()).multiplyScalar(0.5));
-    if (overlap) {
-      const correction = overlap.normal.multiplyScalar(overlap.depth + 0.01);
-      for (let i = 0; i < s.panel.positions.length; i += 3) for (let axis = 0; axis < 3; axis++) s.panel.positions[i + axis] += correction.getComponent(axis);
-      center.add(correction);
-    }
     const releaseVelocity = this.pendingReleaseVelocity.get(s.part) ?? new Vector3();
     this.pendingReleaseVelocity.delete(s.part);
     const carrier = this.body.pointVelocity(center);
