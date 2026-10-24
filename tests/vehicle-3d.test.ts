@@ -129,6 +129,35 @@ test('a headlight separates as a rigid part and reset restores the same full ass
   demo.reset(); assert.equal(world.parts.size, count); assert.equal(hood.parent, root); assert.equal(door.parent, root); assert.equal(lamp.parent, root); assert.ok([...demo.soft.values()].every(s => s.panel.plasticBeams === 0)); world.dispose();
 });
 
+test('a 15 km/h impact marks the chassis without tearing off healthy body panels', () => {
+  const { world, root, hood, door, demo } = setup();
+  const shell: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
+  demo.register(root, shell, []);
+  demo.reset(15 / 3.6);
+  for (let i = 0; i < 2 * 240; i++) demo.advance(1 / 240, neutral);
+  assert.ok(demo.impactSpeed > 3, 'the chassis reached the obstacle');
+  assert.ok(root.condition < 1 && root.condition > 0.9, `chassis condition ${root.condition}`);
+  assert.ok(hood.condition > 0.6, `hood condition ${hood.condition}; mounts ${demo.panel.mounts.map(m => `${m.broken}:${Math.round(m.force)}`).join(',')}; root ${root.condition}; door ${door.condition}`);
+  assert.ok(door.condition > 0.6, `door condition ${door.condition}`);
+  assert.equal(hood.parent, root);
+  assert.ok(demo.panel.mounts.every(m => !m.broken));
+  world.dispose();
+});
+
+test('a severe impact can still release the hood as one part', () => {
+  const { world, root, hood, demo } = setup();
+  const shell: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
+  demo.register(root, shell, []);
+  demo.reset(50 / 3.6);
+  for (let i = 0; i < 2 * 240; i++) demo.advance(1 / 240, neutral);
+  assert.ok(demo.impactSpeed > 10);
+  assert.equal(hood.parent, undefined);
+  assert.ok(demo.panel.mounts.every(m => m.broken));
+  world.dispose();
+});
+
 test('3D suspension, rotation and panel state are independent of rendering cadence', () => {
   const a = setup(), b = setup(), input = { throttle: 1, steer: 0.2, brake: false };
   for (let i = 0; i < 60; i++) a.demo.advance(1 / 60, input);

@@ -90,14 +90,15 @@ export class Vehicle3D extends CarCrashDemo {
       const weight = Math.exp(-distance / (0.22 * 0.22)); if (weight > 0.01) candidates.push({ part: s.part, panel: s.panel, point: hit, weight });
     }
     const root = this.soft.get(this.root);
-    root?.panel.impulseAt(impulse.clone().multiplyScalar(0.35).toArray() as Triple, point.toArray() as Triple, 0.5);
     const total = candidates.reduce((sum, c) => sum + c.weight, 0), energy = impulse.lengthSq() / (2 * this.body.mass);
+    const structuralShare = Math.max(0, Math.min(1, (energy - 2500) / 15000));
+    root?.panel.impulseAt(impulse.clone().multiplyScalar(0.28 * structuralShare).toArray() as Triple, point.toArray() as Triple, 0.5);
     for (const c of candidates) {
       const share = c.weight / Math.max(1, total);
-      c.panel?.impulseAt(impulse.clone().multiplyScalar(0.45 * share).toArray() as Triple, c.point.toArray() as Triple, 0.3);
-      c.part.condition = Math.max(0, c.part.condition - energy * share / (mass(c.part) * 300));
+      c.panel?.impulseAt(impulse.clone().multiplyScalar(0.3 * share * structuralShare).toArray() as Triple, c.point.toArray() as Triple, 0.3);
+      c.part.condition = Math.max(0, c.part.condition - energy * share / (mass(c.part) * 600));
     }
-    if (root) root.part.condition = Math.max(0, root.part.condition - energy * 0.35 / (mass(root.part) * 1000));
+    if (root) root.part.condition = Math.max(0, root.part.condition - energy * 0.35 / (mass(root.part) * 150));
     // Transfer collision energy to nearby installed hardware. The engine is shielded by the body;
     // wheel hardware near the contact receives more of the load.
     for (const part of this.root.world.parts.values()) {
@@ -112,7 +113,7 @@ export class Vehicle3D extends CarCrashDemo {
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
-    super(root, hood, samples, chassisBounds);
+    super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 50000 });
     this.clock = new FixedClock(240, 8);
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = [...root.world.parts.values()].reduce((s, p) => s + mass(p), 0), center = new Vector3();
@@ -151,7 +152,7 @@ export class Vehicle3D extends CarCrashDemo {
     const rigid = isWheel || isEngine && part === engineBlock || !!part.definition.mechanics && !isEngine || /headlight|taillight|window|windshield/i.test(file);
     if (metal && part !== this.hood) {
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot);
-      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 1500000 : 600000, yieldStrain: isRoot ? 0.004 : 0.012, mountStrength: isRoot ? 1e15 : Math.max(6000, mass(part) * 1000), gravity: isRoot ? 0 : 9.81 });
+      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 1500000 : 750000, yieldStrain: isRoot ? 0.006 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(9000, mass(part) * 1500), gravity: isRoot ? 0 : 9.81 });
       this.addSoft(part, panel, isRoot); panel.setAnchorFrame(part.matrix().elements); panel.reset();
     } else if (rigid && samples.length && !this.rigid.has(part)) {
       const body = new RigidBody3D(mass(part), isEngine && !this.engineHull.isEmpty() ? this.engineHull.clone() : boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });
@@ -325,7 +326,7 @@ export class Vehicle3D extends CarCrashDemo {
         s.panel.advance(dt); if (attached) this.surfaceDirty = true;
         if (tick % 24 === 0) {
           const strain = s.panel.beams.reduce((sum, b) => sum + Math.abs(b.rest - b.initial) / b.initial, 0) / s.panel.beams.length;
-          s.part.condition = Math.min(s.part.condition, Math.max(0, 1 - strain / 0.25));
+          s.part.condition = Math.min(s.part.condition, Math.max(0, 1 - strain / (s.root ? 0.3 : 0.4)));
         }
         if (!s.root && !s.panel.attached) s.part.condition = 0;
         if (!s.root && s.part.condition === 0 && s.part.parent) { this.root.world.detach(s.part); detached = true; }

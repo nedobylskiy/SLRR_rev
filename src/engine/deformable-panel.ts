@@ -175,11 +175,14 @@ export class DeformablePanel {
       for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
       if (iteration === 0 || iteration === 4 || iteration === 8 || iteration === 11) surfaces();
     }
+    let release = false;
     for (const m of this.mounts) if (!m.broken) {
       m.force = m.nodes.reduce((sum, n) => sum + Math.hypot(this.anchorLambda[n * 3], this.anchorLambda[n * 3 + 1], this.anchorLambda[n * 3 + 2]) / dt2, 0);
       m.overload = m.force > this.mountStrength ? m.overload + dt : 0;
-      if (m.overload >= 2 * dt) m.broken = true;
+      if (m.overload >= 2 * dt) release = true;
     }
+    // The clamps represent one part attachment: a failed clamp releases the whole panel.
+    if (release) for (const m of this.mounts) m.broken = true;
     if (attached && !this.attached) surfaces(); // Sweep the release step too, before its history is discarded.
     for (const b of this.beams) {
       const a = b.a * 3, c = b.b * 3, dx = p[a] - p[c], dy = p[a + 1] - p[c + 1], dz = p[a + 2] - p[c + 2], length = Math.sqrt(dx * dx + dy * dy + dz * dz), strain = (length - b.rest) / b.initial;

@@ -23,7 +23,12 @@ test('impact supplies momentum, does not directly tear mounts; overload falls an
   for (let i = 0; i < p.velocities.length; i++) momentum[i % 3] += p.velocities[i] * p.options.mass / (p.velocities.length / 3);
   assert.ok(Math.abs(Math.hypot(...momentum) - 650) < 1e-9);
   assert.ok(p.mounts.every(m => !m.broken));
-  run(p, 3); assert.equal(p.attached, false); assert.ok(p.plasticBeams > 0);
+  for (let i = 0; i < 3 * 240; i++) {
+    p.advance(1 / 240);
+    const intact = p.mounts.filter(m => !m.broken).length;
+    assert.ok(intact === 0 || intact === p.mounts.length, 'a panel cannot hang from only some clamps');
+  }
+  assert.equal(p.attached, false); assert.ok(p.plasticBeams > 0);
   for (let i = 0; i < p.positions.length; i++) { assert.ok(Number.isFinite(p.positions[i])); if (i % 3 === 1) assert.ok(p.positions[i] >= 0.015); }
   p.reset(); assert.deepEqual(p.positions, p.rest); assert.ok(p.velocities.every(v => v === 0)); assert.equal(p.plasticBeams, 0); assert.ok(p.mounts.every(m => !m.broken && !m.force));
 });
