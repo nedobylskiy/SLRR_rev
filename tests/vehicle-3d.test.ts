@@ -145,6 +145,25 @@ test('a 15 km/h impact marks the chassis without tearing off healthy body panels
   world.dispose();
 });
 
+test('chassis crumple control changes the same 50 km/h impact without changing body parts', () => {
+  const { world, root, demo } = setup();
+  const shell: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
+  demo.register(root, shell, []);
+  const dent = (value: number) => {
+    demo.setChassisCrumple(value); demo.reset(50 / 3.6);
+    for (let i = 0; i < 2 * 240; i++) demo.advance(1 / 240, neutral);
+    const panel = demo.soft.get(root)!.panel;
+    let maximum = 0;
+    for (let i = 0; i < panel.positions.length; i += 3) maximum = Math.max(maximum, Math.hypot(...[0, 1, 2].map(axis => panel.positions[i + axis] - panel.rest[i + axis])));
+    return maximum;
+  };
+  const firmer = dent(0.7), softer = dent(1.3);
+  assert.ok(softer > firmer * 1.1, `softer chassis ${softer.toFixed(3)} m, firmer ${firmer.toFixed(3)} m`);
+  assert.throws(() => demo.setChassisCrumple(2));
+  world.dispose();
+});
+
 test('a severe impact can still release the hood as one part', () => {
   const { world, root, hood, demo } = setup();
   const shell: number[] = [];

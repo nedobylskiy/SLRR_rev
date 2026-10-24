@@ -29,6 +29,11 @@ let crashSession: ReturnType<Viewer['drive']> | undefined;
 for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 50 км/ч', 50 / 3.6], ['Сброс', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
+const crumpleLabel = textElement('label', 'Смятие кузова'), crumpleSlider = document.createElement('input'), crumpleValue = textElement('output', '×1.00');
+crumpleLabel.className = 'crumple-control'; crumpleSlider.type = 'range'; crumpleSlider.min = '0.5'; crumpleSlider.max = '1.5'; crumpleSlider.step = '0.05'; crumpleSlider.value = '1';
+crumpleSlider.setAttribute('aria-label', 'Смятие кузова'); crumpleSlider.title = 'Изменяет смятие несущего кузова при следующем ударе';
+crumpleSlider.oninput = () => { const value = Number(crumpleSlider.value); crumpleValue.textContent = `×${value.toFixed(2)}`; crashSession?.chassisCrumple(value); };
+crumpleLabel.append(crumpleSlider, crumpleValue); crashControls.append(crumpleLabel);
 const crashCageLabel = textElement('label', ' Каркасы деталей'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
 const internalsLabel = textElement('label', ' Внутренние узлы'), internals = document.createElement('input'); internals.type = 'checkbox';
 internals.onchange = () => viewer?.showInternals(internals.checked); internalsLabel.prepend(internals); crashControls.append(internalsLabel);
@@ -70,6 +75,7 @@ trackDriveButton.onclick = async () => {
     if (start.y < -100) throw new Error('У стартовой линии нет поверхности карты');
     beforeDrivingDetails = el('details').textContent ?? '';
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI });
+    crashSession.chassisCrumple(Number(crumpleSlider.value));
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · поездка'; el('format').textContent = 'MAP / PHYSICS';
@@ -110,6 +116,7 @@ crashButton.onclick = async () => {
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
+    crashSession.chassisCrumple(Number(crumpleSlider.value));
     el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; internals.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
