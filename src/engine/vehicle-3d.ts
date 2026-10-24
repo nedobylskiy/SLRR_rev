@@ -6,8 +6,9 @@ import { DeformablePanel, type PanelBinding, type Triple } from './deformable-pa
 import { TriangleSurface } from './triangle-surface';
 import type { EnginePart } from './world';
 import type { DrivingInput } from './driving-demo';
+import { PanelActivity } from './panel-activity';
 
-export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; center: Vector3; inverseBasis: Matrix4; root: boolean }
+export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean }
 export interface RigidPart { part: EnginePart; body: RigidBody3D; previous: Matrix4; peakForce: number }
 interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[] }
 const mass = (p: EnginePart) => Math.max(0.1, p.definition.config.bodies.reduce((s, b) => s + b.mass, 0));
@@ -30,6 +31,12 @@ export class Vehicle3D extends CarCrashDemo {
   private originalObstacle: { min: Triple; max: Triple };
   private rigidSurface?: TriangleSurface;
   private triangleSource?: number[];
+  private surfaceTopology = '';
+  private surfaceCoordinates: number[] = [];
+  private lastVelocity = new Vector3();
+  private lastOmega = new Vector3();
+  private surfaceDirty = false;
+  private pendingShock = false;
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3) {
     super(root, hood, samples, chassisBounds);
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
@@ -45,7 +52,8 @@ export class Vehicle3D extends CarCrashDemo {
     // Bind reference basis before moving targets into the world.
     const old = panel.positions.slice(); panel.reset();
     if (part === this.hood) { const inverse = part.matrix().invert(); for (let i = 0; i < panel.positions.length; i += 3) new Vector3().fromArray(panel.positions, i).applyMatrix4(inverse).toArray(panel.positions, i); }
-    const soft = { part, panel, center: centerOf(panel.positions), inverseBasis: basis(panel).invert(), root };
+    const activity = new PanelActivity(panel); activity.reset(part.matrix());
+    const soft = { part, panel, activity, center: centerOf(panel.positions), inverseBasis: basis(panel).invert(), root };
     panel.positions.set(old); this.soft.set(part, soft);
     if (panel !== this.panel) panel.colliders.push(this.obstacle);
     if (!root && panel !== this.panel) panel.surfaces.push({ project: (p, previous, i) => !part.parent ? this.rigidSurface?.project(p, previous, i) : undefined });
@@ -63,44 +71,69 @@ export class Vehicle3D extends CarCrashDemo {
     const soft = this.soft.get(part);
     this.geometry.push({ part, triangles, bindings: soft && Array.from({ length: triangles.length / 3 }, (_, i) => soft.panel.bind(triangles.slice(i * 3, i * 3 + 3))) });
   }
-  override setBodyTriangles(triangles: ArrayLike<number>) { super.setBodyTriangles(triangles); this.triangleSource = Array.from(triangles); this.makeRigidSurface(this.triangleSource); }
-  private makeRigidSurface(triangles: number[]) {
-    this.rigidSurface = new TriangleSurface(triangles, () => true, point => this.body.pointVelocity(point), (j, p) => this.body.impulse(new Vector3(...j).negate(), new Vector3(...p)));
-  }
+  override setBodyTriangles(triangles: ArrayLike<number>) { super.setBodyTriangles(triangles, true); this.triangleSource = Array.from(triangles); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; }
   private updateSurface() {
     if (!this.geometry.length) return;
-    const inverse = this.root.matrix().invert(), triangles: number[] = [], out = [0, 0, 0];
+    const inverse = this.root.matrix().invert(), triangles = this.surfaceCoordinates, out = [0, 0, 0], point = new Vector3();
+    triangles.length = 0;
+    let topology = '';
     for (const g of this.geometry) {
       if (g.part === this.hood || !this.connected(g.part)) continue;
+      topology += `${g.part.id},`;
       const matrix = inverse.clone().multiply(g.part.matrix());
       for (let i = 0; i < g.triangles.length; i += 3) {
-        if (g.bindings) { this.soft.get(g.part)!.panel.skin(g.bindings[i / 3], out); triangles.push(...new Vector3(...out).applyMatrix4(inverse).toArray()); }
-        else triangles.push(...new Vector3().fromArray(g.triangles, i).applyMatrix4(matrix).toArray());
+        if (g.bindings) { this.soft.get(g.part)!.panel.skin(g.bindings[i / 3], out); point.fromArray(out).applyMatrix4(inverse); }
+        else point.fromArray(g.triangles, i).applyMatrix4(matrix);
+        triangles.push(point.x, point.y, point.z);
       }
     }
     if (!triangles.length) return;
-    super.setBodyTriangles(triangles); this.makeRigidSurface(triangles);
+    if (topology === this.surfaceTopology && this.bodySurface) this.bodySurface.refit(triangles);
+    else { super.setBodyTriangles(triangles, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = topology; }
   }
   private connected(part: EnginePart) { for (let p: EnginePart | undefined = part; p; p = p.parent) if (p === this.root) return true; return false; }
   override velocity() { return this.body ? this.body.velocity.clone() : super.velocity(); }
   override pointVelocity(point: Vector3) { return this.body ? this.body.pointVelocity(point) : super.pointVelocity(point); }
-  override applyImpulse(j: Vector3, point: Vector3) { if (this.body) this.body.impulse(j, point); else super.applyImpulse(j, point); }
+  override applyImpulse(j: Vector3, point: Vector3) {
+    if (this.body) { this.body.impulse(j, point); if (j.length() / this.body.mass / this.clock.dt > 25) this.pendingShock = true; }
+    else super.applyImpulse(j, point);
+  }
   override reset(speed = 0) {
     super.reset(speed);
     if (!this.body) return;
     for (const s of this.originalTree) if (s.parent && s.part.parent !== s.parent) { if (s.part.parent) this.root.world.detach(s.part); this.root.world.install(s.parent, s.parentSlot!, s.part, s.ownSlot!); }
     for (const s of this.originalTree) if (s.part !== this.root) s.part.local.copy(s.local);
     this.body.setMass([...this.root.world.parts.values()].reduce((s, p) => s + mass(p), 0)); this.body.setFrame(this.root.matrix()); this.body.velocity.z = -speed; this.suspension.reset(); this.terrain.ramp = false;
+    this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
-    for (const s of this.soft.values()) { s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
+    for (const s of this.soft.values()) { s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
     for (const r of this.rigid.values()) { r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
-    if (this.triangleSource) { super.setBodyTriangles(this.triangleSource); this.makeRigidSurface(this.triangleSource); }
+    if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; }
   }
   jump() { this.reset(14); this.terrain.ramp = true; this.obstacle.min[0] += 20; this.obstacle.max[0] += 20; }
   override dropOnRoof() { super.dropOnRoof(); this.body.setMass([...this.root.world.parts.values()].filter(p => this.connected(p)).reduce((s, p) => s + mass(p), 0)); }
   roll() { this.reset(); this.body.impulse(new Vector3(this.body.mass * 5, this.body.mass * 2, 0), this.body.position.clone().add(new Vector3(0, 1, 0))); }
   private syncBody() {
     this.root.local.copy(this.body.matrix()); this.driving.position.setFromMatrixPosition(this.root.local); this.driving.speed = this.body.velocity.dot(new Vector3(0, 0, -1).applyQuaternion(this.body.orientation)); this.suspension.sync();
+  }
+  /** Probe first so a hard impact can wake XPBD before any rigid proxy impulse is applied. */
+  private freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean) {
+    let speed = 0;
+    const solve = (point: Vector3, normal: Vector3, depth: number, carrier = false) => {
+      const relative = body.pointVelocity(point); if (carrier) relative.sub(this.body.pointVelocity(point));
+      speed = Math.max(speed, -relative.dot(normal));
+      if (apply) { const impulse = body.contact(point, normal, depth); if (carrier) this.applyImpulse(impulse.negate(), point); }
+    };
+    const contact = boxContact(body, obstacle); if (contact) solve(contact.point, contact.normal, contact.depth);
+    const matrix = body.matrix(), inverse = matrix.clone().invert();
+    for (const point of body.corners()) {
+      const height = this.terrain.height(point.x, point.z);
+      if (point.y < height) solve(point, this.terrain.normal(point.x, point.z), height - point.y);
+      const old = point.clone().applyMatrix4(inverse).applyMatrix4(previous), projected = new Float64Array(point.toArray());
+      const hit = this.rigidSurface?.project(projected, new Float64Array(old.toArray()), 0);
+      if (hit) { const normal = new Vector3(...hit.normal); solve(point, normal, new Vector3().fromArray(projected).sub(point).dot(normal), true); }
+    }
+    return speed;
   }
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');
@@ -124,15 +157,30 @@ export class Vehicle3D extends CarCrashDemo {
           this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.12).toArray() as Triple, c.point.toArray() as Triple);
         }
       }
-      this.syncBody(); this.bodySurface?.setFrames(previous, this.root.matrix()); this.rigidSurface?.setFrames(previous, this.root.matrix());
+      this.syncBody(); this.bodySurface?.setFrames(previous, this.root.matrix());
+      const omega = this.body.omega;
+      // Gravity and normal suspension load alone do not require a node solve. Hard accelerations,
+      // angular shocks and centrifugal loads can deform panels or overload their attachments.
+      const shock = this.pendingShock || this.body.velocity.distanceTo(this.lastVelocity) / dt > 25 || omega.distanceTo(this.lastOmega) / dt > 10 || omega.lengthSq() * 3 > 25;
+      this.pendingShock = false;
       let detached = false;
       for (const s of this.soft.values()) {
-        if (s.part.parent || s.root) s.panel.setAnchorFrame(s.part.matrix().elements);
-        s.panel.advance(dt);
+        const attached = !!s.part.parent || s.root, frame = s.part.matrix();
+        if (attached) s.panel.setAnchorFrame(frame.elements);
+        if (!s.activity.deforming && (s.activity.forced || attached && (shock || s.activity.threatened(frame, obstacle)))) s.activity.wake();
+        if (!attached && !s.activity.deforming && !s.activity.freeBody) s.activity.wake();
+        if (!attached && !s.activity.deforming) {
+          const free = s.activity.freeBody!, old = free.matrix(); free.integrate(dt);
+          if (this.freeContacts(free, old, obstacle, false) > 0.8) s.activity.wake();
+          else { this.freeContacts(free, old, obstacle, true); s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); }
+        } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
+        if (!s.activity.deforming) continue;
+        s.panel.advance(dt); this.surfaceDirty = true;
         if (!s.root && !s.panel.attached && s.part.parent) { this.root.world.detach(s.part); detached = true; }
         if (!s.root && !s.part.parent) {
           const frame = basis(s.panel).multiply(s.inverseBasis), center = centerOf(s.panel.positions); frame.setPosition(center.sub(s.center.clone().applyMatrix4(frame))); s.part.local.copy(frame);
         }
+        s.activity.settle(dt, s.part.matrix(), !!s.part.parent || s.root);
       }
       for (const r of this.rigid.values()) {
         const wasAttached = !!r.part.parent;
@@ -166,7 +214,8 @@ export class Vehicle3D extends CarCrashDemo {
       }
       if (detached) { const omega = this.body.omega; this.body.setMass([...this.root.world.parts.values()].filter(p => this.connected(p)).reduce((s, p) => s + mass(p), 0)); this.body.setAngularVelocity(omega); this.updateSurface(); }
       // Refit deformed body contact geometry periodically; never retain detached-panel ghost colliders.
-      if (tick % 24 === 0) this.updateSurface();
+      if (tick % 24 === 0 && this.surfaceDirty) { this.updateSurface(); this.surfaceDirty = false; }
+      this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega);
     });
   }
   override dispose() { this.reset(); }

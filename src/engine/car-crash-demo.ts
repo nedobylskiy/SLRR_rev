@@ -22,6 +22,7 @@ export class CarCrashDemo {
   private originalLocal: Matrix4;
   private localCenter: Vector3;
   private referenceInverse: Matrix4;
+  private hoodSurface = { project: (p: Float64Array, previous: Float64Array, offset: number) => !this.panel.attached ? this.bodySurface?.project(p, previous, offset) : undefined };
   constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength'> = {}) {
     if (!hood.parent || hood.world !== root.world) throw new Error('Crash demo needs an installed hood');
     this.parent = hood.parent; this.parentSlot = hood.parentSlot!; this.ownSlot = hood.ownSlot!; this.originalLocal = hood.local.clone();
@@ -39,10 +40,10 @@ export class CarCrashDemo {
     this.mass = Math.max(1, [...root.world.parts.values()].reduce((sum, p) => sum + p.definition.config.bodies.reduce((s, b) => s + b.mass, 0), 0) - cfg.bodies.reduce((sum, b) => sum + b.mass, 0));
     const size = chassisBounds.getSize(new Vector3()); this.inertia = this.mass * (size.x * size.x + size.z * size.z) / 12;
   }
-  setBodyTriangles(triangles: ArrayLike<number>) {
-    if (this.bodySurface) this.panel.surfaces.splice(this.panel.surfaces.indexOf(this.bodySurface), 1);
-    this.bodySurface = new TriangleSurface(triangles, () => !this.panel.attached, point => this.pointVelocity(point), (impulse, point) => this.applyImpulse(new Vector3(...impulse).negate(), new Vector3(...point)));
-    this.panel.surfaces.push(this.bodySurface); this.bodySurface.setFrames(this.root.matrix(), this.root.matrix());
+  setBodyTriangles(triangles: ArrayLike<number>, includeAttached = false) {
+    if (!this.bodySurface) this.panel.surfaces.push(this.hoodSurface);
+    this.bodySurface = new TriangleSurface(triangles, () => includeAttached || !this.panel.attached, point => this.pointVelocity(point), (impulse, point) => this.applyImpulse(new Vector3(...impulse).negate(), new Vector3(...point)));
+    this.bodySurface.setFrames(this.root.matrix(), this.root.matrix());
   }
   velocity() { return new Vector3(-Math.sin(this.driving.yaw), 0, -Math.cos(this.driving.yaw)).multiplyScalar(this.driving.speed).add(this.lateralVelocity); }
   pointVelocity(point: Vector3) { return this.velocity().add(new Vector3().crossVectors(new Vector3(0, this.yawVelocity, 0), point.clone().sub(this.driving.position))); }

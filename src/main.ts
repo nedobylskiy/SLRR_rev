@@ -63,7 +63,7 @@ crashButton.onclick = async () => {
     beforeDrivingDetails = el('details').textContent ?? '';
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
     el('viewport').parentElement?.classList.add('physics-scene');
-    slow.checked = true; pause.checked = false; crashSession.slowMotion(true);
+    slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
     el('details').textContent = 'Шасси движется и вращается в 3D. Четыре опоры подвески используют точки, радиусы и spring из CFG; жёсткость/демпфирование настроены для прототипа. Заезды — удар о препятствие; «Трамплин» — прыжок; «Боковой удар» — внешний импульс, способный перевернуть машину. Металлические панели гнутся и отрываются, фары и стёкла отделяются жёсткими. R восстанавливает сборку; пауза позволяет осмотреть повреждения.';

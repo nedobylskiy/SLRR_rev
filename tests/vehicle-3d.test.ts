@@ -71,6 +71,37 @@ test('3D suspension, rotation and panel state are independent of rendering caden
   assert.throws(() => a.demo.advance(0, { ...input, steer: NaN }), /Finite/); a.world.dispose(); b.world.dispose();
 });
 
+test('installed panels stay rigid at rest, wake for an impulse and retain their dents when carried', () => {
+  const { world, demo, hood } = setup();
+  for (let i = 0; i < 120; i++) demo.advance(1 / 240, neutral);
+  assert.ok([...demo.soft.values()].every(s => !s.activity.deforming));
+  assert.equal(demo.panel.clock.tick, demo.clock.tick);
+  demo.panel.hit(90); demo.advance(1 / 240, neutral);
+  assert.ok(demo.soft.get(hood)!.activity.deforming);
+  for (let i = 0; i < 180; i++) demo.advance(1 / 240, neutral);
+  assert.ok(demo.panel.plasticBeams > 0);
+  const plastic = demo.panel.beams.map(b => b.rest), positions = demo.panel.positions.slice();
+  const transform = new Matrix4().makeRotationY(0.4).setPosition(2, 3, -1);
+  demo.panel.advanceRigid(1 / 240, transform.elements, [1, 2, 3], [0, 0.5, 0], [0, 0, 0]);
+  assert.deepEqual(demo.panel.beams.map(b => b.rest), plastic);
+  for (let i = 0; i < positions.length; i += 3) assert.ok(new Vector3().fromArray(demo.panel.positions, i).distanceTo(new Vector3().fromArray(positions, i).applyMatrix4(transform)) < 1e-10);
+  demo.reset(); assert.ok(!demo.soft.get(hood)!.activity.deforming); assert.equal(demo.panel.plasticBeams, 0); world.dispose();
+});
+
+test('a released panel becomes a rigid free body in flight and wakes again on landing', () => {
+  const { world, demo, hood } = setup();
+  world.detach(hood); demo.panel.mounts.forEach(m => { m.broken = true; });
+  for (let i = 1; i < demo.panel.positions.length; i += 3) demo.panel.positions[i] += 5;
+  let rigidFlight = false, wokeOnLanding = false;
+  for (let i = 0; i < 480; i++) {
+    demo.advance(1 / 240, neutral);
+    const activity = demo.soft.get(hood)!.activity;
+    if (!activity.deforming && activity.freeBody) { rigidFlight = true; assert.ok(activity.freeBody.velocity.y < 0); }
+    if (rigidFlight && activity.deforming) { wokeOnLanding = true; break; }
+  }
+  assert.ok(rigidFlight); assert.ok(wokeOnLanding); assert.equal(hood.parent, undefined); world.dispose();
+});
+
 
 
 

@@ -134,6 +134,7 @@ export class Viewer {
     const keys = new Set<string>(), canvas = this.renderer.domElement;
     let crash: CarCrashDemo | undefined, obstacle: THREE.Mesh | undefined, ramp: THREE.Mesh | undefined;
     const panelViews: PanelView[] = [], softParts = new Set<EnginePart>();
+    const panelParts = new Map<PanelView, EnginePart>();
     const localPositions = (part: EnginePart) => {
       const group = this.proxies.get(part); if (!group) throw new Error(`No render proxy for ${part.definition.alias}`);
       const transform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose));
@@ -162,7 +163,7 @@ export class Viewer {
         (crash as Vehicle3D).register(part, localPositions(part).flat(), ownTriangles);
       }
       crash.setBodyTriangles(triangles);
-      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); panelViews.push(new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part))); }
+      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part)); panelViews.push(view); panelParts.set(view, s.part); }
       const rampGeometry = new THREE.BufferGeometry();
       rampGeometry.setAttribute('position', new THREE.Float32BufferAttribute([-1.8, 0, -4, 1.8, 0, -4, 1.8, 1.12, -8, -1.8, 0, -4, 1.8, 1.12, -8, -1.8, 1.12, -8], 3)); rampGeometry.computeVertexNormals();
       ramp = new THREE.Mesh(rampGeometry, new THREE.MeshStandardMaterial({ color: 0x668d9d, side: THREE.DoubleSide })); ramp.visible = false; this.model.add(ramp);
@@ -172,6 +173,9 @@ export class Viewer {
     }
     const demo = crash?.driving ?? new DrivingDemo(root);
     let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1, paused = false;
+    let frameMs = 1000 / 60;
+    const reportTelemetry = telemetry;
+    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\n${Math.round(1000 / frameMs)} кадр/с · деформация активна: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}` : ''));
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
       if (!relevant.has(event.code)) return;
@@ -192,9 +196,11 @@ export class Viewer {
     this.frame = now => {
       if (document.hidden) { last = undefined; return; }
       // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
-      const seconds = last === undefined || paused ? 0 : Math.min((now - last) / 1000, 0.1); last = now;
+      const elapsed = last === undefined ? 0 : Math.max(0, (now - last) / 1000);
+      const seconds = paused ? 0 : Math.min(elapsed, 0.1); last = now;
+      if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
       const input = { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space') };
-      if (crash) { crash.advance(seconds * timeScale, input); panelViews.forEach(v => v.update()); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); } } else demo.advance(seconds, input);
+      if (crash) { crash.advance(seconds * timeScale, input); for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); } } else demo.advance(seconds, input);
       this.syncWorld(softParts);
       const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta); followed.copy(demo.position);
       if (now - lastHud > 100) {

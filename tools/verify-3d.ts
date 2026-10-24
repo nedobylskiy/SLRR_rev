@@ -30,8 +30,11 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
   demo.setBodyTriangles(triangles);
   if (scenario === 'crash') demo.reset(50 / 3.6); else if (scenario === 'jump') demo.jump(); else if (scenario === 'roll') demo.roll(); else demo.reset();
   let maxY = -Infinity, minUp = 1, airborne = 0;
+  const stepTimes: number[] = [];
   for (let i = 0; i < 240 * 4; i++) {
+    const start = performance.now();
     demo.advance(1 / 240, { throttle: 0, steer: 0, brake: false });
+    stepTimes.push(performance.now() - start);
     maxY = Math.max(maxY, demo.driving.position.y); minUp = Math.min(minUp, new Vector3(0, 1, 0).applyQuaternion(demo.body.orientation).y);
     if (demo.suspension.wheels.every(w => !w.contact)) airborne++;
     assert.ok(demo.body.position.toArray().every(Number.isFinite));
@@ -43,7 +46,9 @@ for (const scenario of scenarios.filter(s => !process.argv[2] || s === process.a
   if (scenario === 'jump') { assert.ok(maxY > 1.5); assert.ok(airborne > 20); }
   if (scenario === 'roll') assert.ok(minUp < -0.8);
   for (const r of demo.rigid.values()) { assert.equal(demo.soft.has(r.part), false); const m = r.part.matrix(), x = new Vector3().setFromMatrixColumn(m, 0), y = new Vector3().setFromMatrixColumn(m, 1); assert.ok(Math.abs(x.dot(y)) < 1e-8); assert.ok(Math.abs(x.length() - 1) < 1e-8 && Math.abs(y.length() - 1) < 1e-8); }
-  console.log(report); reports.push(report);
+  const wallMs = stepTimes.reduce((sum, ms) => sum + ms, 0), sorted = [...stepTimes].sort((a, b) => a - b);
+  const performanceReport = { simulatedSeconds: 4, wallMs, realTimeFactor: 4000 / wallMs, stepP95Ms: sorted[Math.floor(sorted.length * 0.95)], stepMaxMs: sorted.at(-1) };
+  console.log(report, performanceReport); reports.push({ ...report, performance: performanceReport });
   demo.reset(); assert.equal(world.parts.size, 33); assert.equal(hood.parent, root);
   for (const s of originalTree) { assert.equal(s.part.parent, s.parent); assert.equal(s.part.parentSlot, s.parentSlot); assert.equal(s.part.ownSlot, s.ownSlot); }
   assert.ok([...demo.soft.values()].every(s => s.panel.plasticBeams === 0)); world.dispose();

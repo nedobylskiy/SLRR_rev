@@ -6,6 +6,23 @@ import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const plane = [-10, 0.5, -10, 10, 0.5, -10, 10, 0.5, 10, -10, 0.5, -10, 10, 0.5, 10, -10, 0.5, 10];
 const surface = () => new TriangleSurface(plane, () => true, () => new Vector3(), () => {});
+test('refit moves contacts outside old BVH bounds and invalidates cached candidates', () => {
+  const s = surface(), old = new Float64Array([0, 1, 0]), p = new Float64Array([0, -1, 0]);
+  assert.ok(s.project(p, old, 0));
+  const moved = plane.map((v, i) => v + (i % 3 === 0 ? 30 : 0)); s.refit(moved);
+  p.set([0, -1, 0]); assert.equal(s.project(p, old, 0), undefined);
+  old.set([30, 1, 0]); p.set([30, -1, 0]); assert.ok(s.project(p, old, 0));
+  const rebuilt = new TriangleSurface(moved, () => true, () => new Vector3(), () => {}), expected = new Float64Array([30, -1, 0]);
+  rebuilt.project(expected, old, 0); assert.deepEqual(p, expected);
+  assert.throws(() => s.refit(moved.slice(3)), /topology/);
+  assert.throws(() => s.refit(moved.map((v, i) => i === 0 ? NaN : v)), /Invalid/);
+});
+
+test('refit can revive an initially degenerate face', () => {
+  const s = new TriangleSurface([...plane, ...Array(9).fill(0)], () => true, () => new Vector3(), () => {});
+  s.refit([...plane, 29, 2, -1, 31, 2, -1, 30, 2, 1]);
+  const p = new Float64Array([30, 0, 0]); assert.ok(s.project(p, new Float64Array([30, 3, 0]), 0)); assert.ok(p[1] > 2);
+});
 test('triangle contact is two-sided, swept, bounded and cannot flip sides from inside its contact shell', () => {
   const s = surface(); s.setFrames(new Matrix4(), new Matrix4());
   for (const [fromY, toY, sign] of [[1, -4, 1], [0, 4, -1], [0.52, 0.2, 1]]) {

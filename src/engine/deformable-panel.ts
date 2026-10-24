@@ -17,6 +17,8 @@ export class DeformablePanel {
   readonly beams: Beam[] = []; readonly mounts: PanelMount[] = [];
   clock = new FixedClock(240, 32);
   private previous: Float64Array; private anchorLambda: Float64Array;
+  private incoming: Float64Array;
+  private stepContacts = new Map<number, PanelContact>();
   private minX = Infinity; private maxX = -Infinity; private minZ = Infinity; private maxZ = -Infinity;
   private inverseMass: number;
   private template: Float64Array;
@@ -24,6 +26,8 @@ export class DeformablePanel {
   readonly colliders: PanelCollider[] = [];
   readonly surfaces: PanelSurface[] = [];
   contacts = 0;
+  impulseVersion = 0;
+  resetVersion = 0;
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
     [this.nx, this.nz] = options.resolution ?? [7, 9];
@@ -43,6 +47,7 @@ export class DeformablePanel {
     const count = this.nx * this.nz * 2;
     this.positions = new Float64Array(count * 3); this.rest = new Float64Array(count * 3); this.velocities = new Float64Array(count * 3);
     this.previous = new Float64Array(count * 3); this.anchorLambda = new Float64Array(count * 3); this.anchorVelocities = new Float64Array(count * 3); this.inverseMass = count / options.mass;
+    this.incoming = new Float64Array(count * 3);
     for (let z = 0; z < this.nz; z++) for (let x = 0; x < this.nx; x++) {
       const px = this.minX + x / (this.nx - 1) * (this.maxX - this.minX), pz = this.minZ + z / (this.nz - 1) * (this.maxZ - this.minZ);
       let sum = 0, weight = 0;
@@ -90,6 +95,7 @@ export class DeformablePanel {
   }
   get plasticBeams() { return this.beams.filter(b => Math.abs(b.rest - b.initial) > b.initial * 0.001).length; }
   reset() {
+    this.resetVersion++;
     this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(240, 32);
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
@@ -109,6 +115,7 @@ export class DeformablePanel {
   }
   hit(impulse: number, u = 0.5, v = 0.35) {
     if (!Number.isFinite(impulse) || impulse < 0 || impulse > 1000 || ![u, v].every(n => Number.isFinite(n) && n >= 0 && n <= 1)) throw new Error('Invalid panel impact');
+    if (impulse > 0) this.impulseVersion++;
     const center = [this.minX + u * (this.maxX - this.minX), 0, this.minZ + v * (this.maxZ - this.minZ)];
     const weights = Array.from({ length: this.positions.length / 3 }, (_, n) => Math.exp(-((this.rest[n * 3] - center[0]) ** 2 + (this.rest[n * 3 + 2] - center[2]) ** 2) / (2 * 0.17 ** 2)));
     const sum = weights.reduce((a, b) => a + b, 0);
@@ -117,9 +124,27 @@ export class DeformablePanel {
   impulseAt(impulse: Triple, point: Triple, radius = 0.3) {
     const weights = Array.from({ length: this.positions.length / 3 }, (_, n) => Math.exp(-([0, 1, 2].reduce((s, a) => s + (this.positions[n * 3 + a] - point[a]) ** 2, 0)) / (2 * radius * radius))), total = weights.reduce((a, b) => a + b, 0);
     if (total < 1e-12) return;
+    if (impulse.some(v => v !== 0)) this.impulseVersion++;
     weights.forEach((w, n) => { for (let a = 0; a < 3; a++) this.velocities[n * 3 + a] += impulse[a] * w / total * this.inverseMass; });
   }
   advance(seconds: number) { return this.clock.advance(seconds, (_, dt) => this.step(dt)); }
+  /** Carry the existing (possibly dented) cage as one rigid shape. Plastic lengths stay intact. */
+  advanceRigid(seconds: number, transform: ArrayLike<number>, velocity: Triple, omega: Triple, center: Triple) {
+    if (transform.length !== 16 || ![...Array.from(transform), ...velocity, ...omega, ...center].every(Number.isFinite)) throw new Error('Invalid rigid panel motion');
+    return this.clock.advance(seconds, () => {
+      for (let i = 0; i < this.positions.length; i += 3) {
+        const x = this.positions[i], y = this.positions[i + 1], z = this.positions[i + 2];
+        const px = transform[0] * x + transform[4] * y + transform[8] * z + transform[12], py = transform[1] * x + transform[5] * y + transform[9] * z + transform[13], pz = transform[2] * x + transform[6] * y + transform[10] * z + transform[14];
+        this.positions[i] = px; this.positions[i + 1] = py; this.positions[i + 2] = pz;
+        const rx = px - center[0], ry = py - center[1], rz = pz - center[2];
+        this.velocities[i] = velocity[0] + omega[1] * rz - omega[2] * ry;
+        this.velocities[i + 1] = velocity[1] + omega[2] * rx - omega[0] * rz;
+        this.velocities[i + 2] = velocity[2] + omega[0] * ry - omega[1] * rx;
+      }
+      this.previous.set(this.positions); this.anchorVelocities.fill(0); this.contacts = 0;
+      for (const mount of this.mounts) { mount.force = 0; mount.overload = 0; }
+    });
+  }
   private step(dt: number) {
     const p = this.positions, inv = this.inverseMass, dt2 = dt * dt;
     this.previous.set(p); this.anchorLambda.fill(0);
@@ -129,13 +154,13 @@ export class DeformablePanel {
       for (let axis = 0; axis < 3; axis++) { const target = attached ? this.anchorVelocities[i + axis] : 0; p[i + axis] += (target + (this.velocities[i + axis] - target) * damping) * dt; }
     }
     this.anchorVelocities.fill(0);
-    const incoming = new Float64Array(p.length), contacts = new Map<number, PanelContact>();
+    const incoming = this.incoming, contacts = this.stepContacts; contacts.clear();
     for (let i = 0; i < p.length; i++) incoming[i] = (p[i] - this.previous[i]) / dt;
     const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
     for (const b of this.beams) b.lambda = 0;
     for (let iteration = 0; iteration < 12; iteration++) {
       for (const b of this.beams) {
-        const a = b.a * 3, c = b.b * 3, dx = p[a] - p[c], dy = p[a + 1] - p[c + 1], dz = p[a + 2] - p[c + 2], length = Math.hypot(dx, dy, dz);
+        const a = b.a * 3, c = b.b * 3, dx = p[a] - p[c], dy = p[a + 1] - p[c + 1], dz = p[a + 2] - p[c + 2], length = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (length < 1e-10) continue;
         const alpha = 1 / b.stiffness / dt2, dl = (-(length - b.rest) - alpha * b.lambda) / (2 * inv + alpha), s = inv * dl / length; b.lambda += dl;
         p[a] += dx * s; p[a + 1] += dy * s; p[a + 2] += dz * s; p[c] -= dx * s; p[c + 1] -= dy * s; p[c + 2] -= dz * s;
@@ -155,7 +180,7 @@ export class DeformablePanel {
     }
     if (attached && !this.attached) surfaces(); // Sweep the release step too, before its history is discarded.
     for (const b of this.beams) {
-      const a = b.a * 3, c = b.b * 3, length = Math.hypot(p[a] - p[c], p[a + 1] - p[c + 1], p[a + 2] - p[c + 2]), strain = (length - b.rest) / b.initial;
+      const a = b.a * 3, c = b.b * 3, dx = p[a] - p[c], dy = p[a + 1] - p[c + 1], dz = p[a + 2] - p[c + 2], length = Math.sqrt(dx * dx + dy * dy + dz * dz), strain = (length - b.rest) / b.initial;
       if (Math.abs(strain) > this.yieldStrain) b.rest = clamp(b.rest + Math.sign(strain) * (Math.abs(strain) - this.yieldStrain) * b.initial * Math.min(1, 120 * dt), b.initial * 0.5, b.initial * 1.5);
     }
     for (let i = 0; i < p.length; i++) { this.velocities[i] = (p[i] - this.previous[i]) / dt; if (!Number.isFinite(p[i])) throw new Error('Non-finite panel state'); }
