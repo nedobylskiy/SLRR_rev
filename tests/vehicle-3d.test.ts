@@ -176,6 +176,20 @@ test('a severe impact can still release the hood as one part', () => {
   world.dispose();
 });
 
+
+test('many contact points cannot launch one rigid detached panel upward', () => {
+  const { world, demo } = setup();
+  demo.disableObstacle();
+  const body = new RigidBody3D(20, new Box3(new Vector3(-0.5, -0.1, -0.5), new Vector3(0.5, 0.1, 0.5)));
+  body.setFrame(new Matrix4().makeTranslation(5, 0, 0));
+  const points = new Float64Array(60);
+  for (let i = 0; i < points.length; i += 3) { points[i] = 5 + (i % 5) * 0.05; points[i + 1] = -0.05; points[i + 2] = 0; }
+  const before = body.position.y;
+  (demo as unknown as { freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape: Float64Array): number }).freeContacts(body, body.matrix(), new Box3(new Vector3(100, 100, 100), new Vector3(101, 101, 101)), true, points);
+  assert.ok(body.position.y - before < 0.05, `one shallow contact displaced the whole part by ${body.position.y - before} m`);
+  world.dispose();
+});
+
 test('3D suspension, rotation and panel state are independent of rendering cadence', () => {
   const a = setup(), b = setup(), input = { throttle: 1, steer: 0.2, brake: false };
   for (let i = 0; i < 60; i++) a.demo.advance(1 / 60, input);
@@ -225,7 +239,7 @@ test('a detached panel settles instead of gaining motion after landing', () => {
   }
   const activity = demo.soft.get(hood)!.activity, motion = activity.motion();
   assert.equal(activity.deforming, false);
-  assert.ok(motion.velocity.length() < 0.1 && motion.omega.length() < 0.1 && motion.center.y < 0.1, 'a grounded panel stays at rest');
+  assert.ok(motion.velocity.length() < 0.1 && motion.omega.length() < 0.1 && motion.center.y < 0.1, `a grounded panel stays at rest: ${JSON.stringify({ velocity: motion.velocity.toArray(), omega: motion.omega.toArray(), center: motion.center.toArray() })}`);
   world.dispose();
 });
 

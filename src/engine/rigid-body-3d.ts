@@ -28,9 +28,9 @@ export class RigidBody3D {
     this.force.set(0, 0, 0); this.torque.set(0, 0, 0);
     if (![...this.position.toArray(), ...this.velocity.toArray(), ...this.orientation.toArray()].every(Number.isFinite)) throw new Error('Non-finite rigid state');
   }
-  contact(point: Vector3, normal: Vector3, depth: number, restitution = 0.18, friction = 0.6) {
+  contact(point: Vector3, normal: Vector3, depth: number, restitution = 0.18, friction = 0.6, correctPosition = true) {
     const r = point.clone().sub(this.position), v = this.pointVelocity(point), vn = v.dot(normal);
-    this.position.addScaledVector(normal, Math.max(0, depth - 0.001) * 0.6);
+    if (correctPosition) this.position.addScaledVector(normal, Math.max(0, depth - 0.001) * 0.6);
     let magnitude = 0;
     if (vn < 0) {
       const cross = new Vector3().crossVectors(r, normal), denominator = 1 / this.mass + normal.dot(new Vector3().crossVectors(this.inverseWorld(cross), r));

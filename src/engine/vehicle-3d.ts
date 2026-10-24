@@ -252,10 +252,10 @@ export class Vehicle3D extends CarCrashDemo {
   /** Probe first so a hard impact can wake XPBD before any rigid proxy impulse is applied. */
   private freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape?: Float64Array) {
     let speed = 0;
-    const solve = (point: Vector3, normal: Vector3, depth: number, carrier = false) => {
+    const solve = (point: Vector3, normal: Vector3, depth: number, carrier = false, correctPosition = true) => {
       const relative = body.pointVelocity(point); if (carrier) relative.sub(this.body.pointVelocity(point));
       speed = Math.max(speed, -relative.dot(normal));
-      if (apply) { const impulse = body.contact(point, normal, depth); if (carrier) this.applyImpulse(impulse.negate(), point); }
+      if (apply) { const impulse = body.contact(point, normal, depth, 0.18, 0.6, correctPosition); if (carrier) this.applyImpulse(impulse.negate(), point); }
     };
     const contact = boxContact(body, obstacle); if (contact) solve(contact.point, contact.normal, contact.depth);
     const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
@@ -264,16 +264,30 @@ export class Vehicle3D extends CarCrashDemo {
     const matrix = body.matrix(), inverse = matrix.clone().invert();
     const swept = body.bounds.clone().applyMatrix4(matrix).union(body.bounds.clone().applyMatrix4(previous)), nearBody = this.rigidSurface?.intersectsWorld(swept);
     const points: Vector3[] = [];
+    let ground: { point: Vector3; normal: Vector3; depth: number } | undefined;
+    let surface: { point: Vector3; normal: Vector3; depth: number } | undefined;
     if (shape) { const delta = matrix.clone().multiply(previous.clone().invert()); for (let i = 0; i < shape.length; i += 3) points.push(new Vector3().fromArray(shape, i).applyMatrix4(delta)); }
     else points.push(...body.corners());
     for (const point of points) {
       const height = this.terrain.height(point.x, point.z, point.y);
-      if (point.y < height) solve(point, this.terrain.normal(point.x, point.z, point.y), height - point.y);
+      if (point.y < height) {
+        const normal = this.terrain.normal(point.x, point.z, point.y), depth = height - point.y;
+        if (!apply) solve(point, normal, depth);
+        else { solve(point, normal, depth, false, false); if (!ground || depth > ground.depth) ground = { point, normal, depth }; }
+      }
       if (!nearBody) continue;
       const old = point.clone().applyMatrix4(inverse).applyMatrix4(previous), projected = new Float64Array(point.toArray());
       const hit = this.rigidSurface?.project(projected, new Float64Array(old.toArray()), 0);
-      if (hit) { const normal = new Vector3(...hit.normal); solve(point, normal, new Vector3().fromArray(projected).sub(point).dot(normal), true); }
+      if (hit) {
+        const normal = new Vector3(...hit.normal), depth = new Vector3().fromArray(projected).sub(point).dot(normal);
+        if (!apply) solve(point, normal, depth, true);
+        else { solve(point, normal, depth, true, false); if (!surface || depth > surface.depth) surface = { point, normal, depth }; }
+      }
     }
+    // A rigid panel has many shape points. Correcting the whole body for each point
+    // sums the same penetration repeatedly and can launch it metres into the air.
+    if (ground) body.position.addScaledVector(ground.normal, Math.max(0, ground.depth - 0.001) * 0.6);
+    if (surface) body.position.addScaledVector(surface.normal, Math.max(0, surface.depth - 0.001) * 0.6);
     return speed;
   }
   private releasePanel(s: SoftBodyPart) {
