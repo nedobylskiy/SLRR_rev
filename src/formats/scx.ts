@@ -4,10 +4,15 @@ export interface ScxMesh {
   name: string; positions: Float32Array; normals: Float32Array;
   uv: Float32Array; uv2?: Float32Array; uv3?: Float32Array;
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
-  layer2Index?: number;
+  layer2Index?: number; materialFlags?: number; textureChannel?: number; layer2Channel?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
 }
 export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string[] }
+
+/** V3's alphaOpacity flag controls whether diffuse-map alpha affects the surface. */
+export function scxDiffuseUsesAlpha(version: number, materialFlags = 0) {
+  return version !== 3 || (materialFlags & 1) !== 0;
+}
 
 function validate(mesh: ScxMesh) {
   if (mesh.indices.length % 3) throw new Error('SCX: incomplete triangle');
@@ -31,10 +36,14 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       if (![56, 104, 136].includes(size)) throw new Error(`SCX v3: unsupported material size ${size}`);
       r.require(size - 4);
       const diffuse = Array.from({ length: 4 }, () => r.f32());
+      r.seek(start + 40);
+      const materialFlags = r.u32();
       r.seek(start + 44);
       const textureIndex = r.u16();
       r.skip(6);
       const layer2Index = r.u16();
+      let textureChannel = 0, layer2Channel = 0;
+      if (size > 56) { r.seek(start + 70); textureChannel = r.u16(); layer2Channel = r.u16(); }
       r.seek(start + 104 <= start + size ? start + 104 : start + size);
       const name = size === 136 ? r.cstring(32) : `material_${meshes.length}`;
       r.seek(start + size);
@@ -51,7 +60,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       }
       const triangles = r.count(r.u32(), 12);
       const indices = Uint32Array.from({ length: triangles * 3 }, () => r.u32());
-      const mesh = { name, positions, normals, uv, uv2, uv3, indices, diffuse, textureIndex, layer2Index };
+      const mesh = { name, positions, normals, uv, uv2, uv3, indices, diffuse,
+        textureIndex, layer2Index, materialFlags, textureChannel, layer2Channel };
       validate(mesh); meshes.push(mesh);
     }
     if (r.remaining > 0 && r.remaining < 4) throw new Error('SCX v3: truncated tail');

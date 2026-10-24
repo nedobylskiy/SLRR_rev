@@ -4,7 +4,7 @@ import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import type { ScxModel } from '../formats/scx';
 import type { Assets } from '../assets';
-import { parseScx } from '../formats/scx';
+import { parseScx, scxDiffuseUsesAlpha } from '../formats/scx';
 import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { loadPartCollision } from '../engine/part-collision';
@@ -347,10 +347,10 @@ export class Viewer {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
       geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));
-      const uv = part.textureMap?.channel === 1 ? part.uv2 : part.textureMap?.channel === 2 ? part.uv3
-        : model.version === 3 && part.layer2Index !== 0xffff && part.uv3?.some(n => n !== 0) ? part.uv3 : part.uv;
+      const primaryChannel = part.textureMap?.channel ?? part.textureChannel ?? 0;
+      const uv = primaryChannel === 1 ? part.uv2 : primaryChannel === 2 ? part.uv3 : part.uv;
       geometry.setAttribute('uv', new THREE.BufferAttribute(uv ?? part.uv, 2));
-      if (!uv) warnings.push(`SCX ${part.name}: UV channel ${part.textureMap?.channel} missing; using UV1`);
+      if (!uv) warnings.push(`SCX ${part.name}: UV channel ${primaryChannel} missing; using UV1`);
       geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
       if (!part.normals.some(n => n !== 0)) geometry.computeVertexNormals();
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
@@ -372,26 +372,29 @@ export class Viewer {
           if (!alpha) { alpha = textureAlphaMode(selected.bytes, selected.path, texture.image); this.alphaModes.set(alphaKey, alpha); }
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
-          if (alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
-          else if (alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
+          const alphaEnabled = scxDiffuseUsesAlpha(model.version, part.materialFlags);
+          if (alphaEnabled && alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
+          else if (alphaEnabled && alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
       }
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
-      if (layerFile && part.uv2) {
+      if (layerFile) {
         try {
           const bytes = await assets.read(layerFile), texture = await this.texture(bytes, layerFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           const alpha = textureAlphaMode(bytes, layerFile, texture.image);
+          const layerUv = part.layer2Channel === 1 ? part.uv2 : part.layer2Channel === 2 ? part.uv3 : part.uv;
+          if (!layerUv) throw new Error(`SCX ${part.name}: layer2 UV channel ${part.layer2Channel} missing`);
           if (!file) {
-            geometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
+            geometry.setAttribute('uv', new THREE.BufferAttribute(layerUv, 2));
             material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
             if (alpha === 'cutout') material.alphaTest = 0.5;
             else if (alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
           } else if (alpha !== 'opaque') {
             const layerGeometry = geometry.clone();
-            layerGeometry.setAttribute('uv', new THREE.BufferAttribute(part.uv, 2));
+            layerGeometry.setAttribute('uv', new THREE.BufferAttribute(layerUv, 2));
             const layerMaterial = new THREE.MeshStandardMaterial({ map: texture, color: 0xffffff,
               roughness: 0.85, metalness: 0, side: THREE.DoubleSide, transparent: true,
               depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });

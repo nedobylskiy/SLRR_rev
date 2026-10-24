@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseConstants, parseTufa, parseTrees } from '../src/formats/tufa';
-import { parseScx } from '../src/formats/scx';
+import { parseScx, scxDiffuseUsesAlpha } from '../src/formats/scx';
 import { parseRpk, parseProperties, parseRdb } from '../src/formats/rpk';
 import { normalizePath } from '../src/assets';
 
@@ -56,11 +56,21 @@ test('SCX v3 preserves layer2 texture index and all three UV channels', () => {
   assert.deepEqual(Array.from(mesh.uv2!), [0.75, 0.875]);
   const extended = Buffer.alloc(136);
   extended.writeUInt32LE(136, 0); extended.writeUInt16LE(2, 44); extended.writeUInt16LE(5, 52);
+  extended.writeUInt32LE(0x40, 40); extended.writeUInt16LE(2, 70); extended.writeUInt16LE(0, 72);
   const wideVertex = Buffer.alloc(64);
   wideVertex.writeFloatLE(0.25, 24); wideVertex.writeFloatLE(0.5, 28);
   wideVertex.writeFloatLE(12.5, 52); wideVertex.writeFloatLE(-7.5, 56);
   const wide = parseScx(Buffer.concat([Buffer.from('INVO'), u32(3), extended, u32(1), wideVertex, u32(0), u32(0)])).meshes[0];
   assert.deepEqual(Array.from(wide.uv3!), [12.5, -7.5]);
+  assert.equal(wide.materialFlags, 0x40);
+  assert.equal(wide.textureChannel, 2);
+  assert.equal(wide.layer2Channel, 0);
+});
+test('SCX v3 alphaOpacity flag keeps RGB road base opaque while allowing cutout fences', () => {
+  assert.equal(scxDiffuseUsesAlpha(3, 0x40), false);
+  assert.equal(scxDiffuseUsesAlpha(3, 0), false);
+  assert.equal(scxDiffuseUsesAlpha(3, 0x101), true);
+  assert.equal(scxDiffuseUsesAlpha(4, 0), true);
 });
 test('SCX v4 uses the secondary diffuse map only when the primary map is absent', () => {
   const fixture = (properties: Array<[number, number]>) => {
