@@ -5,7 +5,7 @@ import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
-import { PartFactory, type EngineWorld } from './engine/world';
+import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Подключение…</span><button id="memory-lab">Поток в памяти</button><label class="button">Открыть папку игры<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -15,12 +15,35 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
 let engineWorld: EngineWorld | undefined;
+let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
+let beforeDrivingDetails = '';
 const worldButton = textElement('button', 'Собрать Baiern');
-el('memory-lab').before(worldButton);
+const driveButton = textElement('button', 'Пробная поездка') as HTMLButtonElement;
+const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
+el('memory-lab').before(worldButton, driveButton);
+function stopDrive() {
+  if (disposeDriving) el('details').textContent = beforeDrivingDetails;
+  disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Пробная поездка';
+  el('scene-help').textContent = 'ЛКМ — вращение · Колесо — масштаб · ПКМ — перемещение';
+}
+driveButton.onclick = async () => {
+  if (disposeDriving) { stopDrive(); status('Мир собран'); return; }
+  if (!engineRoot) await openWorld('cars/racers/Baiern.rpk', 6);
+  if (!engineRoot || !viewer) return;
+  try {
+    beforeDrivingDetails = el('details').textContent ?? '';
+    disposeDriving = viewer.drive(engineRoot, text => { driveHud.textContent = text; });
+    driveHud.hidden = false; driveButton.textContent = 'Завершить поездку';
+    el('scene-help').textContent = 'W/S или ↑/↓ — газ и задний ход · A/D или ←/→ — руль · Пробел — тормоз · R — вернуть машину';
+    el('details').textContent = 'Пустая тестовая площадка. Крепления, размеры колёс, колёсная база и предел поворота взяты из CFG. Движение упрощённое: без столкновений, подвески и оригинальной логики двигателя. Щёлкни по сцене, чтобы управлять машиной; мышь вращает камеру.';
+    status('Тестовая площадка');
+  } catch (error) { stopDrive(); status('Поездка недоступна', true); el('details').textContent = String(error); }
+};
 worldButton.onclick = () => { void openWorld('cars/racers/Baiern.rpk', 6); };
 async function openWorld(pack: string, id: number) {
   if (!assets) return;
   const request = ++sequence;
+  stopDrive(); engineRoot = undefined; driveButton.disabled = true;
   disposeMemoryLab?.(); disposeMemoryLab = undefined;
   engineWorld?.dispose(); engineWorld = undefined; viewer?.clear();
   el('filename').textContent = `${pack} : 0x${id.toString(16)} · сборка CFG`; el('format').textContent = 'ENGINE / WORLD'; status('Сборка…');
@@ -31,9 +54,11 @@ async function openWorld(pack: string, id: number) {
     engineWorld = built.world;
     const warnings = viewer ? await viewer.showWorld(built.world, assets) : ['WebGL недоступен'];
     if (request !== sequence) return;
+    engineRoot = built.root;
     el('details').textContent = `${built.world.parts.size} объектов · ${built.root.definition.cfgPath}\nСборка по stockpart/slot/attach, включая вложенные детали. Java-конструкторы и физика ещё не запускаются.\n${[...built.warnings, ...warnings].join('\n')}`;
     status('Мир собран');
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Ошибка сборки', true); el('details').textContent = String(error); } }
+  finally { if (request === sequence) driveButton.disabled = false; }
 }
 try { viewer = new Viewer(el('viewport')); }
 catch (e) { el('details').textContent = `WebGL недоступен: ${e}`; }
@@ -64,6 +89,8 @@ async function connect() {
 }
 
 function attach(source: Assets, label: string) {
+  stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); sequence++;
+  driveButton.disabled = false;
   assets = source; el('connection').textContent = label;
   el('counts').replaceChildren(...['scx', 'rpk', 'class'].map(ext => {
     const card = document.createElement('div'); card.append(textElement('b', source.files.filter(f => f.path.toLowerCase().endsWith(`.${ext}`)).length.toLocaleString('ru')), textElement('span', ext.toUpperCase())); return card;
@@ -107,6 +134,7 @@ async function showModel(path: string, textures: string[] = [], request = sequen
 }
 
 async function openAsset(file: Asset) {
+  stopDrive(); engineRoot = undefined; driveButton.disabled = false;
   engineWorld?.dispose(); engineWorld = undefined; viewer?.clear();
   disposeMemoryLab?.(); disposeMemoryLab = undefined;
   const request = ++sequence;
@@ -194,6 +222,7 @@ void connect();
 el('memory-lab').onclick = async () => {
   if (!assets) { status('Нет каталога', true); return; }
   const request = ++sequence;
+  stopDrive(); engineRoot = undefined; driveButton.disabled = false;
   engineWorld?.dispose(); engineWorld = undefined; viewer?.clear();
   disposeMemoryLab?.(); disposeMemoryLab = undefined;
   el('viewport').hidden = true; el('scene-help').hidden = true;
@@ -208,4 +237,4 @@ el('memory-lab').onclick = async () => {
     el('details').textContent = 'Оригинальные исходные методы исполняет ограниченный Java-интерпретатор. TUFA этих методов ещё не исполняется. Данные сборки проходят через собственную модель слотов и поток в памяти.';
   } catch (e) { if (request === sequence) { status('Ошибка исходников', true); el('details').textContent = String(e); } }
 };
-if (import.meta.hot) import.meta.hot.dispose(() => { sequence++; engineWorld?.dispose(); disposeMemoryLab?.(); viewer?.dispose(); });
+if (import.meta.hot) import.meta.hot.dispose(() => { sequence++; stopDrive(); engineWorld?.dispose(); disposeMemoryLab?.(); viewer?.dispose(); });

@@ -1,8 +1,10 @@
-import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
+import { Matrix4 } from 'three';
 import { Assets, normalizePath } from '../assets';
 import { entryProperties } from '../formats/rpk';
-import { parsePartConfig, type CfgPose, type CfgSlot, type PartConfig } from '../formats/cfg';
+import { parsePartConfig, type CfgSlot, type PartConfig } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
+import { slotMatrix } from './slot-frames';
+export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
 export interface PartDefinition {
@@ -10,10 +12,6 @@ export interface PartDefinition {
   model?: { path: string; textures: string[] };
 }
 export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${key.id}`;
-export function poseMatrix(pose: CfgPose) {
-  const [yaw, pitch, roll] = pose.rotation;
-  return new Matrix4().compose(new Vector3(...pose.position), new Quaternion().setFromEuler(new Euler(pitch, yaw, roll, 'YXZ')), new Vector3(1, 1, 1));
-}
 
 /** Assets are shared; instances and slot occupancy belong exclusively to a world. */
 export class EnginePart {
@@ -42,7 +40,7 @@ export class EngineWorld {
     if (child.parent || parent.children.has(parentSlot) || parent.ownSlot === parentSlot || child.children.has(ownSlot)) throw new Error('Occupied attachment');
     const a = parent.definition.config.slots.find(s => s.id === parentSlot), b = child.definition.config.slots.find(s => s.id === ownSlot);
     if (!a || !b) throw new Error('Missing attachment slot');
-    child.local.copy(poseMatrix(a)).multiply(poseMatrix(b).invert());
+    child.local.copy(slotMatrix(parent.definition.config, a)).multiply(slotMatrix(child.definition.config, b).invert());
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
   }
   detach(child: EnginePart) {
@@ -58,6 +56,7 @@ export class EngineWorld {
 /** No Java constructor or implicit native behavior is substituted by this factory. */
 export class PartFactory {
   private definitions = new Map<string, Promise<PartDefinition>>();
+  private aliases = new Map<string, Promise<Set<string>>>();
   constructor(readonly assets: Assets) {}
   async definition(key: ResourceKey): Promise<PartDefinition> {
     const resolved = await this.assets.resource(key.pack, key.id);
@@ -79,11 +78,42 @@ export class PartFactory {
     }
     return pending;
   }
-  private async pointsTo(from: PartDefinition, slot: CfgSlot, target: PartDefinition, targetSlot: number) {
+  private async slotAliases(definition: PartDefinition, slot: CfgSlot) {
+    const start = `${resourceKey(definition.key)}:${slot.id}`;
+    let pending = this.aliases.get(start);
+    if (!pending) {
+      pending = (async () => {
+        const found = new Set<string>(), queue = [{ definition, slot }];
+        while (queue.length) {
+          const current = queue.shift()!, identity = `${resourceKey(current.definition.key)}:${current.slot.id}`;
+          if (found.has(identity)) continue;
+          found.add(identity);
+          if (found.size > 256) throw new Error('Slot compatibility expansion limit');
+          for (const ref of current.slot.compatible) {
+            const location = await this.assets.resourceLocation(current.definition.key.pack, ref.resource);
+            const key = { pack: location.packPath, id: location.id }, alias = `${resourceKey(key)}:${ref.slot}`;
+            if (found.has(alias)) continue;
+            // An abstract compatibility identity may have no concrete native CFG.
+            const entry = (await this.assets.pack(key.pack)).entries.find(e => e.typeId === key.id);
+            if (!entry || !entryProperties(entry).some(p => p.key === 'native' && /^(car|part)\s+.+\.cfg$/i.test(p.value))) { found.add(alias); continue; }
+            const other = await this.definition(key), otherSlot = other.config.slots.find(s => s.id === ref.slot);
+            if (otherSlot) queue.push({ definition: other, slot: otherSlot });
+            else found.add(alias);
+          }
+        }
+        if (found.size > 256) throw new Error('Slot compatibility expansion limit');
+        return found;
+      })();
+      this.aliases.set(start, pending); pending.catch(() => this.aliases.delete(start));
+    }
+    return pending;
+  }
+  private async pointsTo(from: PartDefinition, slot: CfgSlot, target: PartDefinition, targetSlot: CfgSlot) {
+    if (!slot.attach.length) return false;
+    const aliases = await this.slotAliases(target, targetSlot);
     for (const attachment of slot.attach) {
-      if (attachment.slot !== targetSlot) continue;
       const resolved = await this.assets.resourceLocation(from.key.pack, attachment.resource);
-      if (resourceKey({ pack: resolved.packPath, id: resolved.id }) === resourceKey(target.key)) return true;
+      if (aliases.has(`${resourceKey({ pack: resolved.packPath, id: resolved.id })}:${attachment.slot}`)) return true;
     }
     return false;
   }
@@ -91,7 +121,7 @@ export class PartFactory {
     for (const parent of world.parts.values()) for (const a of parent.definition.config.slots) {
       if (parent.children.has(a.id) || parent.ownSlot === a.id) continue;
       for (const b of child.config.slots) {
-        if (await this.pointsTo(child, b, parent.definition, a.id) || await this.pointsTo(parent.definition, a, child, b.id)) return { parent, parentSlot: a.id, ownSlot: b.id };
+        if (await this.pointsTo(child, b, parent.definition, a) || await this.pointsTo(parent.definition, a, child, b)) return { parent, parentSlot: a.id, ownSlot: b.id };
       }
     }
   }

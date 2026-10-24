@@ -5,8 +5,9 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import type { ScxModel } from '../formats/scx';
 import type { Assets } from '../assets';
 import { parseScx } from '../formats/scx';
-import type { EngineWorld } from '../engine/world';
+import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
+import { DrivingDemo } from '../engine/driving-demo';
 
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
@@ -14,6 +15,12 @@ export class Viewer {
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
   private controls: OrbitControls;
   private model = new THREE.Group();
+  private proxies = new Map<EnginePart, THREE.Group>();
+  private grid = new THREE.GridHelper(12, 24, 0x46515a, 0x222c34);
+  private driveGrid = new THREE.GridHelper(2000, 1000, 0x798893, 0x45535b);
+  private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
+  private frame?: (now: number) => void;
+  private stopDriving?: () => void;
   private generation = 0;
   private observer: ResizeObserver;
   constructor(private container: HTMLElement) {
@@ -27,15 +34,18 @@ export class Viewer {
     this.controls.enableDamping = true;
     this.scene.add(new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5));
     const light = new THREE.DirectionalLight(0xffddb8, 3); light.position.set(3, 5, 4); this.scene.add(light);
-    this.scene.add(new THREE.GridHelper(12, 24, 0x46515a, 0x222c34));
+    this.scene.add(this.grid);
+    this.driveGrid.visible = false; this.scene.add(this.driveGrid);
+    this.ground.rotation.x = -Math.PI / 2; this.ground.position.y = -0.002; this.ground.visible = false; this.scene.add(this.ground);
     this.scene.add(this.model);
     this.observer = new ResizeObserver(() => {
       const { clientWidth: w, clientHeight: h } = container;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
-    this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop(now => { this.frame?.(now); this.controls.update(); this.renderer.render(this.scene, this.camera); });
   }
   clear() {
+    this.stopDriving?.(); this.proxies.clear();
     this.generation++;
     this.model.traverse(obj => {
       if (!(obj instanceof THREE.Mesh)) return;
@@ -51,6 +61,7 @@ export class Viewer {
       if (object instanceof THREE.GridHelper) { object.geometry.dispose(); const materials = Array.isArray(object.material) ? object.material : [object.material]; materials.forEach(m => m.dispose()); }
     });
     this.renderer.dispose(); this.renderer.domElement.remove();
+    this.ground.geometry.dispose(); this.ground.material.dispose();
   }
   async show(model: ScxModel, assets: Assets, textures: string[]): Promise<string[]> {
     this.clear(); const generation = this.generation;
@@ -66,12 +77,61 @@ export class Viewer {
       const parsed = parseScx(await assets.read(model.path));
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
-      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix())); this.model.add(group);
+      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose))); this.model.add(group);
+      this.proxies.set(part, group);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
       if (generation !== this.generation) return warnings;
     }
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  private syncWorld() {
+    for (const [part, group] of this.proxies) {
+      group.matrix.copy(modelMatrix(part.matrix(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)));
+      group.matrixWorldNeedsUpdate = true;
+    }
+  }
+  drive(root: EnginePart, telemetry: (text: string) => void) {
+    this.stopDriving?.();
+    const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
+    const demo = new DrivingDemo(root), keys = new Set<string>(), canvas = this.renderer.domElement;
+    let last: number | undefined, lastHud = -Infinity, stopped = false;
+    const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
+    const down = (event: KeyboardEvent) => {
+      if (!relevant.has(event.code)) return;
+      event.preventDefault(); keys.add(event.code);
+      if (event.code === 'KeyR' && !event.repeat) { demo.reset(); keys.clear(); }
+    };
+    const up = (event: KeyboardEvent) => { keys.delete(event.code); };
+    const release = () => { keys.clear(); last = undefined; };
+    const focus = () => canvas.focus({ preventScroll: true });
+    canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Управление автомобилем'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
+    window.addEventListener('keyup', up); window.addEventListener('blur', release); document.addEventListener('visibilitychange', release);
+    this.ground.visible = true; this.grid.visible = false; this.driveGrid.visible = true;
+    this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld();
+    const followed = demo.position.clone();
+    this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
+    this.camera.position.copy(this.controls.target).add(new THREE.Vector3(5, 3, 7)); this.controls.update();
+    const pressed = (...codes: string[]) => codes.some(code => keys.has(code)) ? 1 : 0;
+    this.frame = now => {
+      if (document.hidden) { last = undefined; return; }
+      // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
+      const seconds = last === undefined ? 0 : Math.min((now - last) / 1000, 0.1); last = now;
+      demo.advance(seconds, { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space') });
+      this.syncWorld();
+      const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta); followed.copy(demo.position);
+      if (now - lastHud > 100) { telemetry(`${Math.round(Math.abs(demo.speed) * 3.6)} км/ч · ${demo.speed < -0.1 ? 'задний ход' : 'вперёд'}`); lastHud = now; }
+    };
+    const stop = () => {
+      if (stopped) return; stopped = true;
+      this.frame = undefined; this.stopDriving = undefined;
+      canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);
+      window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', release);
+      canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
+      for (const { part, local } of original) part.local.copy(local);
+      this.ground.visible = false; this.grid.visible = true; this.driveGrid.visible = false; this.syncWorld(); this.fit();
+    };
+    this.stopDriving = stop; focus(); return stop;
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];

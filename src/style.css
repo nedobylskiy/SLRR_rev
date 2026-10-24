@@ -243,6 +243,7 @@ nav button.active{
   border-color:#965e40
 }
 #viewport{
+  position:relative;
   flex:1;
   min-height:160px;
   overflow:hidden
@@ -391,3 +392,5 @@ header{
 .memory-buttons{display:flex;gap:10px;flex-wrap:wrap}
 button:disabled{opacity:.45;cursor:default}
 #memory-result{line-height:1.8!important}
+.drive-hud { position:absolute; top:18px; left:18px; z-index:2; padding:12px 18px; background:#0b1014dd; border:1px solid #46515a; border-radius:6px; font-size:20px; font-weight:700; pointer-events:none; }
+.drive-hud[hidden] { display:none; }

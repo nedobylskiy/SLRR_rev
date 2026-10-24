@@ -4,6 +4,6 @@ import { Matrix4 } from 'three';
 export const SCX_TO_WORLD = 0.01;
 
 /** Right multiplication scales mesh vertices only, never the part's world translation. */
-export function modelMatrix(partWorld: Matrix4) {
-  return partWorld.clone().multiply(new Matrix4().makeScale(SCX_TO_WORLD, SCX_TO_WORLD, SCX_TO_WORLD));
+export function modelMatrix(partWorld: Matrix4, renderPose?: Matrix4) {
+  return partWorld.clone().multiply(renderPose ?? new Matrix4()).multiply(new Matrix4().makeScale(SCX_TO_WORLD, SCX_TO_WORLD, SCX_TO_WORLD));
 }

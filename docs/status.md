@@ -13,8 +13,9 @@
 | Vehicle v5 | 64 заголовка читаются; полный Part tree ещё не декодируется |
 | Original VM leaf | Object.equals(self/other/null) выполняется из исходного class |
 | Original Java Part methods | 7 исходных классов; 10 тестовых деталей; 1000 memory round trips, rollback и cleanup |
-| CFG world | Baiern: 28 объектов из штатных конфигов; 5 stockpart остаются с диагностикой |
-| Part native ↔ CFG world | 4 descriptor-aware вызова; обход 28 объектов и проверка обратных связей |
+| CFG world | Baiern: 33 объекта, включая колёса и руль; typed mounts также проверены на 4 других машинах |
+| Part native ↔ CFG world | 4 descriptor-aware вызова; обход 33 объектов и проверка обратных связей |
+| Driving demo | Ввод, разгон/тормоз/задний ход/руль/reset, fixed-step, live render; без столкновений и подвески |
 | Unit tests | Бинарные границы, граф машины, codec, повторные snapshots, clock, native overloads |
 | Build | TypeScript strict + production Vite build |
 
@@ -32,6 +33,7 @@ npm run verify:vm
 npm run verify:parts
 npm run verify:world
 npm run verify:gameplay
+npm run verify:mounts
 npm run audit
 ```
 

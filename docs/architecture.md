@@ -14,6 +14,8 @@
 | `src/formats/cfg.ts` | Поднабор CFG, слоты, stockpart, body/wheel, неизвестные команды |
 | `src/engine/world.ts` | Фабрика ресурсов, экземпляры мира, дерево слотов, матрицы, lifecycle |
 | `src/engine/part-host.ts` | Четыре Part native для обхода настоящего CFG-мира через script handles |
+| `src/engine/slot-frames.ts` | Поза typed-крепления: root, steering, wheel |
+| `src/engine/driving-demo.ts` | Управляемая плоская кинематическая модель, одинаковая в браузере и Node |
 | `src/assets.ts` | VFS, нормализация путей, pack-local resource graph |
 | `src/render/viewer.ts` | GPU-геометрия, камера, текстуры, освобождение объектов |
 | `src/runtime/tree-machine.ts` | Проверенный минимальный leaf-поднабор TREE |
@@ -39,7 +41,9 @@ World model хранит машину как дерево установленн
 
 Для рендера Three.js остаётся заменяемым backend. Сначала воспроизводятся исходные геометрия/UV/material slots, затем добавляются normal/reflection/layers/paint. Exact appearance не должен тормозить проверку семантики скриптов и состояния автомобиля.
 
-## Физика — ещё не реализована
+## Полная физика — ещё не реализована
+
+Есть [пробная поездка](mounts-and-driving.md) с плоской bicycle-кинематикой и анимацией экземпляров; это не solver столкновений/подвески и не исполнение оригинального drivetrain. Полные native-физика и игровая логика остаются следующими этапами.
 
 Перед выбором backend нужны единицы, оси, описание suspension/tyre/engine API и тесты. Возможен WASM-backend; TypeScript продолжит владеть игровыми правилами. Собственная физика не гарантирует совпадения старого поведения. Начальный критерий — управляемая машина с воспроизводимыми native getters/setters, затем сравнение торможения/ускорения/подвески.
 
