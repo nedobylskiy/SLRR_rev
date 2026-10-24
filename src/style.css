@@ -401,3 +401,4 @@ button:disabled{opacity:.45;cursor:default}
  .hood-controls input { width: auto; }
  .hood-telemetry { width: 100%; color: #9fe1c9; font: 11px/1.6 Consolas, monospace; }
  .crash-hud { font: 11px/1.7 Consolas, monospace; white-space: pre-line; top: 10px; left: 10px; padding: 7px 10px; }
+ .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }

@@ -2,7 +2,7 @@ export type Triple = [number, number, number];
 export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
 export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number }
-export interface CfgWheel extends CfgPose { radius?: number; parameters: number[] }
+export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[] })[];
@@ -15,6 +15,7 @@ export function parsePartConfig(source: string): PartConfig {
   const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], unknown: [] };
   let slot: CfgSlot | undefined, deformable: number | undefined, render: number | undefined;
   let renderPose: CfgPose | undefined, deformablePose: CfgPose | undefined, radius: number | undefined;
+  let spring: Triple | undefined;
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const text = raw.replace(/(?:#|;|\/\/).*$/, '').trim();
     if (!text) continue;
@@ -50,10 +51,12 @@ export function parsePartConfig(source: string): PartConfig {
         result.bodies.push(body); break;
       }
       case 'type':
+        spring = undefined;
         radius = args[1]?.toLowerCase() === 'sphere' ? number(2) : undefined;
         if (radius !== undefined && radius <= 0) throw fail();
         result.unknown.push({ line, command, args }); break;
-      case 'wheel': result.wheels.push({ ...pose(), radius, parameters: args.slice(6).map((_, i) => number(i + 6)) }); break;
+      case 'spring': spring = [number(0), number(1), number(2)]; if (spring.some(v => v <= 0)) throw fail(); break;
+      case 'wheel': result.wheels.push({ ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }); break;
       case 'steering': result.steering = pose(); break;
       case 'maxsteer': result.maxSteer = number(0); if (result.maxSteer <= 0) throw fail(); break;
       default: result.unknown.push({ line, command, args });

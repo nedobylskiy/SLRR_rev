@@ -12,6 +12,7 @@ import { HoodLab } from './hood-lab';
 import type { PartDefinition } from '../engine/world';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
+import { Vehicle3D } from '../engine/vehicle-3d';
 
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
@@ -89,9 +90,9 @@ export class Viewer {
     if (generation === this.generation) this.fit();
     return warnings;
   }
-  private syncWorld(exclude?: EnginePart) {
+  private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
-      if (part === exclude) continue;
+      if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
       group.matrix.copy(modelMatrix(part.matrix(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)));
       group.matrixWorldNeedsUpdate = true;
     }
@@ -131,7 +132,8 @@ export class Viewer {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
-    let crash: CarCrashDemo | undefined, panelView: PanelView | undefined, obstacle: THREE.Mesh | undefined;
+    let crash: CarCrashDemo | undefined, obstacle: THREE.Mesh | undefined, ramp: THREE.Mesh | undefined;
+    const panelViews: PanelView[] = [], softParts = new Set<EnginePart>();
     const localPositions = (part: EnginePart) => {
       const group = this.proxies.get(part); if (!group) throw new Error(`No render proxy for ${part.definition.alias}`);
       const transform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose));
@@ -145,19 +147,25 @@ export class Viewer {
       if (!hood) throw new Error('Installed hood required for crash demo');
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
-      crash = new CarCrashDemo(root, hood, samples.flat(), bounds);
+      crash = new Vehicle3D(root, hood, samples.flat(), bounds);
       const triangles: number[] = [], inverseRoot = root.matrix().invert();
       for (const part of root.world.parts.values()) {
         if (part === hood || !part.definition.model) continue;
         const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
         if (type === 11 || type !== undefined && type >= 101 && type < 200) continue;
         const transform = modelMatrix(inverseRoot.clone().multiply(part.matrix()), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose));
+        const ownTransform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)), ownTriangles: number[] = [];
         for (const mesh of this.proxies.get(part)?.children ?? []) if (mesh instanceof THREE.Mesh) {
           const positions = mesh.geometry.getAttribute('position'), indices = mesh.geometry.getIndex();
-          if (indices) for (let i = 0; i < indices.count; i++) triangles.push(...new THREE.Vector3().fromBufferAttribute(positions, indices.getX(i)).applyMatrix4(transform).toArray());
+          if (indices) for (let i = 0; i < indices.count; i++) { const p = new THREE.Vector3().fromBufferAttribute(positions, indices.getX(i)); ownTriangles.push(...p.clone().applyMatrix4(ownTransform).toArray()); triangles.push(...p.applyMatrix4(transform).toArray()); }
         }
+        (crash as Vehicle3D).register(part, localPositions(part).flat(), ownTriangles);
       }
-      crash.setBodyTriangles(triangles); panelView = new PanelView(this.proxies.get(hood)!, crash.panel, samples);
+      crash.setBodyTriangles(triangles);
+      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); panelViews.push(new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part))); }
+      const rampGeometry = new THREE.BufferGeometry();
+      rampGeometry.setAttribute('position', new THREE.Float32BufferAttribute([-1.8, 0, -4, 1.8, 0, -4, 1.8, 1.12, -8, -1.8, 0, -4, 1.8, 1.12, -8, -1.8, 1.12, -8], 3)); rampGeometry.computeVertexNormals();
+      ramp = new THREE.Mesh(rampGeometry, new THREE.MeshStandardMaterial({ color: 0x668d9d, side: THREE.DoubleSide })); ramp.visible = false; this.model.add(ramp);
       const box = crash.obstacle, size = new THREE.Vector3(...box.max).sub(new THREE.Vector3(...box.min));
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); this.model.add(obstacle);
@@ -176,7 +184,7 @@ export class Viewer {
     canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Управление автомобилем'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
     window.addEventListener('keyup', up); window.addEventListener('blur', release); document.addEventListener('visibilitychange', release);
     this.ground.visible = true; this.grid.visible = false; this.driveGrid.visible = true;
-    this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(crash?.hood);
+    this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(softParts);
     const followed = demo.position.clone();
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
     this.camera.position.copy(this.controls.target).add(withCrash ? new THREE.Vector3(7, 4, -3) : new THREE.Vector3(5, 3, 7)); this.controls.update();
@@ -186,12 +194,13 @@ export class Viewer {
       // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
       const seconds = last === undefined || paused ? 0 : Math.min((now - last) / 1000, 0.1); last = now;
       const input = { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space') };
-      if (crash) { crash.advance(seconds * timeScale, input); panelView!.update(); } else demo.advance(seconds, input);
-      this.syncWorld(crash?.hood);
+      if (crash) { crash.advance(seconds * timeScale, input); panelViews.forEach(v => v.update()); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); } } else demo.advance(seconds, input);
+      this.syncWorld(softParts);
       const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta); followed.copy(demo.position);
       if (now - lastHud > 100) {
         const intact = crash?.panel.mounts.filter(m => !m.broken).length;
-        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} км/ч${crash ? ` · удар ${Math.round(crash.impactSpeed * 3.6)} км/ч · отскок ${Math.round(crash.reboundSpeed * 3.6)}\nКапот: ${crash.hood.parent ? 'на машине' : 'самостоятельная деталь'} · крепления ${intact}/3\nКонтакты с кузовом: ${crash.bodySurface?.hits ? 'есть' : 'ещё нет'} · объектов ${root.world.parts.size}` : ` · ${demo.speed < -0.1 ? 'задний ход' : 'вперёд'}`}`); lastHud = now;
+        const up = crash instanceof Vehicle3D ? new THREE.Vector3(0, 1, 0).applyQuaternion(crash.body.orientation).y : 1;
+        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} км/ч${crash instanceof Vehicle3D ? ` · колёса на опоре ${crash.suspension.wheels.filter(w => w.contact).length}/4\nКапот: ${crash.hood.parent ? 'на машине' : 'отделён'} · крепления ${intact}/3\nПанелей с вмятинами: ${[...crash.soft.values()].filter(s => s.panel.plasticBeams > 0).length} · отделено деталей: ${[...crash.soft.keys(), ...crash.rigid.keys()].filter(p => p !== root && !p.parent).length}\nКузов: ${up < -0.5 ? 'перевёрнут' : up < 0.5 ? 'на боку' : crash.suspension.wheels.every(w => !w.contact) ? 'в воздухе' : 'на колёсах'}` : crash ? ` · удар ${Math.round(crash.impactSpeed * 3.6)} км/ч\nКапот: ${crash.hood.parent ? 'на машине' : 'самостоятельная деталь'}` : ` · ${demo.speed < -0.1 ? 'задний ход' : 'вперёд'}`}`); lastHud = now;
       }
     };
     const stop = () => {
@@ -200,13 +209,14 @@ export class Viewer {
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);
       window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', release);
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
-      panelView?.dispose(); crash?.dispose();
+      panelViews.forEach(v => v.dispose()); crash?.dispose();
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
+      if (ramp) { ramp.removeFromParent(); ramp.geometry.dispose(); (ramp.material as THREE.Material).dispose(); }
       for (const { part, local } of original) part.local.copy(local);
       this.ground.visible = false; this.grid.visible = true; this.driveGrid.visible = false; this.syncWorld(); this.fit();
     };
     this.stopDriving = stop; focus();
-    return Object.assign(stop, { launch: (speed: number) => { crash?.reset(speed); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); keys.clear(); last = undefined; focus(); }, wireframe: (value: boolean) => panelView?.wireframe(value), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
+    return Object.assign(stop, { launch: (speed: number) => { crash?.reset(speed); keys.clear(); last = undefined; focus(); }, jump: () => { if (crash instanceof Vehicle3D) crash.jump(); keys.clear(); last = undefined; focus(); }, roll: () => { if (crash instanceof Vehicle3D) crash.roll(); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); keys.clear(); last = undefined; focus(); }, wireframe: (value: boolean) => panelViews.forEach(v => v.wireframe(value)), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];

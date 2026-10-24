@@ -3,7 +3,7 @@ import { FixedClock } from '../runtime/fixed-clock';
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
-export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number }
+export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
 export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; impulse?: (impulse: Triple, point: Triple) => void }
@@ -12,7 +12,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 /** Generated two-layer cage; XPBD distance/anchor constraints, plastic rest lengths and force-driven mount failure. */
 export class DeformablePanel {
-  readonly nx = 7; readonly nz = 9; readonly thickness = 0.08;
+  readonly nx: number; readonly nz: number; readonly thickness: number;
   readonly positions: Float64Array; readonly rest: Float64Array; readonly velocities: Float64Array;
   readonly beams: Beam[] = []; readonly mounts: PanelMount[] = [];
   clock = new FixedClock(240, 32);
@@ -26,12 +26,17 @@ export class DeformablePanel {
   contacts = 0;
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
+    [this.nx, this.nz] = options.resolution ?? [7, 9];
+    if (![this.nx, this.nz].every(v => Number.isInteger(v) && v >= 3 && v <= 16)) throw new Error('Invalid cage resolution');
+    if (options.gravity !== undefined && (!Number.isFinite(options.gravity) || options.gravity < 0)) throw new Error('Invalid panel gravity');
     if (samples.length < 9 || samples.length % 3 || !Number.isFinite(options.mass) || options.mass <= 0 || !options.mount.every(Number.isFinite)) throw new Error('Invalid panel data');
     for (let i = 0; i < samples.length; i += 3) {
       if (![samples[i], samples[i + 1], samples[i + 2]].every(Number.isFinite)) throw new Error('Non-finite panel sample');
       this.minX = Math.min(this.minX, samples[i]); this.maxX = Math.max(this.maxX, samples[i]); this.minZ = Math.min(this.minZ, samples[i + 2]); this.maxZ = Math.max(this.maxZ, samples[i + 2]);
     }
     if (this.maxX - this.minX < 0.01 || this.maxZ - this.minZ < 0.01) throw new Error('Panel requires an XZ surface');
+    const ys = Array.from(samples).filter((_, i) => i % 3 === 1), minY = Math.min(...ys), maxY = Math.max(...ys);
+    this.thickness = options.volume ? Math.max(0.02, maxY - minY) : 0.08;
     this.yieldStrain = options.yieldStrain ?? 0.008; this.mountStrength = options.mountStrength ?? 5000;
     const stiffness = options.stiffness ?? 400000;
     if (![this.yieldStrain, this.mountStrength, stiffness].every(v => Number.isFinite(v) && v > 0)) throw new Error('Invalid panel material');
@@ -42,7 +47,7 @@ export class DeformablePanel {
       const px = this.minX + x / (this.nx - 1) * (this.maxX - this.minX), pz = this.minZ + z / (this.nz - 1) * (this.maxZ - this.minZ);
       let sum = 0, weight = 0;
       for (let i = 0; i < samples.length; i += 3) { const w = 1 / ((samples[i] - px) ** 2 + (samples[i + 2] - pz) ** 2 + 0.002) ** 2; sum += samples[i + 1] * w; weight += w; }
-      for (let layer = 0; layer < 2; layer++) this.rest.set([px, sum / weight + (layer - 0.5) * this.thickness, pz], this.index(x, z, layer) * 3);
+      for (let layer = 0; layer < 2; layer++) this.rest.set([px, (options.volume ? (minY + maxY) / 2 : sum / weight) + (layer - 0.5) * this.thickness, pz], this.index(x, z, layer) * 3);
     }
     const seen = new Set<string>();
     const connect = (a: number, b: number, scale = 1) => {
@@ -109,13 +114,18 @@ export class DeformablePanel {
     const sum = weights.reduce((a, b) => a + b, 0);
     weights.forEach((w, n) => { this.velocities[n * 3 + 1] -= impulse * w / sum * this.inverseMass * 0.94; this.velocities[n * 3 + 2] -= impulse * w / sum * this.inverseMass * Math.sqrt(1 - 0.94 ** 2); });
   }
+  impulseAt(impulse: Triple, point: Triple, radius = 0.3) {
+    const weights = Array.from({ length: this.positions.length / 3 }, (_, n) => Math.exp(-([0, 1, 2].reduce((s, a) => s + (this.positions[n * 3 + a] - point[a]) ** 2, 0)) / (2 * radius * radius))), total = weights.reduce((a, b) => a + b, 0);
+    if (total < 1e-12) return;
+    weights.forEach((w, n) => { for (let a = 0; a < 3; a++) this.velocities[n * 3 + a] += impulse[a] * w / total * this.inverseMass; });
+  }
   advance(seconds: number) { return this.clock.advance(seconds, (_, dt) => this.step(dt)); }
   private step(dt: number) {
     const p = this.positions, inv = this.inverseMass, dt2 = dt * dt;
     this.previous.set(p); this.anchorLambda.fill(0);
     const attached = this.attached, damping = Math.exp(-(attached ? 2 : 0.25) * dt);
     for (let i = 0; i < p.length; i += 3) {
-      this.velocities[i + 1] -= 9.81 * dt;
+      this.velocities[i + 1] -= (this.options.gravity ?? 9.81) * dt;
       for (let axis = 0; axis < 3; axis++) { const target = attached ? this.anchorVelocities[i + axis] : 0; p[i + axis] += (target + (this.velocities[i + axis] - target) * damping) * dt; }
     }
     this.anchorVelocities.fill(0);

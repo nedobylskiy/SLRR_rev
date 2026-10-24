@@ -26,8 +26,10 @@ let crashSession: ReturnType<Viewer['drive']> | undefined;
 for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 50 км/ч', 50 / 3.6], ['Сброс', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
-const crashCageLabel = textElement('label', ' Каркас капота'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
+const crashCageLabel = textElement('label', ' Каркасы деталей'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
 const dropButton = textElement('button', 'Капот на крышу'); dropButton.onclick = () => crashSession?.drop(); crashControls.append(dropButton);
+const jumpButton = textElement('button', 'Трамплин'), rollButton = textElement('button', 'Боковой удар');
+jumpButton.onclick = () => crashSession?.jump(); rollButton.onclick = () => crashSession?.roll(); crashControls.append(jumpButton, rollButton);
 crashCage.onchange = () => crashSession?.wireframe(crashCage.checked); crashCageLabel.prepend(crashCage); crashControls.append(crashCageLabel);
 const slowLabel = textElement('label', ' Замедление ×4'), slow = document.createElement('input'); slow.type = 'checkbox';
 slow.onchange = () => crashSession?.slowMotion(slow.checked); slowLabel.prepend(slow); crashControls.append(slowLabel);
@@ -46,6 +48,7 @@ const cage = document.createElement('input'); cage.type = 'checkbox'; cage.oncha
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
 el('memory-lab').before(worldButton, driveButton);
 function stopDrive() {
+  el('viewport').parentElement?.classList.remove('physics-scene');
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
   hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
@@ -59,11 +62,12 @@ crashButton.onclick = async () => {
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
+    el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = true; pause.checked = false; crashSession.slowMotion(true);
     crashControls.hidden = false; crashCage.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
-    el('details').textContent = 'Заезды 10/50 км/ч: деформация, отрыв и отскок машины от препятствия. Отделённый капот сталкивается с исходными треугольниками кузова. «Капот на крышу» — отдельная проверка: свободная деталь падает сверху на машину. Масса и контактный импульс дают отдачу кузову; движение пока ограничено плоскостью, подвески и переворотов ещё нет.';
-    el('filename').textContent = 'Baiern · столкновение с препятствием'; el('format').textContent = 'PHYSICS / CAR CRASH'; status('Испытание на машине');
+    el('details').textContent = 'Шасси движется и вращается в 3D. Четыре опоры подвески используют точки, радиусы и spring из CFG; жёсткость/демпфирование настроены для прототипа. Заезды — удар о препятствие; «Трамплин» — прыжок; «Боковой удар» — внешний импульс, способный перевернуть машину. Металлические панели гнутся и отрываются, фары и стёкла отделяются жёсткими. R восстанавливает сборку; пауза позволяет осмотреть повреждения.';
+    el('filename').textContent = 'Baiern · подвеска и повреждения'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('Испытание в 3D');
   } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }
 };
 hoodButton.onclick = async () => {
