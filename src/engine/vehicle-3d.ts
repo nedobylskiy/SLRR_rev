@@ -1,6 +1,6 @@
 import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 import { CarCrashDemo } from './car-crash-demo';
-import { RigidBody3D, boxContact } from './rigid-body-3d';
+import { RigidBody3D, boxContact, orientedBoxContact } from './rigid-body-3d';
 import { Suspension3D, TestTerrain, type Terrain } from './suspension-3d';
 import { DeformablePanel, type PanelBinding, type Triple } from './deformable-panel';
 import { TriangleSurface } from './triangle-surface';
@@ -45,6 +45,7 @@ export class Vehicle3D extends CarCrashDemo {
   private lastOmega = new Vector3();
   private surfaceDirty = false;
   private pendingShock = false;
+  private pendingReleaseSpeed = new Map<EnginePart, number>();
   private structuralMounts = new Map<EnginePart, { parent: EnginePart; field: DeformedFrame; ownInverse: Matrix4 }>();
   private wheelMounts: DeformedFrame[] = [];
   private engineHull = new Box3();
@@ -97,6 +98,8 @@ export class Vehicle3D extends CarCrashDemo {
       const share = c.weight / Math.max(1, total);
       c.panel?.impulseAt(impulse.clone().multiplyScalar(0.3 * share * structuralShare).toArray() as Triple, c.point.toArray() as Triple, 0.3);
       c.part.condition = Math.max(0, c.part.condition - energy * share / (mass(c.part) * 600));
+      const releaseSpeed = Math.min(5, impulse.length() / this.body.mass * 0.45 * Math.sqrt(c.weight) * structuralShare);
+      if (releaseSpeed > 0) this.pendingReleaseSpeed.set(c.part, Math.max(this.pendingReleaseSpeed.get(c.part) ?? 0, releaseSpeed));
     }
     if (root) root.part.condition = Math.max(0, root.part.condition - energy * 0.35 / (mass(root.part) * 150));
     // Transfer collision energy to nearby installed hardware. The engine is shielded by the body;
@@ -113,7 +116,7 @@ export class Vehicle3D extends CarCrashDemo {
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
-    super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 50000 });
+    super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 60000 });
     this.clock = new FixedClock(240, 8);
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = [...root.world.parts.values()].reduce((s, p) => s + mass(p), 0), center = new Vector3();
@@ -152,7 +155,7 @@ export class Vehicle3D extends CarCrashDemo {
     const rigid = isWheel || isEngine && part === engineBlock || !!part.definition.mechanics && !isEngine || /headlight|taillight|window|windshield/i.test(file);
     if (metal && part !== this.hood) {
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot);
-      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 1500000 : 750000, yieldStrain: isRoot ? 0.006 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(9000, mass(part) * 1500), gravity: isRoot ? 0 : 9.81 });
+      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 1500000 : 750000, yieldStrain: isRoot ? 0.006 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000), gravity: isRoot ? 0 : 9.81 });
       this.addSoft(part, panel, isRoot); panel.setAnchorFrame(part.matrix().elements); panel.reset();
     } else if (rigid && samples.length && !this.rigid.has(part)) {
       const body = new RigidBody3D(mass(part), isEngine && !this.engineHull.isEmpty() ? this.engineHull.clone() : boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });
@@ -204,7 +207,7 @@ export class Vehicle3D extends CarCrashDemo {
     for (const s of this.originalTree) if (s.part !== this.root) s.part.local.copy(s.local);
     for (const s of this.originalTree) s.part.condition = 1;
     this.body.setMass([...this.root.world.parts.values()].reduce((s, p) => s + mass(p), 0)); this.body.setFrame(this.root.matrix()); this.body.velocity.z = -speed; this.suspension.reset(); this.terrain.ramp = false;
-    this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false;
+    this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false; this.pendingReleaseSpeed.clear();
     this.surfaceTick = -4;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
     for (const s of this.soft.values()) { s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
@@ -254,6 +257,9 @@ export class Vehicle3D extends CarCrashDemo {
       if (apply) { const impulse = body.contact(point, normal, depth); if (carrier) this.applyImpulse(impulse.negate(), point); }
     };
     const contact = boxContact(body, obstacle); if (contact) solve(contact.point, contact.normal, contact.depth);
+    const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
+    const shell = orientedBoxContact(body, chassis, this.body.bounds.getSize(new Vector3()).multiplyScalar(0.5));
+    if (shell) solve(shell.point, shell.normal, shell.depth, true);
     const matrix = body.matrix(), inverse = matrix.clone().invert();
     const swept = body.bounds.clone().applyMatrix4(matrix).union(body.bounds.clone().applyMatrix4(previous)), nearBody = this.rigidSurface?.intersectsWorld(swept);
     const points: Vector3[] = [];
@@ -268,6 +274,36 @@ export class Vehicle3D extends CarCrashDemo {
       if (hit) { const normal = new Vector3(...hit.normal); solve(point, normal, new Vector3().fromArray(projected).sub(point).dot(normal), true); }
     }
     return speed;
+  }
+  private releasePanel(s: SoftBodyPart) {
+    const bounds = new Box3(), point = new Vector3();
+    for (let i = 0; i < s.panel.positions.length; i += 3) bounds.expandByPoint(point.fromArray(s.panel.positions, i));
+    const center = centerOf(s.panel.positions), chassisCenter = this.body.position.clone();
+    const chassis = this.body.matrix().multiply(new Matrix4().setPosition(this.body.bounds.getCenter(new Vector3())));
+    const probe = new RigidBody3D(s.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());
+    const overlap = orientedBoxContact(probe, chassis, this.body.bounds.getSize(new Vector3()).multiplyScalar(0.5));
+    if (overlap) {
+      const correction = overlap.normal.multiplyScalar(overlap.depth + 0.01);
+      for (let i = 0; i < s.panel.positions.length; i += 3) for (let axis = 0; axis < 3; axis++) s.panel.positions[i + axis] += correction.getComponent(axis);
+      center.add(correction);
+    }
+    const speed = this.pendingReleaseSpeed.get(s.part) ?? 0;
+    this.pendingReleaseSpeed.delete(s.part);
+    const outward = center.clone().sub(chassisCenter);
+    if (outward.lengthSq() < 1e-6) outward.set(0, 1, 0);
+    outward.normalize();
+    const mean = new Vector3(), node = new Vector3(), count = s.panel.velocities.length / 3;
+    for (let i = 0; i < s.panel.velocities.length; i += 3) mean.add(node.fromArray(s.panel.velocities, i));
+    mean.divideScalar(count);
+    const carrier = this.body.pointVelocity(center), inward = mean.clone().sub(carrier).dot(outward);
+    // Anchor release can create a large numerical recoil into the chassis. Remove only
+    // that inward component; keep tangential motion and deformation of the free panel.
+    if (inward < 0.25) s.panel.impulseWhole(outward.clone().multiplyScalar((0.25 - inward) * s.panel.options.mass).toArray() as Triple);
+    if (speed > 0) {
+      const impulse = outward.multiplyScalar(speed * s.panel.options.mass);
+      s.panel.impulseWhole(impulse.toArray() as Triple);
+      this.body.impulse(impulse.negate(), center);
+    }
   }
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');
@@ -329,7 +365,7 @@ export class Vehicle3D extends CarCrashDemo {
           s.part.condition = Math.min(s.part.condition, Math.max(0, 1 - strain / (s.root ? 0.3 : 0.4)));
         }
         if (!s.root && !s.panel.attached) s.part.condition = 0;
-        if (!s.root && s.part.condition === 0 && s.part.parent) { this.root.world.detach(s.part); detached = true; }
+        if (!s.root && s.part.condition === 0 && s.part.parent) { this.root.world.detach(s.part); this.releasePanel(s); detached = true; }
         if (s.part.parent || s.root) this.moveMounts(s.part);
         if (!s.root && !s.part.parent) {
           const frame = basis(s.panel).multiply(s.inverseBasis), center = centerOf(s.panel.positions); frame.setPosition(center.sub(s.center.clone().applyMatrix4(frame))); s.part.local.copy(frame);

@@ -129,6 +129,12 @@ export class DeformablePanel {
     if (impulse.some(v => v !== 0)) this.impulseVersion++;
     weights.forEach((w, n) => { for (let a = 0; a < 3; a++) this.velocities[n * 3 + a] += impulse[a] * w / total * this.inverseMass; });
   }
+  /** Give a released panel one rigid-body impulse without changing its existing dents or spin. */
+  impulseWhole(impulse: Triple) {
+    if (!impulse.every(Number.isFinite)) throw new Error('Invalid panel impulse');
+    for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) this.velocities[i + axis] += impulse[axis] / this.options.mass;
+    if (impulse.some(v => v !== 0)) this.impulseVersion++;
+  }
   advance(seconds: number) { return this.clock.advance(seconds, (_, dt) => this.step(dt)); }
   /** Carry the existing (possibly dented) cage as one rigid shape. Plastic lengths stay intact. */
   advanceRigid(seconds: number, transform: ArrayLike<number>, velocity: Triple, omega: Triple, center: Triple) {

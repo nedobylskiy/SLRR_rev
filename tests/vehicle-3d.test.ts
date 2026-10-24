@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, Matrix4, Vector3 } from 'three';
-import { RigidBody3D, boxContact } from '../src/engine/rigid-body-3d';
+import { RigidBody3D, boxContact, orientedBoxContact } from '../src/engine/rigid-body-3d';
 import { Vehicle3D } from '../src/engine/vehicle-3d';
 import { EngineWorld } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
@@ -151,10 +151,24 @@ test('a severe impact can still release the hood as one part', () => {
   for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
   demo.register(root, shell, []);
   demo.reset(50 / 3.6);
-  for (let i = 0; i < 2 * 240; i++) demo.advance(1 / 240, neutral);
+  for (let i = 0; i < 2 * 240 && hood.parent; i++) demo.advance(1 / 240, neutral);
   assert.ok(demo.impactSpeed > 10);
   assert.equal(hood.parent, undefined);
   assert.ok(demo.panel.mounts.every(m => m.broken));
+  const center = new Vector3(), velocity = new Vector3(), nodes = demo.panel.positions.length / 3;
+  for (let i = 0; i < demo.panel.positions.length; i += 3) {
+    center.add(new Vector3().fromArray(demo.panel.positions, i));
+    velocity.add(new Vector3().fromArray(demo.panel.velocities, i));
+  }
+  center.divideScalar(nodes); velocity.divideScalar(nodes);
+  const outward = center.clone().sub(demo.body.position).normalize();
+  const separationSpeed = velocity.sub(demo.body.pointVelocity(center)).dot(outward);
+  assert.ok(separationSpeed > 0.5, `the released hood receives an outward velocity: ${separationSpeed}, center ${center.toArray()}, chassis ${demo.body.position.toArray()}`);
+  const bounds = new Box3();
+  for (let i = 0; i < demo.panel.positions.length; i += 3) bounds.expandByPoint(new Vector3().fromArray(demo.panel.positions, i));
+  const probe = new RigidBody3D(demo.panel.options.mass, bounds, center); probe.setFrame(new Matrix4());
+  const chassis = demo.body.matrix().multiply(new Matrix4().setPosition(demo.body.bounds.getCenter(new Vector3())));
+  assert.equal(orientedBoxContact(probe, chassis, demo.body.bounds.getSize(new Vector3()).multiplyScalar(0.5)), undefined, 'the released panel is outside the rigid chassis');
   world.dispose();
 });
 
