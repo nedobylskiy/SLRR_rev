@@ -8,7 +8,7 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
-function setup() {
+function setup(mechanical = false) {
   const world = new EngineWorld(), slots = [101, 102, 103, 104].map((type, i) => `slot 0 0 0 0 0 0 ${20 + i}\nslottype ${type}`).join('\n');
   const wheels = [[-0.7, -1.3], [0.7, -1.3], [-0.7, 1.3], [0.7, 1.3]].map(([x, z], i) => `type 10 sphere 0.3\nspring 0.29 0.1 0.05\nwheel ${x} -0.6 ${z} 0 0 0 ${i < 2 ? 1 : 0} 0 1 0`).join('\n');
   const create = (id: number, file: string, cfg: string) => world.create({ key: { pack: 'test.rpk', id }, alias: file, cfgPath: file, config: parsePartConfig(cfg) });
@@ -17,12 +17,58 @@ function setup() {
   const hood = create(6, 'hood.cfg', 'slot 0 0.191 0.696 0 0 0 601\nbody 0 0 0 0 0 0 38.5 sphere 1'); world.install(root, 601, hood, 601);
   const door = create(7, 'door.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 15 sphere 1'); world.install(root, 602, door, 1);
   const lamp = create(8, 'headlights.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 1 sphere 0.2'); world.install(root, 603, lamp, 1);
+  let struts: ReturnType<typeof create>[] = [], block: ReturnType<typeof create> | undefined, crank: ReturnType<typeof create> | undefined;
+  if (mechanical) {
+    world.mechanical = true;
+    for (const [id, kind] of [[121, 'suspension'], [311, 'spring'], [301, 'shock']] as const) for (let index = 0; index < 4; index++) {
+      const slot = id + index;
+      root.definition.config.slots.push({ id: slot, position: [index % 2 ? 0.7 : -0.7, -0.4, index < 2 ? -1.3 : 1.3], rotation: [0, 0, 0], attach: [], compatible: [] });
+      const part = create(20 + slot, `${kind}.cfg`, 'slot 0 0 0 0 0 0 1');
+      part.definition.mechanics = { kind, source: `${kind}.java`, values: kind === 'spring' ? { force: 71000 } : kind === 'shock' ? { damping: 3000 } : {} };
+      world.install(root, slot, part, 1);
+      if (kind === 'suspension') struts.push(part);
+    }
+    root.definition.config.slots.push({ id: 401, position: [0, -0.3, -1.4], rotation: [0, 0, 0], attach: [], compatible: [] });
+    block = create(500, 'engine-block.cfg', 'slot 0 0 0 0 0 0 1\nslot 0 0 0.7 0 0 0 33\nbody 0 0 0 0 0 0 37 sphere 0.4');
+    block.definition.mechanics = { kind: 'engine', source: 'block.java', values: { cylinders: 6, bore: 80 } }; world.install(root, 401, block, 1);
+    crank = create(501, 'engine-crank.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 10 sphere 0.2');
+    crank.definition.mechanics = { kind: 'engine', source: 'crank.java', values: { stroke: 90 } }; world.install(block, 33, crank, 1);
+  }
   const samples = [-0.7, 0.04, -0.7, 0.7, 0.04, -0.7, -0.7, 0.04, 0.7, 0.7, 0.04, 0.7];
   const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)));
   const box = (x: number, y: number, z: number) => { const a: number[] = []; for (const px of [-x, x]) for (const py of [-y, y]) for (const pz of [-z, z]) a.push(px, py, pz); return a; };
   demo.register(door, box(0.04, 0.4, 0.6), []); demo.register(lamp, box(0.15, 0.15, 0.15), []); demo.reset();
-  return { world, root, hood, door, lamp, demo };
+  if (mechanical) {
+    for (const wheel of demo.suspension.wheels) demo.register(wheel.part, box(0.3, 0.3, 0.1), []);
+    demo.register(block!, box(0.3, 0.3, 0.3), []);
+    demo.register(crank!, box(0.2, 0.2, 0.2), []);
+    demo.reset();
+  }
+  return { world, root, hood, door, lamp, demo, struts, block, crank };
 }
+
+test('engine drops with its children as one rigid assembly, while a failed strut keeps its place and releases the wheel', () => {
+  const { world, root, demo, struts, block, crank } = setup(true);
+  assert.ok(block && crank); assert.equal(demo.rigid.has(crank), false);
+  crank.condition = 0; demo.advance(1 / 240, neutral);
+  assert.equal(crank.parent, block); assert.equal(block.parent, root);
+  const hull = demo.rigid.get(block)!.body.bounds;
+  assert.ok(hull.max.z > 0.8, 'engine hull includes the crankshaft mounted beyond the block');
+  block.condition = 0; demo.advance(1 / 240, neutral);
+  assert.equal(block.parent, undefined); assert.equal(crank.parent, block);
+  assert.equal(demo.rigid.get(block)!.body.mass, 47);
+  assert.equal(demo.rigid.has(crank), false);
+  for (let i = 0; i < 30; i++) demo.advance(1 / 240, neutral);
+  assert.ok(new Vector3().setFromMatrixPosition(crank.matrix()).distanceTo(new Vector3().setFromMatrixPosition(block.matrix())) < 2);
+  struts[0].condition = 0; const wheel = demo.suspension.wheels[0].part;
+  demo.advance(1 / 240, neutral);
+  assert.equal(struts[0].parent, root); assert.equal(wheel.parent, undefined);
+  assert.equal(wheel.condition, 0); assert.ok(demo.rigid.has(wheel));
+  demo.reset();
+  assert.equal(block.parent, root); assert.equal(crank.parent, block); assert.equal(struts[0].parent, root); assert.equal(wheel.parent, root);
+  assert.equal(block.condition, 1); assert.equal(struts[0].condition, 1); assert.equal(wheel.condition, 1);
+  world.dispose();
+});
 
 test('rigid body integrates vertical motion and all rotation axes from an off-centre impulse', () => {
   const body = new RigidBody3D(1000, new Box3(new Vector3(-1, -0.5, -2), new Vector3(1, 0.5, 2)));

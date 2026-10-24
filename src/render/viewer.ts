@@ -166,7 +166,9 @@ export class Viewer {
       for (const part of root.world.parts.values()) {
         if (part === hood || !part.definition.model) continue;
         const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
-        if (type === 11 || type !== undefined && type >= 101 && type < 200) continue;
+        if (type === 11) continue;
+        if (type !== undefined && type >= 101 && type <= 104) { (crash as Vehicle3D).register(part, localPositions(part).flat(), []); continue; }
+        if (type !== undefined && type > 104 && type < 200) continue;
         const ownTransform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)), ownTriangles: number[] = [];
         for (const mesh of this.proxies.get(part)?.children ?? []) if (mesh instanceof THREE.Mesh) {
           const positions = mesh.geometry.getAttribute('position'), indices = mesh.geometry.getIndex();
@@ -239,7 +241,8 @@ export class Viewer {
       this.ground.visible = false; this.grid.visible = true; this.driveGrid.visible = false; this.syncWorld(); this.fit();
     };
     this.stopDriving = stop; focus();
-    return Object.assign(stop, { rear: () => { if (crash instanceof Vehicle3D) crash.rearCrash(); keys.clear(); last = undefined; focus(); }, launch: (speed: number) => { crash?.reset(speed); keys.clear(); last = undefined; focus(); }, jump: () => { if (crash instanceof Vehicle3D) crash.jump(); keys.clear(); last = undefined; focus(); }, roll: () => { if (crash instanceof Vehicle3D) crash.roll(); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); keys.clear(); last = undefined; focus(); }, wireframe: (value: boolean) => panelViews.forEach(v => v.wireframe(value)), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
+    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(1 / 240, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
+    return Object.assign(stop, { rear: () => { if (crash instanceof Vehicle3D) crash.rearCrash(); keys.clear(); last = undefined; focus(); }, launch: (speed: number) => { crash?.reset(speed); keys.clear(); last = undefined; focus(); }, jump: () => { if (crash instanceof Vehicle3D) crash.jump(); keys.clear(); last = undefined; focus(); }, roll: () => { if (crash instanceof Vehicle3D) crash.roll(); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); keys.clear(); last = undefined; focus(); }, breakEngine: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.block : undefined), breakStrut: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.corners[0].strut : undefined), wireframe: (value: boolean) => panelViews.forEach(v => v.wireframe(value)), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];

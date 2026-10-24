@@ -32,6 +32,8 @@ internals.onchange = () => viewer?.showInternals(internals.checked); internalsLa
 const dropButton = textElement('button', 'Капот на крышу'); dropButton.onclick = () => crashSession?.drop(); crashControls.append(dropButton);
 const jumpButton = textElement('button', 'Трамплин'), rollButton = textElement('button', 'Боковой удар');
 const rearButton = textElement('button', 'Удар задом'); rearButton.onclick = () => crashSession?.rear(); crashControls.append(rearButton);
+const engineRelease = textElement('button', 'Отрыв двигателя'); engineRelease.onclick = () => crashSession?.breakEngine(); crashControls.append(engineRelease);
+const strutFailure = textElement('button', 'Обрыв левой стойки'); strutFailure.onclick = () => crashSession?.breakStrut(); crashControls.append(strutFailure);
 jumpButton.onclick = () => crashSession?.jump(); rollButton.onclick = () => crashSession?.roll(); crashControls.append(jumpButton, rollButton);
 crashCage.onchange = () => crashSession?.wireframe(crashCage.checked); crashCageLabel.prepend(crashCage); crashControls.append(crashCageLabel);
 const slowLabel = textElement('label', ' Замедление ×4'), slow = document.createElement('input'); slow.type = 'checkbox';
@@ -69,7 +71,7 @@ crashButton.onclick = async () => {
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; internals.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
-    el('details').textContent = 'Оригинальные стойки, пружины, амортизаторы, тормоза и двигатель установлены по Java addStockParts и CFG креплениям. Их состояние меняет опору колёс, демпфирование, торможение и тягу; перекос колеса начинается ниже 10% состояния стойки. Численная модель сил и переключения передач пока приближённая. «Внутренние узлы» скрывает кузов для осмотра деталей. R восстанавливает сборку.';
+    el('details').textContent = 'Оригинальные стойки, пружины, амортизаторы, тормоза и двигатель установлены по Java addStockParts и CFG креплениям. Их состояние меняет опору колёс, демпфирование, торможение и тягу; перекос колеса начинается ниже 10% состояния стойки. При нуле стойка остаётся на кузове, колесо отделяется. Двигатель падает одним телом со всеми вложенными деталями. Кнопки отрыва диагностически выставляют 0% состояния. «Внутренние узлы» скрывает кузов для осмотра. R восстанавливает сборку.';
     el('filename').textContent = 'Baiern · подвеска и повреждения'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('Испытание в 3D');
   } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }
 };

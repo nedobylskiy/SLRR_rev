@@ -14,7 +14,11 @@ import { FixedClock } from '../runtime/fixed-clock';
 export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean; mountVersion?: number }
 export interface RigidPart { part: EnginePart; body: RigidBody3D; previous: Matrix4; peakForce: number }
 interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[] }
-const mass = (p: EnginePart) => Math.max(p.definition.mechanics ? ({ suspension: 12, spring: 3, shock: 3, brake: 8, sway: 4, engine: 4 }[p.definition.mechanics.kind]) : 0.1, p.definition.config.bodies.reduce((s, b) => s + b.mass, 0));
+const mass = (p: EnginePart) => {
+  const type = p.parent?.definition.config.slots.find(s => s.id === p.parentSlot)?.type;
+  const minimum = type !== undefined && type >= 101 && type <= 104 ? 14 : p.definition.mechanics ? ({ suspension: 12, spring: 3, shock: 3, brake: 8, sway: 4, engine: 4 }[p.definition.mechanics.kind]) : 0.1;
+  return Math.max(minimum, p.definition.config.bodies.reduce((s, b) => s + b.mass, 0));
+};
 const boundsOf = (samples: ArrayLike<number>) => { const box = new Box3(); for (let i = 0; i < samples.length; i += 3) box.expandByPoint(new Vector3().fromArray(samples, i)); return box; };
 const centerOf = (p: ArrayLike<number>) => { const out = new Vector3(); for (let i = 0; i < p.length; i += 3) out.add(new Vector3().fromArray(p, i)); return out.multiplyScalar(3 / p.length); };
 function basis(panel: DeformablePanel) {
@@ -42,6 +46,7 @@ export class Vehicle3D extends CarCrashDemo {
   private pendingShock = false;
   private structuralMounts = new Map<EnginePart, { parent: EnginePart; field: DeformedFrame; ownInverse: Matrix4 }>();
   private wheelMounts: DeformedFrame[] = [];
+  private engineHull = new Box3();
   private surfaceTick = -4;
   private configureStructure() {
     this.structuralMounts.clear(); this.wheelMounts = [];
@@ -130,16 +135,25 @@ export class Vehicle3D extends CarCrashDemo {
   }
   register(part: EnginePart, samples: number[], triangles: number[]) {
     const file = part.definition.cfgPath.split('/').at(-1) ?? '';
-    const isRoot = part === this.root, metal = isRoot || /hood|trunk|door|quarterpanel|bumper|sideskirt/i.test(file), rigid = !!part.definition.mechanics || /headlight|taillight|window|windshield/i.test(file);
+    const isRoot = part === this.root, isWheel = this.suspension.wheels.some(w => w.part === part);
+    const engineBlock = this.suspension.mechanics?.block, isEngine = part.definition.mechanics?.kind === 'engine';
+    if (isEngine && engineBlock && samples.length) {
+      const relative = engineBlock.matrix().invert().multiply(part.matrix());
+      for (let i = 0; i < samples.length; i += 3) this.engineHull.expandByPoint(new Vector3().fromArray(samples, i).applyMatrix4(relative));
+      const cluster = this.rigid.get(engineBlock);
+      if (cluster) cluster.body.bounds.copy(this.engineHull);
+    }
+    const metal = isRoot || /hood|trunk|door|quarterpanel|bumper|sideskirt/i.test(file);
+    const rigid = isWheel || isEngine && part === engineBlock || !!part.definition.mechanics && !isEngine || /headlight|taillight|window|windshield/i.test(file);
     if (metal && part !== this.hood) {
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot);
       const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 1500000 : 600000, yieldStrain: isRoot ? 0.004 : 0.012, mountStrength: isRoot ? 1e15 : Math.max(6000, mass(part) * 1000), gravity: isRoot ? 0 : 9.81 });
       this.addSoft(part, panel, isRoot); panel.setAnchorFrame(part.matrix().elements); panel.reset();
     } else if (rigid && samples.length && !this.rigid.has(part)) {
-      const body = new RigidBody3D(mass(part), boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });
+      const body = new RigidBody3D(mass(part), isEngine && !this.engineHull.isEmpty() ? this.engineHull.clone() : boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });
     }
     const soft = this.soft.get(part);
-    if (!part.definition.mechanics) this.geometry.push({ part, triangles, bindings: soft && Array.from({ length: triangles.length / 3 }, (_, i) => soft.panel.bind(triangles.slice(i * 3, i * 3 + 3))) });
+    if (!part.definition.mechanics && !isWheel) this.geometry.push({ part, triangles, bindings: soft && Array.from({ length: triangles.length / 3 }, (_, i) => soft.panel.bind(triangles.slice(i * 3, i * 3 + 3))) });
   }
   override setBodyTriangles(triangles: ArrayLike<number>) { super.setBodyTriangles(triangles, true); this.triangleSource = Array.from(triangles); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; this.configureStructure(); }
   private updateSurface() {
@@ -182,7 +196,7 @@ export class Vehicle3D extends CarCrashDemo {
     this.surfaceTick = -4;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
     for (const s of this.soft.values()) { s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
-    for (const r of this.rigid.values()) { r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
+    for (const r of this.rigid.values()) { r.body.setMass(mass(r.part)); r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
     if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; }
     this.configureStructure();
   }
@@ -192,6 +206,25 @@ export class Vehicle3D extends CarCrashDemo {
   roll() { this.reset(); this.body.impulse(new Vector3(this.body.mass * 5, this.body.mass * 2, 0), this.body.position.clone().add(new Vector3(0, 1, 0))); }
   private syncBody() {
     this.root.local.copy(this.body.matrix()); this.driving.position.setFromMatrixPosition(this.root.local); this.driving.speed = this.body.velocity.dot(new Vector3(0, 0, -1).applyQuaternion(this.body.orientation)); this.suspension.sync();
+  }
+  private releaseFailedWheels() {
+    let released = false;
+    this.suspension.wheels.forEach((wheel, index) => {
+      if (wheel.part.parent !== this.root) return;
+      const strut = this.suspension.mechanics?.component(index, 'strut');
+      if (wheel.part.condition > 0 && wheel.mountCondition > 0 && strut !== 0) return;
+      const frame = wheel.part.matrix(), rigid = this.rigid.get(wheel.part);
+      wheel.part.condition = 0;
+      if (rigid) {
+        rigid.body.setFrame(frame);
+        rigid.body.velocity.copy(this.body.pointVelocity(rigid.body.position));
+        rigid.body.setAngularVelocity(this.body.omega);
+        rigid.previous.copy(frame);
+      }
+      this.root.world.detach(wheel.part);
+      released = true;
+    });
+    return released;
   }
   /** Probe first so a hard impact can wake XPBD before any rigid proxy impulse is applied. */
   private freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape?: Float64Array) {
@@ -222,6 +255,7 @@ export class Vehicle3D extends CarCrashDemo {
     if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
     return this.clock.advance(seconds, tick => {
       const dt = this.clock.dt, previous = this.root.matrix();
+      let detached = this.releaseFailedWheels();
       this.suspension.step(dt, input); this.body.integrate(dt);
       const incomingVelocity = this.body.velocity.clone(), incomingOmega = this.body.omega, predicted = this.body.matrix();
       const obstacle = new Box3(new Vector3(...this.obstacle.min), new Vector3(...this.obstacle.max));
@@ -245,7 +279,6 @@ export class Vehicle3D extends CarCrashDemo {
       // angular shocks and centrifugal loads can deform panels or overload their attachments.
       const shock = this.pendingShock || this.body.velocity.distanceTo(this.lastVelocity) / dt > 25 || omega.distanceTo(this.lastOmega) / dt > 10 || omega.lengthSq() * 3 > 25;
       this.pendingShock = false;
-      let detached = false;
       const ordered = [...this.soft.values()].sort((a, b) => Number(b.root) - Number(a.root) || Number(!!b.part.parent) - Number(!!a.part.parent) || Number(a.part === this.hood) - Number(b.part === this.hood));
       let freeSurfaceUpdated = false;
       for (const s of ordered) {
@@ -276,13 +309,16 @@ export class Vehicle3D extends CarCrashDemo {
       }
       for (const r of this.rigid.values()) {
         const wasAttached = !!r.part.parent;
-        if (wasAttached && r.part.definition.mechanics && r.part.condition > 0) continue;
+        if (wasAttached && (this.suspension.wheels.some(w => w.part === r.part) || r.part.definition.mechanics && (r.part !== this.suspension.mechanics?.block || r.part.condition > 0))) continue;
         const mount = r.part.definition.config.slots.find(s => s.id === r.part.ownSlot), mountPoint = mount ? new Vector3(...mount.position).applyMatrix4(r.part.matrix()) : r.body.position.clone();
         const size = r.body.bounds.getSize(new Vector3()), bracket = Math.max(0.02, Math.min(size.x, size.y, size.z) * 0.2);
         const load = (j: Vector3, point: Vector3) => (j.length() + new Vector3().crossVectors(point.clone().sub(mountPoint), j).length() / bracket) / dt;
         if (wasAttached) { r.body.setFrame(r.part.matrix()); r.body.velocity.copy(incomingVelocity).add(new Vector3().crossVectors(incomingOmega, r.body.position.clone().sub(this.body.position))); r.body.setAngularVelocity(incomingOmega); }
         else r.body.integrate(dt);
-        if (wasAttached && r.part.condition === 0) { if (r.part.definition.mechanics) r.body.setMass(this.subtreeMass(r.part)); this.root.world.detach(r.part); detached = true; }
+        if (wasAttached && r.part.condition === 0) {
+          if (r.part === this.suspension.mechanics?.block) { r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setMass(this.subtreeMass(r.part)); r.body.setFrame(r.part.matrix()); r.body.velocity.copy(incomingVelocity); r.body.setAngularVelocity(incomingOmega); }
+          this.root.world.detach(r.part); detached = true;
+        }
         // Interior hardware is loaded by the chassis impact above. Its render bounds may overlap
         // the chassis and the ground; resolve physical contacts once it actually breaks loose.
         if (wasAttached && r.part.definition.mechanics) { r.previous.copy(r.body.matrix()); continue; }
@@ -310,7 +346,6 @@ export class Vehicle3D extends CarCrashDemo {
         }
         r.previous.copy(r.body.matrix());
       }
-      for (const part of this.root.world.parts.values()) if (part.definition.mechanics && !this.rigid.has(part) && part.parent && this.connected(part) && part.condition === 0) { this.root.world.detach(part); detached = true; }
       if (detached) { const omega = this.body.omega; this.body.setMass([...this.root.world.parts.values()].filter(p => this.connected(p)).reduce((s, p) => s + mass(p), 0)); this.body.setAngularVelocity(omega); this.updateSurface(); }
       // Refit deformed body contact geometry periodically; never retain detached-panel ghost colliders.
       if (tick % 24 === 0 && this.surfaceDirty) { this.updateSurface(); this.surfaceDirty = false; }
