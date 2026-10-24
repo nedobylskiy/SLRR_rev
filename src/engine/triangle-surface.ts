@@ -30,7 +30,7 @@ export class TriangleSurface implements PanelSurface {
     }
     if (!valid) throw new Error('Empty collision surface'); this.tree = this.build(faces);
   }
-  setFrames(previous: Matrix4, current: Matrix4) { this.previousInverse.copy(previous).invert(); this.inverse.copy(current).invert(); this.frame.copy(current); this.revision++; }
+  setFrames(previous: Matrix4, current: Matrix4) { this.previousInverse.copy(previous).invert(); this.inverse.copy(current).invert(); this.frame.copy(current); }
   /** Same triangle order/topology: update bounds bottom-up without sorting or allocating a new BVH. */
   refit(triangles: ArrayLike<number>) {
     if (triangles.length !== this.coordinateCount) throw new Error('Refit requires unchanged triangle topology');
@@ -49,6 +49,7 @@ export class TriangleSurface implements PanelSurface {
     this.revision++;
   }
   reset() { this.hits = 0; }
+  intersectsWorld(bounds: Box3) { return bounds.clone().applyMatrix4(this.inverse).expandByScalar(this.radius).intersectsBox(this.tree.bounds); }
   roofPoint() {
     const top = this.tree.bounds.max.y, center = new Vector3(); let weight = 0;
     const visit = (branch: Branch) => { if (branch.faces) for (const face of branch.faces) { if (face.bounds.max.y > top - 0.12 && Math.abs(face.normal.y) > 0.7) { const area = face.triangle.getArea(); center.addScaledVector(face.triangle.getMidpoint(new Vector3()), area); weight += area; } } else { visit(branch.left!); visit(branch.right!); } }; visit(this.tree);
@@ -70,7 +71,7 @@ export class TriangleSurface implements PanelSurface {
     let cache = entries[offset / 3];
     if (!cache) cache = entries[offset / 3] = { revision: -1, bounds: new Box3(), faces: [] };
     // XPBD visits a node repeatedly within a tick. Reuse only a conservative candidate set;
-    // movement outside its bounds, a new body frame or a refit always triggers a fresh query.
+    // movement outside its body-local bounds or a geometry refit triggers a fresh query.
     if (cache.revision !== this.revision || !cache.bounds.containsBox(query)) {
       cache.revision = this.revision; cache.bounds.copy(query).expandByScalar(0.02); cache.faces.length = 0;
       const stack = this.stack; stack.length = 0; stack.push(this.tree);
@@ -88,7 +89,12 @@ export class TriangleSurface implements PanelSurface {
       const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < 0 ? -1 : 1;
       if (sign * b < this.radius && sign * a > sign * b) {
         const time = Math.max(0, (sign * a - this.radius) / (sign * a - sign * b)), center = this.center.copy(from).lerp(to, time), surface = this.surface.copy(center).addScaledVector(n, -this.delta.subVectors(center, triangle.a).dot(n));
-        if (time >= 0 && time <= 1 && time < first && triangle.containsPoint(surface)) { first = time; normal.copy(n).multiplyScalar(sign); hit.copy(to).addScaledVector(normal, this.radius - sign * b); found = true; }
+        if (time >= 0 && time <= 1 && time < first && triangle.containsPoint(surface)) {
+          first = time; normal.copy(n).multiplyScalar(sign);
+          // Stop at the swept contact, rather than projecting a distant end point onto the
+          // infinite face plane (which could put it beyond the triangle and inside the body).
+          hit.copy(surface).addScaledVector(normal, this.radius); found = true;
+        }
       }
       // Resting contact and triangle edges, including small pre-existing penetrations of the contact shell.
       if (first !== Infinity || to.x < bounds.min.x - this.radius || to.x > bounds.max.x + this.radius || to.y < bounds.min.y - this.radius || to.y > bounds.max.y + this.radius || to.z < bounds.min.z - this.radius || to.z > bounds.max.z + this.radius) continue;

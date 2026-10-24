@@ -59,6 +59,7 @@ test('a headlight separates as a rigid part and reset restores the same full ass
   const { world, root, hood, door, lamp, demo } = setup(), count = world.parts.size; demo.reset(50 / 3.6);
   for (let i = 0; i < 480; i++) demo.advance(1 / 240, neutral);
   assert.ok(!lamp.parent); assert.equal(demo.soft.has(lamp), false); assert.equal(world.parts.get(lamp.id), lamp);
+  assert.equal(lamp.condition, 0);
   const frame = lamp.matrix(), a = new Vector3(0.1, 0, 0).applyMatrix4(frame), b = new Vector3(-0.1, 0, 0).applyMatrix4(frame); assert.ok(Math.abs(a.distanceTo(b) - 0.2) < 1e-10);
   demo.reset(); assert.equal(world.parts.size, count); assert.equal(hood.parent, root); assert.equal(door.parent, root); assert.equal(lamp.parent, root); assert.ok([...demo.soft.values()].every(s => s.panel.plasticBeams === 0)); world.dispose();
 });
@@ -100,6 +101,36 @@ test('a released panel becomes a rigid free body in flight and wakes again on la
     if (rigidFlight && activity.deforming) { wokeOnLanding = true; break; }
   }
   assert.ok(rigidFlight); assert.ok(wokeOnLanding); assert.equal(hood.parent, undefined); world.dispose();
+});
+
+test('bent chassis moves real attachment frames and suspension points, changing a straight drive', () => {
+  const healthy = setup(), damaged = setup(), samples: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.6, 0.6]) for (const z of [-2.1, 2.1]) samples.push(x, y, z);
+  for (const s of [healthy, damaged]) { s.demo.register(s.root, samples, []); s.demo.reset(); s.demo.obstacle.min[0] += 100; s.demo.obstacle.max[0] += 100; }
+  const initialDoor = damaged.door.local.clone(), panel = damaged.demo.soft.get(damaged.root)!.panel, inverse = damaged.root.matrix().invert(), point = new Vector3();
+  for (let i = 0; i < panel.positions.length; i += 3) {
+    point.fromArray(panel.positions, i).applyMatrix4(inverse);
+    point.z += 0.4 * (1 - (point.x + 0.85) / 1.7) * (1 - (point.z + 2.1) / 4.2);
+    point.applyMatrix4(damaged.root.matrix()).toArray(panel.positions, i);
+  }
+  for (const s of [healthy, damaged]) s.demo.advance(1 / 240, neutral);
+  assert.ok(damaged.demo.suspension.wheels[0].hardpoint.distanceTo(damaged.demo.suspension.wheels[0].originalHardpoint) > 0.25);
+  assert.ok(damaged.demo.suspension.wheels[0].mountCondition < 0.1);
+  assert.ok(!damaged.door.local.equals(initialDoor));
+  for (let i = 0; i < 600; i++) for (const s of [healthy, damaged]) s.demo.advance(1 / 240, { ...neutral, throttle: 0.5 });
+  assert.ok(healthy.demo.body.position.distanceTo(damaged.demo.body.position) > 0.05);
+  damaged.demo.reset(); assert.ok(damaged.door.local.equals(initialDoor));
+  assert.ok(damaged.demo.suspension.wheels.every(w => w.mountCondition === 1 && w.hardpoint.equals(w.originalHardpoint)));
+  assert.throws(() => { damaged.root.condition = NaN; }, /condition/); assert.throws(() => { damaged.root.condition = -1; }, /condition/);
+  healthy.world.dispose(); damaged.world.dispose();
+});
+
+test('alignment failure starts below 10 percent support health and zero-health panels detach', () => {
+  const { world, demo, door } = setup(), damage = new Matrix4().makeRotationY(0.2);
+  demo.suspension.deform(0, damage, 0.1); assert.ok(Math.abs(demo.suspension.wheels[0].damage.elements[2]) < 1e-10);
+  demo.suspension.deform(0, damage, 0.05); assert.ok(Math.abs(demo.suspension.wheels[0].damage.elements[2]) > 0.05);
+  door.condition = 0; demo.advance(1 / 240, neutral); assert.equal(door.parent, undefined);
+  demo.reset(); assert.equal(door.condition, 1); assert.ok(door.parent); world.dispose();
 });
 
 

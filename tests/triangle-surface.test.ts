@@ -38,6 +38,12 @@ test('moving body frame sweeps against a stationary world point', () => {
   assert.ok(contact); assert.ok(Math.abs(p[1] - (1.5 + s.radius)) < 1e-10);
 });
 
+test('a diagonal high-speed sweep stops on the finite triangle, not beyond its edge', () => {
+  const s = new TriangleSurface([-1, 0, -1, 1, 0, -1, 0, 0, 1], () => true, () => new Vector3(), () => {});
+  const p = new Float64Array([8, -8, 0]); assert.ok(s.project(p, new Float64Array([0, 0.1, 0]), 0));
+  assert.ok(p[0] < 0.1); assert.ok(p[1] >= s.radius - 1e-10);
+});
+
 test('a free panel bounces, transfers opposite impulse and remains supported above a roof', () => {
   const p = new DeformablePanel([-0.7, 1.3, -0.7, 0.7, 1.3, -0.7, -0.7, 1.3, 0.7, 0.7, 1.3, 0.7], { mass: 38.5, mount: [0, 1.3, 0.7], yieldStrain: 100 });
   p.mounts.forEach(m => { m.broken = true; }); let reactionY = 0, peakUpward = 0;

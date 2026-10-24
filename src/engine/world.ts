@@ -20,6 +20,9 @@ export class EnginePart {
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
+  private health = 1;
+  get condition() { return this.health; }
+  set condition(value: number) { if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid part condition'); this.health = value; }
   constructor(readonly world: EngineWorld, readonly id: number, readonly definition: PartDefinition) {}
   matrix(): Matrix4 { return this.parent ? this.parent.matrix().multiply(this.local) : this.local.clone(); }
 }

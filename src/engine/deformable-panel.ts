@@ -28,6 +28,7 @@ export class DeformablePanel {
   contacts = 0;
   impulseVersion = 0;
   resetVersion = 0;
+  shapeVersion = 0;
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
     [this.nx, this.nz] = options.resolution ?? [7, 9];
@@ -96,6 +97,7 @@ export class DeformablePanel {
   get plasticBeams() { return this.beams.filter(b => Math.abs(b.rest - b.initial) > b.initial * 0.001).length; }
   reset() {
     this.resetVersion++;
+    this.shapeVersion++;
     this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(240, 32);
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
@@ -171,7 +173,7 @@ export class DeformablePanel {
       }
       for (let i = 1; i < p.length; i += 3) p[i] = Math.max(0.015, p[i]);
       for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
-      surfaces();
+      if (iteration === 0 || iteration === 4 || iteration === 8 || iteration === 11) surfaces();
     }
     for (const m of this.mounts) if (!m.broken) {
       m.force = m.nodes.reduce((sum, n) => sum + Math.hypot(this.anchorLambda[n * 3], this.anchorLambda[n * 3 + 1], this.anchorLambda[n * 3 + 2]) / dt2, 0);
@@ -198,6 +200,7 @@ export class DeformablePanel {
       contact.impulse?.(impulse, contact.point);
     }
     for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= 0.015001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+    this.shapeVersion++;
   }
   private contactBox(i: number, box: PanelCollider) {
     const p = this.positions, previous = this.previous;

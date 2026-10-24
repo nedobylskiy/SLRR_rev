@@ -5,7 +5,7 @@ export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; 
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
-  bodies: (CfgPose & { mass: number; shape: string[] })[];
+  bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
   wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; maxSteer?: number;
   unknown: { line: number; command: string; args: string[] }[];
 }
@@ -50,6 +50,7 @@ export function parsePartConfig(source: string): PartConfig {
         if (body.mass < 0 || !body.shape.length) throw fail();
         result.bodies.push(body); break;
       }
+      case 'nocollision': if (result.bodies.length) result.bodies.at(-1)!.collision = false; result.unknown.push({ line, command, args }); break;
       case 'type':
         spring = undefined;
         radius = args[1]?.toLowerCase() === 'sphere' ? number(2) : undefined;

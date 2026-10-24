@@ -29,6 +29,7 @@ for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 
 const crashCageLabel = textElement('label', ' Каркасы деталей'), crashCage = document.createElement('input'); crashCage.type = 'checkbox';
 const dropButton = textElement('button', 'Капот на крышу'); dropButton.onclick = () => crashSession?.drop(); crashControls.append(dropButton);
 const jumpButton = textElement('button', 'Трамплин'), rollButton = textElement('button', 'Боковой удар');
+const rearButton = textElement('button', 'Удар задом'); rearButton.onclick = () => crashSession?.rear(); crashControls.append(rearButton);
 jumpButton.onclick = () => crashSession?.jump(); rollButton.onclick = () => crashSession?.roll(); crashControls.append(jumpButton, rollButton);
 crashCage.onchange = () => crashSession?.wireframe(crashCage.checked); crashCageLabel.prepend(crashCage); crashControls.append(crashCageLabel);
 const slowLabel = textElement('label', ' Замедление ×4'), slow = document.createElement('input'); slow.type = 'checkbox';
@@ -66,7 +67,7 @@ crashButton.onclick = async () => {
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
-    el('details').textContent = 'Шасси движется и вращается в 3D. Четыре опоры подвески используют точки, радиусы и spring из CFG; жёсткость/демпфирование настроены для прототипа. Заезды — удар о препятствие; «Трамплин» — прыжок; «Боковой удар» — внешний импульс, способный перевернуть машину. Металлические панели гнутся и отрываются, фары и стёкла отделяются жёсткими. R восстанавливает сборку; пауза позволяет осмотреть повреждения.';
+    el('details').textContent = 'Шасси движется и вращается в 3D. Четыре опоры подвески используют точки, радиусы и spring из CFG; жёсткость/демпфирование настроены для прототипа. Заезды — удар о препятствие; «Трамплин» — прыжок; «Боковой удар» — внешний импульс, способный перевернуть машину. Металлические панели гнутся и отрываются, фары и стёкла отделяются жёсткими. Деформация кузова смещает крепления и опоры колёс. Перекос оси включается ниже 10% состояния опоры. Отдельные рычаги, стойки и двигатель ещё не установлены. R восстанавливает сборку; пауза позволяет осмотреть повреждения.';
     el('filename').textContent = 'Baiern · подвеска и повреждения'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('Испытание в 3D');
   } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }
 };
