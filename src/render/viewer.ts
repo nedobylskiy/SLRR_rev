@@ -19,6 +19,7 @@ import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
 import { mapObjectPlacements, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
+import { stockContainerTexture } from './stock-container-texture';
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -356,12 +357,12 @@ export class Viewer {
       const file = textures[part.textureIndex];
       if (file) {
         try {
-          const bytes = await assets.read(file);
-          const texture = await this.texture(bytes, file);
+          const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
+          const texture = await this.texture(selected.bytes, selected.path);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
-          const alphaKey = file.toLowerCase();
+          const alphaKey = selected.path.toLowerCase();
           let alpha = this.alphaModes.get(alphaKey);
-          if (!alpha) { alpha = textureAlphaMode(bytes, file, texture.image); this.alphaModes.set(alphaKey, alpha); }
+          if (!alpha) { alpha = textureAlphaMode(selected.bytes, selected.path, texture.image); this.alphaModes.set(alphaKey, alpha); }
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
           if (alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }

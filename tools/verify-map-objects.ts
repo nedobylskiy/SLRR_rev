@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { Assets } from '../src/assets';
 import { parseScx } from '../src/formats/scx';
+import { stockContainerTexture } from '../src/render/stock-container-texture';
 import { mapObjectPlacements, parseIcfg } from '../src/engine/map-objects';
 import { MapCollision } from '../src/engine/map-collision';
 import { poseMatrix } from '../src/engine/transforms';
@@ -44,5 +45,11 @@ const containerMaterial = parseScx(await assets.read(containerModel.path)).meshe
 if (containerMaterial.textureIndex !== 0 || !/maps[/\\]textures[/\\]kontener\.dds$/i.test(containerModel.textures[0] ?? '')) {
   throw new Error('Container SCX material did not resolve its original RPK texture');
 }
-await assets.read(containerModel.textures[containerMaterial.textureIndex]);
+const containerTexture = containerModel.textures[containerMaterial.textureIndex];
+const originalUv = containerMaterial.uv.slice();
+const selected = await stockContainerTexture(containerMaterial, containerTexture, await assets.read(containerTexture), assets);
+if (selected.path !== 'maps/textures/kontenertext1.dds') throw new Error('The stock container did not select its matching 2×3 atlas');
+if (!containerMaterial.uv.every((value, index) => value === originalUv[index])) throw new Error('Container UV was modified');
+const unchanged = await stockContainerTexture(containerMaterial, containerTexture, selected.bytes, assets);
+if (unchanged.path !== containerTexture) throw new Error('An unrecognised atlas must not be substituted');
 console.log(`Resolved ${resolved} Test Track objects, including ${containers.length} containers and ${collision.boxes} original CFG boxes`);
