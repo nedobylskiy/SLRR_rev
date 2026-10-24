@@ -5,6 +5,22 @@ import { Assets } from '../src/assets';
 import { parsePartConfig } from '../src/formats/cfg';
 import { EngineWorld, PartFactory, poseMatrix, type PartDefinition } from '../src/engine/world';
 import type { RpkPack } from '../src/formats/rpk';
+import { modelMatrix } from '../src/engine/model-transform';
+
+test('SCX centimetres convert to CFG metres without scaling attachment translations or mutating poses', () => {
+  const world = new EngineWorld();
+  const root = world.create(definition(1, 'slot 0 0 -2 0 0 0 1'));
+  const child = world.create(definition(2, 'slot 0 0 0.5 0 0 0 2'));
+  world.install(root, 1, child, 2);
+  const original = child.matrix(), draw = modelMatrix(original);
+  assert.deepEqual(new Vector3(0, 0, 50).applyMatrix4(draw).toArray(), [0, 0, -2]);
+  assert.deepEqual(new Vector3().applyMatrix4(draw).toArray(), [0, 0, -2.5]);
+  assert.deepEqual(child.matrix(), original);
+  root.local.makeRotationY(Math.PI / 2);
+  const mount = new Vector3(0, 0, 50).applyMatrix4(modelMatrix(child.matrix()));
+  assert.ok(mount.distanceTo(new Vector3(-2, 0, 0)) < 1e-12);
+  world.dispose();
+});
 
 test('CFG preserves ordered stock, repeated attachments, physical data and unknown commands', () => {
   const cfg = parsePartConfig(`#comment\nslot 1 2 3 0.2 0.4 0.6 7\nattach 0x06 8 ; note\nattach 0x09 10\nstockpart 0x10\n#stockpart 0x11\nstockpart 0x10 // repeated\nbody 0 0 0 0 0 0 12.5 sphere 0.3\nwheel 1 0 2 0 0 0 1 0 1 0\nrender 0x01\ndeformable 0x02\neof`);

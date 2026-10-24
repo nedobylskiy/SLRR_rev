@@ -6,6 +6,7 @@ import type { ScxModel } from '../formats/scx';
 import type { Assets } from '../assets';
 import { parseScx } from '../formats/scx';
 import type { EngineWorld } from '../engine/world';
+import { modelMatrix } from '../engine/model-transform';
 
 export class Viewer {
   private renderer: THREE.WebGLRenderer;
@@ -65,7 +66,7 @@ export class Viewer {
       const parsed = parseScx(await assets.read(model.path));
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
-      group.matrixAutoUpdate = false; group.matrix.copy(part.matrix()); this.model.add(group);
+      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix())); this.model.add(group);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
       if (generation !== this.generation) return warnings;
     }
