@@ -119,7 +119,7 @@ export class Viewer {
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
     if (!keepWorld) this.clear(); const generation = this.generation;
     const pack = await assets.pack(packPath), ids = mapRenderIds(pack), warnings: string[] = [];
-    const terrain = new MapTerrain(), collision = new MapCollision();
+    const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);

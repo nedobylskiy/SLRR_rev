@@ -40,6 +40,8 @@ const containers = placements.filter(placement => placement.typeId === 0x0006052
 if (containers.length !== 80 || resolved !== placements.length) throw new Error(`Incomplete map objects: ${resolved}/${placements.length}, containers ${containers.length}`);
 const first = containers[0].pose.position;
 if (!collision.contact(new Vector3(first[0] + 2.8, first[1], first[2]))) throw new Error('Container CFG box does not collide');
+const top = collision.support(first[0], first[2], first[1] + 8);
+if (!top || top.height <= first[1] || top.normal.y < 0.99) throw new Error('Container CFG box does not support wheels');
 const containerModel = await assets.modelForResource('objects.rpk', 0x522);
 const containerMaterial = parseScx(await assets.read(containerModel.path)).meshes[0];
 if (containerMaterial.textureIndex !== 0 || !/maps[/\\]textures[/\\]kontener\.dds$/i.test(containerModel.textures[0] ?? '')) {

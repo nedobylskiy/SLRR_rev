@@ -1,12 +1,14 @@
 import { Vector3 } from 'three';
 import type { ScxModel } from '../formats/scx';
 import type { Terrain } from './suspension-3d';
+import type { MapCollision } from './map-collision';
 
 interface Face { ax: number; az: number; ay: number; bx: number; bz: number; by: number; cx: number; cz: number; cy: number; normal: Vector3 }
 
 /** Vertical collision sampling from original map SCX geometry, indexed in 16 m cells. */
 export class MapTerrain implements Terrain {
   ramp = false;
+  constructor(private readonly objects?: MapCollision) {}
   private readonly cells = new Map<string, Face[]>();
   private readonly size = 16;
   faces = 0;
@@ -34,11 +36,10 @@ export class MapTerrain implements Terrain {
       }
     }
   }
-  sample(x: number, z: number): { height: number; normal: Vector3 } | undefined {
+  sample(x: number, z: number, fromY?: number): { height: number; normal: Vector3 } | undefined {
     const list = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
-    if (!list) return;
     let best: { height: number; normal: Vector3 } | undefined;
-    for (const f of list) {
+    for (const f of list ?? []) {
       const denominator = (f.bz - f.cz) * (f.ax - f.cx) + (f.cx - f.bx) * (f.az - f.cz);
       if (Math.abs(denominator) < 1e-10) continue;
       const u = ((f.bz - f.cz) * (x - f.cx) + (f.cx - f.bx) * (z - f.cz)) / denominator;
@@ -47,8 +48,12 @@ export class MapTerrain implements Terrain {
       const h = u * f.ay + v * f.by + (1 - u - v) * f.cy;
       if (!best || Math.abs(h) < Math.abs(best.height)) best = { height: h, normal: f.normal };
     }
+    if (fromY !== undefined) {
+      const box = this.objects?.support(x, z, fromY + 0.5);
+      if (box && (!best || box.height > best.height)) best = box;
+    }
     return best;
   }
-  height(x: number, z: number) { return this.sample(x, z)?.height ?? -1000; }
-  normal(x: number, z: number) { return this.sample(x, z)?.normal.clone() ?? new Vector3(0, 1, 0); }
+  height(x: number, z: number, fromY?: number) { return this.sample(x, z, fromY)?.height ?? -1000; }
+  normal(x: number, z: number, fromY?: number) { return this.sample(x, z, fromY)?.normal.clone() ?? new Vector3(0, 1, 0); }
 }

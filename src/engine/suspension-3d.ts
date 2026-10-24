@@ -5,7 +5,7 @@ import { RigidBody3D } from './rigid-body-3d';
 import type { DrivingInput } from './driving-demo';
 import { MechanicalSystem } from './mechanical-system';
 
-export interface Terrain { height(x: number, z: number): number; normal(x: number, z: number): Vector3 }
+export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3 }
 export class TestTerrain implements Terrain {
   ramp = false;
   height(x: number, z: number) { return this.ramp && x > -1.8 && x < 1.8 && z < -4 && z > -8 ? (-z - 4) * 0.28 : 0; }
@@ -69,13 +69,13 @@ export class Suspension3D {
       const damping = this.mechanics ? this.mechanics.damper(index) : 2 * 0.75 * Math.sqrt(k * this.springMass / count);
       let length = w.rest + w.droop;
       if (down.y < -0.05) {
-        let ray = (hard.y - this.terrain.height(hard.x, hard.z) - w.radius) / -down.y;
-        for (let i = 0; i < 2; i++) { const p = hard.clone().addScaledVector(down, ray); ray = (hard.y - this.terrain.height(p.x, p.z) - w.radius) / -down.y; }
+        let ray = (hard.y - this.terrain.height(hard.x, hard.z, hard.y) - w.radius) / -down.y;
+        for (let i = 0; i < 2; i++) { const p = hard.clone().addScaledVector(down, ray); ray = (hard.y - this.terrain.height(p.x, p.z, hard.y) - w.radius) / -down.y; }
         length = ray;
       }
       w.contact = w.part.parent === this.root && w.part.condition > 0 && w.mountCondition > 0 && support > 0 && length < w.rest + w.droop && down.y < -0.05; w.length = Math.max(w.rest - w.bump, Math.min(w.rest + w.droop, length)); w.force = 0;
       if (w.contact) {
-        const patch = hard.clone().addScaledVector(down, length).add(new Vector3(0, -w.radius, 0)), normal = this.terrain.normal(patch.x, patch.z), speed = this.body.pointVelocity(hard).dot(normal);
+        const patch = hard.clone().addScaledVector(down, length).add(new Vector3(0, -w.radius, 0)), normal = this.terrain.normal(patch.x, patch.z, hard.y), speed = this.body.pointVelocity(hard).dot(normal);
         w.force = Math.max(0, Math.min(this.body.mass * 9.81 * 3, (w.rest - length) * k - damping * speed + Math.max(0, w.rest - w.bump - length) * k * 8));
         this.body.addForce(normal.clone().multiplyScalar(w.force), hard);
         const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), this.steer * w.steering).transformDirection(alignment).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();

@@ -52,6 +52,32 @@ export class MapCollision {
       }
     }
   }
+  /** Downward wheel support from original CFG boxes, respecting their object and body poses. */
+  support(x: number, z: number, fromY: number): { height: number; normal: Vector3 } | undefined {
+    const boxes = this.boxCells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
+    if (!boxes) return;
+    const origin = new Vector3(x, fromY, z), direction = new Vector3(0, -1, 0);
+    let best: { height: number; normal: Vector3 } | undefined;
+    for (const box of boxes) {
+      if (x < box.bounds.min.x || x > box.bounds.max.x || z < box.bounds.min.z || z > box.bounds.max.z || fromY < box.bounds.min.y) continue;
+      const local = origin.clone().applyMatrix4(box.inverse), ray = direction.clone().transformDirection(box.inverse);
+      let near = -Infinity, far = Infinity, face = new Vector3();
+      for (let axis = 0; axis < 3; axis++) {
+        const o = local.getComponent(axis), d = ray.getComponent(axis), half = box.half.getComponent(axis);
+        if (Math.abs(d) < 1e-10) { if (Math.abs(o) > half) { far = -Infinity; break; } continue; }
+        const a = (-half - o) / d, b = (half - o) / d;
+        const entry = Math.min(a, b), exit = Math.max(a, b);
+        if (entry > near) { near = entry; face.set(0, 0, 0).setComponent(axis, a < b ? -1 : 1); }
+        far = Math.min(far, exit);
+      }
+      if (near < 0 || near > far || !Number.isFinite(near)) continue;
+      const normal = face.transformDirection(box.matrix);
+      if (normal.y <= 0.1) continue;
+      const height = fromY - near;
+      if (!best || height > best.height) best = { height, normal };
+    }
+    return best;
+  }
   contact(point: Vector3, radius = 0.2): { point: Vector3; normal: Vector3; depth: number } | undefined {
     const list = this.cells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`);
     const boxes = this.boxCells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`);
