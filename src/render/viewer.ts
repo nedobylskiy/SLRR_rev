@@ -16,6 +16,7 @@ import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
 import { mapRenderIds } from '../engine/map';
 import { MapTerrain } from '../engine/map-terrain';
+import { MapCollision } from '../engine/map-collision';
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -114,8 +115,8 @@ export class Viewer {
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
     if (!keepWorld) this.clear(); const generation = this.generation;
     const pack = await assets.pack(packPath), ids = mapRenderIds(pack), warnings: string[] = [];
-    const terrain = new MapTerrain();
-    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, warnings, terrain };
+    const terrain = new MapTerrain(), collision = new MapCollision();
+    if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, warnings, terrain, collision };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
@@ -128,6 +129,7 @@ export class Viewer {
         const parsed = parseScx(await assets.read(resource.path));
         if (generation !== this.generation) break;
         terrain.add(parsed);
+        collision.add(parsed);
         const group = new THREE.Group(); group.name = `${id.toString(16)}: ${pack.entries.find(e => e.typeId === id)?.alias ?? ''}`;
         group.scale.setScalar(0.01); this.model.add(group);
         warnings.push(...await this.append(parsed, assets, resource.textures, group, generation));
@@ -136,7 +138,7 @@ export class Viewer {
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
-    return { loaded, total: ids.length, triangles, warnings, terrain };
+    return { loaded, total: ids.length, triangles, warnings, terrain, collision };
   }
   showInternals(value: boolean) {
     this.internalView = value;
@@ -183,7 +185,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; position: THREE.Vector3; yaw: number }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -203,7 +205,7 @@ export class Viewer {
       if (!hood) throw new Error('Installed hood required for crash demo');
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
-      crash = new Vehicle3D(root, hood, samples.flat(), bounds, track?.terrain);
+      crash = new Vehicle3D(root, hood, samples.flat(), bounds, track?.terrain, track?.collision);
       const triangles: number[] = [], inverseRoot = root.matrix().invert();
       for (const part of root.world.parts.values()) {
         if (part === hood || !part.definition.model) continue;

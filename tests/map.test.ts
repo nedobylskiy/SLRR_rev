@@ -10,10 +10,10 @@ function entry(typeId: number, superId: number, type: number, body = ''): RpkEnt
 
 test('map renderer selects child meshes, excluding minimap and binary root', () => {
   const pack: RpkPack = { version: 0x200, dependencies: [], warnings: [], entries: [
-    entry(1, 0x10004, 1), entry(20, 0x40003, 14),
+    entry(1, 0x10004, 1), entry(20, 0x40003, 14, 'mesh 0x00000015\0'), entry(21, 0, 5),
     entry(26, 0x40003, 14, 'mesh 0x0000001b'), entry(27, 0, 5),
     entry(51, 20, 14, 'mesh 0x00000032'), entry(50, 0, 5),
     entry(54, 20, 14, 'mesh 0x00000035'), entry(53, 0, 5),
   ] };
-  assert.deepEqual(mapRenderIds(pack), [51, 54]);
+  assert.deepEqual(mapRenderIds(pack), [20, 51, 54]);
 });

@@ -10,6 +10,7 @@ import { PanelActivity } from './panel-activity';
 import { DeformedFrame } from './deformed-frame';
 import { slotMatrix } from './slot-frames';
 import { FixedClock } from '../runtime/fixed-clock';
+import type { MapCollision } from './map-collision';
 
 export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean; mountVersion?: number }
 export interface RigidPart { part: EnginePart; body: RigidBody3D; previous: Matrix4; peakForce: number }
@@ -110,7 +111,7 @@ export class Vehicle3D extends CarCrashDemo {
       part.condition = Math.max(0, Math.min(part.condition, 1 - energy * weight / threshold));
     }
   }
-  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain()) {
+  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
     super(root, hood, samples, chassisBounds);
     this.clock = new FixedClock(240, 8);
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
@@ -282,6 +283,8 @@ export class Vehicle3D extends CarCrashDemo {
             const j = this.body.contact(p, this.terrain.normal(p.x, p.z), height - p.y, 0.12);
             if (j.length() > 40) this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.08).toArray() as Triple, p.toArray() as Triple);
           }
+          const wall = this.mapCollision?.contact(p);
+          if (wall) this.body.contact(wall.point, wall.normal, wall.depth, 0.18);
         }
         const c = boxContact(this.body, obstacle);
         if (c) {

@@ -62,7 +62,10 @@ export class Assets {
         if (file) textures.push(file);
       } catch { textures.push(''); } // Preserve material indices when one texture is missing.
     }
-    if (source && /\.sc[xy]$/i.test(source)) return { path: source, textures };
+    if (source && /\.sc[xy]$/i.test(source)) {
+      const visible = /\.scy$/i.test(source) ? source.replace(/\.scy$/i, '.scx') : source;
+      return { path: this.byPath.has(normalizePath(visible)) ? visible : source, textures };
+    }
     const next = props.find(p => p.key === 'mesh') ?? props.find(p => p.key === 'render');
     if (!next) throw new Error(`Resource ${key} has no external SCX/render/mesh; embedded map chunks need a separate decoder`);
     const model = await this.modelForResource(resolved.packPath, parseRid(next.value), visited);

@@ -69,12 +69,12 @@ trackDriveButton.onclick = async () => {
     const start = new Vector3(0, map.terrain.height(0, -1461.785) + 0.15, -1461.785);
     if (start.y < -100) throw new Error('У стартовой линии нет поверхности карты');
     beforeDrivingDetails = el('details').textContent ?? '';
-    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, position: start, yaw: Math.PI });
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI });
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · поездка'; el('format').textContent = 'MAP / PHYSICS';
     el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — вернуться на старт';
-    el('details').textContent = `${map.loaded} оригинальных моделей · ${map.terrain.faces} треугольников поверхности. Старт взят с прямой 1/4 мили из TestTrack.java. Колёса и кузов взаимодействуют с геометрией SCX; PHYS/POLY и столкновения со стенами пока не декодированы.`;
+    el('details').textContent = `${map.loaded} оригинальных моделей · ${map.terrain.faces} треугольников опоры · ${map.collision.walls} боковых граней. Старт взят с прямой 1/4 мили из TestTrack.java. Дорога, ограждения и контактная геометрия извлечены из SCX; отдельные PHYS/POLY-блоки в этом RPK не обнаружены.`;
     status('Поездка по треку');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Поездка недоступна', true); el('details').textContent = String(error); } }
 };

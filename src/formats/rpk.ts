@@ -55,7 +55,8 @@ export function parseRdb(text: string) {
 }
 
 export function entryProperties(entry: RpkEntry) {
-  // Binary RSDs (maps: POLY/PHYS etc.) are not treated as text.
-  if (entry.data.some(v => v === 0)) return [];
-  return parseProperties(new TextDecoder('windows-1252').decode(entry.data));
+  // A single trailing NUL is a text terminator in some map RSDs; interior NULs mark binary payloads.
+  const end = entry.data.at(-1) === 0 ? entry.data.length - 1 : entry.data.length;
+  if (entry.data.subarray(0, end).some(v => v === 0)) return [];
+  return parseProperties(new TextDecoder('windows-1252').decode(entry.data.subarray(0, end)));
 }
