@@ -18,6 +18,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
+let localInstallation = false;
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
 let beforeDrivingDetails = '';
@@ -145,7 +146,7 @@ async function openMainMenu() {
       if (item.command === 0xa008) { trackDriveButton.click(); return; }
       if (item.command === 0xb004) { stopDrive(); status('Каталог ресурсов'); return; }
       menu.showMessage('Этот раздел станет доступен после переноса игровой логики.');
-    }, () => { stopDrive(); status('Каталог ресурсов'); });
+    }, () => { stopDrive(); status('Каталог ресурсов'); }, localInstallation ? '/api/game/menu-video' : undefined);
     disposeOsdMenu = () => { runtime.exit(); menu.dispose(); };
     el('filename').textContent = 'Главное меню · MainMenu.java'; el('format').textContent = 'JAVA / OSD';
     el('scene-help').textContent = '←/→ — выбор · Enter — открыть · Esc — каталог';
@@ -232,6 +233,7 @@ async function connect() {
     const response = await fetch('/api/game/index');
     if (!response.ok) throw new Error(await response.text());
     const files: Asset[] = await response.json();
+    localInstallation = true;
     attach(new Assets(files, async path => {
       const result = await fetch(`/api/game/file?path=${encodeURIComponent(path)}`);
       if (!result.ok) throw new Error(await result.text());
@@ -375,6 +377,7 @@ el('filters').onclick = event => {
 el<HTMLInputElement>('folder').onchange = event => {
   const files = [...((event.target as HTMLInputElement).files ?? [])]; if (!files.length) return;
   const map = new Map(files.map(f => [f.webkitRelativePath.split('/').slice(1).join('/'), f]));
+  localInstallation = false;
   attach(new Assets([...map].map(([path, f]) => ({ path, size: f.size })), async p => new Uint8Array(await map.get(p)!.arrayBuffer())), 'Выбранная папка');
   if (assets.byPath.has('frontend.rpk')) openMainMenu();
   else status('Каталог подключён');

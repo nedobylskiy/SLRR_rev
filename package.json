@@ -28,6 +28,15 @@
     "measure:stock-drive": "tsx tools/measure-stock-drive.ts",
     "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify"
   },
-  "dependencies": { "three": "^0.180.0" },
-  "devDependencies": { "@types/node": "^24.0.0", "@types/three": "^0.180.0", "tsx": "^4.20.0", "typescript": "^5.9.0", "vite": "^7.1.0" }
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/three": "^0.180.0",
+    "ffmpeg-static": "^5.3.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
 }

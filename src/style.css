@@ -261,15 +261,18 @@ body:has(.osd-layer){overflow:hidden}
 .osd-layer[hidden],.osd-item[hidden]{display:none}
 .osd-stage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);overflow:hidden;background:#d4d4d4}
 .osd-stage:focus{outline:none}
+.osd-background-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:9;pointer-events:none}
 .osd-item{position:absolute;display:block}
 .osd-rectangle{pointer-events:none}
 .osd-rectangle img,.osd-button img{display:block;width:100%;height:100%;object-fit:fill}
 .osd-button{padding:0;border:0;border-radius:0;background:transparent;cursor:pointer}
 .osd-button:hover,.osd-button:focus-visible{transform:scale(1.08);filter:brightness(1.12);outline:0}
+.osd-menu-icon:hover,.osd-menu-icon:focus-visible{transform:none;filter:brightness(1.08)}
 .osd-text{white-space:nowrap;color:#171717;font:600 clamp(12px,1.7vw,24px)/1.2 Arial,sans-serif;transform:translateY(-50%);pointer-events:none}
 .osd-align-center{transform:translate(-50%,-50%)}
 .osd-align-right{transform:translate(-100%,-50%)}
-.osd-menu-title{font-size:clamp(17px,2.4vw,34px);letter-spacing:.05em}
+.osd-menu-title{color:#986b6b;font-size:clamp(16px,1.8vw,30px);font-weight:500;letter-spacing:.075em}
+.osd-menu-version{color:#111;font-size:clamp(12px,1.25vw,22px);font-weight:500}
 .osd-menu-message{font-size:clamp(11px,1.1vw,17px);color:#5c2929}
 #inspector{
   overflow:auto;

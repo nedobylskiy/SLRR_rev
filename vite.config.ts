@@ -1,12 +1,35 @@
 import { defineConfig, type Plugin } from 'vite';
 import { readFile, stat } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
+import ffmpegPath from 'ffmpeg-static';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './tools/game-files';
 import { isSavedVehiclePath } from './src/assets';
 
 const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp']);
 function gameAssets(): Plugin {
   let index: Promise<{ path: string; size: number }[]> | undefined;
+  let menuVideo: Promise<Buffer> | undefined;
+  function browserMenuVideo() {
+    menuVideo ??= (async () => {
+      const binary = ffmpegPath;
+      if (!binary) throw new Error('FFmpeg unavailable');
+      const hd = path.join(gameRoot, 'data', 'Fmv', 'background_motion_HD.avi');
+      const sd = path.join(gameRoot, 'data', 'Fmv', 'background_motion.avi');
+      const source = await stat(hd).then(() => hd, () => sd);
+      await stat(source);
+      return new Promise<Buffer>((resolve, reject) => {
+        const child = spawn(binary, ['-hide_banner', '-loglevel', 'error', '-i', source,
+          '-vf', 'fps=15,scale=1280:720', '-an', '-c:v', 'libvpx-vp9', '-deadline', 'realtime',
+          '-cpu-used', '8', '-b:v', '950k', '-f', 'webm', 'pipe:1'], { windowsHide: true });
+        const chunks: Buffer[] = []; let size = 0;
+        child.stdout.on('data', (chunk: Buffer) => { size += chunk.length; if (size > 32 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
+        child.on('error', reject);
+        child.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`Menu video conversion failed (${code})`)));
+      });
+    })().catch(error => { menuVideo = undefined; throw error; });
+    return menuVideo;
+  }
   return {
     name: 'local-slrr-assets',
     configureServer(server) {
@@ -20,6 +43,9 @@ function gameAssets(): Plugin {
           if (url.pathname === '/index') {
             index ??= walk(gameRoot).then(files => Promise.all(files.filter(f => allowed.has(path.extname(f).toLowerCase()) || isSavedVehiclePath(relativeGamePath(f))).map(async f => ({ path: relativeGamePath(f), size: (await stat(f)).size }))));
             res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(await index));
+          } else if (url.pathname === '/menu-video') {
+            const video = await browserMenuVideo();
+            res.setHeader('Content-Type', 'video/webm'); res.setHeader('Content-Length', video.length); res.end(video);
           } else if (url.pathname === '/file') {
             const f = await safeGamePath(url.searchParams.get('path') ?? '');
             if (!allowed.has(path.extname(f).toLowerCase()) && !isSavedVehiclePath(relativeGamePath(f))) { res.statusCode = 403; res.end(); return; }
