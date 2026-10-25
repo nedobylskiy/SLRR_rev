@@ -8,6 +8,7 @@ import { Viewer } from './render/viewer';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
+import { mountMainMenu } from './osd/main-menu';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Подключение…</span><button id="memory-lab">Поток в памяти</button><label class="button">Открыть папку игры<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -19,6 +20,10 @@ let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disp
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
 let beforeDrivingDetails = '';
+let disposeOsdMenu: (() => void) | undefined;
+const menuButton = textElement('button', 'Главное меню');
+el('memory-lab').before(menuButton);
+menuButton.onclick = () => openMainMenu();
 const worldButton = textElement('button', 'Собрать Baiern');
 const mapButton = textElement('button', 'Тестовый трек');
 const trackDriveButton = textElement('button', 'Поездка по треку');
@@ -116,6 +121,7 @@ mapButton.onclick = async () => {
   } catch (error) { if (request === sequence) { viewer.clear(); status('Ошибка карты', true); el('details').textContent = String(error); } }
 };
 function stopDrive() {
+  disposeOsdMenu?.(); disposeOsdMenu = undefined;
   el('viewport').parentElement?.classList.remove('physics-scene');
   mapDebugPanel.hidden = true;
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
@@ -123,6 +129,23 @@ function stopDrive() {
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
   disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Пробная поездка';
   el('scene-help').textContent = 'ЛКМ — вращение · Колесо — масштаб · ПКМ — перемещение';
+}
+function openMainMenu() {
+  if (!assets?.byPath.has('frontend.rpk')) { status('Ресурсы меню недоступны', true); return; }
+  ++sequence;
+  stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined;
+  disposeMemoryLab?.(); disposeMemoryLab = undefined; viewer?.clear();
+  el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
+  const menu = mountMainMenu(document.body, assets, item => {
+    if (item.command === 0xa008) { trackDriveButton.click(); return; }
+    if (item.command === 0xb004) { stopDrive(); status('Каталог ресурсов'); return; }
+    menu.showMessage('Этот раздел станет доступен после переноса игровой логики.');
+  }, () => { stopDrive(); status('Каталог ресурсов'); });
+  disposeOsdMenu = () => menu.dispose();
+  el('filename').textContent = 'Главное меню · MainMenu.java'; el('format').textContent = 'OSD / FRONTEND';
+  el('scene-help').textContent = '←/→ — выбор · Enter — открыть · Esc — каталог';
+  el('details').textContent = 'Экран собран из MainMenu.java и изображений frontend.rpk установленной игры. Свободная поездка открывает текущую тестовую трассу; остальные режимы будут подключены вместе с игровой логикой.';
+  status('Главное меню');
 }
 crashButton.onclick = async () => {
   const opening = openWorld('cars/racers/Baiern.rpk', 6), request = sequence;
@@ -209,7 +232,8 @@ async function connect() {
       return new Uint8Array(await result.arrayBuffer());
     }), 'Локальная установка');
     const example = files.find(f => /baiern_data\/meshes\/chassis\.scx$/i.test(f.path)) ?? files.find(f => /steeringwheel_4spoke_01\.scx$/i.test(f.path));
-    if (assets.byPath.has('cars/racers/baiern.rpk')) await openWorld('cars/racers/Baiern.rpk', 6);
+    if (assets.byPath.has('frontend.rpk')) openMainMenu();
+    else if (assets.byPath.has('cars/racers/baiern.rpk')) await openWorld('cars/racers/Baiern.rpk', 6);
     else if (example) await openAsset(example);
   } catch (e) {
     el('connection').textContent = 'Выбери папку игры';
@@ -346,7 +370,8 @@ el<HTMLInputElement>('folder').onchange = event => {
   const files = [...((event.target as HTMLInputElement).files ?? [])]; if (!files.length) return;
   const map = new Map(files.map(f => [f.webkitRelativePath.split('/').slice(1).join('/'), f]));
   attach(new Assets([...map].map(([path, f]) => ({ path, size: f.size })), async p => new Uint8Array(await map.get(p)!.arrayBuffer())), 'Выбранная папка');
-  status('Каталог подключён');
+  if (assets.byPath.has('frontend.rpk')) openMainMenu();
+  else status('Каталог подключён');
 };
 void connect();
 el('memory-lab').onclick = async () => {
