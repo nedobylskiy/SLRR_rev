@@ -11,6 +11,18 @@ export class TestTerrain implements Terrain {
   height(x: number, z: number) { return this.ramp && x > -1.8 && x < 1.8 && z < -4 && z > -8 ? (-z - 4) * 0.28 : 0; }
   normal(x: number, z: number) { return this.height(x, z) > 0 ? new Vector3(0, 1, 0.28).normalize() : new Vector3(0, 1, 0); }
 }
+/** Lateral grip has priority while a driven tyre is spinning, so throttle does not erase steering force. */
+export function tyreContactForces(normalLoad: number, alignment: number, slipSpeed: number, lateralSpeed: number) {
+  const limit = normalLoad * Math.max(0, alignment);
+  const slide = Math.min(1, Math.hypot(slipSpeed, lateralSpeed) / 3);
+  const longitudinalLimit = limit * 1.05 * (1 - 0.28 * slide);
+  const lateralLimit = limit * 1.2 * (1 - 0.08 * Math.min(1, Math.abs(slipSpeed) / 3));
+  const lateral = Math.max(-lateralLimit, Math.min(lateralLimit, -lateralSpeed * 4200));
+  const lateralUse = lateralLimit > 0 ? lateral / lateralLimit : 0;
+  const availableLongitudinal = longitudinalLimit * Math.sqrt(Math.max(0, 1 - lateralUse * lateralUse));
+  const longitudinal = Math.max(-availableLongitudinal, Math.min(availableLongitudinal, slipSpeed * 3400));
+  return { longitudinal, lateral };
+}
 export class Suspension3D {
   private springMass: number;
   private movingParts: { part: EnginePart; base: Matrix4 }[][] = [[], [], [], []];
@@ -89,10 +101,8 @@ export class Suspension3D {
         if (this.mechanics) {
           const slipSpeed = w.omega * w.radius - longitudinal;
           w.slip = slipSpeed / Math.max(2, Math.abs(longitudinal), Math.abs(w.omega * w.radius));
-          const slide = Math.min(1, Math.hypot(slipSpeed, velocity.dot(side)) / 3);
-          const grip = limit * (1 - 0.28 * slide);
-          const force = forward.clone().multiplyScalar(slipSpeed * 3400).addScaledVector(side, -velocity.dot(side) * 3000);
-          if (force.length() > grip) force.setLength(grip);
+          const tyre = tyreContactForces(w.force, Math.max(0.25, Math.pow(Math.abs(down.dot(normal)), 2)), slipSpeed, velocity.dot(side));
+          const force = forward.clone().multiplyScalar(tyre.longitudinal).addScaledVector(side, tyre.lateral);
           this.body.addForce(force, patch);
           const brakeTorque = braking ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
           w.omega += (drive - force.dot(forward) * w.radius - brakeTorque - w.omega * 0.15) / 1.6 * dt;

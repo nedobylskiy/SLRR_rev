@@ -29,13 +29,14 @@ export class MechanicalSystem {
   readonly displacement: number;
   readonly drive: string;
   rpm = 0;
-  gear = 1;
+  gear = 0;
   power = 0;
   boost = 0;
   manual = false;
   private shiftTimer = 0;
   private lastUp = false;
   private lastDown = false;
+  private lastNeutral = false;
   constructor(readonly root: EnginePart) {
     for (const part of root.world.parts.values()) {
       const profile = part.definition.mechanics;
@@ -81,7 +82,7 @@ export class MechanicalSystem {
     const health = this.health(part);
     return { force: (values?.force ?? 0) * health, damping: (values?.damping ?? 0) * health };
   }
-  reset() { this.rpm = this.block?.definition.mechanics?.values.rpm_idle ?? 900; this.gear = 1; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = false; }
+  reset() { this.rpm = this.block?.definition.mechanics?.values.rpm_idle ?? 900; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = false; }
   private ratios() {
     const values = this.transmission?.definition.mechanics?.values ?? {};
     return Array.from({ length: Math.min(6, Math.max(0, values.gears ?? 6)) }, (_, i) => values[`ratio[${i + 1}]`] ?? 0);
@@ -106,23 +107,26 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
+  advance(dt: number, input: { throttle: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
     if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = Math.max(100, this.block?.definition.mechanics?.values.rpm_idle ?? 900), limit = Math.max(idle + 500, this.block?.definition.mechanics?.values.RPM_limit ?? 6500);
     const ratios = this.ratios(), final = values.end_ratio ?? 1, shares = this.driveShares();
     this.power = Math.min(...[this.block, this.crank, this.head, this.transmission, this.clutch, this.fuel].map(p => this.health(p)));
     this.shiftTimer = Math.max(0, this.shiftTimer - dt);
-    const up = !!input.gearUp, down = !!input.gearDown;
-    if ((up && !this.lastUp || down && !this.lastDown) && this.shiftTimer === 0) {
-      this.manual = true; this.gear = Math.max(-1, Math.min(ratios.filter(r => r > 0).length, this.gear + Number(up) - Number(down))); this.shiftTimer = 0.22;
+    const up = !!input.gearUp, down = !!input.gearDown, neutral = !!input.neutral;
+    if (neutral && !this.lastNeutral) { this.gear = 0; this.shiftTimer = 0; }
+    else if (!neutral && (up && !this.lastUp || down && !this.lastDown) && this.shiftTimer === 0) {
+      if (this.gear !== 0) this.manual = true;
+      this.gear = Math.max(-1, Math.min(ratios.filter(r => r > 0).length, this.gear + Number(up) - Number(down)));
+      this.shiftTimer = 0.22;
     }
-    this.lastUp = up; this.lastDown = down;
+    this.lastUp = up; this.lastDown = down; this.lastNeutral = neutral;
     const mean = shares.reduce((sum, share, i) => sum + wheelOmega[i] * share, 0);
     const roadMean = shares.reduce((sum, share, i) => sum + roadOmega[i] * share, 0);
     if (!this.manual && this.shiftTimer === 0) {
-      if (throttle < 0 && mean < 1.5) this.gear = -1;
-      else if (throttle > 0 && mean > -1.5 && this.gear < 0) this.gear = 1;
+      if (this.gear > 0 && throttle < 0 && mean < 1.5) this.gear = -1;
+      else if (this.gear < 0 && throttle > 0 && mean > -1.5) this.gear = 1;
       if (this.gear > 0 && !input.clutch && mean > 2) {
         const current = ratios[this.gear - 1] ?? 0, next = ratios[this.gear] ?? 0;
         const engagedRpm = Math.abs(roadMean * current * final) * 60 / (2 * Math.PI);

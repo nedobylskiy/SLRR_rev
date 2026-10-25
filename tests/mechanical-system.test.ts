@@ -86,7 +86,11 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
     const system = new MechanicalSystem(root); system.reset(); return { world, system };
   };
   for (const [drive, front] of [['DT_FWD', 1], ['DT_RWD', 0], ['DT_FWD | DT_RWD', 0.7]] as const) {
-    const { world, system } = build(drive, front), result = system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]);
+    const { world, system } = build(drive, front);
+    assert.equal(system.gear, 0);
+    system.advance(1 / 240, { throttle: 0, gearUp: true }, [0, 0, 0, 0]);
+    for (let i = 0; i < 60; i++) system.advance(1 / 240, { throttle: 0 }, [0, 0, 0, 0]);
+    const result = system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]);
     assert.ok(Math.abs(result.torque[0]) > 0 || front === 0);
     assert.ok(Math.abs(result.torque[2]) > 0 || front === 1);
     if (front === 0) assert.equal(result.torque[0], 0);
@@ -95,6 +99,12 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
     world.dispose();
   }
   const { world, system } = build('DT_RWD');
+  for (let i = 0; i < 240; i++) system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]);
+  assert.equal(system.gear, 0, 'throttle cannot engage neutral automatically');
+  assert.ok(system.rpm > 2000, `neutral revs: ${system.rpm}`);
+  system.advance(1 / 240, { throttle: 0, gearUp: true }, [0, 0, 0, 0]);
+  assert.equal(system.gear, 1); assert.equal(system.manual, false, 'selecting drive keeps an automatic transmission automatic');
+  for (let i = 0; i < 60; i++) system.advance(1 / 240, { throttle: 0 }, [0, 0, 0, 0]);
   for (let i = 0; i < 240; i++) system.advance(1 / 240, { throttle: 1, clutch: true }, [0, 0, 0, 0]);
   assert.ok(system.rpm > 2000, `free revs: ${system.rpm}`);
   assert.ok(system.boost > 0, `installed turbo produces boost: ${system.boost}`);
@@ -102,7 +112,10 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   assert.equal(system.gear, 2); assert.equal(system.manual, true);
   for (let i = 0; i < 60; i++) system.advance(1 / 240, { throttle: 0 }, [0, 0, 0, 0]);
   system.advance(1 / 240, { throttle: 0, gearDown: true }, [0, 0, 0, 0]); assert.equal(system.gear, 1);
-  system.reset(); assert.equal(system.gear, 1); assert.equal(system.boost, 0); assert.equal(system.manual, false);
+  system.advance(1 / 240, { throttle: 1, neutral: true }, [0, 0, 0, 0]);
+  assert.equal(system.gear, 0);
+  assert.ok(system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]).torque.every(t => t === 0));
+  system.reset(); assert.equal(system.gear, 0); assert.equal(system.boost, 0); assert.equal(system.manual, false);
   world.dispose();
 });
 
@@ -119,7 +132,7 @@ test('automatic upshift follows road speed and cannot skip gears while the clutc
     make(4, { intake_valve_diam: 30 }), make(5, { gears: 5, 'ratio[1]': 3.58, 'ratio[2]': 2.49, 'ratio[3]': 1.66, end_ratio: 3.03 }),
     make(6, {}, 'clutch.java'), make(7, {}, 'fuel_rail.java'),
   ]) world.install(root, part.definition.key.id, part, 1);
-  const system = new MechanicalSystem(root); system.reset(); system.rpm = 6300;
+  const system = new MechanicalSystem(root); system.reset(); system.gear = 1; system.rpm = 6300;
   const wheel = [0, 0, 50, 50], road = [0, 0, 50, 50];
   system.advance(1 / 240, { throttle: 1 }, wheel, road, 17);
   assert.equal(system.gear, 2);

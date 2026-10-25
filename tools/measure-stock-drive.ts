@@ -26,7 +26,10 @@ try {
   body.setFrame(new Matrix4().makeTranslation(0, new DrivingDemo(root).position.y, 0));
   const suspension = new Suspension3D(root, body, new TestTerrain()); suspension.reset();
   const dt = 1 / 240, input = { throttle: 0, steer: 0, brake: false };
-  for (let i = 0; i < 480; i++) { suspension.step(dt, input); body.integrate(dt); }
+  assert.equal(suspension.mechanics!.gear, 0, 'the stock car starts in neutral');
+  suspension.step(dt, { ...input, gearUp: true }); body.integrate(dt);
+  for (let i = 1; i < 480; i++) { suspension.step(dt, input); body.integrate(dt); }
+  assert.equal(suspension.mechanics!.gear, 1, 'first gear is selected before timing the run');
   const start = body.position.clone(), samples: object[] = [];
   const shifts: { seconds: number; from: number; to: number; speedKph: number; rpm: number }[] = [];
   let previousGear = suspension.mechanics!.gear, zeroTo100Seconds: number | null = null;
