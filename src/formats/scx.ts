@@ -6,6 +6,8 @@ export interface ScxMesh {
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
   layer2Index?: number; materialFlags?: number; textureChannel?: number; layer2Channel?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
+  lightmapIndex?: number; lightmapMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
+  selfIllumIndex?: number; selfIllumMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
 }
 export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string[] }
 
@@ -77,6 +79,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const mesh: ScxMesh = { name: current.name ?? `material_${meshes.length}`, positions: current.positions,
         normals: current.normals ?? new Float32Array(vertices * 3), uv: current.uv ?? new Float32Array(vertices * 2),
         uv2: current.uv2, uv3: current.uv3, textureMap: current.textureMap,
+        lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
+        selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
         indices: current.indices, diffuse: current.diffuse ?? [0.6, 0.65, 0.7, 1], textureIndex: current.textureIndex ?? 0xffff };
       validate(mesh); meshes.push(mesh);
     };
@@ -106,6 +110,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
               if (type === 0x06000000 || (type === 0x06000001 && current.textureIndex === undefined)) {
                 current.textureIndex = index; current.textureMap = map;
               }
+              if (type === 0x06000004) { current.lightmapIndex = index; current.lightmapMap = map; }
+              if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
             }
             else if (type === 0x08000000) current.name = r.cstring(32);
             else throw new Error(`SCX v4: unknown material entry 0x${type.toString(16)}`);
@@ -114,8 +120,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       } else if (item.type === 4) {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
-          const { name, diffuse, textureIndex, textureMap } = current;
-          finish(); current = { name, diffuse, textureIndex, textureMap };
+          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap } = current;
+          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);

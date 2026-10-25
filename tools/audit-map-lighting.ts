@@ -19,7 +19,7 @@ for (const entry of rdb) for (const property of entry.properties.filter(p => /^s
   if (property.value.split(/[\s,]+/).some(v => Number(v) !== 0)) stat.nonzero++;
   shadowKeys.set(property.key, stat);
 }
-const materialSamples: object[] = [], texturePaths = new Map<string, number>();
+const materialSamples: object[] = [], texturePaths = new Map<string, number>(), lightingMaps: object[] = [];
 let models = 0, materials = 0, uv2Materials = 0, uv3Materials = 0, activeUv3Materials = 0;
 const primaryChannels = new Map<number, number>(), secondaryChannels = new Map<number, number>();
 for (const id of mapRenderIds(pack)) {
@@ -32,9 +32,13 @@ for (const id of mapRenderIds(pack)) {
     if (part.uv3?.some(v => Math.abs(v) > 1e-6)) activeUv3Materials++;
     if (model.textures[part.textureIndex]) primaryChannels.set(part.textureChannel ?? 0, (primaryChannels.get(part.textureChannel ?? 0) ?? 0) + 1);
     if (model.textures[part.layer2Index ?? -1]) secondaryChannels.set(part.layer2Channel ?? 0, (secondaryChannels.get(part.layer2Channel ?? 0) ?? 0) + 1);
-    for (const index of [part.textureIndex, part.layer2Index]) {
+    for (const index of [part.textureIndex, part.layer2Index, part.lightmapIndex, part.selfIllumIndex]) {
       const path = model.textures[index ?? -1];
       if (path) texturePaths.set(path, (texturePaths.get(path) ?? 0) + 1);
+    }
+    for (const [kind, index] of [['lightmap', part.lightmapIndex], ['selfIllum', part.selfIllumIndex]] as const) {
+      const path = model.textures[index ?? -1];
+      if (path) lightingMaps.push({ kind, model: model.path, material: part.name, path });
     }
     const layer = model.textures[part.layer2Index ?? -1];
     if (/(?:lightmap|shadow|shad)/i.test(layer ?? '') || part.uv3 && materialSamples.length < 12)
@@ -42,7 +46,7 @@ for (const id of mapRenderIds(pack)) {
   }
 }
 const suspiciousTextures = [...texturePaths].filter(([path]) => /(?:lightmap|shadow|shad)/i.test(path));
-const objectTextures = new Map<string, number>(), objectWarnings: string[] = [];
+const objectTextures = new Map<string, number>(), objectWarnings: string[] = [], objectLightingMaps: object[] = [];
 let objectTypes = 0, objectMaterials = 0;
 for (const typeId of new Set(mapObjectPlacements(new TextDecoder('windows-1252').decode(await assets.read(rdbPath)), pack).map(p => p.typeId))) {
   try {
@@ -58,15 +62,19 @@ for (const typeId of new Set(mapObjectPlacements(new TextDecoder('windows-1252')
     objectTypes++;
     for (const part of parseScx(await assets.read(model.path)).meshes) {
       objectMaterials++;
-      for (const index of [part.textureIndex, part.layer2Index]) {
+      for (const index of [part.textureIndex, part.layer2Index, part.lightmapIndex, part.selfIllumIndex]) {
         const path = model.textures[index ?? -1];
         if (path) objectTextures.set(path, (objectTextures.get(path) ?? 0) + 1);
+      }
+      for (const [kind, index] of [['lightmap', part.lightmapIndex], ['selfIllum', part.selfIllumIndex]] as const) {
+        const path = model.textures[index ?? -1];
+        if (path) objectLightingMaps.push({ kind, model: model.path, material: part.name, path });
       }
     }
   } catch (error) { objectWarnings.push(`0x${typeId.toString(16)}: ${String(error)}`); }
 }
 console.log(JSON.stringify({ packPath, dependencies: pack.dependencies.map(d => d.path), renderModels: models, materials, uv2Materials, uv3Materials, activeUv3Materials,
   primaryChannels: Object.fromEntries(primaryChannels), secondaryChannels: Object.fromEntries(secondaryChannels),
-  shadowKeys: Object.fromEntries(shadowKeys), suspiciousTextures, objectTypes, objectMaterials,
-  suspiciousObjectTextures: [...objectTextures].filter(([path]) => /(?:lightmap|shadow|shad)/i.test(path)), objectWarnings,
+  shadowKeys: Object.fromEntries(shadowKeys), suspiciousTextures, lightingMaps, objectTypes, objectMaterials,
+  suspiciousObjectTextures: [...objectTextures].filter(([path]) => /(?:lightmap|shadow|shad)/i.test(path)), objectLightingMaps, objectWarnings,
   materialSamples: materialSamples.slice(0, 20) }, null, 2));

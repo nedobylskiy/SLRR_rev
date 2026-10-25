@@ -83,6 +83,13 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
   assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].textureIndex, 3);
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].textureIndex, 1);
   assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].textureIndex, 1);
+  const lit = parseScx(fixture([[0x06000000, 3], [0x06000004, 4]])).meshes[0];
+  assert.equal(lit.textureIndex, 3);
+  assert.equal(lit.lightmapIndex, 4);
+  assert.deepEqual(lit.lightmapMap, { channel: 0, tiling: 0, scaleU: 0, scaleV: 0, offsetU: 0, offsetV: 0 });
+  const night = parseScx(fixture([[0x06000000, 3], [0x06000005, 4]])).meshes[0];
+  assert.equal(night.textureIndex, 3);
+  assert.equal(night.selfIllumIndex, 4);
 });
 test('SCX v4 preserves diffuse UV channel and atlas scale/offset across a vertex group', () => {
   const textureProperty = (type: number, index: number, channel: number, scaleU: number, scaleV: number, offsetU: number, offsetV: number) => {

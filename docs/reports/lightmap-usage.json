@@ -1,0 +1,423 @@
+{
+  "lightmaps": [
+    {
+      "id": 458,
+      "path": "maps\\textures\\fura_ablakok2_lightmap.dds"
+    },
+    {
+      "id": 456,
+      "path": "maps\\textures\\fura_kozablak2_lightmap.dds"
+    },
+    {
+      "id": 452,
+      "path": "maps\\textures\\ives_ablak1g_lightmap2B.dds"
+    },
+    {
+      "id": 450,
+      "path": "maps\\textures\\ives_lephaz1a_lightmap.dds"
+    },
+    {
+      "id": 454,
+      "path": "maps\\textures\\kirakatok2_lightmap.dds"
+    },
+    {
+      "id": 300,
+      "path": "maps\\textures\\lapos_ablak3_lightmap2.dds"
+    },
+    {
+      "id": 302,
+      "path": "maps\\textures\\lapos_ablak4_lightmap.dds"
+    },
+    {
+      "id": 540,
+      "path": "maps\\textures\\lightmap_ablakok02.dds"
+    },
+    {
+      "id": 541,
+      "path": "maps\\textures\\lightmap_ablakok08.dds"
+    },
+    {
+      "id": 542,
+      "path": "maps\\textures\\lightmap_ablakok11.dds"
+    },
+    {
+      "id": 543,
+      "path": "maps\\textures\\lightmap_ablakok14.dds"
+    },
+    {
+      "id": 544,
+      "path": "maps\\textures\\lightmap_ablakok23.dds"
+    },
+    {
+      "id": 545,
+      "path": "maps\\textures\\lightmap_kertesablak02.dds"
+    },
+    {
+      "id": 546,
+      "path": "maps\\textures\\lightmap_kertesablak03.dds"
+    }
+  ],
+  "usages": [
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz02",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz05",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz07",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz08",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz10",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz12",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz20",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz16",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz18",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz02_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz05_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz07_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz08_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz10_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz12_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz16_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz18_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "krthaz20_night",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_17_egyedi",
+      "texture": "maps\\textures\\ives_lephaz1a_lightmap.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_17_egyedi",
+      "texture": "maps\\textures\\ives_ablak1g_lightmap2B.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_18_egyedi_d",
+      "texture": "maps\\textures\\lapos_ablak4_lightmap.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_18_egyedi_d",
+      "texture": "maps\\textures\\lapos_ablak3_lightmap2.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_39_egyedi_b",
+      "texture": "maps\\textures\\kirakatok2_lightmap.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_39_egyedi_b",
+      "texture": "maps\\textures\\fura_kozablak2_lightmap.dds",
+      "origin": "RPK"
+    },
+    {
+      "pack": "objects.rpk",
+      "alias": "area_39_egyedi_b",
+      "texture": "maps\\textures\\fura_ablakok2_lightmap.dds",
+      "origin": "RPK"
+    }
+  ],
+  "materialHits": [
+    {
+      "resource": "krthaz02",
+      "mesh": "objects\\meshes\\krthaz02\\krthaz02.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz05",
+      "mesh": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz07",
+      "mesh": "objects\\meshes\\krthaz07\\krthaz07.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz08",
+      "mesh": "objects\\meshes\\krthaz08\\krthaz08.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz10",
+      "mesh": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz12",
+      "mesh": "objects\\meshes\\krthaz12\\krthaz12.scx",
+      "material": "Material #3",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz20",
+      "mesh": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "material": "Material #1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz16",
+      "mesh": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "material": "Material #25",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz18",
+      "mesh": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "material": "Material #5",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz18",
+      "mesh": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "material": "Material #4",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "lightmap",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz02_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz02_night.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz05_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz05_night.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz07_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz07_night.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz08_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz08_night.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz10_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz10_night.scx",
+      "material": "ablak1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz12_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz12_night.scx",
+      "material": "Material #3",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz16_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz16_night.scx",
+      "material": "Material #25",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz18_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz18_night.scx",
+      "material": "Material #4",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "krthaz20_night",
+      "mesh": "objects\\meshes\\_krthaz_selfillum\\krthaz20_night.scx",
+      "material": "Material #1",
+      "texture": "maps\\textures\\lightmap_ablakok02.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "area_17_egyedi",
+      "mesh": "objects\\meshes\\area_17_egyedi\\area_17_egyedi.scx",
+      "material": "Material #5",
+      "texture": "maps\\textures\\ives_lephaz1a_lightmap.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "area_17_egyedi",
+      "mesh": "objects\\meshes\\area_17_egyedi\\area_17_egyedi.scx",
+      "material": "Material #2",
+      "texture": "maps\\textures\\ives_ablak1g_lightmap2B.dds",
+      "slot": "selfIllum",
+      "channel": 1
+    },
+    {
+      "resource": "area_18_egyedi_d",
+      "mesh": "objects\\meshes\\area_18_egyedi_d\\area_18_egyedi_d.scx",
+      "material": "Material #1",
+      "texture": "maps\\textures\\lapos_ablak4_lightmap.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "area_18_egyedi_d",
+      "mesh": "objects\\meshes\\area_18_egyedi_d\\area_18_egyedi_d.scx",
+      "material": "Material #0",
+      "texture": "maps\\textures\\lapos_ablak3_lightmap2.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "area_39_egyedi_b",
+      "mesh": "objects\\meshes\\area_39_egyedi_b\\area_39_egyedi_b.scx",
+      "material": "Material #6",
+      "texture": "maps\\textures\\kirakatok2_lightmap.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "area_39_egyedi_b",
+      "mesh": "objects\\meshes\\area_39_egyedi_b\\area_39_egyedi_b.scx",
+      "material": "Material #3",
+      "texture": "maps\\textures\\fura_kozablak2_lightmap.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    },
+    {
+      "resource": "area_39_egyedi_b",
+      "mesh": "objects\\meshes\\area_39_egyedi_b\\area_39_egyedi_b.scx",
+      "material": "Material #2",
+      "texture": "maps\\textures\\fura_ablakok2_lightmap.dds",
+      "slot": "selfIllum",
+      "channel": 0
+    }
+  ],
+  "warnings": []
+}
