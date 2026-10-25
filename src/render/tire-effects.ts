@@ -111,21 +111,25 @@ export class TireEffects {
       this.markHold[i] = strength > 0 ? 0.22 : Math.max(0, this.markHold[i] - dt);
       if (!wheel.contact || !this.markHold[i]) { this.previous[i] = undefined; this.markTimer[i] = this.markU[i] = 0; }
       const point = wheel.contactPoint, prior = this.previous[i];
-      if (this.markHold[i] && prior && prior.distanceTo(point) < 2.5) {
+      if (wheel.contact && this.markHold[i] && (!prior || prior.distanceTo(point) >= 2.5)) this.previous[i] = point.clone();
+      else if (wheel.contact && this.markHold[i] && prior) {
         const distance = prior.distanceTo(point), steps = Math.max(1, Math.ceil(distance / 0.28));
-        if (distance > 0.075) for (let j = 1; j <= steps; j++) {
-          const a = prior.clone().lerp(point, (j - 1) / steps), b = prior.clone().lerp(point, j / steps);
-          const u0 = this.markU[i], u1 = u0 + a.distanceTo(b) / 0.8;
-          this.marks.get(wheel.surface)!.add(a, b, wheel.contactNormal, wheel.forward, 0.15 + strength * 0.055, u0, u1);
-          this.markU[i] = u1;
+        if (distance > 0.075) {
+          for (let j = 1; j <= steps; j++) {
+            const a = prior.clone().lerp(point, (j - 1) / steps), b = prior.clone().lerp(point, j / steps);
+            const u0 = this.markU[i], u1 = u0 + a.distanceTo(b) / 0.8;
+            this.marks.get(wheel.surface)!.add(a, b, wheel.contactNormal, wheel.forward, 0.15 + strength * 0.055, u0, u1);
+            this.markU[i] = u1;
+          }
+          this.previous[i] = point.clone();
+        } else if (strength > 0 && this.markTimer[i] <= 0) {
+          // A brake-held burnout keeps the contact point still while the tread scrubs the ground.
+          const half = wheel.forward.clone().multiplyScalar(0.07);
+          this.marks.get(wheel.surface)!.add(point.clone().sub(half), point.clone().add(half), wheel.contactNormal, wheel.forward, 0.15 + strength * 0.055, this.markU[i], this.markU[i] + 0.175);
+          this.markTimer[i] = 0.14;
         }
-      } else if (this.markHold[i] && prior && prior.distanceTo(point) < 0.075 && this.markTimer[i] <= 0) {
-        const half = wheel.forward.clone().multiplyScalar(0.07);
-        this.marks.get(wheel.surface)!.add(point.clone().sub(half), point.clone().add(half), wheel.contactNormal, wheel.forward, 0.15, this.markU[i], this.markU[i] + 0.175);
-        this.markTimer[i] = 0.14;
       }
       this.markTimer[i] -= dt;
-      if (this.markHold[i]) this.previous[i] = point.clone();
       if (!smokeStrength) { this.smokeTimer[i] = 0; continue; }
       this.smokeTimer[i] -= dt;
       if (this.smokeTimer[i] <= 0) {

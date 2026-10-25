@@ -66,3 +66,31 @@ test('stock launch leaves rear marks and smoke without marking freely rolling fr
   assert.equal((road.geometry as BufferGeometry).drawRange.count, 12);
   effects.dispose();
 });
+
+test('brake-held rear wheelspin marks the stationary contact patch', () => {
+  const effects = new TireEffects();
+  const front = contact({ slip: 0, slipSpeed: 0 });
+  const rear = contact({ slip: 0.75, slipSpeed: 6 });
+  const road = effects.group.children[0] as Mesh;
+  const smoke = effects.group.children[3] as Points;
+  effects.update(1 / 60, [front, front, rear, rear]);
+  effects.update(1 / 60, [front, front, rear, rear]);
+  assert.equal((road.geometry as BufferGeometry).drawRange.count, 12);
+  assert.ok((smoke.geometry as BufferGeometry).drawRange.count > 0);
+  const rolling = contact({ slip: 0, slipSpeed: 0 });
+  for (let i = 0; i < 20; i++) effects.update(1 / 60, [rolling, rolling, rolling, rolling]);
+  assert.equal((road.geometry as BufferGeometry).drawRange.count, 12);
+  effects.dispose();
+});
+
+test('slow burnout accumulates sub-frame wheel movement into a continuous mark', () => {
+  const effects = new TireEffects();
+  const road = effects.group.children[0] as Mesh;
+  for (const z of [0, -0.02, -0.04, -0.06, -0.08, -0.1]) {
+    effects.update(1 / 60, [contact({ slip: 0.7, slipSpeed: 4, contactPoint: new Vector3(0, 0.012, z) })]);
+  }
+  assert.ok((road.geometry as BufferGeometry).drawRange.count >= 12);
+  const vertices = (road.geometry as BufferGeometry).getAttribute('position');
+  assert.ok(vertices.getZ(6) < -0.075);
+  effects.dispose();
+});
