@@ -89,6 +89,7 @@ export class MapObjectStream {
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
         mesh.name = part.name; mesh.count = 0; mesh.frustumCulled = false; this.parent.add(mesh); return mesh;
       });
+      type.loading = false;
       this.dirty = true;
     }).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); });
   }

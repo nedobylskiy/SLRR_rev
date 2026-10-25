@@ -30,3 +30,28 @@ test('map objects load near the camera, enter over successive frames and leave b
   assert.equal(stream.active, 0);
   parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
 });
+
+test('all nearby object types load after the concurrent-load slots are freed', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100);
+  const loads = Array(6).fill(0);
+  for (let index = 0; index < loads.length; index++) {
+    stream.add([{ matrix: new Matrix4(), position: new Vector3() }], async () => {
+      loads[index]++;
+      return [new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial())];
+    });
+  }
+
+  const camera = new Vector3();
+  stream.update(camera);
+  assert.deepEqual(loads, [1, 1, 1, 1, 0, 0]);
+  await Promise.resolve();
+  stream.update(camera);
+  assert.deepEqual(loads, [1, 1, 1, 1, 1, 1]);
+  await Promise.resolve();
+  stream.update(camera);
+  assert.equal(stream.active, 6);
+  assert.equal(parent.children.length, 6);
+
+  stream.dispose();
+  parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
+});
