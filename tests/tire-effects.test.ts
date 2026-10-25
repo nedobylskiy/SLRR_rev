@@ -94,3 +94,30 @@ test('slow burnout accumulates sub-frame wheel movement into a continuous mark',
   assert.ok(vertices.getZ(6) < -0.075);
   effects.dispose();
 });
+
+test('skid mark fades in at the start and fades out when wheelspin ends', () => {
+  const effects = new TireEffects();
+  const road = effects.group.children[0] as Mesh;
+  for (const z of [0, -0.25, -0.5, -0.75]) {
+    effects.update(1 / 60, [contact({ contactPoint: new Vector3(0, 0.012, z) })]);
+  }
+  const colors = (road.geometry as BufferGeometry).getAttribute('color');
+  assert.equal(colors.itemSize, 4);
+  assert.equal(colors.getW(0), 0);
+  assert.equal(colors.getW(11), 1);
+  effects.update(1 / 60, [contact({ contact: false })]);
+  assert.equal(colors.getW(11), 0);
+  assert.ok(colors.getW(8) > 0 && colors.getW(8) < 1);
+  effects.dispose();
+});
+
+test('smoke grows into a wider plume as it leaves the tire', () => {
+  const effects = new TireEffects();
+  const smoke = effects.group.children[3] as Points;
+  effects.update(1 / 60, [contact({ slip: 0.8, slipSpeed: 7 })]);
+  const sizes = (smoke.geometry as BufferGeometry).getAttribute('aSize');
+  const fresh = sizes.getX(0);
+  effects.update(0.5, [contact({ contact: false })]);
+  assert.ok(sizes.getX(0) > fresh * 2);
+  effects.dispose();
+});
