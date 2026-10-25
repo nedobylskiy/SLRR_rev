@@ -1,33 +1,33 @@
-# Мультиплеер и состояние машины
+# Multiplayer and machine status
 
-Это проект сетевой архитектуры; работающий сетевой транспорт и серверная гонка ещё не реализованы. Приоритет — полноценный захват и восстановление машины в памяти, поскольку старый путь через save-to-disk приводил к утечке по наблюдению владельца.
+This is a network architecture design; working network transport and server race have not yet been implemented. The priority is to fully capture and restore the machine in memory, since the old save-to-disk path led to a leak, according to the owner’s observation.
 
-## Потоки данных
+## Data streams
 
-1. Handshake: версия протокола, manifest ресурсов/скриптов, возможности VM, версия схемы snapshot.
-2. Baseline: полная сборка деталей, ID, слоты, тюнинг, damage, окраска, состояния модов. Использует SRVS или его последующую версию.
-3. Inputs: последовательный номер, simulation tick, steering/throttle/brake/clutch/gear. Клиент не присылает «моя позиция правильная» как окончательное решение.
-4. Dynamics: server tick, baseline revision, position/rotation, linear/angular velocity, rpm/gear, согласованный набор колёсных и моторных параметров.
-5. Events: install/remove, collision damage, paint update, disconnect. Изменяют revision baseline.
+1. Handshake: protocol version, manifest resources/scripts, VM capabilities, snapshot scheme version.
+2. Baseline: complete assembly of parts, ID, slots, tuning, damage, painting, mod states. Uses SRVS or its subsequent version.
+3. Inputs: sequence number, simulation tick, steering/throttle/brake/clutch/gear. The client does not send “my position is correct” as a final decision.
+4. Dynamics: server tick, baseline revision, position/rotation, linear/angular velocity, rpm/gear, coordinated set of wheel and motor parameters.
+5. Events: install/remove, collision damage, paint update, disconnect. Change the revision baseline.
 
-Полный автомобиль не нужно сериализовать 60 раз в секунду, если изменилась только позиция. Но перед оптимизацией delta должны работать lossless baseline и resync. Старые garage saves не содержат автоматически всех динамических величин, нужных для движения.
+The complete car doesn't need to be serialized 60 times per second if only the position has changed. But before optimizing delta, lossless baseline and resync must work. Old garage saves do not automatically contain all the dynamic values needed for movement.
 
-## Авторитет и время
+## Authority and time
 
-Сервер владеет установкой деталей и симуляцией. Клиент может предсказывать собственное движение, остальные машины интерполируются между серверными состояниями. Равенство floating point между браузерами не предполагается; поэтому lockstep без коррекции не выбран по умолчанию.
+The server owns the installation of parts and simulation. The client can predict its own movement, the rest of the machines are interpolated between the server states. Floating point equality between browsers is not assumed; therefore lockstep without correction is not selected by default.
 
-`FixedClock` уже даёт целые ticks и постоянный dt, независимо от частоты рендера. При перегрузке сохраняет и сообщает долг, не растягивает dt и не молча пропускает физические шаги. Политика server catch-up/pause/resync остаётся задачей интеграции.
+`FixedClock` already gives integer ticks and constant dt, regardless of the rendering frequency. When overloaded, retains and communicates duty, does not stretch dt and does not silently skip physical steps. The server catch-up/pause/resync policy remains an integration task.
 
-Native runMethod не должен становиться произвольной удалённой командой. Сеть получает типизированные действия и идентификаторы сущностей. Host DLL invocation вообще не является сетевым RPC.
+Native runMethod should not become an arbitrary remote command. The network receives typed actions and entity identifiers. Host DLL invocation is not a network RPC at all.
 
-## Память и восстановление
+## Memory and recovery
 
-Один baseline владеет своими byte buffers. Передача ArrayBuffer в Worker может передавать владение; после transfer отправитель не использует detached buffer. Transient textures хранятся по content hash, имеют размеры и собственный жизненный цикл. Reconnect, замена автомобиля и rollback должны освобождать старые render/physics/VM instances.
+One baseline owns its byte buffers. Passing an ArrayBuffer to a Worker can transfer ownership; after transfer the sender does not use detached buffer. Transient textures are stored by content hash, have dimensions and their own life cycle. Reconnect, car replacement and rollback should free up old render/physics/VM instances.
 
-CRC32 внутри SRVS — только проверка повреждения. Сетевой протокол обязан проверять отправителя, квоты, размер/частоту сообщений, актуальность tick/revision и разрешённые resources. Успешное декодирование JSON не разрешает создать любую машину на сервере.
+CRC32 inside SRVS - damage check only. The network protocol is required to check the sender, quotas, message size/frequency, tick/revision relevance and allowed resources. Successful JSON decoding does not allow any machine to be created on the server.
 
-## Приёмочные сценарии
+## Acceptance scripts
 
-Один и тот же baseline восстанавливает совпадающее дерево деталей и параметры на двух клиентах с различным порядком загрузки RPK. Ошибка отсутствующего мода оставляет прежнюю машину неизменной. 1000 циклов spawn→baseline→restore→despawn не увеличивают counts активных тел/текстур/VM roots. Потеря baseline запускает resync. Позднее/дублированное сообщение не возвращает старую конфигурацию. Отключение клиента уничтожает принадлежащие ему временные объекты.
+The same baseline restores the same parts tree and parameters on two clients with different RPK load orders. The missing mod bug leaves the original car unchanged. 1000 cycles of spawn→baseline→restore→despawn do not increase the counts of active bodies/textures/VM roots. Losing baseline triggers resync. Late/duplicate message does not return old configuration. Disabling a client destroys the temporary objects it owns.
 
-Эти критерии для игрового мира ещё не пройдены. Текущие unit-тесты проверяют только кодеки, структуру графа и clock.
+These criteria for the game world have not yet been met. Current unit tests only check codecs, graph structure and clock.

@@ -227,7 +227,7 @@ export class Viewer {
   }
   async hood(definition: PartDefinition, assets: Assets, telemetry: (text: string) => void) {
     this.clear(); const generation = this.generation;
-    if (!definition.model) throw new Error('У капота нет модели');
+    if (!definition.model) throw new Error('Hood model missing');
     const parsed = parseScx(await assets.read(definition.model.path));
     if (generation !== this.generation) return;
     const transform = modelMatrix(new THREE.Matrix4().makeTranslation(0, 1.25, 0), definition.config.renderPose && poseMatrix(definition.config.renderPose));
@@ -237,7 +237,7 @@ export class Viewer {
     await this.append(parsed, assets, definition.model.textures, this.model, generation);
     if (generation !== this.generation) return;
     const slot = definition.config.slots.find(s => s.attach.length);
-    if (!slot) throw new Error('У капота нет слота крепления');
+    if (!slot) throw new Error('Hood mount slot missing');
     const lab = new HoodLab(this.model, definition.config.bodies.reduce((sum, b) => sum + b.mass, 0), [slot.position[0], slot.position[1] + 1.25, slot.position[2]], telemetry);
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.ground.visible = true;
     this.controls.target.set(0, 0.9, 0); this.camera.position.set(1.9, 2.5, -2.5); this.controls.update();
@@ -318,7 +318,7 @@ export class Viewer {
     })().catch(() => { /* Procedural fallback remains available when particle assets are absent. */ });
     let frameMs = 1000 / 60, backlogTicks = 0;
     const reportTelemetry = telemetry;
-    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nКузов ${Math.round(root.condition * 100)}% · опоры ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash.suspension.mechanics?.support(i) ?? 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nДвигатель ${Math.round(crash.suspension.mechanics.power * 100)}% · ${Math.round(crash.suspension.mechanics.rpm)} об/мин · передача ${crash.suspension.mechanics.gear < 0 ? 'R' : crash.suspension.mechanics.gear || 'N'} (${crash.suspension.mechanics.manual ? 'ручная' : 'авто'}) · наддув ${crash.suspension.mechanics.boost.toFixed(2)} бар · буксование ${Math.round(Math.max(...crash.suspension.wheels.map(w => Math.abs(w.slip))) * 100)}%` : ''}\n${Math.round(1000 / frameMs)} кадр/с · деформация активна: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${track && this.mapStream ? ` · объекты рядом: ${this.mapStream.active}/${this.mapStream.total}` : ''}${backlogTicks ? ` · отставание ${Math.round(backlogTicks / 240 * 1000)} мс` : ''}` : ''));
+    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nChassis ${Math.round(root.condition * 100)}% · supports ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash.suspension.mechanics?.support(i) ?? 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nEngine ${Math.round(crash.suspension.mechanics.power * 100)}% · ${Math.round(crash.suspension.mechanics.rpm)} rpm · gear ${crash.suspension.mechanics.gear < 0 ? 'R' : crash.suspension.mechanics.gear || 'N'} (${crash.suspension.mechanics.manual ? 'manual' : 'automatic'}) · boost ${crash.suspension.mechanics.boost.toFixed(2)} bar · slip ${Math.round(Math.max(...crash.suspension.wheels.map(w => Math.abs(w.slip))) * 100)}%` : ''}\n${Math.round(1000 / frameMs)} fps · active deformation: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${track && this.mapStream ? ` · nearby objects: ${this.mapStream.active}/${this.mapStream.total}` : ''}${backlogTicks ? ` · lag ${Math.round(backlogTicks / 240 * 1000)} ms` : ''}` : ''));
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyN', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
       if (!relevant.has(event.code)) return;
@@ -328,7 +328,7 @@ export class Viewer {
     const up = (event: KeyboardEvent) => { keys.delete(event.code); };
     const release = () => { keys.clear(); last = undefined; };
     const focus = () => canvas.focus({ preventScroll: true });
-    canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Управление автомобилем'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
+    canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Vehicle controls'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
     window.addEventListener('keyup', up); window.addEventListener('blur', release); document.addEventListener('visibilitychange', release);
     this.ground.visible = !track; this.grid.visible = false; this.driveGrid.visible = !track;
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(softParts);
@@ -349,7 +349,7 @@ export class Viewer {
       if (now - lastHud > 100) {
         const intact = crash?.panel.mounts.filter(m => !m.broken).length;
         const up = crash instanceof Vehicle3D ? new THREE.Vector3(0, 1, 0).applyQuaternion(crash.body.orientation).y : 1;
-        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} км/ч${crash instanceof Vehicle3D ? ` · колёса на опоре ${crash.suspension.wheels.filter(w => w.contact).length}/4\nКапот: ${crash.hood.parent ? 'на машине' : 'отделён'} · крепления ${intact}/3\nПанелей с вмятинами: ${[...crash.soft.values()].filter(s => s.panel.plasticBeams > 0).length} · отделено деталей: ${[...crash.soft.keys(), ...crash.rigid.keys()].filter(p => p !== root && !p.parent).length}\nКузов: ${up < -0.5 ? 'перевёрнут' : up < 0.5 ? 'на боку' : crash.suspension.wheels.every(w => !w.contact) ? 'в воздухе' : 'на колёсах'}` : crash ? ` · удар ${Math.round(crash.impactSpeed * 3.6)} км/ч\nКапот: ${crash.hood.parent ? 'на машине' : 'самостоятельная деталь'}` : ` · ${demo.speed < -0.1 ? 'задний ход' : 'вперёд'}`}`); lastHud = now;
+        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} km/h${crash instanceof Vehicle3D ? ` · supported wheels ${crash.suspension.wheels.filter(w => w.contact).length}/4\nHood: ${crash.hood.parent ? 'attached' : 'detached'} · mounts ${intact}/3\nDented panels: ${[...crash.soft.values()].filter(s => s.panel.plasticBeams > 0).length} · detached parts: ${[...crash.soft.keys(), ...crash.rigid.keys()].filter(p => p !== root && !p.parent).length}\nChassis: ${up < -0.5 ? 'upside down' : up < 0.5 ? 'on its side' : crash.suspension.wheels.every(w => !w.contact) ? 'airborne' : 'on wheels'}` : crash ? ` · impact ${Math.round(crash.impactSpeed * 3.6)} km/h\nHood: ${crash.hood.parent ? 'attached' : 'separate part'}` : ` · ${demo.speed < -0.1 ? 'reverse' : 'forward'}`}`); lastHud = now;
       }
     };
     const stop = () => {

@@ -1,48 +1,48 @@
-# Исследование SLRR и нового движка
+# Research on SLRR and the new engine
 
-Дата первичного исследования: 23 октября 2026. Объект — конкретная локальная Steam-установка с модификациями. Выводы нельзя автоматически переносить на все версии SLRR.
+Date of primary research: October 23, 2026. Object is a specific local Steam installation with modifications. Findings may not automatically carry over to all versions of SLRR.
 
-## Навигация
+## Navigation
 
-| Документ | Содержание |
+|Document|Content|
 |---|---|
-| [Статус и воспроизведение](status.md) | Что реально реализовано и чем проверено |
-| [Карта установки](installation.md) | Файлы, слои игры, native-граница |
-| [RPK/RDB](formats/rpk.md) | Бинарная таблица, зависимости, ресурсные ID |
-| [SCX/SCY/TEX](formats/scx.md) | Геометрия, материалы, версии 3 и 4 |
-| [Карты](maps.md) | Загрузка встроенного Test Track и границы поддержки |
-| [TUFA/TREE](formats/tufa.md) | Оригинальные `.class`, константы, методы, узлы |
-| [Прочие форматы](formats/other.md) | CFG, текстуры, карты, анимация, неизвестное |
-| [Состояние автомобиля](vehicle-serialization.md) | Старый SDAT, save/load, новый буферный формат |
-| [Архитектура](architecture.md) | Реализованные модули и планируемая структура |
-| [Мир движка](engine-world.md) | Фабрика RPK/CFG, экземпляры, сборка, трансформы и границы |
-| [Игровая функциональность](gameplay.md) | Что нужно для управляемой машины, native-контракты и текущие пробелы |
-| [Крепления и пробная поездка](mounts-and-driving.md) | compatible/slottype, пять машин, управление, модель движения и ограничения |
-| [Деформируемая физика](deformable-physics.md) | Аудит найденного реверса, пластичность, отрыв деталей и следующий прототип |
-| [Стенд оригинального капота](hood-prototype.md) | Работающее демо, XPBD-каркас, опоры, импульсы, результаты и ограничения |
-| [Столкновение собранной машины](car-crash-demo.md) | Контакт капота, движущиеся крепления, EngineWorld.detach и самостоятельная деталь |
-| [Контакты кузова и отдача](body-contacts.md) | Треугольники исходной машины, падение капота на крышу, импульсы и отскок шасси |
-| [Машина в 3D](vehicle-3d.md) | CFG-подвеска, деформируемые крепления, состояние деталей, физические меши и быстродействие |
-| [Штатные узлы подвески и двигателя](original-mechanics.md) | Выбор оригинальных деталей, числовые параметры, повреждения и ограничения прототипа |
-| [Part source runtime](part-runtime.md) | Оригинальные save/load через память и ограничения проверки |
-| [Мультиплеер](multiplayer.md) | Авторитет сервера, snapshots, жизненный цикл |
-| [DLL и бинарники](legacy-extensions.md) | runDLL/runMethod, промежуточный EXE, ошибки моста |
-| [Дорожная карта](roadmap.md) | Этапы с критериями приёмки |
-| [Источники](sources.md) | Прямые ссылки, версии, достоверность |
-| [Рабочий архив Elias](elias-workspace-archive.md) | IDA, native ABI, физика колёс, границы стороннего host |
+|[Status and playback](status.md)|What has actually been implemented and what has been verified?|
+|[Installation map](installation.md)|Files, game layers, native border|
+| [RPK/RDB](formats/rpk.md) |Binary table, dependencies, resource IDs|
+| [SCX/SCY/TEX](formats/scx.md) |Geometry, materials, versions 3 and 4|
+|[Maps](maps.md)|Loading built-in Test Track and support boundaries|
+| [TUFA/TREE](formats/tufa.md) |Original `.class`, constants, methods, nodes|
+|[Other formats](formats/other.md)|CFG, textures, maps, animation, unknown|
+|[Vehicle condition](vehicle-serialization.md)|Old SDAT, save/load, new buffer format|
+|[Architecture](architecture.md)|Implemented modules and planned structure|
+|[Engine World](engine-world.md)|RPK/CFG factory, instances, assembly, transforms and boundaries|
+|[Game functionality](gameplay.md)|What is needed for a managed machine, native contracts and current gaps|
+|[Mounts and test drive](mounts-and-driving.md)|compatible/slottype, five cars, controls, motion model and restrictions|
+|[Deformable Physics](deformable-physics.md)|Audit of the found reverse, plasticity, separation of parts and the next prototype|
+|[Original hood stand](hood-prototype.md)|Working demo, XPBD framework, supports, impulses, results and limitations|
+|[Collision of assembled car](car-crash-demo.md)|Hood contact, moving fasteners, EngineWorld.detach and independent part|
+|[Body Contacts and Recoil](body-contacts.md)|Triangles of the original car, falling of the hood onto the roof, impulses and rebound of the chassis|
+|[Car in 3D](vehicle-3d.md)|CFG suspension, deformable mounts, part condition, physics meshes and performance|
+|[Stock suspension and engine components](original-mechanics.md)|Selection of original parts, numerical parameters, damage and limitations of the prototype|
+| [Part source runtime](part-runtime.md) |Original save/load via memory and check limits|
+|[Multiplayer](multiplayer.md)|Server authority, snapshots, lifecycle|
+|[DLLs and binaries](legacy-extensions.md)|runDLL/runMethod, intermediate EXE, bridge errors|
+|[Roadmap](roadmap.md)|Stages with acceptance criteria|
+|[Sources](sources.md)|Direct links, versions, reliability|
+|[Working archive Elias](elias-workspace-archive.md)|IDA, native ABI, wheel physics, third-party host boundaries|
 
-## Уровни достоверности
+## Confidence levels
 
-**Подтверждено корпусом** — парсер проверил структуру на локальных файлах с полным потреблением соответствующих секций. Это не доказательство семантики каждого поля.
+**Confirmed by the corpus** - the parser checked the structure on local files with full consumption of the corresponding sections. This is not a proof of the semantics of each field.
 
-**Подтверждено исходником** — порядок действий виден в локальных Java-файлах; исполнение native-функций из этого не следует.
+**Confirmed by source** - the procedure is visible in the local Java files; execution of native functions does not follow from this.
 
-**Внешний разбор** — сведения из публичной реконструкции. Адреса в чужом EXE нельзя применять к другому бинарнику без проверки хеша и привязки функций.
+**External analysis** - information from the public reconstruction. Addresses in someone else's EXE cannot be applied to another binary without checking the hash and binding functions.
 
-**Проектное решение** — устройство нового движка. Не следует описывать его как существующую возможность старого EXE.
+**Design solution** - design of a new engine. It should not be described as an existing feature of the old EXE.
 
-## Машиночитаемые материалы
+## Machine-readable materials
 
-`reports/inventory.json` — количества, сигнатуры, хеши RPK и PE, зависимости пакетов. `reports/classes.json` — имена и размеры TUFA-классов. `reports/native-candidates.json` — кандидаты native/abstract/declaration и явные декларации из Java. Пустое дерево само по себе не доказывает, что метод native. `reports/pe-comparison.json` — сравнительный анализ двух EXE и libcall.dll.
+`reports/inventory.json` - quantities, signatures, RPK and PE hashes, package dependencies. `reports/classes.json` - names and sizes of TUFA classes. `reports/native-candidates.json` - native/abstract/declaration candidates and explicit declarations from Java. An empty tree by itself does not prove that the method is native. `reports/pe-comparison.json` - comparative analysis of two EXEs and libcall.dll.
 
-Содержимое игровых сохранений и полный исходник DLL не публикуются в этих отчётах.
+The contents of game saves and the full source DLL are not published in these reports.

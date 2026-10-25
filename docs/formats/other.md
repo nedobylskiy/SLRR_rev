@@ -1,25 +1,25 @@
-# Остальные форматы и границы знания
+# Other formats and boundaries of knowledge
 
 ## CFG
 
-Текстовые строки key + значения, комментарии `;` и местами `//`. Один ключ может повторяться. `slot`, `attach`, `render`, `mesh`, `texture`, масса/инерция, параметры пружин/шин и команды настройки образуют несколько разных грамматик, а не одну таблицу key-value.
+Text strings key + values, comments `;` and in some places `//`. One key can be repeated. `slot`, `attach`, `render`, `mesh`, `texture`, mass/inertia, spring/tire parameters and tuning commands form several different grammars, rather than one key-value table.
 
-Реализован ordered-парсер поднабора slot/attach/compatible/slottype/stockpart, render/deformable/mesh/texture, body, wheel, steering и maxsteer с проверкой чисел. Поддержаны RID с суффиксом r и ведущими нулями при значении u32. Фабрика совмещает крепления с учётом aliases, frames колёс/руля и render pose; [подробности и ограничения](../mounts-and-driving.md). Универсальная схема всех CFG, suspension/compound/bone frames и полный физический смысл чисел ещё не реализованы. Неизвестные команды сохраняются в диагностике.
+Implemented an ordered parser for the subset slot/attach/compatible/slottype/stockpart, render/deformable/mesh/texture, body, wheel, steering and maxsteer with number checking. RIDs with suffix r and leading zeros with a value of u32 are supported. The factory combines mounts taking into account aliases, wheel/steering wheel frames and render pose; [details and restrictions](../mounts-and-driving.md). The universal scheme of all CFGs, suspension/compound/bone frames and the full physical meaning of the numbers have not yet been implemented. Unknown commands are stored in diagnostics.
 
-## Изображения и звук
+## Images and sound
 
-DDS: контейнер с разными форматами, не один универсальный поток RGBA. Three.js DDSLoader читает заголовок и mipmaps; проверка аппаратной поддержки компрессии обязательна. PNG/JPEG/TGA используются для моделей, интерфейса и окраски. В `save` файлы с окончаниями `.1`, `.2` и т. п. нередко имеют JFIF-сигнатуру — расширение не является типом.
+DDS: container with different formats, not one universal RGBA stream. Three.js DDSLoader reads header and mipmaps; checking hardware compression support is required. PNG/JPEG/TGA are used for models, interface and coloring. In `save`, files with endings `.1`, `.2`, etc. often have a JFIF signature - the extension is not a type.
 
-WAV/MP3 распознаны по именам/корпусу. Аудиоподсистема нового движка ещё не подключена; будущий Web Audio backend должен повторить приоритеты каналов и позиционный звук.
+WAV/MP3 recognized by names/case. The audio subsystem of the new engine has not yet been connected; The future Web Audio backend should replicate channel priorities and positional audio.
 
-## Карты и коллизии
+## Maps and collisions
 
-Большие RPK карт могут содержать встроенные бинарные данные. Названия POLY/PHYS известны из сообщества и внешних материалов, но их полная схема здесь ещё не установлена. Внешний `.scx` карты может быть пустым placeholder. Делать вывод «карта пустая» по нему нельзя.
+Large map RPKs may contain embedded binary data. POLY/PHYS names appear in community research, but their full structure has not been established here. A map's external `.scx` can be an empty placeholder; that alone does not mean the map is empty.
 
-Нужны: каталог chunk-тегов с размерами, сопоставление встроенного render/physics, система координат, instancing, пространственный индекс, маршруты и стартовые позиции. До этого просмотр отдельных мешей не равен загрузке трассы.
+Needed: a directory of chunk tags with dimensions, mapping of built-in render/physics, coordinate system, instancing, spatial index, routes and starting positions. Before this, viewing individual meshes is not the same as loading the route.
 
-## Анимация и другие данные
+## Animation and other data
 
-В установке присутствуют `.bon`, `.skl`, `.smb`, `.vax`, `.vaz`, `.spl`, `.scm`, `.box`, `.matrixdata`, `.ptx`, `.walk`, `.trc`, `.rest`. Их имена позволяют выделить группы для исследования, но не служат спецификацией. Собственные декодеры для них ещё не написаны. Скелетные chunks SCX v4 структурно обходятся, однако система костей и анимация не восстанавливаются.
+The installation contains `.bon`, `.skl`, `.smb`, `.vax`, `.vaz`, `.spl`, `.scm`, `.box`, `.matrixdata`, `.ptx`, `.walk`, `.trc`, `.rest`. Their names help identify groups for study, but do not serve as specifications. Own decoders for them have not yet been written. Skeletal chunks of SCX v4 are structurally bypassed, but the bone system and animation are not restored.
 
-Для каждого следующего формата: собрать сигнатуры и версии, найти инструмент-источник, проверить границы на всём корпусе, затем сравнить смысл с работающей игрой. Не включать выдуманную схему в production-код.
+For each of the following formats: collect signatures and versions, find the source tool, check the boundaries on the entire corpus, then compare the meaning with the running game. Don't include fictitious schema in production code.

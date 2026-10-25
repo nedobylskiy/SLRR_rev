@@ -1,37 +1,37 @@
-# Устройство исследованной установки
+# Device of the investigated installation
 
-Всего 25105 файлов. Полные количества и размеры воспроизводятся `npm run audit`.
+There are 25105 files in total. Full quantities and sizes are reproduced by `npm run audit`.
 
-| Расширение | Количество | Назначение/уровень подтверждения |
+|Extension|Quantity|Purpose/level of confirmation|
 |---|---:|---|
-| `.java` | 3454 | Исходники игровой логики и модов |
-| `.class` | 2921 | TUFA, не стандартный JVM classfile |
-| `.rpk` | 147 | Все имеют RPAK version 0x200 |
-| `.rdb` | 118 | Текстовое представление ресурсных описаний |
-| `.scx` | 6033 | 3532 INVO v3, 2500 INVO v4, 1 файл длиной 0 |
-| `.scy` | 35 | Дополнительные модели; парсер специально на всём этом корпусе ещё не проверен |
-| `.cfg` | 3194 | Текстовые параметры деталей, слотов, физических объектов |
-| `.dds` | 3296 | Текстуры |
-| `.png` | 1685 | Текстуры и интерфейс |
-| `.tex` | 866 | Списки текстур рядом с моделями |
-| `.wav` | 337 | Звуки |
+| `.java` | 3454 |Sources of game logic and mods|
+| `.class` | 2921 |TUFA, not a standard JVM classfile|
+| `.rpk` | 147 |All have RPAK version 0x200|
+| `.rdb` | 118 |Textual representation of resource descriptions|
+| `.scx` | 6033 |3532 INVO v3, 2500 INVO v4, 1 file of length 0|
+| `.scy` | 35 |Additional models; the parser has not yet been specifically tested on this entire corpus|
+| `.cfg` | 3194 |Text parameters of parts, slots, physical objects|
+| `.dds` | 3296 |Textures|
+| `.png` | 1685 |Textures and interface|
+| `.tex` | 866 |Lists of textures next to models|
+| `.wav` | 337 |Sounds|
 
-## Слои
+## Layers
 
-`system/scripts/{lang,io,net,render,sound,util}` содержит базовую библиотеку классов, преимущественно в TUFA. Исходников Java этой системной библиотеки в исследованном `system` не обнаружено.
+`system/scripts/{lang,io,net,render,sound,util}` contains the core class library, primarily in TUFA. The Java sources of this system library were not found in the examined `system`.
 
-`sl/Scripts/game/src` содержит управление карьерой, гаражом, трассами, интерфейсом, автомобилем. Дополнительные режимы находятся в `Gamemodes`.
+`sl/Scripts/game/src` contains management of career, garage, tracks, interface, car. Additional modes are found in `Gamemodes`.
 
-`parts/scripts` содержит иерархию деталей, двигателя, ходовой части, кузова. Многие узлы реализуют собственные `save/load`, поэтому универсальный дамп полей Java не заменяет сериализацию детали.
+`parts/scripts` contains a hierarchy of parts, engine, chassis, body. Many nodes implement their own `save/load`, so a generic Java field dump is not a replacement for part serialization.
 
-`cars/racers/*_data` содержит конфигурации, модели и классы конкретных автомобилей. `maps`, `misc`, `objects` связывают мир и геометрию через RPK; не каждая карта представлена отдельным непустым SCX.
+`cars/racers/*_data` contains configurations, models, and classes for specific vehicles. `maps`, `misc`, and `objects` connect world resources and geometry through RPK; not every map has a separate nonempty SCX.
 
-`save` содержит SDAT и побочные изображения окраски. Для мультиплеера следует учитывать эти изображения как отдельные данные, а не только значения texture ID.
+`save` contains SDAT and coloring side images. For multiplayer, these images should be considered as separate data, not just texture ID values.
 
-`multibot` присутствует в установке, но название каталога само по себе не является доказательством наличия исходников сетевого мода.
+`multibot` is present in the installation, but the directory name in itself is not proof of the presence of the network mod sources.
 
-## Что остаётся за Java-границей
+## What remains beyond the Java border
 
-Native-декларации и ресурсные свойства `native` связывают скрипты с физикой, объектами мира, моделями, камерой, вводом, звуком, файловыми операциями и жизненным циклом. Извлечение игровых Java не восстанавливает эти функции. Даже полноценная стандартная JVM требует заново реализовать native API и специфический диалект языка.
+Native declarations and resource properties `native` associate scripts with physics, world objects, models, camera, input, sound, file operations and lifecycle. Removing game Java does not restore these functions. Even a full-fledged standard JVM requires re-implementing the native API and a specific language dialect.
 
-Исследование проводилось без изменения установки, запуска её EXE, запуска resdecode/resconvert и записи сохранений.
+The study was carried out without changing the installation, running its EXE, running resdecode/resconvert and writing saves.

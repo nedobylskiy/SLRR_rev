@@ -1,58 +1,58 @@
-# RPK / RPAK и RDB
+# RPK / RPAK and RDB
 
-Реализация: `src/formats/rpk.ts`. Подтверждён полный проход таблиц всех 147 локальных RPK. Начальные сведения: [публичная C++-реконструкция RPAK](https://github.com/EliasFD3S/slrr-reverse/blob/5c42f3b139aef4c7b9e0b6420c5704e22c0e6cd7/engine/Core/Platform/rpak.cpp); конкретные поля сверены с локальными RDB и байтами.
+Implementation: `src/formats/rpk.ts`. Complete table traversal of all 147 local RPKs has been confirmed. Getting Started: [public C++ RPAK reconstruction](https://github.com/EliasFD3S/slrr-reverse/blob/5c42f3b139aef4c7b9e0b6420c5704e22c0e6cd7/engine/Core/Platform/rpak.cpp); specific fields are checked against local RDBs and bytes.
 
-Все многобайтовые числа little-endian. RPK здесь — ресурсный контейнер и граф зависимостей, а не ZIP с моделями. Payload может быть текстом или встроенными бинарными блоками.
+All multibyte numbers are little-endian. The RPK here is a resource container and dependency graph, not a ZIP with models. Payload can be text or inline binary blocks.
 
-## Заголовок
+## Heading
 
-| Смещение | Тип | Значение |
+|Bias|Type|Meaning|
 |---:|---|---|
 | 0 | char[4] | `RPAK` |
 | 4 | u32 | 0x200 |
-| 8 | u32 | Число зависимостей группы A |
-| 12 | u32 | Число зависимостей группы B |
-| 16 | records[sum] | Зависимости по 64 байта |
+| 8 | u32 |Number of group A dependencies|
+| 12 | u32 |Number of group B dependencies|
+| 16 | records[sum] |Dependencies 64 bytes|
 
-Запись зависимости: u32 ID, char[56] путь с NUL, u32 trailer. Старшие 16 бит ID задают номер внешнего пакета в ссылках этого контейнера. Последний dword сохраняется без интерпретации.
+Dependency entry: u32 ID, char[56] path with NUL, u32 trailer. The upper 16 bits of the ID specify the external package number in the links of this container. The last dword is saved without interpretation.
 
-После зависимостей идут четыре u32: размер таблицы записей в байтах, число записей, два служебных значения. Затем сама таблица переменной длины. Парсер требует точного совпадения конца таблицы и проверяет границы payload каждого ресурса.
+After the dependencies there are four u32: the size of the record table in bytes, the number of records, two service values. Then the table itself is variable length. The parser requires an exact match of the end of the table and checks the payload boundaries of each resource.
 
-## Ресурсная запись
+## Resource record
 
-| От начала записи | Тип | Назначение |
+|From the start of recording|Type|Purpose|
 |---:|---|---|
 | +0 | u32 | super/parent resource ID |
-| +4 | u32 | type ID этого ресурса |
+| +4 | u32 |type ID of this resource|
 | +8 | u8 | typeof |
 | +9 | u8 | flags |
-| +10 | f32 | isparentcompatible; сопоставлено RDB |
-| +14 | u32 | Абсолютное смещение payload в файле |
-| +18 | u32 | Размер payload |
-| +22 | u8 | Размер alias, включая завершающий NUL в наблюдавшихся записях |
+| +10 | f32 |isparentcompatible; mapped to RDB|
+| +14 | u32 |Absolute payload offset in the file|
+| +18 | u32 |Payload size|
+| +22 | u8 |Size of alias including terminating NUL in observed records|
 | +23 | bytes[n] | alias |
-| далее | f32[12] | Присутствует при flags & 1; transform пока хранится без интерпретации |
+|further| f32[12] |Present when flags & 1; transform is stored without interpretation for now|
 
-Утверждение, что +10 — просто padding, встречается во внешних разборах, но в локальном `maps.rpk` это float 1.0 и соответствует `isparentcompatible 1.00` в `maps.rdb`.
+The statement that +10 is just padding is found in external parses, but in the local `maps.rpk` it is float 1.0 and corresponds to `isparentcompatible 1.00` in `maps.rdb`.
 
-## ID и разрешение ссылок
+## ID and link resolution
 
-Внутри RPK: `high16=0` — текущий пакет, `high16!=0` — зависимость через его таблицу. `low16` — локальный ID. Глобальные ID запущенной игры зависят от порядка загрузки; их нельзя переносить между клиентами.
+Inside the RPK: `high16=0` is the current package, `high16!=0` is the dependency through its table. `low16` - local ID. The global IDs of the running game depend on the load order; they cannot be transferred between clients.
 
-Новый движок использует пару `{pack: normalizedPath, localId}`. В манифесте сессии дополнительно должен проверяться хеш содержимого. Basename недостаточен: моды могут иметь одинаковые имена в разных каталогах.
+The new engine uses the `{pack: normalizedPath, localId}` pair. The session manifest must additionally check the content hash. Basename is not sufficient: mods can have the same name in different directories.
 
-Исходный Java имеет литералы вида `frontend:0x0000C10Cr` — это расширение языка, а не допустимый синтаксис обычного Java. Нужен отдельный этап разрешения пакета.
+Source Java has literals of the form `frontend:0x0000C10Cr` - this is a language extension and not valid regular Java syntax. A separate packet resolution step is needed.
 
-Типичная цепь: ресурс детали → `render` → `mesh` → `sourcefile ...scx`. `texture` встречается многократно и задаёт порядок таблицы текстур материала. Потеря повторяющихся полей ломает индексы. `src/assets.ts` разрешает эту цепь и обнаруживает циклы.
+Typical chain: part life → `render` → `mesh` → `sourcefile ...scx`. `texture` occurs multiple times and sets the order of the material texture table. Losing duplicate fields breaks indexes. `src/assets.ts` enables this circuit and detects loops.
 
-Частые typeof, видимые в `system.rdb`: 5 mesh, 7 texture, 8 game type, 9 physics body, 14 render object. Это контекстные типы; полную семантику остальных значений надо сверять с базовым пакетом.
+Frequent typesof visible in `system.rdb`: 5 mesh, 7 texture, 8 game type, 9 physics body, 14 render object. These are context types; The full semantics of the remaining values must be checked with the base package.
 
 ## RDB
 
-Текстовые блоки `<FILE name > ... </FILE>`, включая `external_links`, `.res` и `.rsd`. `.res` содержит метаданные (typeof, superid, typeid, alias), `.rsd` — свойства ресурса. Это не XML общего назначения: существующие файлы содержат комментарии, повторяющиеся имена и идентификаторы.
+`<FILE name > ... </FILE>` text blocks, including `external_links`, `.res` and `.rsd`. `.res` contains metadata (typeof, superid, typeid, alias), `.rsd` contains resource properties. This is not general purpose XML: existing files contain comments, duplicate names and identifiers.
 
-`parseRdb` сохраняет блоки и порядок свойств. Пока он служит инспектору, не является обратимым компилятором RDB→RPK. Поставляемые с игрой resdecode/resconvert находятся в `modding_tools/Resource tools`; их наличие не означает, что они используются новым движком.
+`parseRdb` preserves blocks and property order. While it serves the inspector, it is not a reversible RDB→RPK compiler. The resdecode/resconvert supplied with the game is in `modding_tools/Resource tools`; their presence does not mean that they are used by the new engine.
 
-## Ограничения
+## Restrictions
 
-Встроенная геометрия/коллизии карт, свойства наследования и общий traversal иерархии ещё не исполняются. Текстовые `sourcefile` читаются; бинарные POLY/PHYS не притворяются текстовым RSD. Формат transform и оставшиеся flag-биты требуют отдельной проверки.
+Built-in map geometry/collisions, inheritance properties, and general traversal hierarchies are not yet enforced. Text `sourcefile` is read; binary POLY/PHYS do not pretend to be text RSD. The transform format and the remaining flag bits require separate checking.

@@ -1,51 +1,51 @@
-# Мир движка: первая сборка из ресурсов
+# Engine world: first assembly from resources
 
-Текущий приоритет — воссоздание движка. Проверяемый первый срез: RPK type → native car/part CFG → определения деталей → экземпляры мира → связи слотов → SCX/текстуры → общая WebGL-сцена. Код находится в `src/formats/cfg.ts`, `src/engine/world.ts`, `src/render/viewer.ts`.
+The current priority is recreating the engine. The first slice being checked is: RPK type → native car/part CFG → part definitions → world instances → slot connections → SCX/textures → general WebGL scene. The code is in `src/formats/cfg.ts`, `src/engine/world.ts`, `src/render/viewer.ts`.
 
-## Определения и экземпляры
+## Definitions and instances
 
-`PartFactory` разрешает RID относительно таблицы зависимостей исходного пакета, читает `native car/part`, CFG и ссылку на script. Канонический ключ — нормализованный путь RPK и local ID. Определение кэшируется отдельно от изменяемых экземпляров. Java-конструктор пока не вызывается; ссылка на class сохраняется для следующей интеграции VM.
+`PartFactory` resolves RID relative to source package dependency table, reads `native car/part`, CFG and script reference. The canonical key is the normalized RPK path and local ID. The definition is cached separately from mutable instances. The Java constructor is not called yet; the class reference is saved for the next VM integration.
 
-`EngineWorld` владеет экземплярами и занятостью слотов; `EnginePart` содержит родителя, дочерние детали и локальную матрицу. Renderer читает мир, но не владеет его логикой. Этот же мир создаётся в Node без DOM, камеры и GPU. Математика сейчас использует Three.js. `advance` продвигает фиксированные ticks; обработчиков физики пока нет.
+`EngineWorld` owns instances and slot occupancy; `EnginePart` contains the parent, child parts and local matrix. Renderer reads the world, but does not own its logic. The same world is created in Node without DOM, camera and GPU. Math currently uses Three.js. `advance` promotes fixed ticks; There are no physics processors yet.
 
-Установка совмещает оба крепления: `child.local = parentSlot * inverse(childSlot)`. Мировая матрица вычисляется через родителей. Отсоединение сохраняет мировую матрицу детали вместе с поддеревом. Запрещены циклы, занятые слоты, чужие и уничтоженные экземпляры. `dispose` очищает связи и таблицу объектов. WebGL-представление отдельно освобождает geometry/material/texture при смене сцены.
+The installation combines both mounts: `child.local = parentSlot * inverse(childSlot)`. The world matrix is calculated through the parents. Detachment saves the world matrix of the part along with the subtree. Cycles, occupied slots, alien and destroyed instances are prohibited. `dispose` clears the relationships and object table. The WebGL view separately frees geometry/material/texture when changing scenes.
 
-CFG-трансформы хранятся в метрах, вершины SCX переводятся в них с коэффициентом **0.01**. В `src/engine/model-transform.ts` матрица рендера строится как `partWorld * scale(0.01)`: масштабируется геометрия, а не смещение крепления. Ранее коэффициент отсутствовал, из-за чего кузов размером 421 единицу окружал детали, смещённые всего на 1–2 единицы. На Baiern проверены размеры кузова 1.730 × 1.154 × 4.212 м, центр капота z=-1.503 м и левой двери x=-0.745 м. Проверка реальной геометрии в `verify:world` теперь защищает от повторения этой ошибки; совпадение одних матриц слотов этого не выявляло. Отдельный просмотр SCX по-прежнему показывает исходные координаты с подгонкой камеры.
+CFG transforms are stored in meters, SCX vertices are converted to them with a coefficient of **0.01**. In `src/engine/model-transform.ts` the render matrix is constructed as `partWorld * scale(0.01)`: the geometry is scaled, not the mount offset. Previously, there was no coefficient, which is why a body measuring 421 units surrounded parts that were offset by only 1-2 units. On Baiern the body dimensions checked are 1.730 × 1.154 × 4.212 m, hood center z=-1.503 m and left door x=-0.745 m. Checking the actual geometry in `verify:world` now protects against repeating this error; the coincidence of slot matrices alone did not reveal this. A separate SCX view still shows the original coordinates with camera adjustments.
 
-## CFG-поднабор
+## CFG subset
 
-| Команда | Текущее использование |
+|Team|Current use|
 |---|---|
-| `slot x y z yaw pitch roll id` | Поза и номер крепления |
-| `attach resource slot` | Допустимая связь текущего слота с ресурсом/слотом другой детали |
-| `compatible resource slot` | Альтернативная идентичность слота, включая цепочки и циклы |
-| `slottype` | Система координат root / steering / wheel |
-| `stockpart resource` | Запрос на отдельный экземпляр; повтор означает ещё одну деталь |
-| `deformable`, `render`, `mesh` | Разрешение внешней модели через RPK |
-| `texture` | Сохраняется; индивидуальный override ещё не применяется |
-| `body ... mass shape` | Сохраняются поза, масса и исходное описание shape |
-| `wheel` | Сохраняется исходная поза; физическое колесо пока не создаётся |
-| `steering`, `maxsteer` | Рулевая система координат и предел поворота |
+| `slot x y z yaw pitch roll id` |Mount position and number|
+| `attach resource slot` |Valid connection of the current slot with a resource/slot of another part|
+| `compatible resource slot` |Alternate slot identity, including chains and loops|
+| `slottype` |Root/steering/wheel coordinate system|
+| `stockpart resource` |Request for a separate copy; repetition means one more detail|
+| `deformable`, `render`, `mesh` |External model resolution via RPK|
+| `texture` |Saved; individual override is not applied yet|
+| `body ... mass shape` |Pose, mass and original shape description are preserved|
+| `wheel` |The original pose is maintained; the physical wheel is not created yet|
+| `steering`, `maxsteer` |Steering coordinate system and steering limit|
 
-Комментарии `#`, `;`, `//` пропускаются. Повторы и порядок сохраняются. Некорректные числа и дубли slot ID отклоняются. Неизвестные команды остаются в `unknown` вместе с номером строки. Они **не исполняются**: compound, bone, wheelbones, flap, deformation, spring, collision и прочие native-команды ещё требуют реализации.
+Comments `#`, `;`, `//` are ignored. Repetition and order are preserved. Invalid numbers and duplicate slot IDs are rejected. Unknown commands remain in `unknown` along with the line number. They are **not executed**: compound, bone, wheelbones, flap, deformation, spring, collision and other native commands still require implementation.
 
-`attach` не создаёт деталь автоматически. Фабрика обрабатывает `stockpart`, ищет точную связь хотя бы с одной стороны, проверяет namespace ресурса и наличие свободного слота. После успешной установки добавляет вложенные `stockpart`. Неразрешённые детали повторно рассматриваются после появления остальных родителей, затем выдаются в диагностике. Абстрактный compatibility RID может не иметь конкретной записи в RPK: разрешение namespace отделено от загрузки объекта.
+`attach` does not create the part automatically. The factory processes `stockpart`, looks for an exact connection on at least one side, checks the namespace of the resource and the availability of a free slot. After successful installation, adds nested `stockpart`. Unresolved details are reconsidered after the appearance of the remaining parents, then issued in the diagnosis. An abstract compatibility RID may not have a specific entry in the RPK: the namespace permission is separate from object loading.
 
-Разрешаются явные цепочки `compatible`; RPK superId не подменяет slot identities. Порядок углов принят как yaw(Y), pitch(X), roll(Z), YXZ. Для колёс реализованы frames slottype 101 и далее, для руля — 11; универсальной схемы bone/compound и suspension frames пока нет. Для chassis выбран `deformable`, поскольку встреченный `render` внутри того же CFG относится к рулевому compound. [Проверенные правила, примеры и ограничения](mounts-and-driving.md).
+Explicit `compatible` chains are allowed; RPK superId does not replace slot identities. The order of the angles is taken as yaw(Y), pitch(X), roll(Z), YXZ. For the wheels, frames slottype 101 and further are implemented, for the steering wheel - 11; There is no universal bone/compound and suspension frames scheme yet. For the chassis, `deformable` was selected, since the `render` encountered inside the same CFG refers to the steering compound. [Proven Rules, Examples and Limitations](mounts-and-driving.md).
 
-## Проверенный пример
+## Tested example
 
-`npm run verify:world` читает Baiern `cars/racers/Baiern.rpk:0x6` и `_main_CoupeSport.cfg`. На исследованной установке создаются **33 объекта**, в том числе детали кузова, вложенные зеркала/стёкла дверей, четыре `traffic_racer_default_wheel` и `Baiern_steering_wheel`. Пропущенных stockpart нет. Это CFG-комплектация, которая отличается от Java `addStockParts`; двигатель и полноценная физическая ходовая таким способом не появляются.
+`npm run verify:world` reads Baiern `cars/racers/Baiern.rpk:0x6` and `_main_CoupeSport.cfg`. The setup we tested creates **33 objects**, including body parts, nested door mirrors/glasses, four `traffic_racer_default_wheel` and `Baiern_steering_wheel`. There are no missing stockparts. This is a CFG package, which is different from Java `addStockParts`; the engine and full-fledged physical chassis do not appear in this way.
 
-Дополнительный адаптер `stock(..., { mechanical: true })` выбирает штатные части из оригинальных Java `addStockParts`, разрешает их RPK-ссылки и ставит по тем же CFG-креплениям. Для CoupeSport результат — **72 объекта** без предупреждений; `npm run verify:components` проверяет также значения подвески и состав двигателя. Это выбор исходных данных, а не выполнение Java VM или native-конструкторов. См. [описание узлов](original-mechanics.md).
+The additional adapter `stock(..., { mechanical: true })` selects standard parts from the original Java `addStockParts`, resolves their RPK links and places them on the same CFG mounts. For CoupeSport, the result is **72 objects** without warnings; `npm run verify:components` also checks the suspension values and engine composition. This is a selection of source data, not execution of the Java VM or native constructors. See [node description](original-mechanics.md).
 
-Проверяются крепление капота в слот 601, конечность матриц, detach/install и очистка мира. Синтетические tests дополнительно проверяют повёрнутые крепления, потомков, циклы, владение, порядок установки и dependency namespaces. В браузере кнопка «Собрать Baiern» показывает эту сборку; в инспекторе native-ресурса RPK доступно «Создать в мире». «Пробная поездка» включает упрощённое движение с обновлением визуальных матриц. Визуальное соответствие оригиналу и прозрачность/окраска ещё не завершены. Отчёт с локальными путями: `local/world-verification.json`.
+The fastening of the hood in slot 601, the finiteness of the matrices, detach/install and world cleaning are checked. Synthetic tests additionally check rotated fixtures, children, loops, ownership, installation order, and dependency namespaces. In the browser, the "Build Baiern" button shows this build; In the RPK native resource inspector, “Create in the world” is available. "Test Ride" includes simplified movement with updated visual matrices. The visual match to the original and the transparency/coloring are not yet complete. Report with local paths: `local/world-verification.json`.
 
-## Следующий срез движка
+## Next engine slice
 
-Добавлен первый адаптер `PartHost`: четыре native-операции обходят слоты того же EngineWorld, без копии дерева. Проверка `verify:gameplay` сверяет descriptors с оригинальным Part.class и проходит 33 реальные детали. Конструкторы и оригинальный игровой цикл ещё не исполняются. [Последовательность работ для игровой функциональности](gameplay.md).
+Added the first adapter `PartHost`: four native operations bypass slots of the same EngineWorld, without a copy of the tree. The `verify:gameplay` check checks the descriptors against the original Part.class and goes through 33 real parts. The constructors and original game loop are not yet executed. [Workflow for game functionality](gameplay.md).
 
-1. Расширить проверенный поднабор креплений колёс/руля до suspension и остальных bone/compound frames; текущие пять машин уже собираются без координатных поправок.
-2. Единый экземпляр для CFG-объекта и VM Part: вызвать оригинальные конструкторы и native lifecycle. Сейчас отдельная модель `PartAssemblyRuntime` проверяет save/load; адаптера к `EngineWorld` ещё нет.
-3. Collision shapes, единицы и оси; затем backend физики, подвеска, шины и управляющий ввод на фиксированном шаге.
-4. Одна карта со столкновениями и spawn, запуск минимальной игровой логики. После этого сериализация этого мира и сетевой цикл.
+1. Expand the proven subset of wheel/steering wheel mounts to suspension and other bone/compound frames; the current five vehicles are already assembled without coordinate corrections.
+2. Single instance for CFG object and VM Part: call original constructors and native lifecycle. Currently, a separate model `PartAssemblyRuntime` checks save/load; There is no adapter for `EngineWorld` yet.
+3. Collision shapes, units and axes; then backend physics, suspension, tires and control input at a fixed step.
+4. One map with collisions and spawn, running minimal game logic. After this, the serialization of this world and the network loop.

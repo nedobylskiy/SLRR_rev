@@ -1,30 +1,30 @@
-# Совместимость креплений и пробная поездка
+# Mount compatibility and test ride
 
-## Разрешение креплений
+## Allow mounts
 
-`attach resource slot` требует соединения с определённым ресурсом и номером слота. `compatible resource slot` объявляет **другую идентичность текущего слота**, а не создаёт соединение. Фабрика разворачивает цепочки compatible, учитывая пути RPK, dependency slots и оба slot ID. Повторные ссылки и циклы обходятся с visited set; расширение ограничено 256 идентичностями. Abstract identity допустима без concrete native CFG. RPK superId сам по себе не превращает один слот в другой.
+`attach resource slot` requires a connection to a specific resource and slot number. `compatible resource slot` declares **another identity for the current slot** rather than creating a connection. The factory deploys compatible chains, taking into account RPK paths, dependency slots and both slot IDs. Repeated references and cycles are avoided with visited set; expansion is limited to 256 identities. Abstract identity is acceptable without concrete native CFG. RPK superId by itself does not transform one slot into another.
 
-Пример из установки: chassis Baiern ссылается на `parts.rpk:0x200, slot 1`. У `traffic_racer_default_wheel` собственный RID другой и слот 1 объявлен compatible с этим типом. Руль аналогично использует `parts.rpk:0x999, slot 999`. Старый resolver сравнивал только прямые RID и оставлял все пять деталей неустановленными.
+Example from installation: chassis Baiern references `parts.rpk:0x200, slot 1`. `traffic_racer_default_wheel` has a different RID and slot 1 is declared compatible with this type. The steering wheel similarly uses `parts.rpk:0x999, slot 999`. The old resolver only compared direct RIDs and left all five parts unset.
 
-Native `slottype` выбирает родительскую систему координат **независимо от номера слота**:
+Native `slottype` selects the parent coordinate system **regardless of the slot number**:
 
-| Поддержанный тип | Базовая поза |
+|Supported type|Basic pose|
 |---|---|
-| отсутствует / 0 | Корневая система детали |
-| 11 | Строка `steering` текущего CFG |
-| 101, 102, … | Соответствующая строка `wheel`, индекс type−101 |
+|missing / 0|Root system detail|
+| 11 |String `steering` of the current CFG|
+| 101, 102, … |Corresponding string `wheel`, index type−101|
 
-Матрица крепления: `frame * slotPose`. Установка: `parentSlotMatrix * inverse(childSlotMatrix)`. Поэтому локальный нулевой slot колеса размещается в указанной wheel-позе, а не в центре chassis. Правые колёса сохраняют поворот, записанный в slot. Поза в строке `render RID x y z yaw pitch roll` применяется отдельно, после матрицы экземпляра и перед переводом SCX сантиметров в метры. У стандартного traffic wheel в ней записан дополнительный yaw 3.142; он также учитывается.
+Mounting matrix: `frame * slotPose`. Installation: `parentSlotMatrix * inverse(childSlotMatrix)`. Therefore, the local zero slot of the wheel is placed at the specified wheel position, and not at the center of the chassis. The right wheels retain the rotation recorded in slot. The pose in line `render RID x y z yaw pitch roll` is applied separately, after the instance matrix and before the SCX conversion of centimeters to meters. The standard traffic wheel has an additional yaw 3.142 recorded in it; it is also taken into account.
 
-Не используются имена мешей, комментарии FL/FR, номера слотов 101/999 как магические позиции, названия марок или таблицы координат под Baiern. Во внутреннем тесте slot ID специально отличаются от slottype. В CFG также приняты RID с суффиксом `r` и ведущими нулями сверх восьми hex-символов, если числовое значение помещается в u32: оба варианта встречаются в установке.
+No mesh names, FL/FR comments, 101/999 slot numbers are used as magic positions, brand names or coordinate tables under Baiern. In internal testing, slot ID is specifically distinguished from slottype. CFG also accepts RIDs with the suffix `r` and leading zeros beyond eight hex characters if the numeric value fits in u32: both options are found in the installation.
 
-Это проверенный поднабор native frames. Типы 2xx/3xx для элементов подвески, прочие bone/compound frames и деформация ещё не реализованы; попытка установить деталь на неподдержанную систему завершается ошибкой. `wheelbones` не считается полным декодированным скелетом. Оси yaw(Y), pitch(X), roll(Z), порядок YXZ и перевод SCX→метры 0.01 сохранены.
+This is a proven subset of native frames. Types 2xx/3xx for suspension elements, other bone/compound frames and deformation are not yet implemented; An attempt to install a part on an unsupported system fails. `wheelbones` is not considered a complete decoded skeleton. The yaw(Y), pitch(X), roll(Z) axes, YXZ order and translation SCX→meters 0.01 are preserved.
 
-## Проверка на оригинальных ресурсах
+## Checking on original resources
 
-`npm run verify:mounts` создаёт первую native car-запись каждого выбранного пакета, собирает stockpart, проверяет четыре колёсных крепления и руль, геометрические центры и радиусы, затем выполняет разгон и поворот тем же DrivingDemo без браузера.
+`npm run verify:mounts` creates the first native car record of each selected package, collects stockpart, checks four wheel mounts and steering wheel, geometric centers and radii, then performs acceleration and turning with the same DrivingDemo without a browser.
 
-| Пакет | Собрано деталей | Колёса + руль | Пропущенных stockpart |
+|Plastic bag|Collected parts|Wheels + steering wheel|Missed stockpart|
 |---|---:|---:|---:|
 | Baiern | 33 | 5 | 0 |
 | Einvagen | 32 | 5 | 0 |
@@ -32,21 +32,21 @@ Native `slottype` выбирает родительскую систему ко�
 | Ninja | 29 | 5 | 0 |
 | Zed | 26 | 5 | 0 |
 
-Результат относится к выбранным версиям CFG в данной установке, не ко всем модам и вариантам машин. Отчёт: `local/mounts-verification.json`. Синтетические tests проверяют цепочки aliases, циклы, отличие пакетов/slot ID, повёрнутые frame offsets и отсутствие соединения от одного compatible.
+The result applies to the selected CFG versions in this installation, not to all mods and vehicle variants. Report: `local/mounts-verification.json`. Synthetic tests check aliases chains, loops, packet/slot ID differences, rotated frame offsets and lack of connection from one compatible.
 
-## Управление в пустом мире
+## Management in an empty world
 
-Кнопка **«Пробная поездка»** запускает текущую собранную машину. Если машины нет, создаётся пример Baiern. Через «Создать в мире» в инспекторе RPK можно выбрать другую машину. Щелчок по сцене возвращает ей фокус ввода.
+The **Test Drive** button starts the currently assembled car. If there is no machine, a Baiern example is created. Through "Create in the world" in the RPK inspector, you can select another car. Clicking on a scene returns input focus to it.
 
-- W / ↑ — разгон вперёд; S / ↓ — торможение до остановки, затем задний ход.
-- A/D или ←/→ — поворот; пробел — тормоз.
-- R — вернуть машину к исходной позиции и сбросить скорость/руль/вращение колёс.
-- Мышь вращает камеру; «Завершить поездку» возвращает просмотр сборки.
+- W / ↑ — forward acceleration; S / ↓ - braking to a stop, then reverse.
+- A/D or ←/→ — turn; space - brake.
+- R — return the car to the starting position and reduce the speed/steering wheel/wheel rotation.
+- The mouse rotates the camera; "End Trip" returns the assembly view.
 
-`DrivingDemo` — плоская кинематическая bicycle-модель. Колёсная база вычисляется из поз колёс, радиус — из предшествующего `type ... sphere radius`, предел руля — из `maxsteer`, steering factors — из параметров wheel. Высота и продольный наклон chassis выводятся из wheel poses и радиусов для размещения на плоскости. Поворот и вращение колёс, а также вращение руля меняют экземпляры мира; renderer обновляет матрицы proxy каждый кадр.
+`DrivingDemo` - flat kinematic bicycle model. The wheelbase is calculated from the wheel poses, the radius is calculated from the previous `type ... sphere radius`, the steering limit is calculated from `maxsteer`, and the steering factors are calculated from the wheel parameters. The height and pitch of the chassis are derived from the wheel poses and radii to be placed on the plane. Turning and rotating the wheels, as well as turning the steering wheel, change the instances of the world; The renderer updates the proxy matrices every frame.
 
-Разгон 5 м/с², торможение 9 м/с², ограничения скорости 28/8 м/с и передаточное отношение анимации руля 14 — **общие параметры нового демо**, не реконструированный drivetrain. Сопротивление движению также упрощённое. Это не native физика SLRR: нет столкновений, гравитации, подвески, сил шин, двигателя, коробки и оригинальных updatevariables/Controller. Одинаковое демо-поведение разных комплектаций не считается совместимостью их динамики.
+Acceleration 5 m/s², braking 9 m/s², speed limits 28/8 m/s and steering animation ratio 14 - **general parameters of the new demo**, not reconstructed drivetrain. Motion resistance is also simplified. This is not native SLRR physics: no collisions, gravity, suspension, tire forces, engine, gearbox and original updatevariables/Controller. The same demo behavior of different trim levels is not considered compatibility of their dynamics.
 
-Расчёт идёт фиксированными шагами 60 Гц независимо от рендера; headless tests сравнивают разные частоты подачи времени, торможение, задний ход, reset и оставшийся tick debt. UI при длинной паузе явно приостанавливает локальный прогон, ограничивая elapsed до 0.1 с; после скрытия вкладки время начинается заново. Blur/visibilitychange очищают нажатые клавиши. Выход из поездки и смена ресурса снимают обработчики, восстанавливают позы и освобождают представление.
+The calculation is carried out in fixed steps of 60 Hz, regardless of the rendering; headless tests compare different timing frequencies, braking, reverse, reset and remaining tick debt. During a long pause, the UI explicitly pauses the local run, limiting elapsed to 0.1 s; After hiding the tab, time starts again. Blur/visibilitychange clears pressed keys. Exiting the trip and changing the resource removes the handlers, restores the poses, and releases the view.
 
-Следующий шаг к игровой физике — native lifecycle/конструкторы и изменяемая конфигурация WheelRef, затем физический backend со столкновениями и подвеской. Текущий прототип уже позволяет проверять сборку, преобразования, ввод и обновление сцены вместе.
+The next step towards game physics is native lifecycle/constructors and variable WheelRef configuration, then a physical backend with collisions and suspension. The current prototype already allows you to test assembly, transformations, input, and scene updates together.

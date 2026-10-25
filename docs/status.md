@@ -1,27 +1,27 @@
-# Проверяемый статус
+# Verified status
 
-Это начальная версия независимого окружения, не завершённый игровой движок SLRR. Актуальный приоритет владельца — воссоздание движка: общий мир, ресурсы, сборка, VM/native lifecycle и физика. Мультиплеер следует после этой основы.
+This repository is an unfinished independent SLRR engine. Current work focuses on a shared world, resource loading, vehicle assembly, the script/native boundary, and physics. Multiplayer depends on that foundation.
 
-## Проверки
+## Checks
 
-| Проверка | Результат первичного корпуса |
+| Check | Result for the tested installation |
 |---|---|
-| RPK | 147/147, точное потребление TOC, проверенные payload ranges |
-| TUFA | 2921/2921 файлов, 2993 класса, точное потребление CONS/MTHD/TREE |
-| SCX | 3532 v3 + 2500 v4; 1 дополнительный нулевой sample невалиден |
-| SDAT | 139/139 decode→encode byte-identical в памяти |
-| Vehicle v5 | 64 заголовка читаются; полный Part tree ещё не декодируется |
-| Original VM leaf | Object.equals(self/other/null) выполняется из исходного class |
-| Original Java Part methods | 7 исходных классов; 10 тестовых деталей; 1000 memory round trips, rollback и cleanup |
-| CFG world | Baiern: 72 объекта с оригинальными штатными деталями подвески и двигателя; прежняя CFG-сборка 33 объектов и typed mounts проверены на 4 других машинах |
-| Part native ↔ CFG world | 4 descriptor-aware вызова; обход 33 объектов и проверка обратных связей |
-| Driving demo | Ввод, разгон/тормоз/задний ход/руль/reset, fixed-step, live render; без столкновений и подвески |
-| Unit tests | Бинарные границы, граф машины, codec, повторные snapshots, clock, native overloads |
-| Build | TypeScript strict + production Vite build |
+| RPK | 147/147; complete table-of-contents traversal and validated payload bounds |
+| TUFA | 2921/2921 files, 2993 classes; complete CONS/MTHD/TREE traversal |
+| SCX | 3532 v3 + 2500 v4; one empty sample is correctly rejected |
+| SDAT | 139/139 decode→encode round trips are byte-identical in memory |
+| Vehicle v5 | 64 headers read; full Part-tree decoding is still incomplete |
+| TUFA execution | Original `Object.equals(self/other/null)` leaf method runs |
+| Java source methods | Seven original Part-related classes, ten synthetic test parts, 1000 in-memory round trips, rollback and cleanup |
+| CFG world | Baiern stock assembly: 72 objects with suspension and engine parts; 33-object base assembly and typed mounts checked on four other cars |
+| Part native bridge | Four descriptor-aware calls traverse the 33-object CFG assembly and verify back-references |
+| Driving prototype | Input, drivetrain, suspension, contact, damage, and fixed-step rendering on Test Track; several behaviors remain approximate |
+| Unit tests | 110 tests covering formats, assembly, physics, serialization, source runtime, and UI-related logic |
+| Build | Strict TypeScript check and production Vite build |
 
-Проверки корпуса требуют собственной локальной игры; fixtures в репозитории синтетические. Сохранения, EXE, DLL и модели не копируются в тестовые данные репозитория.
+Checks that use original game files require a local installation; committed fixtures are synthetic. Saves, EXEs, DLLs, and models are not included in the test data.
 
-## Воспроизведение
+## Reproduce
 
 ```powershell
 npm ci
@@ -41,14 +41,14 @@ npm run verify:components
 npm run audit
 ```
 
-`SLRR_GAME_ROOT` меняет каталог. Для бинарника или исходника другого периода надо заново получить hash, прогнать парсеры и сравнить API. Дата файла и PE timestamp сами по себе не гарантируют происхождение сборки.
+Set `SLRR_GAME_ROOT` to use another installation. For a different binary or source revision, record its hash, rerun the parsers, and compare the API. File dates and PE timestamps alone do not establish provenance.
 
-## Что нельзя заключать из этих результатов
+## Limits of these results
 
-Чтение бинарных структур не доказывает семантическую совместимость всей VM, полноту физики или визуальное совпадение. 1000 циклов codec не доказывают отсутствие утечек в старом EXE либо в будущем игровом мире. Корень заявленного сбоя save-to-disk пока не воспроизведён. SRVS — новый формат; это не полная расшифровка старого Vehicle/Part.save и не сетевой транспорт.
+Parsing binary structures does not establish full VM compatibility, complete physics, or exact rendering. A thousand codec cycles do not prove the absence of leaks in the original EXE or a future game world. The reported save-to-disk failure has not been reproduced. SRVS is a new format, not a complete decoding of the original `Vehicle/Part.save` data or a network transport.
 
-Внешний C++-проект заявляет boot оригинальных скриптов, но в текущей работе он не собирался и не запускался. Его большие эвристические TREE/native участки не считаются проверенным стандартом поведения.
+The external C++ reconstruction claims to boot original scripts, but it has not been built or run as part of this project. Its TREE/native heuristics are research leads, not verified behavior for this installation.
 
-Подробности: [мир движка](engine-world.md), [ограниченный source runtime Part](part-runtime.md). Они пока имеют отдельные модели экземпляров. Общей автомобильной физики, выполнения конструкторов и общей TUFA VM ещё нет. Отдельно работает [стенд капота](hood-prototype.md): оригинальные SCX/CFG проверены в четырёх режимах импульса. Без удара и при 5 Н·с нет пластичности/разрыва; при 65 Н·с остаётся деформация с целыми опорами; при 650 Н·с отрываются все три опоры.
+The [engine world](engine-world.md) and [limited Part source runtime](part-runtime.md) still use separate host models. There is no general TUFA VM or execution of all original constructors. The separate [hood test stand](hood-prototype.md) uses original SCX/CFG data with a new XPBD solver: no impact or 5 N·s leaves it intact, 65 N·s produces a lasting dent with intact mounts, and 650 N·s breaks all three stand mounts.
 
-Интеграция со [сборкой машины](car-crash-demo.md) сохраняет топологию EngineWorld/PartHost и [контакты свободного капота с кузовом](body-contacts.md). [Vehicle3D](vehicle-3d.md) добавляет прыжки, pitch/roll/перевороты, деформируемый кузов и смещаемые крепления. [Штатная сборка Baiern](original-mechanics.md) включает стойки, пружины, амортизаторы, тормоза, стабилизаторы и вложенные детали двигателя: 72 объекта. Видимые узлы подвески стоят по CFG у колёс и следуют за их ходом; стабилизатор остаётся на кузове. Положение колеса и тормоза обновляется исходными `setSlotPos`, ось амортизатора следует `bonepos/linked`, без координат конкретной машины в коде. Для тормозов выбираются угловые `renderID_FL/FR/RL/RR` из Java. Их состояние меняет опору, демпфирование, торможение и тягу; перекос опоры включается ниже 10%. При нуле состояния блок с вложенными узлами отделяется одним телом, а разрушенная стойка остаётся на кузове и освобождает колесо. **67 unit-тестов проходят.** Численная модель движения и часть геометрии шарниров пока приближённые; несущая node-beam модель и snapshots физических каркасов ещё не завершены.
+Integration with the [assembled car](car-crash-demo.md) preserves EngineWorld/PartHost topology and includes [contacts between detached panels and the body](body-contacts.md). [Vehicle3D](vehicle-3d.md) adds jumps, pitch/roll, deformable body panels, and moving mounts. The [stock Baiern assembly](original-mechanics.md) contains 72 objects, including suspension, brakes, stabilizers, and nested engine parts. Wheel and brake locations follow original `setSlotPos` calls; shock axes use `bonepos/linked` without car-specific offsets. Part condition affects support, damping, braking, and traction. At zero condition, the engine block and its children detach as one body; a failed strut remains attached but releases its wheel. The motion model, hinge geometry, load-bearing deformation, and physical-state snapshots are still approximations or incomplete.

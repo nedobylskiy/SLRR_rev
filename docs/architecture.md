@@ -1,71 +1,71 @@
-# Архитектура нового движка
+# Architecture of the new engine
 
-## Реализовано
+## Implemented
 
-Приложение TypeScript + Vite + Three.js/WebGL 2. Чистые бинарные парсеры не зависят от DOM и используются браузером и Node CLI. Локальный сервер выдаёт только разрешённые типы ресурсов, привязан к 127.0.0.1 и проверяет реальный путь после разрешения symlink. Он не пишет в игру и не выдаёт EXE/DLL. Статическая сборка работает с выбранной пользователем папкой, без локального API.
+TypeScript + Vite + Three.js/WebGL application 2. Pure binary parsers are DOM independent and are used by the browser and Node CLI. The local server serves only allowed resource types, is bound to 127.0.0.1 and checks the real path after symlink resolution. It does not write to the game and does not produce EXE/DLL. The static build works with a user-selected folder, without a local API.
 
-| Модуль | Ответственность |
+|Module|Responsibility|
 |---|---|
-| `src/binary.ts` | Чтение LE с контролем границ |
-| `src/formats/rpk.ts` | Таблицы RPAK, текстовые RDB/RSD |
-| `src/formats/scx.ts` | Геометрия SCX v3/v4 |
-| `src/formats/tufa.ts` | TUFA, типизированные CONS, методы, TREE |
-| `src/formats/sdat.ts` | SDAT envelope, embedded blobs, заголовок Vehicle |
-| `src/formats/cfg.ts` | Поднабор CFG, слоты, stockpart, body/wheel, неизвестные команды |
-| `src/engine/world.ts` | Фабрика ресурсов, экземпляры мира, дерево слотов, матрицы, lifecycle |
-| `src/engine/part-host.ts` | Четыре Part native для обхода настоящего CFG-мира через script handles |
-| `src/engine/slot-frames.ts` | Поза typed-крепления: root, steering, wheel |
-| `src/engine/driving-demo.ts` | Управляемая плоская кинематическая модель, одинаковая в браузере и Node |
-| `src/engine/rigid-body-3d.ts` | Центр масс, quaternion, мировой угловой момент, контактные импульсы и OBB SAT |
-| `src/engine/suspension-3d.ts` | Четыре ray-опоры по CFG wheel/spring, пружины, демпферы и контактное управление |
-| `src/engine/vehicle-3d.ts` | Актуальная 3D-сцена: подвеска, объёмные панели, жёсткие фары и реальное отделение частей |
-| `src/assets.ts` | VFS, нормализация путей, pack-local resource graph |
-| `src/render/viewer.ts` | GPU-геометрия, камера, текстуры, освобождение объектов |
-| `src/runtime/tree-machine.ts` | Проверенный минимальный leaf-поднабор TREE |
-| `src/runtime/native-registry.ts` | Descriptor-aware native calls, контракт runDLL |
-| `src/runtime/memory-file.ts` | Примитивный поток в памяти |
-| `src/runtime/java-source.ts` | Ограниченный интерпретатор выбранных Java-методов |
-| `src/runtime/part-assembly.ts` | Host Part/save/load и транзакционное восстановление в памяти |
-| `src/runtime/vehicle-state.ts` | Проверяемый SRVS snapshot codec |
-| `src/runtime/fixed-clock.ts` | Фиксированный шаг с явным backlog |
-| `tools/` | Воспроизводимые исследования и проверки корпуса |
+| `src/binary.ts` |Reading LE with Bounds Control|
+| `src/formats/rpk.ts` |RPAK tables, text RDB/RSD|
+| `src/formats/scx.ts` |Geometry SCX v3/v4|
+| `src/formats/tufa.ts` |TUFA, typed CONS, methods, TREE|
+| `src/formats/sdat.ts` |SDAT envelope, embedded blobs, Vehicle header|
+| `src/formats/cfg.ts` |CFG subset, slots, stockpart, body/wheel, unknown commands|
+| `src/engine/world.ts` |Resource factory, world instances, slot tree, matrices, lifecycle|
+| `src/engine/part-host.ts` |Four Part native for bypassing the real CFG world through script handles|
+| `src/engine/slot-frames.ts` |Typed mounting position: root, steering, wheel|
+| `src/engine/driving-demo.ts` |Controllable flat kinematic model, same in browser and Node|
+| `src/engine/rigid-body-3d.ts` |Center of mass, quaternion, world angular momentum, contact impulses and OBB SAT|
+| `src/engine/suspension-3d.ts` |Four ray-mounts on CFG wheel/spring, springs, dampers and contact control|
+| `src/engine/vehicle-3d.ts` |Actual 3D scene: suspension, volumetric panels, hard headlights and real separation of parts|
+| `src/assets.ts` |VFS, path normalization, pack-local resource graph|
+| `src/render/viewer.ts` |GPU geometry, camera, textures, object release|
+| `src/runtime/tree-machine.ts` |Verified minimal leaf subset of TREE|
+| `src/runtime/native-registry.ts` |Descriptor-aware native calls, runDLL contract|
+| `src/runtime/memory-file.ts` |Primitive stream in memory|
+| `src/runtime/java-source.ts` |Limited interpreter of selected Java methods|
+| `src/runtime/part-assembly.ts` |Host Part/save/load and in-memory transactional recovery|
+| `src/runtime/vehicle-state.ts` |Verifiable SRVS snapshot codec|
+| `src/runtime/fixed-clock.ts` |Fixed step with explicit backlog|
+| `tools/` |Reproducible research and hull testing|
 
-Появился [первый CFG-мир](engine-world.md) с рендером сборки. Snapshot codec, native registry и [Part source runtime](part-runtime.md) ещё требуют интеграции с ним. Физика и общий запуск скриптов отсутствуют.
+The [first CFG world](engine-world.md) appeared with a rendering of the assembly. Snapshot codec, native registry and [Part source runtime](part-runtime.md) still require integration with it. Physics and general script launch are missing.
 
-## Целевая структура — проектное решение
+## Target structure - design solution
 
-Данные ресурсов → world model → simulation → snapshots. Renderer подписывается на world state, но не является владельцем gameplay. Та же simulation должна запускаться в Node без камеры и WebGL для серверных тестов.
+Resource data → world model → simulation → snapshots. Renderer subscribes to world state, but is not the owner of gameplay. The same simulation should be run in Node without a camera and WebGL for server tests.
 
-VM получает host API через NativeRegistry. Ключ — class+method+descriptor. Неизвестная native-функция завершает вызов диагностикой, а не возвращает успешный ноль. По мере реализации API вести покрытие: missing, stub, tested, compatible. Нельзя подменить таблицу coverage количеством зарегистрированных пустых функций.
+The VM receives the host API via NativeRegistry. The key is class+method+descriptor. An unknown native function ends the call with a diagnostic rather than returning a successful null. As the API is implemented, maintain coverage: missing, stub, tested, compatible. You cannot replace the coverage table with the number of registered empty functions.
 
-ResourceManager должен разделить immutable assets, mutable instances и transient-generated textures. Стабильный ResourceKey хранит полный нормализованный путь пакета и local ID; manifest хранит хеши пакетов, скриптов, CFG и геометрии. Порядок загрузки не должен влиять на сетевую идентичность.
+The ResourceManager must separate immutable assets, mutable instances and transient-generated textures. A stable ResourceKey stores the full normalized package path and local ID; manifest stores hashes of packages, scripts, CFGs and geometry. Boot order should not affect network identity.
 
-World model хранит машину как дерево установленных деталей с явными ID и связями слотов. Жизненный цикл: allocated → configured → attached → active → removed. Физическое тело, VM-instance и render proxy имеют явного владельца. При dispose освобождаются не только JS-ссылки, но и GPU/physics/audio resources.
+World model stores the machine as a tree of installed parts with explicit IDs and slot connections. Life cycle: allocated → configured → attached → active → removed. The physical body, VM-instance and render proxy have an explicit owner. When dispose, not only JS links are released, but also GPU/physics/audio resources.
 
-Для рендера Three.js остаётся заменяемым backend. Сначала воспроизводятся исходные геометрия/UV/material slots, затем добавляются normal/reflection/layers/paint. Exact appearance не должен тормозить проверку семантики скриптов и состояния автомобиля.
+For rendering, Three.js remains a replaceable backend. First the original geometry/UV/material slots are rendered, then normal/reflection/layers/paint are added. Exact appearance should not slow down the checking of the semantics of scripts and the state of the car.
 
-## Полная физика — ещё не реализована
+## Full physics - not yet implemented
 
-Основное требование — деформируемые детали и разрушаемые крепления. [Прототип оригинального капота](hood-prototype.md) уже проверяет остаточную деформацию, отрыв трёх опор и падение на пол через собственный XPBD-каркас. Стенд остаётся отдельным режимом; связь со сборкой машины описана ниже. Общего автомобильного solver ещё нет. [Аудит найденного реверса и проектное направление](deformable-physics.md). Предположение, что оригинальный SLRR использовал именно node-beam, пока не подтверждено.
+The main requirement is deformable parts and destructible fasteners. [The prototype of the original hood](hood-prototype.md) is already testing permanent deformation, separation of three supports and falling to the floor through its own XPBD frame. Stand remains a separate mode; The connection with the machine assembly is described below. There is no general automotive solver yet. [Audit of the found reverse and project direction](deformable-physics.md). The assumption that the original SLRR used node-beam has not yet been confirmed.
 
-Отдельный [CarCrashDemo](car-crash-demo.md) связывает этот solver с установленным EnginePart: движущиеся цели приходят из матрицы капота, контакт с препятствием деформирует узлы, последняя порванная опора вызывает EngineWorld.detach. Свободный капот имеет отдельные узлы/скорости и обновляет собственную мировую позу. [TriangleSurface](body-contacts.md) даёт контакты с исходными треугольниками собранного кузова через BVH. Импульсы капота передаются машине, а удар шасси о препятствие даёт отскок и yaw-момент. Базовая езда остаётся bicycle-моделью с плоской контактной динамикой; полной 3D-динамики/подвески и единого автомобильного solver нет.
+A separate [CarCrashDemo](car-crash-demo.md) links this solver to the installed EnginePart: moving targets come from the hood matrix, contact with an obstacle deforms the nodes, the last broken support calls EngineWorld.detach. The free hood has separate nodes/speeds and updates its own world pose. [TriangleSurface](body-contacts.md) gives contacts to the original triangles of the assembled body via BVH. The impulses of the hood are transmitted to the car, and the impact of the chassis on an obstacle produces a rebound and a yaw moment. The basic ride remains a bicycle model with flat contact dynamics; There is no full 3D dynamics/suspension and no single car solver.
 
-Текущая сцена использует [Vehicle3D](vehicle-3d.md), расширяющий эту основу: 6 степеней свободы шасси, CFG-подвеска, 13 деформируемых оболочек и жёсткие отделяемые световые приборы/стёкла. Здесь мотор и руль действуют контактными силами колёс; плоская bicycle-модель больше не перемещает кузов. Прошлый CarCrashDemo остаётся регрессионной реализацией. Подвеска и материалы новые, с явно указанными допущениями; полного исходного solver/нативного drivetrain и единого структурного решения всех деталей пока нет.
+The current scene uses [Vehicle3D](vehicle-3d.md), which expands on this foundation: 6 degrees of freedom chassis, CFG suspension, 13 deformable shells and rigid detachable lights/glass. Here the motor and steering wheel act by the contact forces of the wheels; the flat bicycle model no longer moves the body. The previous CarCrashDemo remains a regression implementation. The suspension and materials are new, with explicitly stated assumptions; There is no complete original solver/native drivetrain and a unified structural solution for all the details yet.
 
-`DeformedFrame` переносит CFG-крепления и колёсные hardpoints вместе с каркасом родителя; геометрия опор влияет на шинные силы и траекторию. `EnginePart.condition` хранит состояние 0..1; ноль разрешает отделение деталей, а перекос колеса включается ниже 10% состояния опоры. [Штатные стойки, пружины, амортизаторы, тормоза и двигатель](original-mechanics.md) теперь устанавливаются из исходных Java-списков и влияют на эту модель. `loadPartCollision` загружает исходные физические SCX из CFG body, исключая nocollision, для контактов свободных деталей. Condition и физические каркасы пока не объединены с source-runtime сохранением.
+`DeformedFrame` carries CFG mounts and wheel hardpoints along with the parent frame; The geometry of the supports influences the tire forces and trajectory. `EnginePart.condition` stores state 0..1; zero allows separation of parts, and wheel misalignment is activated below 10% of the support state. [OEM Struts, Springs, Shocks, Brakes and Engine](original-mechanics.md) are now installed from the original Java lists and affect this model. `loadPartCollision` loads the original physical SCX from the CFG body, excluding nocollision, for free part contacts. Condition and physical frameworks have not yet been combined with source-runtime persistence.
 
-Есть [пробная поездка](mounts-and-driving.md) с плоской bicycle-кинематикой и анимацией экземпляров; это не solver столкновений/подвески и не исполнение оригинального drivetrain. Полные native-физика и игровая логика остаются следующими этапами.
+There is a [test ride](mounts-and-driving.md) with flat bicycle kinematics and animation of instances; This is not a crash/suspension solver and not a rendition of the original drivetrain. Full native physics and game logic remain the next stages.
 
-Перед выбором backend нужны единицы, оси, описание suspension/tyre/engine API и тесты. Возможен WASM-backend; TypeScript продолжит владеть игровыми правилами. Собственная физика не гарантирует совпадения старого поведения. Начальный критерий — управляемая машина с воспроизводимыми native getters/setters, затем сравнение торможения/ускорения/подвески.
+Before choosing a backend, you need units, axes, a description of the suspension/tyre/engine API and tests. WASM-backend possible; TypeScript will continue to own the rules of the game. Intrinsic physics do not guarantee the old behavior will match. The initial criterion is a controllable car with reproducible native getters/setters, then a comparison of braking/acceleration/suspension.
 
-## Исполнение скриптов
+## Script execution
 
-Ближайший путь — TREE reference interpreter с трассировкой и fail-closed поведением. Сначала вызовы и поля, затем массивы и контроль потока, class initialization и GC, затем File/Part.save/load. После этого рассматривается lowering в JS/WASM ради скорости. Ошибки видны с class, method, source и op.
+The closest way is TREE reference interpreter with tracing and fail-closed behavior. First calls and fields, then arrays and flow control, class initialization and GC, then File/Part.save/load. After that, lowering in JS/WASM is considered for the sake of speed. Errors are visible with class, method, source and op.
 
-Обработка `.java` — отдельный compiler frontend со специфическим resource literal синтаксисом и integer truthiness. Прямой `javac` не является совместимым решением. Возможность сторонней JVM требует адаптера TUFA/исходников и native library; она не отменяет работу над host API.
+Processing `.java` is a separate compiler frontend with specific resource literal syntax and integer truthiness. Direct `javac` is not a compatible solution. Third party JVM capability requires TUFA/source adapter and native library; it does not cancel work on the host API.
 
-## Граница Windows DLL
+## Windows DLL boundary
 
-WebGL работает в браузере, произвольную Win32 DLL браузер загрузить не может. Для переносимых модов нужно JS/WASM-представление их функций. Для Windows-расширений возможен desktop host с явным перечнем экспортов и определённым ABI. Он остаётся необязательным backend; сервер и чистый браузер не должны зависеть от указателей 32-битного EXE.
+WebGL works in the browser; the browser cannot load arbitrary Win32 DLLs. Portable mods require a JS/WASM representation of their functions. For Windows extensions, a desktop host with an explicit list of exports and a specific ABI is possible. It remains an optional backend; the server and pure browser should not depend on 32-bit EXE pointers.
 
-`LegacyDllBridge` сейчас поддерживает только зарегистрированные синхронные JS capability-функции с тем же строковым контрактом. Самостоятельного Win32 FFI backend нет.
+`LegacyDllBridge` currently only supports registered synchronous JS capability functions with the same string contract. There is no independent Win32 FFI backend.

@@ -44,7 +44,7 @@ export class HoodLab {
     this.update();
     if (now - this.lastHud > 100) {
       const intact = this.panel.mounts.filter(m => !m.broken).length;
-      this.telemetry(`${intact === 3 ? 'Закреплён' : intact ? 'Часть креплений разрушена' : 'Капот оторван'} · опоры ${intact}/3 · ${this.panel.plasticBeams ? 'Есть остаточная деформация' : 'Упругая форма'} · ${this.panel.options.mass} кг`);
+      this.telemetry(`${intact === 3 ? 'Hood attached' : intact ? 'Some mounts broken' : 'Hood detached'} · mounts ${intact}/3 · ${this.panel.plasticBeams ? 'Permanent deformation' : 'Elastic shape'} · ${this.panel.options.mass} kg`);
       this.lastHud = now;
     }
   }

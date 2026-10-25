@@ -1,36 +1,36 @@
-# Испытание оригинального капота
+# Testing the original hood
 
-В тестовой сцене кнопка **«Испытание капота»** слева открывает отдельный стенд. «Слабый удар» даёт упругий прогиб, «Вмятина» изменяет форму после затухания колебаний, «Перегрузка» разрушает опоры. После отрыва тот же каркас продолжает движение и падает на плоскость. «Новый капот» сбрасывает скорости, пластические длины и повреждения опор. Удары можно повторять; флажок показывает физические связи. Зелёные маркеры обозначают целые опоры, красные — разрушенные.
+In the test scene, the **"Hood Test"** button on the left opens a separate stand. “Weak impact” gives an elastic deflection, “Dent” changes shape after vibrations die out, “Overload” destroys the supports. After separation, the same frame continues to move and falls onto the plane. "New Hood" resets speeds, plastic lengths and support damage. The blows can be repeated; The checkbox shows physical connections. Green markers indicate intact supports, red markers indicate destroyed ones.
 
-Следующий этап уже доступен отдельным режимом [«Машина и препятствие»](car-crash-demo.md): капот установлен на штатной сборке, мнётся от контакта, физический разрыв вызывает EngineWorld.detach. Ограничения ниже относятся к первоначальному стенду; возможности режима машины описаны отдельно.
+The next stage is already available in a separate mode [“Car and obstacle”](car-crash-demo.md): the hood is installed on a standard assembly, it wrinkles from contact, a physical rupture causes EngineWorld.detach. The restrictions below apply to the original stand; Machine mode capabilities are described separately.
 
-## Оригинальные данные и новые допущения
+## Original data and new assumptions
 
-Фабрика разрешает ресурс `cars/racers/Baiern.rpk:0x10d` через обычный RPK/CFG путь. Модель — `Baiern_data/meshes/hood.scx`; материалы и текстуры загружаются штатным загрузчиком. SCX переводится из сантиметров в метры, учитывается render pose. Из `hood.cfg` взяты суммарная масса `18 + 18 + 2.5 = 38.5 кг` и позиция логического слота 601 `(0, 0.191, 0.696)`. Высота стенда 1.25 м — размещение лабораторной сцены.
+The factory resolves `cars/racers/Baiern.rpk:0x10d` through the normal RPK/CFG path. The model is `Baiern_data/meshes/hood.scx`; the standard loader supplies its materials and textures. SCX coordinates are converted from centimeters to meters and the render pose is applied. `hood.cfg` provides a total mass of `18 + 18 + 2.5 = 38.5 kg` and logical slot 601 at `(0, 0.191, 0.696)`. The stand height of 1.25 m is specific to this test scene.
 
-Физическая структура **сгенерирована**, не извлечена из оригинального solver: две сетки 7×9, всего 126 массовых узлов. Высота поверхности оценивается по исходным вершинам; расстояние между слоями 8 см является численным параметром каркаса, а не толщиной листа металла. Продольные, поперечные, диагональные и межслойные связи удерживают форму. Масса распределена равномерно. По позиции слота выбраны две задние опоры; третья опора на противоположной кромке представляет замок закрытого капота. CFG не содержит трёх восстановленных болтов; нельзя распространять эту эвристику на все детали.
+The physical structure is **generated**, not extracted from the original solver: two 7x9 meshes, 126 mass nodes in total. The height of the surface is estimated from the original vertices; the distance between layers of 8 cm is a numerical parameter of the frame, and not the thickness of the metal sheet. Longitudinal, transverse, diagonal and interlayer bonds maintain shape. The mass is distributed evenly. According to the slot position, two rear supports are selected; the third support on the opposite edge represents the closed hood lock. CFG does not contain three remanufactured bolts; This heuristic cannot be extended to all details.
 
-Каркас прямоугольный и выходит за некоторые края видимой модели. Каждая исходная вершина связана с восемью узлами ближайшей ячейки. Интерполяция в XZ и линейная экстраполяция между слоями в Y точно воспроизводят исходную геометрию в покое и сохраняют общий жёсткий поворот/перенос. Дубли UV/материалов получают одинаковую привязку. После шага обновляются позиции и нормали мешей.
+The frame is rectangular and extends beyond some edges of the visible model. Each source vertex is connected to eight nodes of the nearest cell. Interpolation in XZ and linear extrapolation between layers in Y accurately reproduce the original geometry at rest and maintain overall rigid rotation/translation. Duplicate UVs/materials receive the same binding. After the step, the positions and normals of the meshes are updated.
 
-## Расчёт
+## Calculation
 
-`src/engine/deformable-panel.ts` не зависит от Three.js/DOM и выполняется также в Node. Основа distance/anchor constraints — [XPBD, Macklin et al., 2016](https://matthias-research.github.io/pages/publications/XPBD.pdf): на каждом подшаге накапливается lambda, compliance делится на dt². Здесь 240 шагов в секунду, 12 итераций; FixedClock отделяет физическую частоту от частоты рендера. Интерфейс ограничивает время после длинной паузы, скрытая вкладка приостанавливает сцену.
+`src/engine/deformable-panel.ts` is independent of Three.js/DOM and also runs in Node. The basis of distance/anchor constraints is [XPBD, Macklin et al., 2016](https://matthias-research.github.io/pages/publications/XPBD.pdf): lambda is accumulated at each substep, compliance is divided by dt². Here 240 steps per second, 12 iterations; FixedClock separates the physical clock from the render clock. The interface limits the time after a long pause, a hidden tab pauses the scene.
 
-Текущие демонстрационные параметры: stiffness 400000 Н/м, yield strain 0.008, демпфирование 2/с на опорах и 0.25/с после отрыва. При превышении yield меняется rest length связи со скоростью 120/с, с ограничением 0.5–1.5 исходной длины. Это собственная упрощённая пластичность; повреждение листа и разрыв самого металла пока не моделируются.
+Current demo parameters: stiffness 400000 N/m, yield strain 0.008, damping 2/s on supports and 0.25/s after lift-off. When yield is exceeded, the rest length of the connection changes at a speed of 120/s, with a limit of 0.5–1.5 of the original length. This is its own simplified plasticity; Damage to the sheet and rupture of the metal itself are not yet modeled.
 
-Кнопки передают импульсы 5, 65 и 650 Н·с по локальной области поверхности с Gaussian sigma 0.17 м. Направление имеет вертикальную и горизонтальную составляющие; суммарный входной импульс проверяется тестом. Кнопки не задают вмятину и не переключают флаг отрыва. Реакция опоры оценивается как сумма модулей anchor lambda / dt²; при превышении 5000 Н в течение двух последовательных подшагов опора отключается. Последняя разрушенная опора освобождает деталь без обнуления скоростей узлов. Опоры стенда неподвижны и поглощают импульс, поэтому система «один капот» не замкнута.
+The buttons transmit pulses of 5, 65 and 650 N·s over a local area of the surface with a Gaussian sigma of 0.17 m. The direction has vertical and horizontal components; the total input pulse is checked by the test. The buttons do not set a dent and do not toggle the tear-off flag. The support reaction is estimated as the sum of the modules anchor lambda / dt²; If 5000 N is exceeded for two consecutive substeps, the support is switched off. The last destroyed support frees the part without zeroing the speeds of the nodes. The stand supports are motionless and absorb impulse, so the “one hood” system is not closed.
 
-Контакт пока только узловой: плоскость y=0.015 с простым трением, без отскока. Видимый SCX и контактные узлы следуют одной деформации, но точного контакта всех треугольников с полом нет. Стойки — визуальные ориентиры без коллизии. Нет self-collision, произвольных препятствий, кузова/подвески, двусторонних сил между деталями, связи разрушения с EngineWorld.detach/Java API и сохранения этого каркаса в сетевой буфер. Это следующие интеграционные задачи, а не свойства текущего демо.
+The contact is only a nodal one: plane y=0.015 with simple friction, without rebound. The visible SCX and contact nodes follow the same deformation, but there is no exact contact of all triangles with the floor. The pillars are visual reference points without conflict. There is no self-collision, arbitrary obstacles, body/suspension, two-way forces between parts, destruction communication with EngineWorld.detach/Java API and saving this frame to a network buffer. These are the following integration tasks, not properties of the current demo.
 
-## Воспроизводимая проверка
+## Reproducible verification
 
-`npm test` проверяет перенос/поворот skinning, входной импульс, разрыв только после физических шагов, падение, сброс, независимость от частоты рендера и отказ на некорректных данных. `npm run verify:hood` читает оригинальные локальные SCX/CFG, проверяет привязку всех вершин, секунду выдержки и шесть секунд после удара. Результат сохраняется в игнорируемый `local/hood-verification.json`; игровых файлов в репозитории нет.
+`npm test` checks skinning translation/rotation, input pulse, break only after physical steps, crash, reset, render frequency independence and failure on incorrect data. `npm run verify:hood` reads the original local SCX/CFG, checks the binding of all vertices, the second of exposure and six seconds after impact. The result is stored in the ignored `local/hood-verification.json`; There are no game files in the repository.
 
-| Импульс | Максимальное смещение узла после выдержки | Смещение спустя 6 с | Разрушено опор | Пластически изменено связей |
+|Pulse|Maximum node displacement after holding|Offset after 6 s|Supports destroyed|Plastically modified connections|
 |---|---:|---:|---:|---:|
-| 0 | 0.035 мм | 0.017 мм | 0/3 | 0 |
-| 5 Н·с | 2.22 мм | 0.022 мм | 0/3 | 0 |
-| 65 Н·с | 36.88 мм | 12.69 мм | 0/3 | 73 |
-| 650 Н·с | 2.97 м | 2.97 м | 3/3 | 912 |
+| 0 |0.035 mm|0.017 mm| 0/3 | 0 |
+|5 N s|2.22 mm|0.022 mm| 0/3 | 0 |
+|65 N s|36.88 mm|12.69 mm| 0/3 | 73 |
+|650 N s|2.97 m|2.97 m| 3/3 | 912 |
 
-Для оторванной детали смещение включает её перемещение по миру и не является глубиной вмятины. Числа характеризуют выбранный каркас и материал, не соответствие ударам в старом EXE. Без удара пластические связи и крепления остаются целыми.
+For a torn part, the displacement includes its movement around the world and is not the depth of the indentation. The numbers characterize the selected frame and material, not corresponding to the blows in the old EXE. Without impact, plastic connections and fastenings remain intact.

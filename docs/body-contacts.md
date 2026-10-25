@@ -1,39 +1,39 @@
-# Контакты капота с кузовом и реакция машины
+# Contacts between the hood and the body and the reaction of the car
 
-Здесь описана базовая плоская интеграция контактов. В текущей сцене она расширена до [трёхмерной динамики и подвески](vehicle-3d.md), а контактная поверхность обновляется с учётом повреждений и отделения остальных панелей.
+Basic flat contact integration is described here. In the current scene, it is expanded to [3D dynamics and suspension](vehicle-3d.md), and the contact surface is updated to take into account the damage and separation of the remaining panels.
 
-В режиме «Машина и препятствие» свободный капот взаимодействует с исходной геометрией кузова. Машина получает от препятствия контактный импульс, а не просто обнуляет скорость. Это новый собственный слой физики, не восстановленный solver SLRR.
+In the "Car and Obstacle" mode, the free hood interacts with the original body geometry. The machine receives a contact impulse from the obstacle, and does not simply reset the speed. This is a new native physics layer, not restored by the SLRR solver.
 
-## Геометрия
+## Geometry
 
-В `TriangleSurface` поступают треугольники исходных SCX всех видимых установленных панелей, включая крышу, стёкла, двери и багажник. Матрицы установки деталей, render pose и перевод сантиметров в метры применяются штатным путём. В проверенном Baiern получается **5716 треугольников**. Капот, колёса и руль из этой поверхности исключены. Используется геометрия рендера; оригинальные `_phys_*.scx` не объявляются здесь восстановленной физической структурой.
+`TriangleSurface` receives original SCX triangles of all visible installed panels, including roof, windows, doors and trunk. Matrices for installing parts, render pose and converting centimeters to meters are applied in the standard way. The tested Baiern yields **5716 triangles**. The hood, wheels and steering wheel are excluded from this surface. Render geometry is used; the original `_phys_*.scx` is not declared to be a restored physical structure here.
 
-Треугольники хранятся в системе шасси и организованы в BVH с листьями до восьми граней. Узел капота рассматривается как сфера радиусом 35 мм. Его предыдущая и текущая позиции переводятся соответственно предыдущей и текущей обратными матрицами шасси: движущийся кузов тоже участвует в swept-проверке. На гранях работает двухсторонний sweep, на гранях/рёбрах — ближайшая точка контактной оболочки. При повторном контакте сохраняется сторона входа, чтобы маленькая погрешность внутри оболочки не вытолкнула точку сквозь лист на противоположную сторону.
+The triangles are stored in the chassis system and organized into BVHs with leaves of up to eight edges. The hood assembly is considered as a sphere with a radius of 35 mm. Its previous and current positions are translated accordingly by the previous and current inverse chassis matrices: the moving body also participates in the swept check. A two-way sweep works on faces, and the closest point of the contact shell works on faces/edges. When re-contacting, the entry side is maintained so that a small error within the shell does not push the point through the sheet to the opposite side.
 
-Поверхность становится активной при освобождении последней опоры. Дополнительная проверка использует историю самого шага отрыва, до её потери. Форма крыши и стёкол не заменена одной коробкой, заполняющей весь салон. Проёмы и отсутствующие модели сохраняют смысл отверстий.
+The surface becomes active when the last support is released. An additional check uses the history of the liftoff step itself, before its loss. The shape of the roof and windows has not been replaced by one box that fills the entire cabin. Openings and missing models retain the meaning of the openings.
 
-Это дискретизация каркаса: нет полного sweep всех треугольников самого капота и сплошного объёма произвольного меша. Отдельные визуальные вершины между узлами могут локально пересекать поверхность; тонкие отверстия меньше шага каркаса не гарантируются. Вращение шасси внутри одного подшага приближено переводом концов sweep в две системы координат.
+This is a discretization of the frame: there is no complete sweep of all triangles of the hood itself and a continuous volume of an arbitrary mesh. Individual visual vertices between nodes may locally intersect the surface; thin holes smaller than the frame pitch are not guaranteed. The rotation of the chassis within one substep is approximated by translating the ends of the sweep into two coordinate systems.
 
-## Скорости и импульсы
+## Speeds and impulses
 
-После позиционных ограничений вычисляется скорость узла. Restitution свободного капота о кузов равна 0.18; отскок отключается при скорости сближения менее 0.5 м/с для устойчивого покоя. Трение ограничено нормальным изменением скорости, коэффициент 0.55. Для перекладины restitution капота 0.12. Это параметры прототипа, не извлечённые коэффициенты оригинальной стали.
+After positional constraints, the node speed is calculated. Restitution of the free hood to the body is 0.18; the rebound is turned off at a closing speed of less than 0.5 m/s for stable rest. Friction is limited by the normal change in speed, coefficient 0.55. For the hood restitution crossbar 0.12. These are prototype parameters, not extracted coefficients of the original steel.
 
-Скорость поверхности включает поступательное движение и `omega × r`. Контактный импульс узла передаётся шасси с обратным знаком. Связь выполняется последовательно после шага каркаса, не общим монолитным solver: нельзя считать её точным решением всей системы с гарантией сохранения энергии.
+Surface velocity includes translational motion and `omega × r`. The contact pulse of the node is transmitted to the chassis with the opposite sign. The connection is performed sequentially after the frame step, not by a general monolithic solver: it cannot be considered an exact solution of the entire system with a guarantee of energy conservation.
 
-Для машины используются масса из сумм CFG body установленных частей без отдельно моделируемого капота и приближённая yaw-инерция `m × (width² + length²) / 12`. При столкновении с перекладиной остаётся консервативная AABB-проверка основного меша шасси. Нормальный импульс:
+For the car, the mass from the sums of CFG body of installed parts without a separately modeled hood and the approximate yaw-inertia `m × (width² + length²) / 12` are used. When colliding with a crossbar, a conservative AABB check of the main landing gear mesh remains. Normal impulse:
 
 ```text
 j = -(1 + restitution) × relativeNormalSpeed / (1/m + leverArm²/Iyaw)
 ```
 
-Restitution шасси 0.22, при малых скоростях 0. Смещённый удар меняет yaw-скорость. Внешняя поперечная скорость и yaw-скорость затухают с упрощённым сопротивлением шин. Газ, тормоз и руль всё ещё использует существующая bicycle-модель; это гибридное плоское движение с динамическими контактами. Высота/наклон машины удерживаются опорной моделью: нет вертикального подброса, pitch/roll, подвески, переворотов и полной динамики колёс. Вертикальную реакцию контактов принимает условная дорога. Реакции закреплённых опор капота пока не полностью передаются шасси.
+Chassis Restitution 0.22, at low speeds 0. Displaced impact changes yaw speed. External lateral speed and yaw speed are damped with simplified tire resistance. Gas, brake and steering still use the existing bicycle model; It is a hybrid flat motion with dynamic contacts. The height/tilt of the car is maintained by the reference model: there is no vertical toss, pitch/roll, suspension, flips and full wheel dynamics. The vertical reaction of the contacts is taken by the conditional road. The reactions of the fixed hood supports are not yet fully transmitted to the chassis.
 
-## Наблюдение и проверка
+## Observation and verification
 
-«Капот на крышу» — диагностическая постановка: сброс машины, явное освобождение того же капота и размещение на 0.6 м выше крыши с начальной скоростью вниз 1 м/с. Точка выбирается по верхним горизонтальным граням. Это не имитация отрыва при ударе: штатные заезды по-прежнему рвут крепления рассчитанной нагрузкой. «Пауза» позволяет остановить движение и вращать камеру; «Замедление ×4» сохраняет фиксированный физический шаг.
+“Hood to roof” - diagnostic setup: dropping the car, clearly releasing the same hood and placing it 0.6 m above the roof with an initial downward speed of 1 m/s. The point is selected along the upper horizontal edges. This is not an imitation of separation upon impact: regular runs still tear the fastenings with a calculated load. “Pause” allows you to stop movement and rotate the camera; "Slowdown ×4" maintains a fixed physical step.
 
-В оригинальной сборке средняя скорость капота после первого удара о крышу достигает **+0.568 м/с** вверх. Через секунду центр каркаса находится на высоте **1.522 м**, верх крыши — **1.482 м**. Затем капот может соскользнуть по наклонной поверхности к стеклу и упасть на землю. Не требуется, чтобы он оставался на выпуклой крыше бесконечно. На синтетической плоской крыше отдельно проверены отскок и длительная опора всех узлов.
+In the original assembly, the average speed of the hood after the first impact on the roof reaches **+0.568 m/s** up. After a second, the center of the frame is at a height of **1.522 m**, the top of the roof is **1.482 m**. The hood may then slide down the slope toward the glass and fall to the ground. It is not required to remain on the convex roof indefinitely. On the synthetic flat roof, the rebound and long-term support of all components are separately tested.
 
-`npm test`: 45 тестов; новые проверки покрывают двусторонний sweep, повторный контакт внутри оболочки, отсутствие контакта за краем грани, движущийся кузов, отскок/опору, обратный горизонтальный импульс машине, yaw-момент и отскок шасси без увеличения скорости. `npm run verify:crash` использует оригинальные файлы и сохраняет сценарии и roofDrop в `local/crash-verification.json`. Счётчик bodyContacts означает успешные проекции узлов на итерациях, а не число отдельных ударов.
+`npm test`: 45 tests; The new checks cover two-way sweep, re-contact inside the shell, no contact beyond the edge of the edge, moving body, bounce/support, reverse horizontal impulse to the car, yaw moment and chassis bounce without increasing speed. `npm run verify:crash` uses the original files and saves the scripts and roofDrop in `local/crash-verification.json`. The bodyContacts counter refers to successful node projections in iterations, not the number of individual hits.
 
-Проверка машины даёт скорость удара 8.69/48.08 км/ч и начальный отскок 1.91/10.58 км/ч соответственно. Стоянка и быстрый проезд мимо препятствия не повреждают капот. После быстрого удара освобождённый экземпляр остаётся в EngineWorld, PartHost видит пустой слот; физическое трение может переносить деталь вместе с кузовом, но его матрица напрямую её не перемещает.
+Testing the car gives an impact speed of 8.69/48.08 km/h and an initial rebound of 1.91/10.58 km/h respectively. Parking and quickly driving past obstacles does not damage the hood. After a quick hit, the freed instance remains in EngineWorld, PartHost sees an empty slot; physical friction can move the part along with the body, but its matrix does not directly move it.

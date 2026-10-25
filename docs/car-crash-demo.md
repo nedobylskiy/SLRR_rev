@@ -1,48 +1,48 @@
-# Капот на собранной машине: контакт и отделение
+# Hood on an assembled car: contact and separation
 
-Этот документ описывает первоначальный CarCrashDemo, сохранённый для регрессионных проверок. Актуальная сцена использует [Vehicle3D с подвеской и остальными кузовными деталями](vehicle-3d.md); её шасси больше не ограничено плоскостью.
+This document describes the original CarCrashDemo saved for regression checks. The current scene uses [Vehicle3D with suspension and other body parts](vehicle-3d.md); its chassis is no longer limited to a plane.
 
-Кнопка **«Машина и препятствие»** собирает штатный Baiern из RPK/CFG и открывает площадку с жёлтой неподвижной перекладиной. Капот является тем же экземпляром EnginePart, установленным через оригинальные слоты. Отдельная кнопка «Испытание капота» по-прежнему открывает первоначальный стенд.
+The **“Car and Obstacle”** button assembles a standard Baiern from RPK/CFG and opens a platform with a yellow fixed crossbar. The hood is the same EnginePart instance installed through the original slots. A separate "Hood Test" button still opens the original stand.
 
-## Проверка в сцене
+## Scene check
 
-- «Заезд 10 км/ч»: сброс и начальная скорость машины/капота 10 км/ч. Контакт оставляет остаточную деформацию, три опоры остаются целыми.
-- «Заезд 50 км/ч»: тот же путь при большей скорости; контакт срывает крепления. Капот продолжает движение отдельно, слот машины освобождён.
-- «Сброс» или R: восстановление формы, опор, начального положения и установки того же экземпляра капота.
-- «Капот на крышу»: отдельная диагностическая постановка — та же деталь освобождается и падает сверху на крышу. Её столкновение, отскок и возможное соскальзывание рассчитываются solver. В этой постановке разрыв креплений задаётся явно, в заездах — только нагрузкой.
-- «Пауза» останавливает физическое время; камера продолжает работать для осмотра контакта.
-- W/S, A/D, пробел: ручное управление, включая возможность объехать препятствие или отъехать от отделённой детали. Фокус ввода — щелчок по сцене; кнопки заездов сами возвращают туда фокус.
-- «Каркас капота» показывает узлы/связи через видимую геометрию. «Замедление ×4» включено по умолчанию, чтобы рассмотреть удар. Оно замедляет ход времени, сохраняя физический шаг 1/240 с.
+- “Ride 10 km/h”: reset and initial speed of the car/hood is 10 km/h. The contact leaves residual deformation, the three supports remain intact.
+- “Ride 50 km/h”: the same path at a higher speed; the contact breaks the fastenings. The hood continues to move separately, the car slot is freed.
+- “Reset” or R: restoration of the shape, supports, initial position and installation of the same hood instance.
+- “Hood on the roof”: a separate diagnostic setup - the same part is released and falls from above onto the roof. Its collision, rebound and possible slippage are calculated by the solver. In this setting, the rupture of the fasteners is specified explicitly, in the races - only by the load.
+- “Pause” stops physical time; The camera continues to operate to inspect the contact.
+- W/S, A/D, spacebar: manual control, including the ability to drive around an obstacle or move away from a separated part. Input focus - click on the scene; The race buttons themselves return the focus there.
+- "Hood Frame" shows nodes/connections through visible geometry. "Slowdown ×4" is enabled by default to consider the impact. It slows down the passage of time, maintaining a physical step of 1/240 sec.
 
-Заезды задают только начальную скорость, не импульс удара/вмятину/флаг отрыва. Фактическая скорость при остановке кузова немного ниже начальной из-за сопротивления движению; обе скорости видны в сцене. Повторный заезд сначала полностью восстанавливает машину.
+The races only set the initial speed, not the impact impulse/dent/take-off flag. The actual speed when the body stops is slightly lower than the initial speed due to movement resistance; both speeds are visible in the scene. A re-run first completely restores the car.
 
-## Реализация
+## Implementation
 
-`CarCrashDemo` объединяет существующую bicycle-кинематику шасси и `DeformablePanel` общим фиксированным шагом 240 Гц. Рендер не меняет dt. Эта сессия владеет отдельным FixedClock; общий world clock для будущих скриптов ещё не объединён с физическим расписанием.
+`CarCrashDemo` combines the existing bicycle kinematics of the chassis and `DeformablePanel` with a common fixed step of 240 Hz. The render does not change dt. This session owns a separate FixedClock; the general world clock for future scripts has not yet been combined with the physical schedule.
 
-Рендер получает исходные вершины установленного капота из штатного SCX-загрузчика, переводит их в метры с render pose и привязывает к каркасу в локальной системе детали. Начальная мировая поза и каждый следующий target креплений приходят из `hood.matrix()`, то есть из исходной сборки слотов. Отдельных поправок координат капота Baiern здесь нет.
+The renderer receives the original vertices of the installed hood from the standard SCX loader, converts them into meters with a render pose and binds them to the frame in the local part system. The initial world pose and each subsequent target attachment come from `hood.matrix()`, that is, from the initial slot assembly. There are no separate corrections to the coordinates of the Baiern hood.
 
-`setAnchorFrame` перемещает цели constraints, **не переносит физические узлы**. Узлы следуют за движущимися креплениями через solver, сохраняя собственные скорости. В начале автоматического заезда масса капота получает ту же поступательную скорость, что машина. При поворотах движение целей включает вращение. Пока опоры целы, демпфирование действует относительно скорости целей, а не земли; свободная деталь использует прежнее слабое демпфирование. Это устраняет паразитную нагрузку при обычном быстром движении.
+`setAnchorFrame` moves constraints targets, **does not move physical nodes**. The nodes follow the moving fixtures through the solver, maintaining their own speeds. At the beginning of the automatic drive, the hood mass receives the same forward speed as the car. When turning, the targets' movement involves rotation. As long as the supports are intact, the damping acts relative to the speed of the targets, not the ground; the free part uses the same weak damping. This eliminates parasitic loading during normal fast driving.
 
-Неподвижная перекладина задана AABB на высоте капота; её координаты совпадают у рендера и solver. На каждой итерации узлы проверяются по swept segment/slab входу в AABB и проецируются на поверхность. Это предотвращает пролетание быстрых точек через всю толщину препятствия. Контакты и ограничения связей вместе создают деформацию и реакцию опор; используются те же пластические длины/пороги, что в [стенде](hood-prototype.md). Без соприкосновения никаких ударных изменений состояния не вызывается.
+The fixed crossbar is set to AABB at hood height; its coordinates are the same for the renderer and the solver. At each iteration, nodes are checked against the swept segment/slab input in AABB and projected onto the surface. This prevents fast dots from flying through the entire thickness of the obstacle. Contacts and tie constraints together create deformation and reaction of the supports; The same plastic lengths/thresholds are used as in [stand](hood-prototype.md). Without contact, no impact changes in state are caused.
 
-Контакт шасси с препятствием определяется по консервативному AABB основного меша. Вместо обнуления скорости теперь рассчитывается нормальный импульс с учётом массы, плеча и приближённого момента инерции; restitution 0.22 даёт отскок. Смещённый импульс меняет угловую скорость вокруг вертикальной оси. Базовое движение от газа/руля пока остаётся bicycle-моделью; вертикальное движение, наклон и подвеска не решаются. Подробнее: [контакты кузова и отдача](body-contacts.md).
+The contact of the chassis with the obstacle is determined by the conservative AABB of the main mesh. Instead of zeroing the speed, the normal impulse is now calculated taking into account mass, leverage and approximate moment of inertia; restitution 0.22 gives a rebound. The displaced impulse changes the angular velocity around the vertical axis. The basic movement from the gas/steering wheel still remains a bicycle model; vertical movement, tilt and suspension are not addressed. More details: [body contacts and recoil](body-contacts.md).
 
-После отключения последней физической опоры вызывается **EngineWorld.detach(hood)**. Узлы, скорости и пластическое состояние не пересоздаются и не обнуляются. Родитель теряет занятую запись слота, ownSlot/parentSlot очищаются; имеющиеся PartHost handles сразу видят свободное крепление. Число объектов мира остаётся прежним: капот не удаляется и не заменяется визуальной копией.
+After the last physical support is disabled, **EngineWorld.detach(hood)** is called. Nodes, velocities and plastic state are not recreated or reset. The parent loses the occupied slot entry, ownSlot/parentSlot are cleared; existing PartHost handles immediately see the free mount. The number of world objects remains the same: the hood is not removed and is not replaced with a visual copy.
 
-Свободный каркас продолжает интеграцию, контакты с препятствием, полом и исходными треугольниками собранного кузова независимо от его трансформа. При контакте учитывается скорость поверхности автомобиля; обратный импульс передаётся шасси. Для EnginePart.local оценивается поза по центру и осям деформированного каркаса относительно исходного базиса. Это приближённая rigid pose; полный меш и контакты продолжают использовать все узлы. `PanelView` выводит вершины в мировых координатах; обычный syncWorld пропускает его proxy, поэтому движение автомобиля не применяется второй раз. При завершении сессии исходные буферы геометрии/нормалей и матрицы восстанавливаются, линия каркаса и препятствие освобождают GPU-ресурсы.
+The free frame continues integration, contacts with the obstacle, the floor and the original triangles of the assembled body, regardless of its transformation. During contact, the speed of the vehicle's surface is taken into account; the return impulse is transmitted to the chassis. For EnginePart.local, the pose is estimated along the center and axes of the deformed frame relative to the original basis. This is an approximate rigid pose; the full mesh and contacts continue to use all nodes. `PanelView` displays vertices in world coordinates; regular syncWorld skips its proxy so the car movement is not applied a second time. When the session ends, the original geometry/normal and matrix buffers are restored, the wireframe line and the obstacle free up GPU resources.
 
-## Результаты и ограничения
+## Results and limitations
 
-`npm test`: 45 тестов, включая native-топологию при физическом отрыве/сбросе, стабильный handle, проезд мимо препятствия, swept-контакты треугольников, опору/отскок панели, отдачу шасси и одинаковый итог при разных частотах рендера. Синтетическая плоская панель в unit-тесте использует собственный профиль материала. `npm run verify:crash` дополнительно проверяет **оригинальные** Baiern SCX/CFG с обычным профилем стенда и падение на крышу; результаты записываются в игнорируемый `local/crash-verification.json`.
+`npm test`: 45 tests, including native topology during physical separation/reset, stable handle, driving past obstacles, swept contacts of triangles, panel support/rebound, chassis recoil and the same result at different rendering frequencies. The synthetic flat panel in the unit test uses its own material profile. `npm run verify:crash` additionally tests **original** Baiern SCX/CFG with regular stand profile and roof drop; the results are written to the ignored `local/crash-verification.json`.
 
-| Проверка оригинальной сборки | Скорость удара | Начальный отскок шасси | Разрушено опор | Пластически изменено связей |
+|Checking the original assembly|Impact speed|Initial chassis bounce|Supports destroyed|Plastically modified connections|
 |---|---:|---:|---:|---:|
-| Стоянка, 6 с | 0 | 0 | 0/3 | 0 |
-| Начальная скорость 10 км/ч | 8.69 км/ч | 1.91 км/ч | 0/3 | 289 |
-| Начальная скорость 50 км/ч | 48.08 км/ч | 10.58 км/ч | 3/3 | 730 |
-| 50 км/ч, препятствие в стороне | 0 (контакта нет) | 0 | 0/3 | 0 |
+|Parking, 6 s| 0 | 0 | 0/3 | 0 |
+|Initial speed 10 km/h|8.69 km/h|1.91 km/h| 0/3 | 289 |
+|Initial speed 50 km/h|48.08 km/h|10.58 km/h| 3/3 | 730 |
+|50 km/h, obstacle to the side|0 (no contact)| 0 | 0/3 | 0 |
 
-В быстром заезде последняя опора отключается через 0.4333 с модельного времени от старта. Проверены предварительная скорость узлов вместе с машиной, существование того же объекта среди 33 деталей, свободный слот через native API и повторная установка без накопления объектов. Трансформация шасси напрямую не перемещает свободную деталь; физический контакт/трение при этом могут увлекать её вместе с машиной.
+In a fast race, the last support is turned off after 0.4333 s model time from the start. The preliminary speed of the nodes together with the machine, the existence of the same object among 33 parts, a free slot through the native API and re-installation without accumulating objects were checked. Transforming the chassis does not directly move the free part; physical contact/friction can drag it along with the machine.
 
-Это интеграционный прототип новой физики. Материал и три физические опоры всё ещё сгенерированы. Прочие части кузова остаются жёсткими, подвески/drivetrain нет. Контакты свободного капота с кузовом используют сферы узлов против треугольников; весь визуальный меш капота не является сплошным collider. Нет self-collision и контактов отдельных свободных деталей между собой. Прикреплённый капот пока исключён из контактов с кузовом; крепления не дают полной двусторонней динамики. Контактная отдача уже действует, но ограничена плоскостью земли и yaw. Точные параметры стали/разрыва, сохранение деформированного каркаса и сетевой snapshot не реализованы. Числа здесь не являются результатом сверки со старым EXE.
+This is an integration prototype of new physics. The material and three physical supports are still generated. Other parts of the body remain rigid, there is no suspension/drivetrain. The free hood to body contacts use node spheres versus triangles; the entire hood visual mesh is not a solid collider. There is no self-collision and contacts of individual free parts with each other. The attached hood is not yet in contact with the body; the mounts do not provide full two-way dynamics. Contact recoil is already in effect, but is limited by the ground plane and yaw. Precise steel/break parameters, preservation of deformed frame and network snapshot are not implemented. The numbers here are not the result of checking against the old EXE.

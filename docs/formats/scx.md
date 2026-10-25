@@ -1,56 +1,56 @@
 # SCX / SCY / TEX
 
-SCX — формат 3D-моделей Invictus. Парсер `src/formats/scx.ts`, рендер `src/render/viewer.ts`. Из 6033 файлов один нулевой; остальные 6032 структурно читаются. Пустой валидный INVO-заголовок — placeholder, а не повреждённая модель.
+SCX is the Invictus 3D model format. Parser `src/formats/scx.ts`, renderer `src/render/viewer.ts`. Out of 6033 files, one is zero; the remaining 6032 are structurally readable. An empty valid INVO header is a placeholder, not a damaged model.
 
-Первичный внешний ориентир: [io_invo_scx](https://github.com/nonamesex/io_invo_scx/tree/7bcc34e51a3cb40369cc28db2950ab27f9587078), особенно [ImHex-описание](https://github.com/nonamesex/io_invo_scx/blob/7bcc34e51a3cb40369cc28db2950ab27f9587078/imhex/scx.hexpat). Реализация написана отдельно; код этого импортёра не копировался.
+Primary external reference: [io_invo_scx](https://github.com/nonamesex/io_invo_scx/tree/7bcc34e51a3cb40369cc28db2950ab27f9587078), especially [ImHex description](https://github.com/nonamesex/io_invo_scx/blob/7bcc34e51a3cb40369cc28db2950ab27f9587078/imhex/scx.hexpat). The implementation is written separately; This importer's code was not copied.
 
-Все числа little-endian. Заголовок: `INVO` + u32 version.
+All numbers are little-endian. Header: `INVO` + u32 version.
 
-## Версия 3
+## Version 3
 
-Далее повторяются материалы с геометрией:
+Next, the materials with geometry are repeated:
 
-1. u32 размер материала, включая это поле: встречены 56, 104, 136. Нулевой размер завершает список.
-2. Материал: diffuse RGBA f32[4] (+4), specular RGB f32[3] (+20), specular weight (+32), glossiness (+36), flags u32 (+40), diffuse/bump/specular/reflection/layer2 texture indices u16 (с +44). 0xffff — отсутствие карты.
-3. Расширенный материал >56 содержит дополнительные каналы, размер вершины и освещение. Блок 136 содержит имя char[32] по +104.
-4. u32 vertex count; вершины по 44 байта для материала 56 и по 64 для 104/136.
-5. u32 triangle count; для каждого треугольника u32[3] индексов.
+1. u32 material size, including this field: 56, 104, 136 met. Size zero completes the list.
+2. Material: diffuse RGBA f32[4] (+4), specular RGB f32[3] (+20), specular weight (+32), glossiness (+36), flags u32 (+40), diffuse/bump/specular/reflection/layer2 texture indices u16 (from +44). `0xffff` means no texture map.
+3. Advanced material >56 contains additional channels, vertex size and lighting. Block 136 contains the name char[32] by +104.
+4. u32 vertex count; vertices are 44 bytes for material 56 and 64 for 104/136.
+5. u32 triangle count; for each triangle u32[3] indices.
 
-Базовая вершина: position f32[3], normal f32[3], UV1 f32[2], UV2 f32[2], color u8[4]. В 64-байтовой добавляются 8 служебных байт, UV3 f32[2], 4 служебных байта. Парсер сохраняет все три набора UV, пятый индекс текстуры материала (`layer2`, смещение +52), флаги (+40) и явно указанные каналы основной и второй карт (+70 и +72 в расширенном материале). Канал 0 соответствует UV1, 1 — UV2, 2 — UV3. Например, у `area_1934.scx` трава `area.dds` использует канал 2 с сотнями повторов, а `invictus_racing500.dds`, `ReallyFast_Text.dds` и `DragRacingofStates.dds` во втором слое — канал 0, около 0..1. Выбирать UV по величине координат было ошибкой: соседние материалы без второго слоя тоже используют UV3.
+Base vertex: position f32[3], normal f32[3], UV1 f32[2], UV2 f32[2], color u8[4]. The 64-byte version adds 8 service bytes, UV3 f32[2], 4 service bytes. The parser stores all three sets of UVs, the fifth material texture index (`layer2`, offset +52), flags (+40) and explicitly specified channels of the main and second maps (+70 and +72 in the extended material). Channel 0 corresponds to UV1, 1 to UV2, 2 to UV3. For example, `area_1934.scx` grass `area.dds` uses channel 2 with hundreds of repetitions, and `invictus_racing500.dds`, `ReallyFast_Text.dds` and `DragRacingofStates.dds` in the second layer use channel 0, about 0..1. It was a mistake to select UVs based on coordinates: neighboring materials without a second layer also use UV3.
 
-Флаг `0x1` (`alphaOpacity` в [ImHex-описании](https://github.com/nonamesex/io_invo_scx/blob/7bcc34e51a3cb40369cc28db2950ab27f9587078/imhex/scx.hexpat#L5-L15)) включает прозрачность основной карты, а `0x40` — смешивание второго слоя по его альфе. На Test Track `area_1810.scx` использует `cross.dds` как **непрозрачный RGB-асфальт**, хотя альфа этой DDS почти нулевая: у материала `0x40`, но нет `0x1`. Второй слой `parkolo01.dds` даёт разметку. Прежний рендер включал прозрачность основной карты просто по наличию альфы в файле, из-за чего вместо покрытия показывался цвет фона WebGL. Для `park_fnc.dds` у соседнего материала флаги `0x101`, поэтому её вырезанная альфа остаётся активной. Это подтверждено полями реальных SCX и визуальным содержимым DDS; остальные режимы смешивания v3 ещё не реконструированы.
+The `0x1` flag (`alphaOpacity` in [ImHex description](https://github.com/nonamesex/io_invo_scx/blob/7bcc34e51a3cb40369cc28db2950ab27f9587078/imhex/scx.hexpat#L5-L15)) turns on the transparency of the main map, and `0x40` turns on the blending of the second layer according to its alpha. On Test Track, `area_1810.scx` uses `cross.dds` as an **opaque RGB asphalt**, although the alpha of this DDS is almost zero: the material has `0x40`, but not `0x1`. The second layer `parkolo01.dds` gives the markings. The previous render turned on the transparency of the main map simply by the presence of alpha in the file, which is why the WebGL background color was shown instead of the coverage. For `park_fnc.dds`, the neighboring material has `0x101` flags, so its cut alpha remains active. This is confirmed by real SCX fields and visual DDS content; the remaining v3 blending modes have not yet been reconstructed.
 
-## Версия 4
+## Version 4
 
-После версии: u32 directory count; затем пары u32 type, u32 absolute offset. Каждый chunk начинается `type:u32`, `size:u32`. **Размер включает эти 8 байт** — проверено на всём локальном корпусе, это важно для строгих границ.
+After version: u32 directory count; then pairs u32 type, u32 absolute offset. Each chunk starts with `type:u32`, `size:u32`. **Size includes these 8 bytes** - tested on the entire local corpus, this is important for strict boundaries.
 
-| type | Назначение |
+| type |Purpose|
 |---:|---|
-| 0 | Материал |
-| 1 | Hard surface / начало physics-only группы |
+| 0 |Material|
+| 1 |Hard surface / start of physics-only group|
 | 2 | Sparse bone list |
 | 3 | Bone list |
-| 4 | Вершины |
-| 5 | Индексы |
+| 4 |Peaks|
+| 5 |Indexes|
 
-Материал: flags, служебное слово, property count, затем typed properties. Цвета 0..2 имеют RGBA u8[4]. Значения 0x01000000..2 — f32. Карты 0x06000000..5 содержат семь 32-битных значений: texture index, channel, tiling flags, scale U/V, offset U/V. Для выбранной диффузной карты рендер теперь применяет соответствующий UV-канал и аффинное преобразование `u'=u·scaleU+offsetU`, `v'=v·scaleV+offsetV`. Наблюдаемый флаг tiling=3 сохраняется, точное поведение других значений ещё не проверено. Имя 0x08000000 — char[32]. В корпусе встречены дополнительные свойства 0x05000000 и 0x07000000 по одному dword: структура читается, назначение и шейдинг пока не реализованы.
+Material: flags, function word, property count, then typed properties. Colors 0..2 have RGBA u8[4]. Values 0x01000000..2 - f32. Maps 0x06000000..5 contain seven 32-bit values: texture index, channel, tiling flags, scale U/V, offset U/V. For the selected diffuse map, the renderer now applies the corresponding UV channel and affine transformation `u'=u·scaleU+offsetU`, `v'=v·scaleV+offsetV`. The observed flag tiling=3 is retained, the exact behavior of other values has not yet been tested. Name 0x08000000 is char[32]. The corpus contains additional properties 0x05000000 and 0x07000000, one dword each: the structure is readable, the purpose and shading have not yet been implemented.
 
-`0x06000000` — основная диффузная карта, `0x06000001` — вторая диффузная карта (`DiffuseMixSecond`). Некоторые модели, например `objects/meshes/kontener/kontener.scx`, содержат только вторую: её индекс 0 указывает на единственную `texture` в render-ресурсе `objects.rpk`, `maps/textures/kontener.dds`. Если основной карты нет, рендер использует вторую как цветовую текстуру. Если присутствуют обе, приоритет у основной независимо от порядка свойств. Смешивание двух карт оригинальным шейдером пока не воспроизводится. У текущего `kontener.dds` есть отдельная [несовместимость атласа с UV модели](../test-track-container-uv.md), не связанная с выбором индекса карты.
+`0x06000000` is the primary diffuse map; `0x06000001` is the secondary diffuse map (`DiffuseMixSecond`). Some models, including `objects/meshes/kontener/kontener.scx`, contain only the latter. Its index 0 points to the sole `texture` in the `objects.rpk` render resource: `maps/textures/kontener.dds`. When there is no primary map, the renderer uses the secondary map for color. When both are present, the primary map takes precedence regardless of property order. The original shader's two-map blending has not yet been reproduced. The current `kontener.dds` also has a separate [atlas/UV mismatch](../test-track-container-uv.md), unrelated to the choice of map index.
 
-Vertex chunk: count u32, flags u32, interleaved records. Биты: position 0x1; influence group 0x2/4/8/10; bone indices 0x20; normal 0x40; emissive 0x80; color 0x100; UV1 0x200; UV2 0x400; UV3 0x800; tangent/bump normal 0x40000. UV2/UV3 теперь читаются и доступны материалу. Аудит текущей установки нашёл 13 моделей окружения с дополнительными UV-каналами и сотни записей диффузных карт с масштабом/смещением, отличными от единицы/нуля.
+Vertex chunk: count u32, flags u32, interleaved records. Bits: position 0x1; influence group 0x2/4/8/10; bone indices 0x20; normal 0x40; emissive 0x80; color 0x100; UV1 0x200; UV2 0x400; UV3 0x800; tangent/bump normal 0x40000. UV2/UV3 are now readable and available to the material. An audit of the current installation found 13 environment models with additional UV channels and hundreds of diffuse map entries with scale/displacement other than one/zero.
 
-**Веса не являются независимым float на каждый установленный бит.** Группа 0x2 означает одну кость и 0 явных весов; 0x4 — две кости и 1 вес; 0x8 — три и 2 веса; 0x10 — четыре и 3 веса. Последний вес не хранится. Это проверено на `humans/drivers/police.SCX`; неверный stride ломает все последующие данные.
+**The weights are not an independent float per bit set.** Group 0x2 means one die and 0 explicit weights; 0x4 - two dice and 1 weight; 0x8 - three and 2 weights; 0x10 - four and 3 weights. The last weight is not stored. This is tested on `humans/drivers/police.SCX`; an invalid stride breaks all subsequent data.
 
-Index chunk: u32 количество **индексов**, затем u16[count], а не count треугольников. Одна material-группа может иметь несколько пар vertex/index (например, по группам костей). Парсер не должен перезаписывать предыдущую геометрию.
+Index chunk: u32 number of **indices**, then u16[count], not count of triangles. One material group can have several vertex/index pairs (for example, by bone groups). The parser should not overwrite previous geometry.
 
-## Текстуры, оси и масштаб
+## Textures, axes and scale
 
-`.tex` — построчный список текстур, материал ссылается индексом. Это fallback для самостоятельного SCX. При загрузке через RPK порядок берётся из повторяющихся `texture` в RSD. DDS/TGA/PNG/JPEG декодируются загрузчиками Three.js; поддержка компрессии DDS зависит от WebGL-расширений.
+`.tex` - line-by-line list of textures, the material is referenced by index. This is a fallback for standalone SCX. When loading via RPK, the order is taken from the repeating `texture` in the RSD. DDS/TGA/PNG/JPEG are decoded by Three.js loaders; DDS compression support depends on WebGL extensions.
 
-Рендер учитывает альфа-канал исходной текстуры: у DXT1/DXT3/DXT5 проверяется верхний уровень DDS, маски с прозрачными и непрозрачными пикселями рисуются через `alphaTest` с записью глубины (листва, решётки), плавная прозрачность — через смешивание. Для PNG/TGA с альфа-каналом проверяются уже декодированные пиксели: полностью непрозрачная RGBA-карта остаётся в обычном проходе. Например, `cars/textures/default_white.png` имеет RGBA-заголовок, но альфа всех пикселей равна 255; прежнее смешивание без записи глубины заставляло панели кузова просвечивать друг через друга. Результат проверки кешируется по пути текстуры в пределах текущей сцены. Это также устраняет белые прямоугольники вокруг листвы Test Track (`Lomb3.dds` содержит DXT3 alpha), но не воспроизводит все эффекты материалов оригинального движка.
+The render takes into account the alpha channel of the original texture: for DXT1/DXT3/DXT5 the top level of DDS is checked, masks with transparent and opaque pixels are drawn through `alphaTest` with depth recording (foliage, gratings), smooth transparency is through blending. For PNG/TGA with alpha channel, already decoded pixels are checked: the fully opaque RGBA map remains in the normal pass. For example, `cars/textures/default_white.png` has an RGBA title, but the alpha of all pixels is 255; the previous blending without recording depth caused the body panels to show through each other. The result of the check is cached along the texture path within the current scene. This also eliminates the white rectangles around Test Track foliage (`Lomb3.dds` contains DXT3 alpha), but does not reproduce all of the original engine's material effects.
 
-Парсер сохраняет исходные оси и единицы. При отдельном просмотре модель центрируется и масштабируется до инспекционного размера. В CFG-мире применяется перевод вершин SCX в метры с коэффициентом **0.01**, без перестановки осей. На Baiern это даёт длину кузова 4.212 м и совмещает геометрию капота/дверей с креплениями CFG; `verify:world` проверяет размеры и размещение реальных мешей. Для bone/compound, иных типов ресурсов и модов калибровку надо продолжать. Blender-перестановка осей в WebGL не переносится.
+The parser preserves the original axes and units. When viewed separately, the model is centered and scaled to inspection size. In the CFG world, SCX vertices are converted to meters with a coefficient of **0.01**, without rearranging the axes. On the Baiern this gives a body length of 4,212 m and combines the hood/door geometry with CFG mounts; `verify:world` checks the size and placement of real meshes. For bone/compound, other types of resources and mods, calibration must be continued. Blender axis swaps do not carry over to WebGL.
 
-## Что ещё не поддержано визуально
+## What is not yet supported visually
 
-Скелетная анимация, деформация, повреждения геометрии, окраска, vertex colors, большинство специальных слоёв, normal/reflection/emissive maps и точное освещение оригинала. Для v3 реализован наблюдаемый слой `layer2` с альфа-смешиванием поверх базовой карты; иные режимы материала ещё не воспроизведены. Чтение 6032 файлов не означает визуального совпадения этих эффектов. SCY имеет заявленную поддержку в чужом импортёре, но отдельный полный прогон локальных SCY ещё не включён.
+Skeletal animation, deformation, geometry damage, coloring, vertex colors, most special layers, normal/reflection/emissive maps and accurate lighting of the original. For v3, implemented an observable layer `layer2` with alpha blending on top of the basemap; other material modes have not yet been reproduced. Reading 6032 files does not mean that these effects are visually identical. SCY has declared support in a foreign importer, but a separate full run of local SCY is not yet included.

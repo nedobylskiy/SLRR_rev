@@ -1,53 +1,53 @@
-# От сборки ресурсов к игровой функциональности
+# From resource assembly to game functionality
 
-Актуальная цель — независимый движок SLRR. Ближайший игровой результат: автомобиль появляется на тестовой площадке, опирается на четыре колеса, разгоняется, поворачивает, тормозит и корректно уничтожается/создаётся повторно. Установленные детали должны задавать его параметры. Карьера, оригинальный интерфейс и мультиплеер следуют после этого среза.
+The current goal is an independent SLRR engine. The closest game result: the car appears on the test site, rests on four wheels, accelerates, turns, brakes and is correctly destroyed/recreated. The installed parts must set its parameters. Career, original interface and multiplayer follow after this cut.
 
-## На что уже можно опереться
+## What you can already rely on
 
-Читаются RPK/CFG/SCX и TUFA. В CFG есть позы креплений, `body` с массой и описанием формы, `wheel`, `spring`, `enginepower`, `brakepower`, `ratios`, `rearendratio`, `maxsteer`. Это входные данные, а не готовая физическая модель: часть команд живёт в compound/bone frames, параметры меняются скриптами. SCX→CFG масштаб 0.01 уже проверен на кузове и деталях Baiern.
+RPK/CFG/SCX and TUFA are readable. CFG has mount poses, `body` with mass and shape description, `wheel`, `spring`, `enginepower`, `brakepower`, `ratios`, `rearendratio`, `maxsteer`. This is input data, not a ready-made physical model: some of the commands live in compound/bone frames, parameters are changed by scripts. SCX→CFG scale 0.01 has already been tested on Baiern body and parts.
 
-Baiern сейчас собирается по CFG `stockpart`: 33 объекта, включая четыре колеса и руль. **Эта комплектация не является машиной из Java `addStockParts`.** В последнем отдельно выбираются двигатель, подвеска, пружины, амортизаторы, тормоза, диски и шины, с вариантами по Descriptor. Видимый автомобиль пока не подтверждает наличие работающей физической ходовой или силовой установки. Добавлена [пробная поездка](mounts-and-driving.md) с упрощённым движением, без оригинального drivetrain и столкновений.
+Baiern is now assembled according to CFG `stockpart`: 33 objects, including four wheels and a steering wheel. **This package is not a car from Java `addStockParts`.** In the latter, the engine, suspension, springs, shock absorbers, brakes, wheels and tires are separately selected, with options according to Descriptor. The visible vehicle does not yet confirm the presence of a working physical chassis or power plant. Added [test drive](mounts-and-driving.md) with simplified movement, without the original drivetrain and collisions.
 
-В 3D-стенде теперь доступен [адаптер штатной комплектации Baiern](original-mechanics.md): 72 установленных объекта, реальные RPK/CFG-ссылки и числовые параметры подвески/двигателя. Он выбирает ограниченные Java-ветви, не выполняя полный игровой скрипт. Обычная «Пробная поездка» остаётся упрощённой.
+[Baiern stock adapter](original-mechanics.md) is now available in the 3D booth: 72 installed objects, real RPK/CFG links and numerical suspension/engine parameters. It selects limited Java branches without executing the full game script. The regular Test Drive remains simplified.
 
-Оригинальный `Chassis.updatevariables()` получает `WheelRef` и обходит установленные детали через `partOnSlot`, вызывает их `updatevariables`. У колёс и подвески есть native setters для радиуса, ширины, сцепления, пружины, демпфирования, хода, торможения и приводных параметров. Скрипты содержат значительную часть расчёта конфигурации, native-слой должен хранить результат и выполнять симуляцию.
+The original `Chassis.updatevariables()` receives `WheelRef` and bypasses the installed parts through `partOnSlot`, calling them `updatevariables`. Wheels and suspension have native setters for radius, width, grip, spring, damping, travel, braking and drive parameters. The scripts contain a significant part of the configuration calculation; the native layer must store the result and perform the simulation.
 
-## Пробелы и проверяемые результаты
+## Spaces and tested results
 
-| Этап | Что требуется | Критерий готовности |
+|Stage|What is required|Readiness criterion|
 |---|---|---|
-| 1. Полная конструкция | `compatible`, resource/slot aliases, `slottype`, compound/bone/wheel frames, render poses | Руль, диски и шины стоят на правильных креплениях; нет ручных координат под конкретную машину |
-| 2. Единые экземпляры | GameRef create/destroy/parent/command, ScriptObject ↔ EnginePart, изменяемые настройки и слоты | Скрипт видит именно созданную CFG-машину; установка/снятие сразу отражаются в его обходе |
-| 3. Запуск конфигурации | Конструкторы, наследование, поля/static init, массивы, resource literals, casts/instanceof, необходимые коллекции | Реальные `addStockParts` и `updatevariables` выполняются; формируется отчёт отсутствующих natives |
-| 4. Столкновения | Разбор body shapes и их frames, физическое тело, масса/центр масс/инерция, поверхность | Кузов взаимодействует с площадкой, не проваливается и не получает неверный масштаб |
-| 5. Автомобильная физика | Четыре контакта, ход подвески, пружина/амортизатор, продольные/боковые силы, тормоза, двигатель/передачи | Разгон, торможение и поворот воспроизводимы на фиксированном шаге; замена деталей меняет параметры |
-| 6. Игровой цикл | Газ/тормоз/руль/передачи, камера, spawn/reset, синхронизация визуальных объектов | Управляемая машина; одинаковый прогон inputs даёт воспроизводимый результат без рендера |
-| 7. Развитие игры | Одна оригинальная карта, гараж и тюнинг, UI/звук, сохранение мира | Законченный локальный сценарий; затем сеть, reconnect и восстановление машины |
+|1. Complete design| `compatible`, resource/slot aliases, `slottype`, compound/bone/wheel frames, render poses |The steering wheel, wheels and tires are on the correct mountings; there are no manual coordinates for a specific car|
+|2. Single copies|GameRef create/destroy/parent/command, ScriptObject ↔ EnginePart, changeable settings and slots|The script sees exactly the created CFG machine; installation/removal is immediately reflected in its bypass|
+|3. Launch configuration|Constructors, inheritance, fields/static init, arrays, resource literals, casts/instanceof, required collections|The real `addStockParts` and `updatevariables` are executed; a report of missing natives is generated|
+|4. Collisions|Analysis of body shapes and their frames, physical body, mass/center of mass/inertia, surface|The body interacts with the platform, does not fall through and does not receive the wrong scale|
+|5. Automotive physics|Four pins, suspension travel, spring/damper, longitudinal/lateral forces, brakes, engine/gears|Acceleration, braking and turning are reproducible at a fixed step; replacing parts changes parameters|
+|6. Game loop|Gas/brake/steering wheel/gears, camera, spawn/reset, synchronization of visual objects|Driven machine; the same run of inputs gives a reproducible result without rendering|
+|7. Game development|One original map, garage and tuning, UI/sound, world preservation|Complete local script; then network, reconnect and restore the machine|
 
-Для первого физического прогона достаточно собственной тестовой площадки. Декодирование embedded POLY/PHYS оригинальных трасс — отдельная работа; оно не должно блокировать проверку подвески и управления. Полный native API тоже не нужно реализовывать разом: приоритет определяет выполнение выбранного сценария, неизвестный вызов должен выдавать диагностическую ошибку.
+For the first physical run, your own test site is enough. Decoding embedded POLY/PHYS original traces is a separate task; it should not block testing of the suspension and steering. The full native API also does not need to be implemented at once: priority determines the execution of the selected script, an unknown call should produce a diagnostic error.
 
-Выбор физического backend пока не сделан. Нужен переносимый backend, пригодный для браузера и Node без рендера; его следует проверять на контракте WheelRef, единицах и повторяемых сценариях. Точное совпадение старого поведения потребует сравнения с игрой: одни Java-декларации не раскрывают native tyre/contact solver. Перенос тела по нажатию клавиши не заменяет этот слой.
+The choice of physical backend has not yet been made. We need a portable backend suitable for the browser and Node without rendering; it should be tested on the WheelRef contract, units and repeatable scenarios. An exact match of the old behavior will require comparison with the game: Java declarations alone do not reveal the native tire/contact solver. Moving a body by pressing a key does not replace this layer.
 
-## Что сделано в следующем шаге
+## What is done in the next step
 
-`src/engine/part-host.ts` связывает script handles с существующими `EnginePart` через WeakMap. Второе дерево деталей не создаётся. Реализованы четыре вызова через `NativeRegistry` с точными descriptors установленного `Part.class`:
+`src/engine/part-host.ts` links script handles to existing `EnginePart` via WeakMap. The second part tree is not created. Implemented four calls via `NativeRegistry` with the exact descriptors of the installed `Part.class`:
 
-| Native | Данные мира |
+| Native |World data|
 |---|---|
-| `getSlots()I` | Число CFG-слотов экземпляра |
-| `getSlotID(I)I` | Индекс → ID; индекс -1 → собственный входной слот детали, 0 при отсутствии родителя |
-| `partOnSlot(I)Ljava.game.parts.Part;` | Соседний экземпляр: дочерний либо родитель на входном слоте |
-| `slotIDOnSlot(I)I` | Ответный слот соседней детали; 0 у свободного слота |
+| `getSlots()I` |Number of CFG slots of an instance|
+| `getSlotID(I)I` |Index → ID; index -1 → part's own input slot, 0 if there is no parent|
+| `partOnSlot(I)Ljava.game.parts.Part;` |Adjacent instance: child or parent on input slot|
+| `slotIDOnSlot(I)I` |Response slot of an adjacent part; 0 for free slot|
 
-После `detach/install` тот же handle сразу видит изменившиеся связи. Чужие, поддельные и устаревшие handles отклоняются; аргументы и descriptors проверяются. Недопустимый индекс завершается ошибкой: совместимость поведения старой VM за границами массива не заявляется. Handle пока имеет базовый тип Part; выполнение реальных конструкторов, полей подклассов и наследуемого dispatch — следующий этап VM.
+After `detach/install` the same handle immediately sees the changed connections. Alien, fake and outdated handles are rejected; arguments and descriptors are checked. Invalid index fails: compatibility of old VM behavior across array boundaries is not declared. Handle currently has a base type of Part; execution of real constructors, subclass fields and inherited dispatch is the next stage of the VM.
 
-`npm run verify:gameplay` сверяет эти четыре декларации с локальным TUFA и обходит всю реальную CFG-сборку Baiern **через native-вызовы**, проверяя обратные ссылки каждого соединения. На исследованной установке посещаются 33 экземпляра. Это прямые host-вызовы, не исполнение TREE цикла обхода. Source runtime сериализации остаётся отдельным: его host-операции не считаются автоматически реализованными в CFG-мире.
+`npm run verify:gameplay` checks these four declarations against the local TUFA and traverses the entire actual Baiern CFG assembly **via native calls**, checking the backreferences of each connection. In the installation studied, 33 specimens are visited. These are direct host calls, not execution of a TREE traversal loop. The serialization source runtime remains separate: its host operations are not automatically considered implemented in the CFG world.
 
-## Проверка доступных контрактов
+## Checking available contracts
 
-Тот же инструмент сохраняет `local/gameplay-contracts.json`: пути, SHA256, имена классов, родительские классы и native method descriptors. Тела игрового кода не копируются.
+The same tool saves `local/gameplay-contracts.json`: paths, SHA256, class names, parent classes and native method descriptors. Game code bodies are not copied.
 
-| Установленный класс | Собственных native-деклараций |
+|Installed class|Own native declarations|
 |---|---:|
 | `java.game.parts.Part` | 25 |
 | `java.game.parts.WheelRef` | 32 |
@@ -55,6 +55,6 @@ Baiern сейчас собирается по CFG `stockpart`: 33 объекта
 | `java.util.resource.GameRef` | 22 |
 | `java.io.Controller` | 7 |
 
-Это 125 деклараций в выбранных пяти классах, **не полный объём движка и не процент готовности**. Например, два `WheelRef.setDamping` имеют разные descriptors и требуют разных адаптеров. Controller потребует сопоставления браузерного ввода с оригинальной схемой управления; события и время также должны быть частью host lifecycle.
+This is 125 declarations in the selected five classes, **not the full volume of the engine and not the percentage of readiness**. For example, two `WheelRef.setDamping` have different descriptors and require different adapters. Controller will require the browser input to be mapped to the original control scheme; events and times should also be part of the host lifecycle.
 
-Исходники для проверки рассуждений в собственной установке: `parts/scripts/src/Part.java` (addPart/слоты), `parts/scripts/src/WheelRef.java` (параметры физического колеса), `parts/scripts/bodypart/Src/Chassis.java` (updatevariables/forceUpdate), `cars/racers/Baiern_data/scripts/src/Baiern_CoupeSport.java` (комплектация), `sl/Scripts/game/src/Vehicle.java` (обёртка машины). Декларации надо сверять с class: версия Java и установленного TUFA может различаться.
+Sources for testing reasoning in your own installation: `parts/scripts/src/Part.java` (addPart/slots), `parts/scripts/src/WheelRef.java` (physical wheel parameters), `parts/scripts/bodypart/Src/Chassis.java` (updatevariables/forceUpdate), `cars/racers/Baiern_data/scripts/src/Baiern_CoupeSport.java` (bundle), `sl/Scripts/game/src/Vehicle.java` (machine wrapper). Declarations must be checked against the class: the version of Java and the installed TUFA may differ.

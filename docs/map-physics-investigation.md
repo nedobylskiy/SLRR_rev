@@ -1,129 +1,129 @@
-# Поиск оригинальной коллизии карт
+# Search for original map collision
 
-Проверка локальной Steam-установки 24 октября 2026 года. Воспроизвести инвентаризацию можно командой `npm run audit:map-physics`; имя другой карты передаётся вторым аргументом после корня игры: `npx tsx tools/audit-map-physics.ts <game-root> city`. Инструмент только читает файлы. Важно различать исходный текстовый `.rdb`, собранный `.rpk`, отдельные `.SCX/.SCY` и алгоритм внутри EXE.
+Checking local Steam installation on October 24, 2026. You can reproduce the inventory using the command `npm run audit:map-physics`; the name of the other card is passed as the second argument after the game root: `npx tsx tools/audit-map-physics.ts <game-root> city`. The tool only reads files. It is important to distinguish between the original text `.rdb`, the assembled `.rpk`, the individual `.SCX/.SCY`, and the algorithm inside the EXE.
 
-## Подтверждённые данные
+## Confirmed data
 
 | | Test Track | City |
 |---|---:|---:|
-| Объектов `typeof 1` в текстовом RDB | 1597 | 11003 |
-| Объектов `type 1` в собранном RPK | 1 | 1 |
-| Render-ресурсов `type 14` в RPK | 169 | 142 |
-| Mesh-ресурсов `type 5` в RPK | 170 | 148 |
-| Явно названный `_phys.SCX` в RPK | отсутствует | `c1_phys.SCX` |
+|`typeof 1` objects in text RDB| 1597 | 11003 |
+|`type 1` objects in the assembled RPK| 1 | 1 |
+|Render resources `type 14` in RPK| 169 | 142 |
+|Mesh resources `type 5` in RPK| 170 | 148 |
+|Explicitly named `_phys.SCX` in the RPK|absent| `c1_phys.SCX` |
 
-Число mesh-ресурсов в выводе аудита может быть на один меньше общего числа `type 5`: он считает только записи с текстовым `sourcefile`. Подавляющее большинство экземпляров `typeof 1` из RDB в установленный RPK не попало. Их координаты можно использовать для реконструкции видимых объектов, но совпадение этой текстовой версии карты с установленным EXE не доказано. Нельзя также утверждать, что отсутствующие `obstacles/*.rpk` доступны только потому, что они перечислены в `external_links`. У Test Track этих трёх файлов зависимостей нет в установке: `obstacles/common.rpk`, `obstacles/test_track.rpk`, `obstacles.rpk`.
+The number of mesh resources in the audit output can be one less than the total number of `type 5`: it only counts entries with text `sourcefile`. The vast majority of `typeof 1` instances from the RDB were not included in the installed RPK. Their coordinates can be used to reconstruct visible objects, but the match of this text version of the map with the installed EXE has not been proven. Nor can it be argued that missing `obstacles/*.rpk` are available only because they are listed in `external_links`. Test Track does not have these three dependency files in the installation: `obstacles/common.rpk`, `obstacles/test_track.rpk`, `obstacles.rpk`.
 
-Проверка пропавших контейнеров дала конкретную цепочку: RDB содержит 80 экземпляров `gametype 0x00060527` с `params x,y,z,yaw,pitch,roll`; зависимость `0x0006` указывает на `objects.rpk`, где ресурс `0x527` содержит скомпилированный `ICFG`. Его исходный `objects/scripts/kontener.cfg` задаёт `render 0x522` и `body ... box 2.705278 1.347327 1.354536`. Ресурс render ведёт к `objects/meshes/kontener/kontener.scx`. Аналогично разрешаются ещё 1333 экземпляра 10 типов. Теперь они отображаются, а `box`-формы участвуют в контактах кузова и опоре колёс сверху. Это часть **оригинальных данных физики объектов**, но ещё не оригинальный алгоритм контакта или физика дороги.
+Checking the missing containers yielded a specific chain: RDB contains 80 instances of `gametype 0x00060527` with `params x,y,z,yaw,pitch,roll`; the dependency `0x0006` points to `objects.rpk`, where the resource `0x527` contains the compiled `ICFG`. Its initial `objects/scripts/kontener.cfg` specifies `render 0x522` and `body ... box 2.705278 1.347327 1.354536`. The render resource points to `objects/meshes/kontener/kontener.scx`. Similarly, another 1333 instances of 10 types are resolved. Now they are displayed, and `box` shapes are involved in the contacts of the body and the support of the wheels on top. This is part of the **original object physics data**, but not yet the original contact algorithm or road physics.
 
-Собранный Test Track ссылается на `palya.scY`, тогда как текстовый RDB ссылается на `palya.scx`. Первый файл содержит 86 материалов и **ноль треугольников** в проверенной структуре INVO v3; второй — 11 295 треугольников и используется нашим загрузчиком как визуальный fallback. Это не доказывает, что игра использует `palya.scx` для столкновений. В ресурсных payload Test Track не найдены сигнатуры `PHYS` и `POLY` (поиск последовательности байтов); их отсутствие не исключает другой упаковки физических данных или генерации коллизии при загрузке.
+The assembled Test Track references `palya.scY`, whereas the text RDB references `palya.scx`. The first file contains 86 materials and **zero triangles** in the proven INVO v3 structure; the second is 11,295 triangles and is used by our loader as a visual fallback. This does not prove that the game uses `palya.scx` for collisions. Signatures `PHYS` and `POLY` (search for byte sequence) were not found in the resource payload Test Track; their absence does not exclude different packaging of physical data or the generation of a collision during loading.
 
-У City есть отдельный `c1_phys.SCX` (12 126 треугольников), подключённый через mesh-ресурс `0x16d` и render-ресурс `0x16e`. Название делает его кандидатом на исходную физическую поверхность, но пока нет трассировки загрузчика EXE, подтверждающей использование именно этого файла для контактов. Отдельного `_phys.SCX` в ресурсах Test Track не найдено. У SCX v4 существует chunk `type 1` (`HardSurfaceDef` в [описании формата](formats/scx.md)); меши Test Track и `c1_phys.SCX` имеют версию 3, так что этот механизм не объясняет их коллизию. Флаги материалов SCX v3 в [разборе формата](https://github.com/nonamesex/io_invo_scx/blob/7bcc34e51a3cb40369cc28db2950ab27f9587078/imhex/scx.hexpat) описывают смешивание/прозрачность, а не установленный нами признак столкновения.
+City has a separate `c1_phys.SCX` (12,126 triangles), connected through the mesh resource `0x16d` and the render resource `0x16e`. The name makes it a candidate for the original physical surface, but there is no EXE loader trace yet to confirm the use of this particular file for pins. A separate `_phys.SCX` was not found in the Test Track resources. SCX v4 has chunk `type 1` (`HardSurfaceDef` in [format description](formats/scx.md)); The Test Track and `c1_phys.SCX` meshes are version 3, so this mechanism does not explain their collision. The SCX v3 material flags in [format parsing](https://github.com/nonamesex/io_invo_scx/blob/7bcc34e51a3cb40369cc28db2950ab27f9587078/imhex/scx.hexpat) describe blending/transparency, not the collision flag we set.
 
-## Текущая граница и следующий шаг
+## Current boundary and next step
 
-### Проверка загрузчика Steam EXE
+### Checking the Steam EXE loader
 
-Проверен установленный `StreetLegal_Redline.exe` (SHA-256
+Checked installed `StreetLegal_Redline.exe` (SHA-256
 `F44FB88A4335C657E20701CDB84AFB8D1D85F7C3ACEB93D30113E6E6E44FEFC2`).
-Это другой бинарник, чем присланный отдельно EXE и EXE из архива Elias;
-смещения функций между ними переносить нельзя. PDB-символов в установленном
-файле нет; следующие имена получены из RTTI, строки и адреса — виртуальные
-адреса именно этого PE с базой `0x400000`.
+This is a different binary than the EXE sent separately and the EXE from the Elias archive;
+Function shifts cannot be transferred between them. PDB symbols in installed
+no file; the following names are obtained from RTTI, strings and addresses are virtual
+addresses of this particular PE with the base `0x400000`.
 
-| Адрес | Наблюдение в машинном коде | Что пока не следует заключать |
+|Address|Observation in machine code|What should not be concluded yet|
 |---|---|---|
-| `0x4BADE0` (`_type_ground::virtual_12`) | Разбирает запись формата `%x,%f,%f,%f,%f,%f,%f,%s,%s`; читает `gravity` и `ground_friction`. | Формат записи ещё не сопоставлен побайтно с RDB/RPK. |
-| `0x4BB19F` внутри неё | Передаёт имя `groundbody` в общий конструктор объекта `0x4E8A50`, затем вызывает функции `0x4EBDD0` с маской `0x200000` и `0x4EABC0`. | Само имя не доказывает форму физического тела. Значение маски ещё не установлено. |
-| `0x4BB1DB` внутри неё | Разрешает ресурс типа `0x0e` по разобранному ID и создаёт `r_ground`/`bone00`; это отдельный путь отображения. | Отображаемую сетку нельзя автоматически считать коллизией. |
-| `0x451130` (`CompatibleMesh_ground::virtual_20`) | Проверяет сигнатуру `INVO` и разбирает версии mesh; это подтверждает особый загрузчик ground-mesh. | Пока не установлено, какой mesh он получает на Test Track и какие секции отдаются физике. |
+| `0x4BADE0` (`_type_ground::virtual_12`) |Parses a record of format `%x,%f,%f,%f,%f,%f,%f,%s,%s`; reads `gravity` and `ground_friction`.|The record format has not yet been mapped byte-by-byte to RDB/RPK.|
+|`0x4BB19F` inside her|Passes the name `groundbody` to the general constructor of the `0x4E8A50` object, then calls the functions `0x4EBDD0` with the mask `0x200000` and `0x4EABC0`.|The name itself does not prove the shape of the physical body. The mask value has not yet been set.|
+|`0x4BB1DB` inside her|Resolves a resource of type `0x0e` by parsed ID and creates `r_ground`/`bone00`; this is a separate display path.|The displayed mesh cannot be automatically considered a collision.|
+| `0x451130` (`CompatibleMesh_ground::virtual_20`) |Checks the `INVO` signature and parses mesh versions; This is confirmed by the special ground-mesh loader.|It has not yet been established which mesh he receives on the Test Track and which sections are given to physics.|
 
-Вызов `0x4E8A50` используется ещё в десяти местах EXE, поэтому следующая
-проверка — связать его общий объект с `RIF_UPDATECOLLISION` и реальным
-созданием геометрии столкновений, а затем сравнить входной ресурс с `palya.scx`,
-`palya.SCY` и `c1_phys.SCX` на City. Для трамплина пока **не обнаружен**
-отдельный CFG-body: считать его видимые треугольники оригинальным collider
-было бы неподтверждённым предположением.
+The `0x4E8A50` call is used in ten other places in the EXE, so the following
+check - associate its shared object with `RIF_UPDATECOLLISION` and real
+creating collision geometry, and then compare the input resource with `palya.scx`,
+`palya.SCY` and `c1_phys.SCX` on City. For the springboard **not yet discovered**
+separate CFG-body: treat its visible triangles as original collider
+would be an unconfirmed guess.
 
-### Может ли физическое тело быть мешем?
+### Can a physical body be a mesh?
 
-**Да.** В установленной игре найдены 4855 строк `body` в CFG; 3419 из них
-ссылаются на `.scx` (1894 различных пути), остальные в основном используют
-`sphere` и `box`. Например,
-`objects/scripts/19x6_garazs.cfg` задаёт два тела через
-`objects/meshes/19x6_garazs/phys_01.scx` и `phys_02.scx`, а отображение —
-отдельными `render`-ресурсами. Первый физический меш содержит 12
-треугольников, тогда как видимая модель гаража содержит 214. Это прямой
-пример того, что оригинальные границы столкновения могут отличаться от
-видимых поверхностей, даже когда оба файла имеют формат SCX.
+**Yes.** In the installed game, 4855 lines of `body` were found in CFG; 3419 of them
+refer to `.scx` (1894 different paths), the rest mostly use
+`sphere` and `box`. For example,
+`objects/scripts/19x6_garazs.cfg` specifies two bodies via
+`objects/meshes/19x6_garazs/phys_01.scx` and `phys_02.scx`, and the display is
+separate `render` resources. The first physical mesh contains 12
+triangles, while the visible garage model contains 214. This is a straight
+example that the original collision boundaries may differ from
+visible surfaces, even when both files are in SCX format.
 
-В Steam EXE обработчик формы около `0x4BC021–0x4BC1BC` сравнивает строку
-с `ball`, `sphere`, `box`, `rodx`, `rody`, `rodz`. Для другой строки он
-передаёт её как имя файла в конструктор формы `0x4F7D60` с кодом типа `6`.
-Ветка типа `6` по адресу `0x4F817F` вызывает загрузчик `0x4F5B90`;
-тот сообщает `Fatal! Missing mesh file` при отсутствии файла и разбирает
-структуру INVO, включая индексы треугольников. Это подтверждает поддержку
-меша как физической формы в самом бинарнике, а не только синтаксис CFG.
+In the Steam EXE, the form handler near `0x4BC021–0x4BC1BC` compares the string
+with `ball`, `sphere`, `box`, `rodx`, `rody`, `rodz`. For another line it
+passes it as a file name to the constructor of the form `0x4F7D60` with a code of type `6`.
+A branch like `6` at address `0x4F817F` calls the loader `0x4F5B90`;
+it reports `Fatal! Missing mesh file` if there is no file and parses
+INVO structure, including triangle indices. This confirms support
+mesh as a physical form in the binary itself, and not just the CFG syntax.
 
-**Для трамплина Test Track источник формы ещё не установлен.** В найденных
-CFG размещённых объектов нет отдельного `body` для него; он может быть частью
-физической сетки грунта, но это не следует из одной лишь визуальной модели.
-Поддержка mesh-body в EXE делает такую гипотезу правдоподобной, не доказывая,
-что конкретно этот видимый меш используется для контактов.
+**For the Test Track springboard, the source of the form has not yet been set.** In the found ones
+CFG of placed objects there is no separate `body` for it; he could be part
+physical soil grid, but this does not follow from the visual model alone.
+EXE support for mesh-body makes this hypothesis plausible without having to prove it.
+that this particular visible mesh is used for contacts.
 
-#### Деревянные трамплины Test Track найдены
+#### Test Track wooden jumps found
 
-Идентификация визуальных моделей больше не является препятствием. Это
-`maps/test_track/meshes/Box10.scx` и `Box11.scx`, mesh-ресурсы `0xAC` и
-`0xAF`, подключённые через render-ресурсы `0xAD` и `0xB0` под корнем
-`0x14`. Текстуры обоих render-ресурсов разрешаются в
-`maps/textures/Deszka02.dds` (доски) и `gerenda2.dds` (балки). Каждый SCX
-содержит 280 треугольников, имеет габариты около 11,7 × 2,9 × 5,0 м;
-вершины заданы уже в координатах карты. Пример границ `Box10` после
-перевода в метры: `x=-223.1…-211.5`, `y=-0.2…2.7`,
-`z=-1032.4…-1027.4`. Рядом стоят контейнеры из RDB, в том числе при
+Identifying visual patterns is no longer a barrier. This
+`maps/test_track/meshes/Box10.scx` and `Box11.scx`, mesh resources `0xAC` and
+`0xAF`, connected via render resources `0xAD` and `0xB0` under the root
+`0x14`. The textures of both render resources are resolved to
+`maps/textures/Deszka02.dds` (boards) and `gerenda2.dds` (beams). Every SCX
+contains 280 triangles, has dimensions of about 11.7 × 2.9 × 5.0 m;
+the vertices are already specified in map coordinates. Example of `Box10` boundaries after
+conversion to meters: `x=-223.1…-211.5`, `y=-0.2…2.7`,
+`z=-1032.4…-1027.4`. Nearby there are containers from RDB, including
 `x=-230.742`, `z=-1038.196`.
 
-В **текстовом** RDB есть записи `Box10`/`Box11` типа `1`, но в
-**собранном** `test_track.rpk` для них остались только mesh/render-ресурсы;
-их модели входят в иерархию отображения `ground` без отдельного CFG.
-В их RSD нет `body` или ссылки на физический SCX. Следовательно, вопрос
-теперь не «какая это модель?», а «какие секции `Box10/Box11` загрузчик
-`ground` передаёт физике и как он выбирает контактную поверхность?».
-Их 280 видимых треугольников нельзя объявить точной оригинальной формой,
-пока не прослежена эта ветка EXE.
+In the **text** RDB there are entries `Box10`/`Box11` of type `1`, but in
+**collected** `test_track.rpk` only mesh/render resources remain for them;
+their models are included in the mapping hierarchy `ground` without a separate CFG.
+There is no `body` or reference to physical SCX in their RSD. Therefore the question
+now not “what model is this?”, but “which sections of the `Box10/Box11` bootloader
+`ground` passes to physics and how does it choose the contact surface?
+Their 280 visible triangles cannot be declared to be the exact original shape,
+this EXE branch has not been traced yet.
 
-### Как выбирается физическая форма обычного объекта
+### How the physical form of an ordinary object is chosen
 
-Выбор записан в **CFG ресурса**, а в собранном RPK сохраняется в payload
-`ICFG` вместе с текстом команд. `render <resource>` назначает отображаемую
-модель; отдельная команда `body x y z yaw pitch roll mass <shape>` задаёт
-физическое тело и его положение. `<shape>` бывает примитивом (`box`,
-`sphere` и др.) с параметрами либо путём к физическому SCX. Название
-`_phys` в пути — соглашение файлов игры, не переключатель движка: на загрузку
-меша указывает именно аргумент команды `body`.
+The choice is recorded in the **CFG of the resource**, and in the collected RPK it is saved in the payload
+`ICFG` along with the command text. `render <resource>` assigns the displayed
+model; a separate command `body x y z yaw pitch roll mass <shape>` specifies
+physical body and its position. `<shape>` can be primitive (`box`,
+`sphere`, etc.) with parameters or the path to the physical SCX. Name
+`_phys` on the way - game file agreement, not engine switch: to load
+mesh is indicated precisely by the command argument `body`.
 
-Примеры из установки:
+Examples from installation:
 
-| CFG | Отображение | Физическая форма |
+| CFG |Display|Physical form|
 |---|---|---|
 | `objects/scripts/kontener.cfg` | `render 0x522` | `body ... box 2.705278 1.347327 1.354536` |
-| `objects/scripts/19x6_garazs.cfg` | несколько `render` | два `body ... phys_01.scx` и `phys_02.scx` |
-| `objects/scripts/fa03a.cfg` | два `render` с LOD | явного `body` нет |
-| `objects/scripts/fa06a.cfg` | два `render` с LOD | `body 0 3 0 ... box 0.0501 3 0.0501` — узкий ствол |
-| `objects/scripts/fa12a.cfg` | два `render` с LOD | `body 0 4 0 ... box 0.050 6 0.050` — узкий ствол |
-| `misc/garage/vehicle_lift/scripts/lift_arm.cfg` | `render 0x0a` | `body ... _phys_lift_arm.scx`, затем `nocollision` |
+| `objects/scripts/19x6_garazs.cfg` |several `render`|two `body ... phys_01.scx` and `phys_02.scx`|
+| `objects/scripts/fa03a.cfg` |two `render` with LOD|there is no explicit `body`|
+| `objects/scripts/fa06a.cfg` |two `render` with LOD|`body 0 3 0 ... box 0.0501 3 0.0501` - narrow barrel|
+| `objects/scripts/fa12a.cfg` |two `render` with LOD|`body 0 4 0 ... box 0.050 6 0.050` - narrow barrel|
+| `misc/garage/vehicle_lift/scripts/lift_arm.cfg` | `render 0x0a` |`body ... _phys_lift_arm.scx`, then `nocollision`|
 
-`bounds` у дерева присутствует и без `body`: это отдельные данные границ
-объекта, а не доказательство физической формы. `nocollision` после `body`
-показывает, что тело может существовать без обычных контактов; например,
-у автомобилей так помечены плавучие тела с `buoy`. Для обычного объекта без
-`body` не следует автоматически строить столкновения из `render`.
-На Test Track из доступного `objects.rpk` разрешаются 881 экземпляр `fa06a` и 105 `fa12a` с этими исходными коробками. Ранее прототип проверял столкновения только в восьми углах кузова: ствол толщиной 0,1 м обычно оказывался между ними, поэтому машина проходила сквозь дерево, хотя его `body` уже был загружен. Теперь каждый такой `body` проверяется против всего ориентированного объёма кузова; импульс столкновения передаётся деформируемым деталям. Листва в контактах не участвует. Точность оригинального решателя и реакция на `fa03a` (без явного `body`) пока не подтверждены.
-Грунт/дорога карты загружаются своим путём (`_type_ground`) и требуют
-отдельной проверки — правило для CFG-объектов нельзя без доказательства
-переносить на `palya.scx`.
+`bounds` is present in the tree even without `body`: this is separate boundary data
+object, not evidence of physical form. `nocollision` after `body`
+shows that the body can exist without ordinary contacts; For example,
+in cars, floating bodies with `buoy` are marked this way. For a normal object without
+`body` should not automatically build collisions from `render`.
+On Test Track, from the available `objects.rpk`, 881 copies of `fa06a` and 105 `fa12a` are allowed with these original boxes. Previously, the prototype tested collisions only at eight corners of the body: the 0.1 m thick trunk usually ended up between them, so the car went through the tree, although its `body` was already loaded. Now each such `body` is checked against the entire oriented volume of the body; The collision impulse is transferred to the deformable parts. Foliage is not involved in contacts. The original solver's accuracy and response to `fa03a` (without explicit `body`) has not yet been confirmed.
+Ground/road maps are loaded in their own way (`_type_ground`) and require
+separate check - a rule for CFG objects is impossible without proof
+transfer to `palya.scx`.
 
-Наша `MapTerrain` индексирует **визуальные** треугольники всех ground-SCX как статические поверхности; `MapCollision` строит боковые контакты из тех же треугольников. Это монолитные треугольные сетки для столкновений, а не независимо движущиеся физические вершины. Ранее при перекрытии настила рампы асфальтом вертикальная выборка предпочитала высоту ближе к нулю. После идентификации `Box10/Box11` она выбирает верхнюю поверхность ниже точки запроса (с допуском проникновения 0,5 м); кузов и свободные детали передают собственную высоту, чтобы не притягиваться к далёкой поверхности над ними. На реальной карте при `x=-214,z=-1031.5` теперь выбирается настил `y≈1.67`, а для точки под ним — асфальт `y≈0.12`. Это исправляет известный конфликт двух слоёв **в прототипе**, но не доказывает совпадение его треугольников или допусков с оригинальным collider.
+Our `MapTerrain` indexes the **visual** triangles of all ground-SCXs as static surfaces; `MapCollision` builds side contacts from the same triangles. These are monolithic triangular collision meshes rather than independently moving physical vertices. Previously, when covering the ramp deck with asphalt, the vertical sampling preferred a height closer to zero. After identifying `Box10/Box11`, it selects the top surface below the query point (with a penetration tolerance of 0.5 m); the body and free parts convey their own height so as not to be attracted to the distant surface above them. On a real map, at `x=-214,z=-1031.5` the flooring `y≈1.67` is now selected, and for the point below it the asphalt `y≈0.12` is selected. This corrects the known conflict between two layers **in the prototype**, but does not prove that its triangles or tolerances match the original collider.
 
-Для восстановления оригинального поведения требуется проследить в **исходном EXE выбранной версии** путь `GroundRef` → загрузка карты/mesh → создание физических примитивов → запросы контактов колеса и кузова. Адреса из [архива Elias](elias-workspace-archive.md) относятся к другому EXE; его `Physics_Step` помечен автором как `Soft` и не воспроизводит исходный solver. Проверять гипотезы следует на Test Track и City: какой ресурс загружается как collider, как используются SCY и `_phys.SCX`, передаётся ли коллизия из RDB, а затем сравнивать координаты и нормали отдельных поверхностей с оригинальной игрой. Деревянный трамплин не выделен среди 11 распознанных типов объектов Test Track с CFG-формами: его опора пока берётся из визуальных `Box10/Box11.scx`. Верх подтверждённых CFG-коробок тоже доступен лучам колёс, но это не устанавливает происхождение физической поверхности трамплина. До трассировки EXE коллизию карты в демо нужно считать временной.
+To restore the original behavior, you need to trace in the **original EXE of the selected version** the path `GroundRef` → loading the map/mesh → creating physical primitives → requests for wheel and body contacts. The addresses from the [Elias archive](elias-workspace-archive.md) refer to a different EXE; his `Physics_Step` is marked by the author as `Soft` and does not reproduce the original solver. You should check your hypotheses on Test Track and City: which resource is loaded as a collider, how SCY and `_phys.SCX` are used, whether the collision is transferred from RDB, and then compare the coordinates and normals of individual surfaces with the original game. The wooden springboard is not selected among the 11 recognized types of Test Track objects with CFG shapes: its support is still taken from the visual `Box10/Box11.scx`. The top of the confirmed CFG boxes is also accessible to the wheel beams, but this does not establish the origin of the physical surface of the springboard. Before the EXE trace, the map collision in the demo should be considered temporary.

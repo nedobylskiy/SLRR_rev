@@ -46,8 +46,8 @@ export function mountMainMenu(viewport: HTMLElement, assets: Assets, items: read
   const message = osd.createText('', 'center', 0, 0.89, 3);
   message.node.classList.add('osd-menu-message');
   osd.endGroup();
-  osd.createButton('Предыдущий пункт', -0.855, 0, 0.1, 0.2, 4, resource(0xd15d), () => change(-1));
-  osd.createButton('Следующий пункт', 0.855, 0, 0.1, 0.2, 4, resource(0xd15e), () => change(1));
+  osd.createButton('Previous item', -0.855, 0, 0.1, 0.2, 4, resource(0xd15d), () => change(-1));
+  osd.createButton('Next item', 0.855, 0, 0.1, 0.2, 4, resource(0xd15e), () => change(1));
   const arrows = osd.endGroup();
   if (motions.length) { osd.hideGroup(arrows); title.hide(); }
 
