@@ -106,6 +106,29 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   world.dispose();
 });
 
+test('automatic upshift follows road speed and cannot skip gears while the clutch reconnects', () => {
+  const world = new EngineWorld(), cfg = parsePartConfig('slot 0 0 0 0 0 0 1');
+  const make = (id: number, values: Record<string, number>, script = `${id}.java`) => world.create({
+    key: { pack: 'test.rpk', id }, alias: String(id), cfgPath: `${id}.cfg`, script, config: cfg,
+    mechanics: { kind: 'engine', source: script, values, drive: id === 5 ? 'DT_RWD' : undefined },
+  });
+  const root = world.create({ key: { pack: 'test.rpk', id: 1 }, alias: 'car', cfgPath: 'car.cfg', config: parsePartConfig('slot 0 0 0 0 0 0 1') });
+  for (let id = 2; id <= 7; id++) root.definition.config.slots.push({ id, position: [0, 0, 0], rotation: [0, 0, 0], attach: [], compatible: [] });
+  for (const part of [
+    make(2, { cylinders: 6, bore: 80, rpm_idle: 1000, RPM_limit: 7000 }), make(3, { stroke: 90 }),
+    make(4, { intake_valve_diam: 30 }), make(5, { gears: 5, 'ratio[1]': 3.58, 'ratio[2]': 2.49, 'ratio[3]': 1.66, end_ratio: 3.03 }),
+    make(6, {}, 'clutch.java'), make(7, {}, 'fuel_rail.java'),
+  ]) world.install(root, part.definition.key.id, part, 1);
+  const system = new MechanicalSystem(root); system.reset(); system.rpm = 6300;
+  const wheel = [0, 0, 50, 50], road = [0, 0, 50, 50];
+  system.advance(1 / 240, { throttle: 1 }, wheel, road, 17);
+  assert.equal(system.gear, 2);
+  for (let i = 0; i < 120; i++) system.advance(1 / 240, { throttle: 1 }, wheel, road, 17);
+  assert.equal(system.gear, 2, 'second gear stays engaged after the shift timer expires');
+  assert.ok(system.rpm < 6000, `engine revs match second gear: ${system.rpm}`);
+  world.dispose();
+});
+
 test('charger parser derives original boost band, wastegate and combined drive type', async () => {
   const path = 'parts/engines/mod/scripts/src/sample.java';
   const source = 'class sample extends TurboCharger { sample(int id) { calculateOptandRange(5000.0, 9000.0); P_turbo_max = 2.0; default_P_turbo_waste = 1.0; P_turbo_waste = default_P_turbo_waste; drive_type = DT_FWD | DT_RWD; type = TT_AUTO; } }';

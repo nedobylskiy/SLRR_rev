@@ -1,6 +1,6 @@
 {
   "vehicle": "Baiern CoupeSport 2.5",
-  "configuration": "user-reported stock engine in the installed game; saved best results may reflect earlier runs or tuning",
+  "configuration": "user-reported stock Baiern CoupeSport 2.5 in the installed game; recorded performance is the driving target",
   "sourceImages": ["vehicle-specs.png", "engine-graph.png", "test-track-results.png"],
   "chassis": {
     "massKg": 1482,
@@ -33,6 +33,9 @@
     "fuel": "98 octane pump gas"
   },
   "transmission": {
+    "gameName": "Baiern Tourist 5 speed street automatic transmission",
+    "sourceClass": "Baiern_Tourist_transmission",
+    "type": "TT_AUTO",
     "forwardRatios": [3.579, 2.49, 1.659, 1.24, 1],
     "reverseRatioMagnitude": 4,
     "finalDriveRatio": 3.029

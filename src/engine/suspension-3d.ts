@@ -59,7 +59,9 @@ export class Suspension3D {
   step(dt: number, input: DrivingInput) {
     const target = Math.max(-1, Math.min(1, input.steer)) * (this.root.definition.config.maxSteer ?? 0.6); this.steer += Math.max(-2 * dt, Math.min(2 * dt, target - this.steer));
     const frame = this.body.matrix(), count = this.wheels.length;
-    const drivetrain = this.mechanics?.advance(dt, input, this.wheels.map(w => w.omega));
+    const chassisForward = new Vector3(0, 0, -1).applyQuaternion(this.body.orientation);
+    const roadSpeed = this.body.velocity.dot(chassisForward);
+    const drivetrain = this.mechanics?.advance(dt, input, this.wheels.map(w => w.omega), this.wheels.map(w => roadSpeed / w.radius), roadSpeed);
     for (const [index, w] of this.wheels.entries()) {
       const support = this.mechanics?.support(index) ?? 1;
       const failure = Math.max(0, 1 - Math.min(w.mountCondition, support) / 0.1);

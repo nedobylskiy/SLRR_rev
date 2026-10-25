@@ -1,5 +1,12 @@
 import type { EnginePart } from './world';
 
+// Shared provisional drive response, fitted to the original stock-car road tests.
+// The native game's converter/traction calculations are not yet available.
+const LOW_SPEED_TRANSFER = 3.6;
+const CRUISE_TRANSFER = 0.82;
+const TRANSFER_FADE_START_KPH = 100;
+const TRANSFER_FADE_END_KPH = 145;
+
 export interface CornerMechanics { strut?: EnginePart; spring?: EnginePart; shock?: EnginePart; brake?: EnginePart; sway?: EnginePart }
 const attached = (part: EnginePart | undefined, root: EnginePart): number => {
   if (!part) return 0;
@@ -99,8 +106,8 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean }, wheelOmega: readonly number[]) {
-    if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v))) throw new Error('Invalid drivetrain step');
+  advance(dt: number, input: { throttle: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
+    if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = Math.max(100, this.block?.definition.mechanics?.values.rpm_idle ?? 900), limit = Math.max(idle + 500, this.block?.definition.mechanics?.values.RPM_limit ?? 6500);
     const ratios = this.ratios(), final = values.end_ratio ?? 1, shares = this.driveShares();
@@ -112,12 +119,14 @@ export class MechanicalSystem {
     }
     this.lastUp = up; this.lastDown = down;
     const mean = shares.reduce((sum, share, i) => sum + wheelOmega[i] * share, 0);
+    const roadMean = shares.reduce((sum, share, i) => sum + roadOmega[i] * share, 0);
     if (!this.manual && this.shiftTimer === 0) {
       if (throttle < 0 && mean < 1.5) this.gear = -1;
       else if (throttle > 0 && mean > -1.5 && this.gear < 0) this.gear = 1;
       if (this.gear > 0 && !input.clutch && mean > 2) {
         const current = ratios[this.gear - 1] ?? 0, next = ratios[this.gear] ?? 0;
-        if (next > 0 && this.rpm > limit * 0.88) { this.gear++; this.shiftTimer = 0.28; }
+        const engagedRpm = Math.abs(roadMean * current * final) * 60 / (2 * Math.PI);
+        if (next > 0 && this.rpm > limit * 0.88 && engagedRpm > limit * 0.7) { this.gear++; this.shiftTimer = 0.12; }
         else if (this.gear > 1 && this.rpm < Math.max(idle * 1.45, limit * 0.42) && mean * current * final * 60 / (2 * Math.PI) < limit * 0.65) { this.gear--; this.shiftTimer = 0.22; }
       }
     }
@@ -134,18 +143,27 @@ export class MechanicalSystem {
     const turbo = this.engine.some(part => /turbocharger/i.test(part.definition.script ?? '') && this.health(part));
     this.boost += (Math.min(2.5, targetBoost) - this.boost) * (1 - Math.exp(-dt / (turbo ? 0.35 : 0.06)));
     const omega = Math.max(idle, this.rpm) * Math.PI / 30;
-    const firing = this.rpm < limit && this.power > 0;
+    const automaticShift = this.shiftTimer > 0 && !this.manual && !input.clutch;
+    const firing = this.rpm < limit && this.power > 0 && !automaticShift;
     const idleControl = this.rpm < idle ? Math.min(80, 25 + (idle - this.rpm) * 0.25) : 0;
     const engineTorque = firing ? (this.estimateFlywheelTorqueAt(this.rpm) * gas + idleControl) * this.power : 0;
     const drag = 14 + Math.max(0, this.rpm - idle) * 0.012;
     const directionBrake = this.gear > 0 && throttle < 0 || this.gear < 0 && throttle > 0;
     const clutchOpen = !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power;
-    const launch = Math.max(0.15, Math.min(1, (this.rpm - idle) / (idle * 0.55) + gas * 0.28));
-    const capacity = clutchOpen ? 0 : (gas > 0 ? 220 * launch : 90 * Math.min(1, Math.abs(shaftOmega) / Math.max(1, omega))) * (this.clutch ? this.health(this.clutch) : 1);
+    const launch = Math.max(0.65, Math.min(1, (this.rpm - idle) / (idle * 0.55) + gas * 0.28));
+    const stallCapacity = this.estimateFlywheelTorqueAt(limit * 0.6) * 1.8;
+    const capacity = clutchOpen ? 0 : (gas > 0 ? stallCapacity * launch : 90 * Math.min(1, Math.abs(shaftOmega) / Math.max(1, omega))) * (this.clutch ? this.health(this.clutch) : 1);
     const clutchTorque = Math.max(-capacity, Math.min(capacity, (omega - shaftOmega) * 9));
     const inertia = 0.28 + Math.max(0, this.crank?.definition.mechanics?.values.inertia ?? 0) * 0.01;
     this.rpm = Math.max(idle * 0.65, Math.min(limit * 1.08, this.rpm + (engineTorque - drag - clutchTorque) / inertia * dt * 30 / Math.PI));
-    return { torque: shares.map(share => clutchTorque * totalRatio * 0.82 * share), directionBrake };
+    if (automaticShift) {
+      const engagedRpm = Math.max(idle, Math.abs(roadMean * totalRatio) * 30 / Math.PI);
+      this.rpm += (engagedRpm - this.rpm) * (1 - Math.exp(-dt / 0.07));
+    }
+    const speedKph = Math.abs(roadSpeedMps) * 3.6;
+    const assist = Math.max(0, Math.min(1, (TRANSFER_FADE_END_KPH - speedKph) / (TRANSFER_FADE_END_KPH - TRANSFER_FADE_START_KPH)));
+    const transfer = CRUISE_TRANSFER + (LOW_SPEED_TRANSFER - CRUISE_TRANSFER) * assist;
+    return { torque: shares.map(share => clutchTorque * totalRatio * transfer * share), directionBrake };
   }
   /** Legacy static estimate used by component diagnostics; driving uses advance() and wheel slip. */
   driveForce(index: number, speed: number, wheelRadius: number, throttle: number) {

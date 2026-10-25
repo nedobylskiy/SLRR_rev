@@ -1,0 +1,13 @@
+{
+  "gameName": "Baiern Devils RaceMan6 6 speed race manual transmission",
+  "sourceClass": "Baiern_Devils_RaceMan6_transmission",
+  "sourcePath": "parts/engines/Baiern_Emer/scripts/src/Baiern_Devils_RaceMan6_transmission.java",
+  "type": "TT_MANUAL",
+  "adjustableForwardGears": true,
+  "sourceForwardRatios": [2.7, 2.2, 1.8, 1.5, 1.2, 1],
+  "observedTuneScreenForwardRatios": [2.7, 2.2, 1.799, 1.5, 1.2, 1],
+  "reverseRatioMagnitude": 3,
+  "finalDriveRatio": 2.73,
+  "drive": "RWD",
+  "sourceImage": "race-man6-tune.png"
+}
