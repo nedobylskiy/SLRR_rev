@@ -311,14 +311,10 @@ export class Viewer {
     if (tireEffects) this.scene.add(tireEffects.group);
     let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1, paused = false;
     if (tireEffects && assets) void (async () => {
-      const asphaltPath = 'particles/textures/skidmarks/sliding/asphalt.png';
       const grassPath = 'particles/textures/skidmarks/sliding/grass.png';
-      const asphalt = await this.texture(await assets.read(asphaltPath), asphaltPath);
-      try {
-        const looseGround = await this.texture(await assets.read(grassPath), grassPath);
-        if (stopped) { asphalt.dispose(); looseGround.dispose(); }
-        else tireEffects.setTextures(asphalt, looseGround);
-      } catch { asphalt.dispose(); }
+      const looseGround = await this.texture(await assets.read(grassPath), grassPath);
+      if (stopped) looseGround.dispose();
+      else tireEffects.setLooseGroundTexture(looseGround);
     })().catch(() => { /* Procedural fallback remains available when particle assets are absent. */ });
     let frameMs = 1000 / 60, backlogTicks = 0;
     const reportTelemetry = telemetry;

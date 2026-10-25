@@ -7,7 +7,7 @@ import { MechanicalSystem } from './mechanical-system';
 import type { TireSurface } from './map-terrain';
 
 export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
-export interface TireContactState { contact: boolean; force: number; contactPoint: Vector3; contactNormal: Vector3; forward: Vector3; slipSpeed: number; lateralSpeed: number; surface: TireSurface }
+export interface TireContactState { contact: boolean; force: number; contactPoint: Vector3; contactNormal: Vector3; forward: Vector3; slipSpeed: number; lateralSpeed: number; slip: number; surface: TireSurface }
 export class TestTerrain implements Terrain {
   ramp = false;
   height(x: number, z: number) { return this.ramp && x > -1.8 && x < 1.8 && z < -4 && z > -8 ? (-z - 4) * 0.28 : 0; }
@@ -30,7 +30,7 @@ export class Suspension3D {
   private movingParts: { part: EnginePart; base: Matrix4 }[][] = [[], [], [], []];
   readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
-  readonly wheels: (TireContactState & { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; rest: number; bump: number; droop: number; length: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number; omega: number; slip: number })[];
+  readonly wheels: (TireContactState & { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; rest: number; bump: number; droop: number; length: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number; omega: number })[];
   steer = 0;
   constructor(readonly root: EnginePart, readonly body: RigidBody3D, readonly terrain: Terrain) {
     this.springMass = body.mass;

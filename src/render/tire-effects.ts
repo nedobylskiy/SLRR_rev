@@ -4,12 +4,17 @@ import type { TireSurface } from '../engine/map-terrain';
 
 const MAX_MARKS = 1400;
 const MAX_SMOKE = 160;
-const surfaces: TireSurface[] = ['road', 'grass', 'dirt'];
-
 /** Visual threshold in metres per second of longitudinal or sideways scrub. */
 export function tireScrub(contact: TireContactState): number {
-  if (!contact.contact || contact.force < 120) return 0;
-  return Math.max(0, Math.min(1, (Math.hypot(contact.slipSpeed, contact.lateralSpeed) - 1.15) / 4));
+  if (!contact.contact || contact.force < 300) return 0;
+  const longitudinal = Math.abs(contact.slip) > 0.25 ? Math.abs(contact.slipSpeed) : 0;
+  return Math.max(0, Math.min(1, (Math.max(longitudinal, Math.abs(contact.lateralSpeed) * 0.85) - 3.4) / 3));
+}
+
+/** Smoke needs substantial longitudinal wheel slip, not normal cornering scrub. */
+export function tireSmoke(contact: TireContactState): number {
+  if (!contact.contact || contact.force < 500 || Math.abs(contact.slip) < 0.65) return 0;
+  return Math.max(0, Math.min(1, (Math.abs(contact.slipSpeed) - 8) / 5));
 }
 
 class MarkBuffer {
@@ -58,6 +63,8 @@ export class TireEffects {
   private marks = new Map<TireSurface, MarkBuffer>();
   private previous: (THREE.Vector3 | undefined)[] = [undefined, undefined, undefined, undefined];
   private markU = [0, 0, 0, 0];
+  private markHold = [0, 0, 0, 0];
+  private markTimer = [0, 0, 0, 0];
   private ownedTextures = new Set<THREE.Texture>();
   private smokeTimer = [0, 0, 0, 0];
   private smoke: SmokeParticle[] = [];
@@ -83,11 +90,11 @@ export class TireEffects {
     this.smokePoints.renderOrder = 3;
     this.group.add(this.smokePoints);
   }
-  /** The game's grass skid image is reserved for identifiable loose ground; mixed grass atlases retain black marks. */
-  setTextures(asphalt: THREE.Texture, looseGround: THREE.Texture) {
-    this.ownedTextures.forEach(texture => texture.dispose()); this.ownedTextures = new Set([asphalt, looseGround]);
-    for (const texture of this.ownedTextures) { texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.ClampToEdgeWrapping; }
-    this.marks.get('road')!.setTexture(asphalt); this.marks.get('grass')!.setTexture(asphalt); this.marks.get('dirt')!.setTexture(looseGround);
+  /** The original asphalt image contains transparent dashes; paved/grass marks use a continuous strip. */
+  setLooseGroundTexture(texture: THREE.Texture) {
+    this.ownedTextures.forEach(old => old.dispose()); this.ownedTextures = new Set([texture]);
+    texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.ClampToEdgeWrapping;
+    this.marks.get('dirt')!.setTexture(texture);
   }
   update(dt: number, wheels: readonly TireContactState[]) {
     if (dt <= 0) return;
@@ -99,10 +106,11 @@ export class TireEffects {
     }
     this.smoke = this.smoke.filter(particle => particle.age < particle.life);
     for (let i = 0; i < wheels.length; i++) {
-      const wheel = wheels[i], strength = tireScrub(wheel);
-      if (!strength) { this.previous[i] = undefined; this.smokeTimer[i] = this.markU[i] = 0; continue; }
+      const wheel = wheels[i], strength = tireScrub(wheel), smokeStrength = tireSmoke(wheel);
+      this.markHold[i] = strength > 0 ? 0.1 : Math.max(0, this.markHold[i] - dt);
+      if (!wheel.contact || !this.markHold[i]) { this.previous[i] = undefined; this.markTimer[i] = this.markU[i] = 0; }
       const point = wheel.contactPoint, prior = this.previous[i];
-      if (prior && prior.distanceTo(point) < 2.5) {
+      if (this.markHold[i] && prior && prior.distanceTo(point) < 2.5) {
         const distance = prior.distanceTo(point), steps = Math.max(1, Math.ceil(distance / 0.28));
         if (distance > 0.075) for (let j = 1; j <= steps; j++) {
           const a = prior.clone().lerp(point, (j - 1) / steps), b = prior.clone().lerp(point, j / steps);
@@ -110,28 +118,31 @@ export class TireEffects {
           this.marks.get(wheel.surface)!.add(a, b, wheel.contactNormal, wheel.forward, 0.15 + strength * 0.055, u0, u1);
           this.markU[i] = u1;
         }
-      } else if (prior && prior.distanceTo(point) < 0.075 && this.smokeTimer[i] <= 0) {
+      } else if (this.markHold[i] && prior && prior.distanceTo(point) < 0.075 && this.markTimer[i] <= 0) {
         const half = wheel.forward.clone().multiplyScalar(0.07);
         this.marks.get(wheel.surface)!.add(point.clone().sub(half), point.clone().add(half), wheel.contactNormal, wheel.forward, 0.15, this.markU[i], this.markU[i] + 0.175);
+        this.markTimer[i] = 0.14;
       }
-      this.previous[i] = point.clone();
+      this.markTimer[i] -= dt;
+      if (this.markHold[i]) this.previous[i] = point.clone();
+      if (!smokeStrength) { this.smokeTimer[i] = 0; continue; }
       this.smokeTimer[i] -= dt;
       if (this.smokeTimer[i] <= 0) {
-        this.smokeTimer[i] = 0.09 - strength * 0.055;
-        if (this.smoke.length < MAX_SMOKE) {
-          const drift = wheel.forward.clone().multiplyScalar(-Math.sign(wheel.slipSpeed || 1) * (0.3 + strength * 0.7));
-          this.smoke.push({ position: point.clone().addScaledVector(wheel.contactNormal, 0.08), velocity: drift.add(new THREE.Vector3((Math.random() - 0.5) * 0.7, 0.55 + Math.random() * 0.35, (Math.random() - 0.5) * 0.7)), age: 0, life: 0.75 + Math.random() * 0.65, size: 0.27 + strength * 0.5 });
+        this.smokeTimer[i] = 0.13 - smokeStrength * 0.05;
+        for (let j = 0; j < 3 && this.smoke.length < MAX_SMOKE; j++) {
+          const drift = wheel.forward.clone().multiplyScalar(-Math.sign(wheel.slipSpeed || 1) * (0.25 + smokeStrength * 0.5));
+          this.smoke.push({ position: point.clone().addScaledVector(wheel.contactNormal, 0.08), velocity: drift.add(new THREE.Vector3((Math.random() - 0.5) * 0.9, 0.5 + Math.random() * 0.4, (Math.random() - 0.5) * 0.9)), age: 0, life: 0.9 + Math.random() * 0.65, size: 0.38 + smokeStrength * 0.42 });
         }
       }
     }
     for (let i = 0; i < this.smoke.length; i++) {
       const p = this.smoke[i]; p.position.toArray(this.positions, i * 3);
-      this.alphas[i] = Math.min(1, p.age * 8) * (1 - p.age / p.life) * 0.28;
+      this.alphas[i] = Math.min(1, p.age * 8) * (1 - p.age / p.life) * 0.42;
       this.sizes[i] = p.size * (1 + p.age * 1.7);
     }
     this.smokeGeometry.setDrawRange(0, this.smoke.length);
     for (const name of ['position', 'aAlpha', 'aSize']) this.smokeGeometry.attributes[name].needsUpdate = true;
   }
-  reset() { this.previous.fill(undefined); this.smokeTimer.fill(0); this.markU.fill(0); this.smoke = []; this.marks.forEach(mark => mark.clear()); this.smokeGeometry.setDrawRange(0, 0); }
+  reset() { this.previous.fill(undefined); this.smokeTimer.fill(0); this.markTimer.fill(0); this.markHold.fill(0); this.markU.fill(0); this.smoke = []; this.marks.forEach(mark => mark.clear()); this.smokeGeometry.setDrawRange(0, 0); }
   dispose() { this.group.removeFromParent(); this.marks.forEach(mark => mark.dispose()); this.ownedTextures.forEach(texture => texture.dispose()); this.smokeGeometry.dispose(); (this.smokePoints.material as THREE.Material).dispose(); }
 }
