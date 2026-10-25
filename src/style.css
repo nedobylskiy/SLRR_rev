@@ -402,6 +402,12 @@ button:disabled{opacity:.45;cursor:default}
  .hood-controls .crumple-control { gap: 8px; white-space: nowrap; }
  .hood-controls .crumple-control input { width: 120px; accent-color: #76e5c4; }
  .hood-controls .crumple-control output { min-width: 3.5em; font-variant-numeric: tabular-nums; }
+ .map-debug-panel { padding: 8px 18px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .map-debug-panel[hidden] { display: none; }
+ .map-debug-panel summary { cursor: pointer; color: #76e5c4; }
+ .map-debug-options { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 10px 0 2px; }
+ .map-debug-options label { display: flex; align-items: center; gap: 6px; }
+ .map-debug-options input { width: auto; accent-color: #76e5c4; }
  .hood-telemetry { width: 100%; color: #9fe1c9; font: 11px/1.6 Consolas, monospace; }
  .crash-hud { font: 11px/1.7 Consolas, monospace; white-space: pre-line; top: 10px; left: 10px; padding: 7px 10px; }
  .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }

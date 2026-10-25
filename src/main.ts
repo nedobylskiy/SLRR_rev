@@ -26,6 +26,17 @@ const driveButton = textElement('button', 'Пробная поездка') as HT
 const hoodButton = textElement('button', 'Испытание капота'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Машина и препятствие'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
+const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
+mapDebugPanel.append(textElement('summary', 'Каркасы карты'));
+const mapDebugOptions = textElement('div', '', 'map-debug-options');
+const mapDebugChecks: HTMLInputElement[] = [];
+for (const [layer, title] of [['terrain', 'Опорные поверхности'], ['walls', 'Боковые грани'], ['boxes', 'CFG-боксы']] as const) {
+  const label = textElement('label', title), input = document.createElement('input'); input.type = 'checkbox';
+  input.onchange = () => viewer?.showMapDebug(layer, input.checked);
+  label.prepend(input); mapDebugOptions.append(label); mapDebugChecks.push(input);
+}
+mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
+const showMapDebugControls = () => { mapDebugPanel.hidden = false; mapDebugPanel.open = false; for (const input of mapDebugChecks) input.checked = false; };
 let crashSession: ReturnType<Viewer['drive']> | undefined;
 for (const [label, speed] of [['Заезд 10 км/ч', 10 / 3.6], ['Заезд 50 км/ч', 50 / 3.6], ['Сброс', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
@@ -72,6 +83,7 @@ trackDriveButton.onclick = async () => {
       if (request === sequence) status(`Трасса ${done}/${total}`);
     }, true);
     if (request !== sequence || !engineRoot) return;
+    showMapDebugControls();
     const start = new Vector3(0, map.terrain.height(0, -1461.785) + 0.15, -1461.785);
     if (start.y < -100) throw new Error('У стартовой линии нет поверхности карты');
     beforeDrivingDetails = el('details').textContent ?? '';
@@ -98,12 +110,14 @@ mapButton.onclick = async () => {
       if (request === sequence) status(`Трасса ${done}/${total}`);
     });
     if (request !== sequence) return;
+    showMapDebugControls();
     el('details').textContent = `${result.loaded}/${result.total} моделей · ${result.objects} размещённых объектов по RDB/CFG · ${result.triangles.toLocaleString('ru')} треугольников карты. Геометрия и текстуры из оригинальных RPK/SCX; для объектов применены координаты RDB. Коллизия дороги пока приближённая.\n${result.warnings.slice(0, 12).join('\n')}`;
     status(result.loaded ? 'Трасса загружена' : 'Нет геометрии', !result.loaded);
   } catch (error) { if (request === sequence) { viewer.clear(); status('Ошибка карты', true); el('details').textContent = String(error); } }
 };
 function stopDrive() {
   el('viewport').parentElement?.classList.remove('physics-scene');
+  mapDebugPanel.hidden = true;
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
   hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;

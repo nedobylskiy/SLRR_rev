@@ -20,6 +20,11 @@ import { MapCollision } from '../engine/map-collision';
 import { mapObjectPlacements, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
 import { stockContainerTexture } from './stock-container-texture';
+import { MapObjectStream, type StreamPlacement } from './map-object-stream';
+import { MapDebugView, type MapDebugLayer } from './map-debug-view';
+
+export interface MapFogSettings { color: number; near: number; far: number }
+const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
@@ -39,6 +44,9 @@ export class Viewer {
   private frame?: (now: number) => void;
   private stopDriving?: () => void;
   private generation = 0;
+  private mapStream?: MapObjectStream;
+  private mapDebug?: MapDebugView;
+  private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
   private observer: ResizeObserver;
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -59,10 +67,13 @@ export class Viewer {
       const { clientWidth: w, clientHeight: h } = container;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
-    this.renderer.setAnimationLoop(now => { this.frame?.(now); this.controls.update(); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop(now => { this.frame?.(now); this.controls.update(); this.mapStream?.update(this.camera.position); this.renderer.render(this.scene, this.camera); });
   }
   clear() {
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.mapStream?.dispose(); this.mapStream = undefined;
+    this.mapDebug?.dispose(); this.mapDebug = undefined;
+    this.scene.fog = null; this.scene.background = null;
     this.internalView = false;
     this.generation++;
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
@@ -75,6 +86,15 @@ export class Viewer {
     });
     this.model.clear();
   }
+  setMapFog(settings: MapFogSettings) {
+    if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
+    this.mapFog = { ...settings };
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.color.setHex(settings.color); this.scene.fog.near = settings.near; this.scene.fog.far = settings.far;
+      this.scene.background = new THREE.Color(settings.color); this.mapStream?.setRange(settings.far + 100);
+    }
+  }
+  showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   dispose() {
     this.renderer.setAnimationLoop(null); this.observer.disconnect(); this.controls.dispose(); this.clear();
     this.scene.traverse(object => {
@@ -122,6 +142,8 @@ export class Viewer {
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
+    this.scene.fog = new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far);
+    this.scene.background = new THREE.Color(this.mapFog.color);
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
     this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
@@ -143,6 +165,8 @@ export class Viewer {
       progress?.(loaded, ids.length);
     }
     let objects = 0;
+    const stream = new MapObjectStream(this.model, this.mapFog.far + 100);
+    this.mapStream = stream;
     try {
       const rdb = new TextDecoder('windows-1252').decode(await assets.read(packPath.replace(/\.rpk$/i, '.rdb')));
       const placements = mapObjectPlacements(rdb, pack), byType = new Map<number, typeof placements>();
@@ -163,30 +187,27 @@ export class Viewer {
             try { model = await assets.modelForResource(resource.packPath, render.resource); renderPose = render.pose ? poseMatrix(render.pose) : new THREE.Matrix4(); break; }
             catch { /* A game type can list abstract LOD render IDs before a concrete mesh. */ }
           }
-          if (!model) continue;
-          const parsed = parseScx(await assets.read(model.path)), template = new THREE.Group();
-          warnings.push(...await this.append(parsed, assets, model.textures, template, generation));
-          if (generation !== this.generation) break;
-          for (const part of template.children) {
-            if (!(part instanceof THREE.Mesh)) continue;
-            const mesh = new THREE.InstancedMesh(part.geometry, part.material, instances.length);
-            mesh.name = `map object ${resource.entry.alias}: ${part.name}`;
-            for (let i = 0; i < instances.length; i++) {
-              mesh.setMatrixAt(i, modelMatrix(poseMatrix(instances[i].pose), renderPose));
-            }
-            mesh.instanceMatrix.needsUpdate = true;
-            mesh.computeBoundingSphere();
-            this.model.add(mesh);
-          }
           for (const instance of instances) for (const body of cfg.bodies) {
             if (body.collision === false || body.shape[0]?.toLowerCase() !== 'box') continue;
             const half = body.shape.slice(1, 4).map(Number);
             if (half.length === 3) collision.addBox(poseMatrix(instance.pose).multiply(poseMatrix(body)), new THREE.Vector3(half[0], half[1], half[2]));
           }
+          if (model) {
+            const placements: StreamPlacement[] = instances.map(instance => {
+              const matrix = modelMatrix(poseMatrix(instance.pose), renderPose);
+              return { matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix) };
+            });
+            stream.add(placements, async () => {
+              const parsed = parseScx(await assets.read(model.path)), template = new THREE.Group();
+              warnings.push(...await this.append(parsed, assets, model.textures, template, generation));
+              return template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh).map(part => { part.name = `map object ${resource.entry.alias}: ${part.name}`; return part; });
+            });
+          }
           objects += instances.length;
         } catch (error) { warnings.push(`Object type 0x${typeId.toString(16)}: ${String(error)}`); }
       }
     } catch (error) { warnings.push(`Map objects: ${String(error)}`); }
+    if (generation === this.generation) { this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position); }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
   showInternals(value: boolean) {
@@ -288,7 +309,7 @@ export class Viewer {
     let last: number | undefined, lastHud = -Infinity, stopped = false, timeScale = 1, paused = false;
     let frameMs = 1000 / 60, backlogTicks = 0;
     const reportTelemetry = telemetry;
-    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nКузов ${Math.round(root.condition * 100)}% · опоры ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash instanceof Vehicle3D ? crash.suspension.mechanics?.support(i) ?? 1 : 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nДвигатель ${Math.round(crash.suspension.mechanics.power * 100)}% · ${Math.round(crash.suspension.mechanics.rpm)} об/мин · передача ${crash.suspension.mechanics.gear}` : ''}\n${Math.round(1000 / frameMs)} кадр/с · деформация активна: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${backlogTicks ? ` · отставание ${Math.round(backlogTicks / 240 * 1000)} мс` : ''}` : ''));
+    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nКузов ${Math.round(root.condition * 100)}% · опоры ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash instanceof Vehicle3D ? crash.suspension.mechanics?.support(i) ?? 1 : 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nДвигатель ${Math.round(crash.suspension.mechanics.power * 100)}% · ${Math.round(crash.suspension.mechanics.rpm)} об/мин · передача ${crash.suspension.mechanics.gear}` : ''}\n${Math.round(1000 / frameMs)} кадр/с · деформация активна: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${track && this.mapStream ? ` · объекты рядом: ${this.mapStream.active}/${this.mapStream.total}` : ''}${backlogTicks ? ` · отставание ${Math.round(backlogTicks / 240 * 1000)} мс` : ''}` : ''));
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
       if (!relevant.has(event.code)) return;

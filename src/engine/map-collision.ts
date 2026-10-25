@@ -9,6 +9,8 @@ interface StaticBox { matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: 
 export class MapCollision {
   private readonly cells = new Map<string, Wall[]>();
   private readonly boxCells = new Map<string, StaticBox[]>();
+  private readonly allBoxes: StaticBox[] = [];
+  private readonly allWalls: Wall[] = [];
   private readonly size = 8;
   walls = 0;
   boxes = 0;
@@ -25,6 +27,7 @@ export class MapCollision {
       if (!list.length) this.boxCells.set(key, list);
       list.push(box);
     }
+    this.allBoxes.push(box);
     this.boxes++;
   }
   add(model: ScxModel) {
@@ -49,10 +52,13 @@ export class MapCollision {
           if (!list.length) this.cells.set(key, list);
           list.push(wall);
         }
+        this.allWalls.push(wall);
         this.walls++;
       }
     }
   }
+  forEachBox(visit: (matrix: Matrix4, half: Vector3) => void) { for (const box of this.allBoxes) visit(box.matrix, box.half); }
+  forEachWall(visit: (triangle: Triangle) => void) { for (const wall of this.allWalls) visit(wall.triangle); }
   /** Downward wheel support from original CFG boxes, respecting their object and body poses. */
   support(x: number, z: number, fromY: number): { height: number; normal: Vector3 } | undefined {
     const boxes = this.boxCells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);

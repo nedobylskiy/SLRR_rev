@@ -10,6 +10,7 @@ export class MapTerrain implements Terrain {
   ramp = false;
   constructor(private readonly objects?: MapCollision) {}
   private readonly cells = new Map<string, Face[]>();
+  private readonly allFaces: Face[] = [];
   private readonly size = 16;
   faces = 0;
   add(model: ScxModel) {
@@ -32,9 +33,13 @@ export class MapTerrain implements Terrain {
           if (!list.length) this.cells.set(key, list);
           list.push(face);
         }
+        this.allFaces.push(face);
         this.faces++;
       }
     }
+  }
+  forEachFace(visit: (a: Vector3, b: Vector3, c: Vector3) => void) {
+    for (const f of this.allFaces) visit(new Vector3(f.ax, f.ay, f.az), new Vector3(f.bx, f.by, f.bz), new Vector3(f.cx, f.cy, f.cz));
   }
   sample(x: number, z: number, fromY?: number): { height: number; normal: Vector3 } | undefined {
     const list = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);

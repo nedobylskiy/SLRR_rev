@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { BoxGeometry, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
+import { MapObjectStream } from '../src/render/map-object-stream';
+
+test('map objects load near the camera, enter over successive frames and leave beyond the fog range', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100, 1);
+  const placements = [0, 20, 200].map(x => ({ matrix: new Matrix4().makeTranslation(x, 0, 0), position: new Vector3(x, 0, 0) }));
+  let loads = 0;
+  stream.add(placements, async () => { loads++; return [new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial())]; });
+  let distantLoads = 0;
+  stream.add([{ matrix: new Matrix4().makeTranslation(500, 0, 0), position: new Vector3(500, 0, 0) }], async () => { distantLoads++; return [new Mesh(new BoxGeometry(1, 1, 1), new MeshBasicMaterial())]; });
+  stream.update(new Vector3(0, 0, 0));
+  assert.equal(stream.active, 0);
+  assert.equal(distantLoads, 0, 'distant model bytes are not requested at startup');
+  await Promise.resolve();
+  stream.update(new Vector3(0, 0, 0));
+  assert.equal(stream.active, 1);
+  stream.update(new Vector3(0, 0, 0));
+  assert.equal(stream.active, 2);
+  assert.equal(loads, 1);
+  assert.equal(stream.total, 4);
+  stream.update(new Vector3(250, 0, 0));
+  assert.equal(stream.active, 1);
+  assert.equal((parent.children[0] as import('three').InstancedMesh).count, 1);
+  stream.update(new Vector3(500, 0, 0));
+  assert.equal(distantLoads, 1);
+  stream.dispose();
+  stream.update(new Vector3(0, 0, 0));
+  assert.equal(stream.active, 0);
+  parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
+});
