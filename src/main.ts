@@ -29,6 +29,23 @@ menuButton.onclick = () => openMainMenu();
 const worldButton = textElement('button', 'Собрать Baiern');
 const mapButton = textElement('button', 'Тестовый трек');
 const trackDriveButton = textElement('button', 'Поездка по треку');
+const trackWindowButton = textElement('button', 'Свернуть окно · Esc', 'track-window-button');
+trackWindowButton.hidden = true; el('viewport').after(trackWindowButton);
+let trackDriving = false;
+function setTrackExpanded(expanded: boolean) {
+  const active = expanded && trackDriving;
+  el('viewport').parentElement?.classList.toggle('track-drive-expanded', active);
+  document.body.classList.toggle('track-drive-expanded', active);
+  trackWindowButton.hidden = !active;
+  trackDriveButton.textContent = trackDriving ? 'Развернуть поездку' : 'Поездка по треку';
+  if (trackDriving) el('viewport').querySelector('canvas')?.focus({ preventScroll: true });
+}
+trackWindowButton.onclick = () => setTrackExpanded(false);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && trackDriving && !trackWindowButton.hidden) {
+    event.preventDefault(); setTrackExpanded(false);
+  }
+});
 const driveButton = textElement('button', 'Пробная поездка') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Испытание капота'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Машина и препятствие'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
@@ -80,6 +97,7 @@ const cage = document.createElement('input'); cage.type = 'checkbox'; cage.oncha
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Скорость автомобиля'); el('viewport').append(driveHud);
 el('memory-lab').before(worldButton, driveButton, mapButton, trackDriveButton);
 trackDriveButton.onclick = async () => {
+  if (trackDriving) { setTrackExpanded(true); return; }
   if (!assets || !viewer) return;
   await openWorld('cars/racers/Baiern.rpk', 6);
   const request = sequence;
@@ -97,6 +115,7 @@ trackDriveButton.onclick = async () => {
     crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI }, assets);
     crashSession.chassisCrumple(Number(crumpleSlider.value));
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
+    trackDriving = true; setTrackExpanded(true);
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · поездка'; el('format').textContent = 'MAP / PHYSICS';
     el('scene-help').textContent = 'Старт в нейтрали: E — первая, Q — задняя · N — нейтраль · W/S — газ и задний ход · A/D — руль · Пробел — тормоз · Shift — сцепление · R — вернуться на старт';
@@ -124,6 +143,7 @@ mapButton.onclick = async () => {
 };
 function stopDrive() {
   disposeOsdMenu?.(); disposeOsdMenu = undefined;
+  trackDriving = false; setTrackExpanded(false);
   el('viewport').parentElement?.classList.remove('physics-scene');
   mapDebugPanel.hidden = true;
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
