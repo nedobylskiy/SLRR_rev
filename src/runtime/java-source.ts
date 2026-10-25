@@ -4,7 +4,7 @@ export const jv = (type: string, value: unknown): JavaValue => ({ type, value })
 export const nil = () => jv('Object', null);
 interface Token { text: string; line: number; value?: JavaValue }
 type Expr = { kind: string; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
-type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; declarations?: { type: string; name: string; expr?: Expr }[] };
+type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
 export interface SourceMethod { owner: string; name: string; parameters: { type: string; name: string }[]; result: string; isStatic: boolean; body: Stmt; line: number }
 export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue> }
 export interface JavaHost {
@@ -85,6 +85,7 @@ class Parser {
   }
   declaration(): Stmt | undefined {
     const start = this.at; this.eat('final');
+    if (this.peek() === 'new') { this.at = start; return; }
     if (!/^[A-Za-z_$][\w$]*$/.test(this.peek() ?? '')) { this.at = start; return; }
     let type = this.tokens[this.at++].text;
     while (this.eat('[')) { this.need(']'); type += '[]'; }
@@ -96,6 +97,18 @@ class Parser {
   statement(): Stmt {
     if (this.eat('{')) { const statements: Stmt[] = []; while (!this.eat('}')) { if (!this.peek()) throw new Error('Unclosed Java block'); statements.push(this.statement()); } return { kind: 'block', statements }; }
     if (this.eat(';')) return { kind: 'block', statements: [] };
+    if (this.eat('switch')) {
+      this.need('('); const condition = this.expression(); this.need(')'); this.need('{');
+      const cases: NonNullable<Stmt['cases']> = [];
+      while (!this.eat('}')) {
+        if (!this.peek()) throw new Error('Unclosed Java switch');
+        if (this.eat('case')) { const wrapped = this.eat('('); const value = this.expression(); if (wrapped) this.need(')'); this.need(':'); cases.push({ value, statements: [] }); }
+        else if (this.eat('default')) { this.need(':'); cases.push({ statements: [] }); }
+        else if (cases.length) cases[cases.length - 1].statements.push(this.statement());
+        else throw new Error('Java switch statement before first case');
+      }
+      return { kind: 'switch', condition, cases };
+    }
     if (this.eat('if')) { this.need('('); const condition = this.expression(); this.need(')'); const body = this.statement(), otherwise = this.eat('else') ? this.statement() : undefined; return { kind: 'if', condition, body, otherwise }; }
     if (this.eat('while')) { this.need('('); const condition = this.expression(); this.need(')'); return { kind: 'while', condition, body: this.statement() }; }
     if (this.eat('for')) {
@@ -228,6 +241,20 @@ export class JavaSourceMachine {
       case 'var': for (const d of stmt.declarations!) { if (scope.values.has(d.name)) throw new Error(`Duplicate local ${d.name}`); scope.values.set(d.name, d.expr ? coerce(d.type, ev(d.expr)) : jv(d.type, ['int', 'float', 'double'].includes(d.type) ? 0 : null)); } return;
       case 'expr': ev(stmt.expr!); return;
       case 'if': if (truth(ev(stmt.condition!))) return run(stmt.body!); else if (stmt.otherwise) return run(stmt.otherwise); return;
+      case 'switch': {
+        const key = ev(stmt.condition!).value;
+        const cases = stmt.cases!;
+        let start = cases.findIndex(entry => entry.value && ev(entry.value).value === key);
+        if (start < 0) start = cases.findIndex(entry => !entry.value);
+        if (start < 0) return;
+        const inner = new Scope(scope);
+        for (let i = start; i < cases.length; i++) for (const part of cases[i].statements) {
+          const flow = run(part, inner);
+          if (flow?.kind === 'break') return;
+          if (flow) return flow;
+        }
+        return;
+      }
       case 'return': return { kind: 'return', value: stmt.expr ? ev(stmt.expr) : jv('void', undefined) };
       case 'break': return { kind: 'break' };
       case 'continue': return { kind: 'continue' };

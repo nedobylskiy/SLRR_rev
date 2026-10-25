@@ -17,6 +17,31 @@ export interface OsdElement {
   hide(): void;
 }
 
+export interface OsdMotion { operation: 'runAnimation' | 'teleport' | 'reverseAnimation'; speed: number; steps: number; direction: number; axis: string }
+
+/** Translate Java's per-step OSD motion to a screen-space interval. */
+export function osdMotionInterval(destination: number, motion: OsdMotion): [number, number] {
+  const travel = motion.speed * motion.steps * motion.direction * 50;
+  return motion.operation === 'teleport' ? [destination + travel, destination] : [destination - travel, destination];
+}
+
+export class OsdMotionController {
+  private origins = new WeakMap<HTMLElement, { axis: 'left' | 'top'; start: number; end: number; duration: number }>();
+  animate(node: HTMLElement, motion: OsdMotion): Promise<void> {
+    const axis = motion.axis.toUpperCase() === 'Y' ? 'top' : 'left';
+    const destination = Number.parseFloat(node.style[axis]);
+    const previous = this.origins.get(node);
+    const reverse = (motion.operation === 'reverseAnimation' || (motion.operation === 'teleport' && motion.steps === 0)) && previous;
+    const [start, end] = reverse ? [previous.end, previous.start] : previous
+      ? [destination, destination + motion.speed * motion.steps * motion.direction * 50] : osdMotionInterval(destination, motion);
+    const duration = reverse ? previous.duration : Math.max(1, motion.steps) * 16;
+    if (!reverse) this.origins.set(node, { axis, start, end, duration });
+    if (!Number.isFinite(start) || !Number.isFinite(end) || typeof node.animate !== 'function') return Promise.resolve();
+    const animation = node.animate([{ [axis]: `${start}%` }, { [axis]: `${end}%` }], { duration, easing: 'ease-out', fill: 'both' });
+    return animation.finished.then(() => { node.style[axis] = `${end}%`; animation.cancel(); }, () => undefined);
+  }
+}
+
 /** A screen-space OSD renderer kept separate from the 3D scene and its camera. */
 export class OsdLayer {
   readonly root = document.createElement('div');

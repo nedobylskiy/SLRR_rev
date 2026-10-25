@@ -142,15 +142,15 @@ async function openMainMenu() {
     const source = new TextDecoder().decode(await assets.read('sl/scripts/game/src/MainMenu.java'));
     if (request !== sequence) return;
     const runtime = new MainMenuRuntime(source), built = runtime.enter();
-    const menu = mountMainMenu(document.body, assets, built.items, built.selected, item => {
+    const menu = mountMainMenu(document.body, assets, built.items, built.selected, built.layout, runtime.primaryVisuals(), action => runtime.dispatchMenuAction(action), item => {
       if (item.command === 0xa008) { trackDriveButton.click(); return; }
       if (item.command === 0xb004) { stopDrive(); status('Каталог ресурсов'); return; }
       menu.showMessage('Этот раздел станет доступен после переноса игровой логики.');
-    }, () => { stopDrive(); status('Каталог ресурсов'); }, localInstallation ? '/api/game/menu-video' : undefined);
+    }, () => { void menu.animateOut(runtime.cleanupVisuals()).then(() => { stopDrive(); status('Каталог ресурсов'); }); }, localInstallation ? '/api/game/menu-video' : undefined);
     disposeOsdMenu = () => { runtime.exit(); menu.dispose(); };
     el('filename').textContent = 'Главное меню · MainMenu.java'; el('format').textContent = 'JAVA / OSD';
     el('scene-help').textContent = '←/→ — выбор · Enter — открыть · Esc — каталог';
-    el('details').textContent = 'MainMenu.enter() и Gates.buildSlidingMenu() выполняются из установленного Java-исходника. Свободная поездка открывает текущую трассу; прочие команды ждут игровую логику.';
+    el('details').textContent = 'MainMenu.enter(), Gates.buildSlidingMenu() и навигация Gates.osdCommand() выполняются из установленного Java-исходника. Свободная поездка открывает текущую трассу; прочие команды ждут игровую логику.';
     status('Главное меню');
   } catch (error) { if (request === sequence) { status('Ошибка исполнения MainMenu.java', true); el('details').textContent = String(error); } }
 }

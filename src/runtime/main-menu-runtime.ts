@@ -1,11 +1,14 @@
 import { JavaSourceMachine, jv, nil, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from './java-source';
 
-export interface MainMenuItem { label: string; active: number; disabled: number; command: number }
+export interface MenuResource { pack: string; id: number }
+export interface MainMenuItem { label: string; active: MenuResource; disabled: MenuResource; command: number; width: number; height: number; depth: number }
+export interface MainMenuLayout { spacing: number; y: number; speed: number }
+export interface MenuMotion { target: string; operation: 'runAnimation' | 'teleport' | 'reverseAnimation'; speed: number; steps: number; direction: number; axis: string }
 export interface MainMenuState { gameMode: number; played: boolean; debugMode: boolean; hasCar: boolean }
 export const INITIAL_MENU_STATE: MainMenuState = { gameMode: 0, played: false, debugMode: false, hasCar: false };
 
-interface Slider { items: MainMenuItem[]; selected: number; active: number; speed: number }
-interface Gates { myPrevState: JavaValue; slider: Slider | null }
+interface Slider { items: MainMenuItem[]; selected: number; active: number; speed: number; spacing: number; y: number }
+interface Gates { myPrevState: JavaValue; slider: Slider | null; messageSeek: number; showMenu: number }
 interface MainMenu { window: Gates | null }
 
 function integer(value: JavaValue) {
@@ -23,10 +26,11 @@ export class MainMenuRuntime implements JavaHost {
   private readonly osd = { tag: 'Osd' };
   private readonly gameLogic = { tag: 'GameLogic' };
   private readonly player: { car: object | null };
+  private motion: MenuMotion[] = [];
 
   constructor(source: string, readonly state: MainMenuState = INITIAL_MENU_STATE) {
     this.mainClass = parseSourceClass(source, new Set(['enter', 'exit']), 'MainMenu');
-    this.gatesClass = parseSourceClass(source, new Set(['buildSlidingMenu']), 'Gates');
+    this.gatesClass = parseSourceClass(source, new Set(['buildSlidingMenu', 'osdCommand', 'showPrimaryVisuals', 'cleanup']), 'Gates');
     this.player = { car: state.hasCar ? {} : null };
     for (const name of ['enter', 'exit']) if (!this.mainClass.methods.some(method => method.name === name)) throw new Error(`MainMenu.${name} missing`);
     if (!this.gatesClass.methods.some(method => method.name === 'buildSlidingMenu')) throw new Error('Gates.buildSlidingMenu missing');
@@ -37,8 +41,41 @@ export class MainMenuRuntime implements JavaHost {
     this.run(this.mainClass, 'enter', jv('MainMenu', this.menu), [previous]);
     const slider = (this.menu as MainMenu).window?.slider;
     if (!slider?.items.length || slider.selected < 0 || slider.selected >= slider.items.length) throw new Error('MainMenu built no valid sliding menu');
-    return { items: slider.items.map(item => ({ ...item })), selected: slider.selected };
+    return { items: slider.items.map(item => ({ ...item })), selected: slider.selected,
+      layout: { spacing: slider.spacing, y: slider.y, speed: slider.speed } satisfies MainMenuLayout };
   }
+
+  /** Send a UI action through the Java osdCommand switch and its SlidingMenu native. */
+  dispatchMenuAction(action: 'left' | 'right' | 'select') {
+    const name = { left: 'CMD_MENU_LEFT', right: 'CMD_MENU_RIGHT', select: 'CMD_MENU_SELECT' }[action];
+    const command = this.gatesClass.constants.get(name);
+    const window = this.menu.window;
+    if (!window?.slider || !command) throw new Error(`Java menu action unavailable: ${name}`);
+    const method = this.gatesClass.methods.find(method => method.name === 'osdCommand');
+    if (!method) throw new Error('Gates.osdCommand missing');
+    this.pendingCommand = undefined;
+    this.run(this.gatesClass, 'osdCommand', jv('Gates', window), [command]);
+    return { selected: window.slider.selected, command: this.pendingCommand };
+  }
+
+  primaryVisuals(): MenuMotion[] {
+    const window = this.menu.window;
+    if (!window) throw new Error('MainMenu not entered');
+    if (!this.gatesClass.methods.some(method => method.name === 'showPrimaryVisuals')) return [];
+    this.motion = [];
+    this.run(this.gatesClass, 'showPrimaryVisuals', jv('Gates', window), []);
+    return this.motion.map(motion => ({ ...motion }));
+  }
+
+  cleanupVisuals(): MenuMotion[] {
+    const window = this.menu.window;
+    if (!window || !this.gatesClass.methods.some(method => method.name === 'cleanup')) return [];
+    this.motion = [];
+    this.run(this.gatesClass, 'cleanup', jv('Gates', window), []);
+    return this.motion.map(motion => ({ ...motion }));
+  }
+
+  private pendingCommand: number | undefined;
 
   exit(next: JavaValue = nil()) {
     if (!this.menu.window) return;
@@ -56,6 +93,7 @@ export class MainMenuRuntime implements JavaHost {
   global(name: string): JavaValue {
     if (name === 'GameLogic') return jv('GameLogic', this.gameLogic);
     if (name === 'SlidingMenu') return jv('class', 'SlidingMenu');
+    if (name === 'Osd' || name === 'Input') return jv('class', name);
     if (name === 'osd') return jv('Osd', this.osd);
     if (name === 'player') return jv('Player', this.player);
     const constant = this.gatesClass.constants.get(name);
@@ -72,9 +110,18 @@ export class MainMenuRuntime implements JavaHost {
       if (name === 'DEBUG_MODE') return jv('int', Number(this.state.debugMode));
     }
     if (receiver.value === 'SlidingMenu' && name === 'STYLE_HORIZONTAL') return jv('int', 0);
+    if (receiver.value === 'Osd') {
+      const commands: Record<string, number> = { CMD_MENU_LF: 1, CMD_MENU_RG: 2, CMD_MENU_SEL: 3 };
+      if (name in commands) return jv('int', commands[name]);
+    }
+    if (receiver.value === 'Input' && name === 'AXIS_SELECT') return jv('int', -1);
     const obj = receiver.value;
     if (obj && typeof obj === 'object') {
       if ('slider' in obj && name === 'slider') return jv('SlidingMenu', (obj as Gates).slider);
+      if ('slider' in obj && name === 'message') return jv('MenuText', { name });
+      if ('slider' in obj && name === 'arrowGroup') return jv('int', 0);
+      if ('slider' in obj && ['center_line', 'logo_streetlegal_resized', 'logo_redline_resized'].includes(name)) return jv('MenuVisual', { name });
+      if ('slider' in obj && (name === 'messageSeek' || name === 'showMenu')) return jv('int', (obj as Gates)[name]);
       if ('myPrevState' in obj && name === 'myPrevState') return (obj as Gates).myPrevState;
       if ('car' in obj && name === 'car') return jv('Vehicle', (obj as typeof this.player).car);
       if ('items' in obj && name === 'active') return jv('int', (obj as Slider).active);
@@ -85,6 +132,7 @@ export class MainMenuRuntime implements JavaHost {
     if (receiver.value === this.menu && name === 'window') { this.menu.window = value.value as Gates | null; return; }
     const obj = receiver.value;
     if (obj && typeof obj === 'object') {
+      if ('slider' in obj && (name === 'messageSeek' || name === 'showMenu')) { (obj as Gates)[name] = integer(value); return; }
       if ('myPrevState' in obj && name === 'myPrevState') { (obj as Gates).myPrevState = value; return; }
       if ('slider' in obj && name === 'slider') { (obj as Gates).slider = value.value as Slider; return; }
       if ('items' in obj && name === 'active') { (obj as Slider).active = integer(value); return; }
@@ -92,26 +140,59 @@ export class MainMenuRuntime implements JavaHost {
     throw new Error(`Cannot set menu field ${receiver.type}.${name}`);
   }
   construct(name: string, args: JavaValue[]): JavaValue {
-    if (name === 'Gates' && args.length === 0) return jv('Gates', { myPrevState: nil(), slider: null } satisfies Gates);
+    if (name === 'Gates' && args.length === 0) return jv('Gates', { myPrevState: nil(), slider: null, messageSeek: 0, showMenu: 0 } satisfies Gates);
     throw new Error(`Unsupported menu constructor ${name}`);
   }
   call(receiver: JavaValue, name: string, args: JavaValue[]): JavaValue {
     const obj = receiver.value;
+    if (receiver.type === 'MenuText' && name === 'changeText' && args.length === 1) return nil();
+    if (obj === this.osd && name === 'hideGroup' && args.length === 1) return nil();
+    if (receiver.type === 'MenuVisual' && obj && typeof obj === 'object') {
+      if (name === 'runAnimation' && args.length === 4) {
+        this.motion.push({ target: (obj as { name: string }).name, operation: 'runAnimation', speed: Number(args[0].value),
+          steps: integer(args[1]), direction: integer(args[2]), axis: String(args[3].value) });
+        return nil();
+      }
+      if (name === 'reverseAnimation' && args.length === 1) {
+        this.motion.push({ target: (obj as { name: string }).name, operation: 'reverseAnimation', speed: 0, steps: 0, direction: 0, axis: String(args[0].value) });
+        return nil();
+      }
+    }
     if (obj && typeof obj === 'object' && 'myPrevState' in obj) {
       if (name === 'show' && args.length === 0) { this.run(this.gatesClass, 'buildSlidingMenu', receiver, []); return nil(); }
       if (name === 'hide' && args.length === 0) return nil();
     }
-    if (obj === this.osd && name === 'createSlidingMenu' && args.length === 7) return jv('SlidingMenu', { items: [], selected: 0, active: 0, speed: 0 } satisfies Slider);
+    if (obj === this.osd && name === 'createSlidingMenu' && args.length === 7) return jv('SlidingMenu', {
+      items: [], selected: 0, active: 0, speed: 0, spacing: Number(args[2].value), y: Number(args[1].value),
+    } satisfies Slider);
     if (obj && typeof obj === 'object' && 'items' in obj) {
       const slider = obj as Slider;
+      if (name === 'teleport' && (args.length === 0 || args.length === 4)) {
+        this.motion.push({ target: 'slider', operation: 'teleport', speed: args.length ? Number(args[0].value) : 0,
+          steps: args.length ? integer(args[1]) : 0, direction: args.length ? integer(args[2]) : 0,
+          axis: args.length ? String(args[3].value) : 'X' });
+        return nil();
+      }
       if (name === 'addItem' && args.length === 7) {
         const active = args[3].value as { pack: string; id: number }, disabled = args[4].value as { pack: string; id: number };
-        if (active?.pack?.toLowerCase() !== 'frontend' || disabled?.pack?.toLowerCase() !== 'frontend') throw new Error('Unsupported menu resource namespace');
-        slider.items.push({ active: active.id, disabled: disabled.id, command: integer(args[5]), label: String(args[6].value) });
+        if (!active?.pack || !disabled?.pack) throw new Error('Menu item requires image resources');
+        slider.items.push({ active: { ...active }, disabled: { ...disabled }, command: integer(args[5]), label: String(args[6].value),
+          width: Number(args[0].value), height: Number(args[1].value), depth: integer(args[2]) });
         return nil();
       }
       if (name === 'activate' && args.length === 1) { slider.selected = integer(args[0]); return nil(); }
       if (name === 'setSpeed' && args.length === 1) { slider.speed = Number(args[0].value); return nil(); }
+      if (name === 'deactivate' && args.length === 0) { slider.active = 0; return nil(); }
+      if (name === 'execute' && args.length === 1) {
+        if (!slider.items.length) throw new Error('Empty sliding menu');
+        switch (integer(args[0])) {
+          case 1: slider.selected = (slider.selected + slider.items.length - 1) % slider.items.length; break;
+          case 2: slider.selected = (slider.selected + 1) % slider.items.length; break;
+          case 3: this.pendingCommand = slider.items[slider.selected].command; break;
+          default: throw new Error(`Unknown SlidingMenu command ${args[0].value}`);
+        }
+        return nil();
+      }
     }
     throw new Error(`Missing menu native ${receiver.type}.${name}`);
   }
