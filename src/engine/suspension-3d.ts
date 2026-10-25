@@ -16,7 +16,7 @@ export class Suspension3D {
   private movingParts: { part: EnginePart; base: Matrix4 }[][] = [[], [], [], []];
   readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
-  readonly wheels: { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; rest: number; bump: number; droop: number; length: number; contact: boolean; force: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number }[];
+  readonly wheels: { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; rest: number; bump: number; droop: number; length: number; contact: boolean; force: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number; omega: number; slip: number }[];
   steer = 0;
   constructor(readonly root: EnginePart, readonly body: RigidBody3D, readonly terrain: Terrain) {
     this.springMass = body.mass;
@@ -27,7 +27,7 @@ export class Suspension3D {
       if (!wheel?.radius || !part) throw new Error('3D suspension needs installed wheels and CFG radii');
       const [rest, bump, droop] = wheel.spring ?? [0.29, 0.1, 0.05], frame = root.slotFrame(slot), center = new Vector3().setFromMatrixPosition(frame);
       const hardpoint = center.clone().add(new Vector3(0, rest, 0));
-      return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius, rest, bump, droop, length: rest, contact: false, force: 0, frame, inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0 };
+      return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius, rest, bump, droop, length: rest, contact: false, force: 0, frame, inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0, omega: 0, slip: 0 };
     });
     if (this.wheels.length !== 4) throw new Error('3D prototype requires four configured wheels');
     for (const part of root.children.values()) {
@@ -39,7 +39,7 @@ export class Suspension3D {
     const slot = cfg.slots.find(s => s.type === 11), part = slot && root.children.get(slot.id);
     if (slot && part) this.steering = { part, frame: slotMatrix(cfg, slot), inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert() };
   }
-  reset() { this.steer = 0; this.wheels.forEach(w => { w.spin = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.hardpoint.copy(w.originalHardpoint); }); this.movingParts.flat().forEach(m => m.base.copy(m.part.local)); }
+  reset() { this.steer = 0; this.mechanics?.reset(); this.wheels.forEach(w => { w.spin = w.omega = w.slip = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.hardpoint.copy(w.originalHardpoint); }); this.movingParts.flat().forEach(m => m.base.copy(m.part.local)); }
   /** A bent chassis moves the rest seat; the wheel travel is applied on top of it. */
   setMechanicalBase(part: EnginePart, local: Matrix4) {
     for (const corner of this.movingParts) {
@@ -59,6 +59,7 @@ export class Suspension3D {
   step(dt: number, input: DrivingInput) {
     const target = Math.max(-1, Math.min(1, input.steer)) * (this.root.definition.config.maxSteer ?? 0.6); this.steer += Math.max(-2 * dt, Math.min(2 * dt, target - this.steer));
     const frame = this.body.matrix(), count = this.wheels.length;
+    const drivetrain = this.mechanics?.advance(dt, input, this.wheels.map(w => w.omega));
     for (const [index, w] of this.wheels.entries()) {
       const support = this.mechanics?.support(index) ?? 1;
       const failure = Math.max(0, 1 - Math.min(w.mountCondition, support) / 0.1);
@@ -80,10 +81,29 @@ export class Suspension3D {
         this.body.addForce(normal.clone().multiplyScalar(w.force), hard);
         const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), this.steer * w.steering).transformDirection(alignment).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();
         const side = new Vector3().crossVectors(forward, normal).normalize(), velocity = this.body.pointVelocity(patch), longitudinal = velocity.dot(forward);
-        const drive = this.mechanics ? this.mechanics.driveForce(index, longitudinal, w.radius, Math.max(-1, Math.min(1, input.throttle))) : Math.max(-1, Math.min(1, input.throttle)) * this.body.mass * 5 / count;
-        const braking = input.brake ? -longitudinal * this.body.mass / count / dt * (this.mechanics?.brake(index) ?? 1) : -longitudinal * this.body.mass * 0.08 / count;
-        const lateral = -velocity.dot(side) * this.body.mass / count / (dt * 6), force = forward.multiplyScalar(drive + braking).addScaledVector(side, lateral), limit = w.force * 1.05 * Math.max(0.25, Math.pow(Math.abs(down.dot(normal)), 2));
-        if (force.length() > limit) force.setLength(limit); this.body.addForce(force, patch); w.spin += longitudinal * dt / w.radius;
+        const drive = this.mechanics ? drivetrain!.torque[index] : Math.max(-1, Math.min(1, input.throttle)) * this.body.mass * 5 / count;
+        const braking = input.brake || drivetrain?.directionBrake;
+        const limit = w.force * 1.05 * Math.max(0.25, Math.pow(Math.abs(down.dot(normal)), 2));
+        if (this.mechanics) {
+          const slipSpeed = w.omega * w.radius - longitudinal;
+          w.slip = slipSpeed / Math.max(2, Math.abs(longitudinal), Math.abs(w.omega * w.radius));
+          const slide = Math.min(1, Math.hypot(slipSpeed, velocity.dot(side)) / 3);
+          const grip = limit * (1 - 0.28 * slide);
+          const force = forward.clone().multiplyScalar(slipSpeed * 3400).addScaledVector(side, -velocity.dot(side) * 3000);
+          if (force.length() > grip) force.setLength(grip);
+          this.body.addForce(force, patch);
+          const brakeTorque = braking ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
+          w.omega += (drive - force.dot(forward) * w.radius - brakeTorque - w.omega * 0.15) / 1.6 * dt;
+          w.spin += w.omega * dt;
+        } else {
+          const brakeForce = braking ? -longitudinal * this.body.mass / count / dt : -longitudinal * this.body.mass * 0.08 / count;
+          const force = forward.multiplyScalar(drive + brakeForce).addScaledVector(side, -velocity.dot(side) * this.body.mass / count / (dt * 6));
+          if (force.length() > limit) force.setLength(limit); this.body.addForce(force, patch); w.spin += longitudinal * dt / w.radius;
+        }
+      }
+      else if (this.mechanics) {
+        const brakeTorque = input.brake || drivetrain!.directionBrake ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
+        w.omega += (drivetrain!.torque[index] - brakeTorque - w.omega * 0.25) / 1.6 * dt; w.spin += w.omega * dt; w.slip = 0;
       }
     }
     if (this.mechanics) for (const first of [0, 2]) {

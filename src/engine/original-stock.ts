@@ -3,7 +3,7 @@ import type { Triple } from '../formats/cfg';
 import type { PartDefinition, ResourceKey } from './world';
 
 export type WheelCorner = 'FL' | 'FR' | 'RL' | 'RR';
-export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string; renderVariants?: Partial<Record<WheelCorner, ResourceKey>>; slotPositions?: { base: number; position: Triple }[] }
+export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string; transmissionType?: string; renderVariants?: Partial<Record<WheelCorner, ResourceKey>>; slotPositions?: { base: number; position: Triple }[] }
 const clean = (s: string) => s.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 const mask = (s: string) => s.replace(/"(?:\\.|[^"\\])*"/g, m => ' '.repeat(m.length));
 function closing(s: string, start: number, open = '{', close = '}') { let depth = 1; for (let i = start + 1; i < s.length; i++) { if (s[i] === open) depth++; if (s[i] === close && --depth === 0) return i; } throw new Error('Unbalanced original source'); }
@@ -94,6 +94,12 @@ export class OriginalStock {
     if (!kind) return;
     const values: Record<string, number> = {};
     for (const m of source.matchAll(/\b(\w+(?:\[\d+\])?)\s*=\s*([^;{}]+);/g)) { const n = originalNumber(m[2]); if (n !== undefined && values[m[1]] === undefined) values[m[1]] = n; }
+    const range = /\bcalculateOptandRange\s*\(\s*([^,]+),\s*([^)]+)\)/.exec(source);
+    if (range) {
+      const from = originalNumber(range[1]), to = originalNumber(range[2]);
+      if (from !== undefined && to !== undefined && to > from) { values.rpm_turbo_opt = (from + to) / 2; values.rpm_turbo_range = (to - from) / 2; }
+    }
+    if (values.P_turbo_waste === undefined && values.default_P_turbo_waste !== undefined && /\bP_turbo_waste\s*=\s*default_P_turbo_waste\s*;/.test(source)) values.P_turbo_waste = values.default_P_turbo_waste;
     const call = (name: string) => { const args = new RegExp(`wheel\\.${name}\\s*\\(([^)]+)\\)`).exec(source)?.[1]; if (!args) return; const a = args.split(',').map(originalNumber); return a.every(n => n !== undefined) ? a as number[] : undefined; };
     const renderVariants: Partial<Record<WheelCorner, ResourceKey>> = {};
     if (kind === 'brake') for (const match of source.matchAll(/\brenderID_(FL|FR|RL|RR)\s*=\s*([\w.]+):0x([\da-f]+)r\s*;/gi)) {
@@ -104,6 +110,6 @@ export class OriginalStock {
       const numbers = match[2].split(',').map(originalNumber);
       if (numbers.length === 3 && numbers.every(n => n !== undefined)) slotPositions.push({ base: Number(match[1]), position: numbers as Triple });
     }
-    return { kind, source: def.script!, values, hub: call('setHub'), arm: call('setArm'), drive: /\bdrive_type\s*=\s*(\w+)/.exec(source)?.[1], renderVariants: Object.keys(renderVariants).length ? renderVariants : undefined, slotPositions: slotPositions.length ? slotPositions : undefined };
+    return { kind, source: def.script!, values, hub: call('setHub'), arm: call('setArm'), drive: /\bdrive_type\s*=\s*([^;]+)/.exec(source)?.[1].trim(), transmissionType: /\btype\s*=\s*(TT_\w+)/.exec(source)?.[1], renderVariants: Object.keys(renderVariants).length ? renderVariants : undefined, slotPositions: slotPositions.length ? slotPositions : undefined };
   }
 }

@@ -92,7 +92,7 @@ trackDriveButton.onclick = async () => {
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · поездка'; el('format').textContent = 'MAP / PHYSICS';
-    el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — вернуться на старт';
+    el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · Q/E — передачи вручную · Shift — сцепление · R — вернуться на старт';
     el('details').textContent = `${map.loaded} моделей карты · ${map.objects} объектов по RDB/CFG · ${map.collision.boxes} физических коробок · ${map.terrain.faces} треугольников опоры. Старт взят с прямой 1/4 мили из TestTrack.java. Для размещённых объектов используются исходные позиции RDB и формы box из CFG; остальная коллизия карты пока построена из SCX.`;
     status('Поездка по треку');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Поездка недоступна', true); el('details').textContent = String(error); } }
@@ -135,7 +135,7 @@ crashButton.onclick = async () => {
     el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; internals.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'Завершить поездку';
-    el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · R — восстановить машину';
+    el('scene-help').textContent = 'W/S — газ и задний ход · A/D — руль · Пробел — тормоз · Q/E — передачи вручную · Shift — сцепление · R — восстановить машину';
     el('details').textContent = 'Оригинальные стойки, пружины, амортизаторы, тормоза и двигатель установлены по Java addStockParts и CFG креплениям. Их состояние меняет опору колёс, демпфирование, торможение и тягу; перекос колеса начинается ниже 10% состояния стойки. При нуле стойка остаётся на кузове, колесо отделяется. Двигатель падает одним телом со всеми вложенными деталями. Кнопки отрыва диагностически выставляют 0% состояния. «Внутренние узлы» скрывает кузов для осмотра. R восстанавливает сборку.';
     el('filename').textContent = 'Baiern · подвеска и повреждения'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('Испытание в 3D');
   } catch (error) { stopDrive(); viewer.clear(); status('Ошибка испытания', true); el('details').textContent = String(error); }

@@ -68,3 +68,50 @@ test('installed original component condition changes support, damping, braking a
   world.install(root, 404, transmission, 1); block.condition = 0; assert.equal(system.driveForce(2, 0, 0.315, 1), 0);
   world.dispose();
 });
+
+test('drivetrain keeps engine RPM independent of road speed, shifts and distributes front/rear torque', () => {
+  const build = (drive: string, front = 0.5) => {
+    const world = new EngineWorld(), make = (id: number, values: Record<string, number>, script = `${id}.java`) => world.create({
+      key: { pack: 'test.rpk', id }, alias: String(id), cfgPath: `${id}.cfg`, script,
+      config: parsePartConfig('slot 0 0 0 0 0 0 1'), mechanics: { kind: 'engine', source: script, values, drive: id === 5 ? drive : undefined },
+    });
+    const root = world.create({ key: { pack: 'test.rpk', id: 1 }, alias: 'root', cfgPath: 'root.cfg', config: parsePartConfig('slot 0 0 0 0 0 0 1') });
+    for (let id = 2; id <= 8; id++) root.definition.config.slots.push({ id, position: [0, 0, 0], rotation: [0, 0, 0], attach: [], compatible: [] });
+    const parts = [
+      make(2, { cylinders: 6, bore: 80, rpm_idle: 900, RPM_limit: 6500 }), make(3, { stroke: 90 }),
+      make(4, { intake_valve_diam: 32 }), make(5, { gears: 3, 'ratio[1]': 3.5, 'ratio[2]': 2.1, 'ratio[3]': 1.4, 'ratio[7]': -3, end_ratio: 3, drive_front: front }),
+      make(6, {}, 'clutch.java'), make(7, {}, 'fuel_rail.java'), make(8, { rpm_turbo_opt: 3500, rpm_turbo_range: 3500, P_turbo_max: 1.2, P_turbo_waste: 0.8 }, 'turbocharger.java'),
+    ];
+    for (const part of parts) world.install(root, part.definition.key.id, part, 1);
+    const system = new MechanicalSystem(root); system.reset(); return { world, system };
+  };
+  for (const [drive, front] of [['DT_FWD', 1], ['DT_RWD', 0], ['DT_FWD | DT_RWD', 0.7]] as const) {
+    const { world, system } = build(drive, front), result = system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]);
+    assert.ok(Math.abs(result.torque[0]) > 0 || front === 0);
+    assert.ok(Math.abs(result.torque[2]) > 0 || front === 1);
+    if (front === 0) assert.equal(result.torque[0], 0);
+    if (front === 1) assert.equal(result.torque[2], 0);
+    if (front === 0.7) assert.ok(Math.abs(result.torque[0] / result.torque[2] - 0.7 / 0.3) < 1e-10);
+    world.dispose();
+  }
+  const { world, system } = build('DT_RWD');
+  for (let i = 0; i < 240; i++) system.advance(1 / 240, { throttle: 1, clutch: true }, [0, 0, 0, 0]);
+  assert.ok(system.rpm > 2000, `free revs: ${system.rpm}`);
+  assert.ok(system.boost > 0, `installed turbo produces boost: ${system.boost}`);
+  system.advance(1 / 240, { throttle: 0, gearUp: true }, [0, 0, 0, 0]);
+  assert.equal(system.gear, 2); assert.equal(system.manual, true);
+  for (let i = 0; i < 60; i++) system.advance(1 / 240, { throttle: 0 }, [0, 0, 0, 0]);
+  system.advance(1 / 240, { throttle: 0, gearDown: true }, [0, 0, 0, 0]); assert.equal(system.gear, 1);
+  system.reset(); assert.equal(system.gear, 1); assert.equal(system.boost, 0); assert.equal(system.manual, false);
+  world.dispose();
+});
+
+test('charger parser derives original boost band, wastegate and combined drive type', async () => {
+  const path = 'parts/engines/mod/scripts/src/sample.java';
+  const source = 'class sample extends TurboCharger { sample(int id) { calculateOptandRange(5000.0, 9000.0); P_turbo_max = 2.0; default_P_turbo_waste = 1.0; P_turbo_waste = default_P_turbo_waste; drive_type = DT_FWD | DT_RWD; type = TT_AUTO; } }';
+  const assets = new Assets([{ path, size: source.length }], async () => new TextEncoder().encode(source));
+  const definition: PartDefinition = { key: { pack: 'parts.rpk', id: 1 }, alias: 'sample', cfgPath: 'parts/engines/mod/sample.cfg', script: 'parts/engines/mod/scripts/sample.class', config: parsePartConfig('slot 0 0 0 0 0 0 1') };
+  const profile = (await new OriginalStock(assets).profile(definition))!;
+  assert.equal(profile.values.rpm_turbo_opt, 7000); assert.equal(profile.values.rpm_turbo_range, 2000);
+  assert.equal(profile.values.P_turbo_waste, 1); assert.equal(profile.drive, 'DT_FWD | DT_RWD'); assert.equal(profile.transmissionType, 'TT_AUTO');
+});
