@@ -21,7 +21,8 @@
     "verify:hood": "tsx tools/verify-hood.ts",
     "verify:crash": "tsx tools/verify-crash.ts",
     "verify:3d": "tsx tools/verify-3d.ts",
-    "verify:components": "tsx tools/verify-components.ts"
+    "verify:components": "tsx tools/verify-components.ts",
+    "report:stock-benchmark": "tsx tools/report-stock-benchmark.ts"
   },
   "dependencies": { "three": "^0.180.0" },
   "devDependencies": { "@types/node": "^24.0.0", "@types/three": "^0.180.0", "tsx": "^4.20.0", "typescript": "^5.9.0", "vite": "^7.1.0" }

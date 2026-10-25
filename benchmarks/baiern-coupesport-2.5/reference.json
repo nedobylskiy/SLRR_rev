@@ -1,0 +1,53 @@
+{
+  "vehicle": "Baiern CoupeSport 2.5",
+  "configuration": "user-reported stock engine in the installed game; saved best results may reflect earlier runs or tuning",
+  "sourceImages": ["vehicle-specs.png", "engine-graph.png", "test-track-results.png"],
+  "chassis": {
+    "massKg": 1482,
+    "lengthMm": 4258,
+    "widthMm": 1647,
+    "heightMm": 1142,
+    "groundClearanceMm": 102,
+    "frontTrackMm": 1418,
+    "rearTrackMm": 1454,
+    "wheelbaseMm": 2736,
+    "frontWeightPercent": 47.4,
+    "rearWeightPercent": 52.5,
+    "drive": "RWD"
+  },
+  "engine": {
+    "cylinders": 6,
+    "displacementCc": 2714,
+    "boreMm": 80,
+    "strokeMm": 90,
+    "staticCompressionRatio": 10.4,
+    "idleRpm": 1000,
+    "redlineRpm": 7000,
+    "destructionRpm": 9000,
+    "peakFlywheelTorqueNm": 205,
+    "peakFlywheelTorqueFtLb": 151,
+    "peakTorqueRpm": 4500,
+    "peakFlywheelPowerHp": 194,
+    "peakFlywheelPowerKw": 143,
+    "peakPowerRpm": 6250,
+    "fuel": "98 octane pump gas"
+  },
+  "transmission": {
+    "forwardRatios": [3.579, 2.49, 1.659, 1.24, 1],
+    "reverseRatioMagnitude": 4,
+    "finalDriveRatio": 3.029
+  },
+  "testTrackResults": {
+    "topSpeedKph": 195.9,
+    "zeroTo100Seconds": 6.109,
+    "quarterMileSeconds": 14.542,
+    "quarterMileTrapKph": 137,
+    "mileSeconds": 39.763,
+    "mileTrapKph": 195.9
+  },
+  "displayedDerivedValues": {
+    "hpPerLiter": 97.3,
+    "kgPerHp": 7.642,
+    "kgPerNm": 74.132
+  }
+}

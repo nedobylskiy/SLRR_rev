@@ -89,7 +89,9 @@ export class MechanicalSystem {
     if (front) return [0.5, 0.5, 0, 0];
     return [0, 0, 0.5, 0.5];
   }
-  private torqueAt(rpm: number) {
+  /** Current fallback flywheel curve for diagnostics; excludes throttle and component condition. */
+  estimateFlywheelTorqueAt(rpm: number) {
+    if (!Number.isFinite(rpm) || rpm < 0) throw new Error('Invalid engine RPM');
     const limit = this.block?.definition.mechanics?.values.RPM_limit ?? 6500;
     const peak = limit * 0.58, width = Math.max(1000, limit * 0.58);
     const shape = Math.max(0.2, 1 - 0.55 * ((rpm - peak) / width) ** 2);
@@ -134,7 +136,7 @@ export class MechanicalSystem {
     const omega = Math.max(idle, this.rpm) * Math.PI / 30;
     const firing = this.rpm < limit && this.power > 0;
     const idleControl = this.rpm < idle ? Math.min(80, 25 + (idle - this.rpm) * 0.25) : 0;
-    const engineTorque = firing ? (this.torqueAt(this.rpm) * gas + idleControl) * this.power : 0;
+    const engineTorque = firing ? (this.estimateFlywheelTorqueAt(this.rpm) * gas + idleControl) * this.power : 0;
     const drag = 14 + Math.max(0, this.rpm - idle) * 0.012;
     const directionBrake = this.gear > 0 && throttle < 0 || this.gear < 0 && throttle > 0;
     const clutchOpen = !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power;
