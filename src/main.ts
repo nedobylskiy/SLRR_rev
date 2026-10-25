@@ -9,6 +9,7 @@ import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
 import { mountMainMenu } from './osd/main-menu';
+import { MainMenuRuntime } from './runtime/main-menu-runtime';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Подключение…</span><button id="memory-lab">Поток в памяти</button><label class="button">Открыть папку игры<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -130,22 +131,27 @@ function stopDrive() {
   disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Пробная поездка';
   el('scene-help').textContent = 'ЛКМ — вращение · Колесо — масштаб · ПКМ — перемещение';
 }
-function openMainMenu() {
+async function openMainMenu() {
   if (!assets?.byPath.has('frontend.rpk')) { status('Ресурсы меню недоступны', true); return; }
-  ++sequence;
+  const request = ++sequence;
   stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined;
   disposeMemoryLab?.(); disposeMemoryLab = undefined; viewer?.clear();
   el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
-  const menu = mountMainMenu(document.body, assets, item => {
-    if (item.command === 0xa008) { trackDriveButton.click(); return; }
-    if (item.command === 0xb004) { stopDrive(); status('Каталог ресурсов'); return; }
-    menu.showMessage('Этот раздел станет доступен после переноса игровой логики.');
-  }, () => { stopDrive(); status('Каталог ресурсов'); });
-  disposeOsdMenu = () => menu.dispose();
-  el('filename').textContent = 'Главное меню · MainMenu.java'; el('format').textContent = 'OSD / FRONTEND';
-  el('scene-help').textContent = '←/→ — выбор · Enter — открыть · Esc — каталог';
-  el('details').textContent = 'Экран собран из MainMenu.java и изображений frontend.rpk установленной игры. Свободная поездка открывает текущую тестовую трассу; остальные режимы будут подключены вместе с игровой логикой.';
-  status('Главное меню');
+  try {
+    const source = new TextDecoder().decode(await assets.read('sl/scripts/game/src/MainMenu.java'));
+    if (request !== sequence) return;
+    const runtime = new MainMenuRuntime(source), built = runtime.enter();
+    const menu = mountMainMenu(document.body, assets, built.items, built.selected, item => {
+      if (item.command === 0xa008) { trackDriveButton.click(); return; }
+      if (item.command === 0xb004) { stopDrive(); status('Каталог ресурсов'); return; }
+      menu.showMessage('Этот раздел станет доступен после переноса игровой логики.');
+    }, () => { stopDrive(); status('Каталог ресурсов'); });
+    disposeOsdMenu = () => { runtime.exit(); menu.dispose(); };
+    el('filename').textContent = 'Главное меню · MainMenu.java'; el('format').textContent = 'JAVA / OSD';
+    el('scene-help').textContent = '←/→ — выбор · Enter — открыть · Esc — каталог';
+    el('details').textContent = 'MainMenu.enter() и Gates.buildSlidingMenu() выполняются из установленного Java-исходника. Свободная поездка открывает текущую трассу; прочие команды ждут игровую логику.';
+    status('Главное меню');
+  } catch (error) { if (request === sequence) { status('Ошибка исполнения MainMenu.java', true); el('details').textContent = String(error); } }
 }
 crashButton.onclick = async () => {
   const opening = openWorld('cars/racers/Baiern.rpk', 6), request = sequence;

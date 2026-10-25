@@ -27,6 +27,8 @@ function lex(source: string): Token[] {
       const decoded = str[0].slice(1, -1).replace(/\\(u[0-9a-fA-F]{4}|[nrtbf"'\\])/g, (_m, c: string) => c[0] === 'u' ? String.fromCharCode(parseInt(c.slice(1), 16)) : ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' }[c] ?? c));
       tokens.push({ text: str[0], line, value: jv('String', decoded) }); offset += str[0].length; continue;
     }
+    const resource = /^([A-Za-z_$][\w$]*):(0[xX][\da-fA-F]+)r\b/.exec(tail);
+    if (resource) { tokens.push({ text: resource[0], line, value: jv('ResourceRef', { pack: resource[1], id: Number(resource[2]) }) }); offset += resource[0].length; continue; }
     const number = /^(?:0[xX][\da-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)/.exec(tail);
     if (number) { const s = number[0], floating = !/^0x/i.test(s) && /[.eEfFdD]/.test(s); tokens.push({ text: s, line, value: jv(floating ? 'float' : 'int', floating ? Math.fround(Number(s.replace(/[fFdD]$/, ''))) : Number(s) | 0) }); offset += s.length; continue; }
     const word = /^[A-Za-z_$][\w$]*/.exec(tail);
@@ -108,12 +110,12 @@ class Parser {
   }
 }
 
-export function parseSourceClass(source: string, selected = new Set(['save', 'load', 'createFromFile'])): SourceClass {
-  const tokens = lex(source), ci = tokens.findIndex(t => t.text === 'class'); if (ci < 0) throw new Error('No Java class');
+export function parseSourceClass(source: string, selected = new Set(['save', 'load', 'createFromFile']), className?: string): SourceClass {
+  const tokens = lex(source), ci = tokens.findIndex((t, i) => t.text === 'class' && (!className || tokens[i + 1]?.text === className)); if (ci < 0) throw new Error(`Java class missing: ${className ?? '(first)'}`);
   const name = tokens[ci + 1].text, parent = tokens[ci + 2]?.text === 'extends' ? tokens[ci + 3].text : null;
   const methods: SourceMethod[] = [], constants = new Map<string, JavaValue>(); let depth = 0;
   for (let i = tokens.findIndex((t, at) => at > ci && t.text === '{'); i < tokens.length; i++) {
-    const t = tokens[i]; if (t.text === '{') { depth++; continue; } if (t.text === '}') { depth--; continue; }
+    const t = tokens[i]; if (t.text === '{') { depth++; continue; } if (t.text === '}') { depth--; if (depth === 0) break; continue; }
     if (depth === 1 && /^[A-Z][A-Z0-9_]*$/.test(t.text) && tokens[i + 1]?.text === '=' && tokens[i + 2]?.value && tokens[i + 3]?.text === ';')
       constants.set(t.text, coerce(tokens[i - 1].text, tokens[i + 2].value!));
     if (depth !== 1 || !selected.has(t.text) || tokens[i + 1]?.text !== '(') continue;
