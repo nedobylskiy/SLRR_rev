@@ -13,6 +13,7 @@ export interface OsdElement {
   readonly node: HTMLElement;
   setText(value: string): void;
   setResource(resource: OsdResource): void;
+  setBounds(x: number, y: number, width: number, height: number, depth: number): void;
   show(): void;
   hide(): void;
 }
@@ -93,6 +94,12 @@ export class OsdLayer {
         const request = ++imageRequest;
         void this.imageUrl(resource).then(url => { if (!this.disposed && request === imageRequest) image.src = url; })
           .catch(() => { if (!this.disposed && request === imageRequest) node.classList.add('osd-missing-image'); });
+      },
+      setBounds: (x, y, width, height, depth) => {
+        const bounds = osdBounds(x, y, width, height);
+        node.style.left = `${bounds.left}%`; node.style.top = `${bounds.top}%`;
+        node.style.width = `${bounds.width}%`; node.style.height = `${bounds.height}%`;
+        node.style.zIndex = String(depth + 10);
       },
       show: () => { node.hidden = false; },
       hide: () => { node.hidden = true; },

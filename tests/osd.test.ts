@@ -92,6 +92,35 @@ test('game state and source edits change the executed menu', () => {
   assert.throws(() => new MainMenuRuntime(source.replace('buildSlidingMenu', 'buildSomethingElse')), /buildSlidingMenu missing/);
 });
 
+test('source show and run control selection and label color, with finite native slider bounds', () => {
+  const scripted = source.replace('  public void buildSlidingMenu() {', `
+    ColorBank bank = new ColorBank();
+    int m_idx; int m_dir = 1; int m_iterator = 3;
+    public void show() { osd.createText("version from source"); buildSlidingMenu(); slider.activate(0); slider.active = 1; showMenu = 2; }
+    public void run() { for(;;) {
+      if(message.text && message.text != "") {
+        if(m_iterator == 3) { m_idx += m_dir; message.setColor(bank.getColor(m_idx)); m_iterator = 0; }
+        else m_iterator++;
+      }
+      if(slider && slider.active && showMenu > 0) message.changeText(slider.getLabel());
+    } }
+    public void buildSlidingMenu() {`) + `
+    class ColorBank {
+      int[] color = new int[2];
+      public ColorBank() { color[1] = 0xF0BB0000; }
+      public int getColor(int id) { return color[id]; }
+    }`;
+  const runtime = new MainMenuRuntime(scripted);
+  assert.equal(runtime.enter().selected, 0);
+  assert.equal(runtime.versionText, 'version from source');
+  assert.equal(runtime.dispatchMenuAction('left').selected, 0);
+  assert.equal(runtime.tick().text, 'NEW CAREER');
+  assert.equal(runtime.tick().color >>> 0, 0xF0BB0000);
+  assert.equal(runtime.dispatchMenuAction('right').selected, 1);
+  assert.equal(runtime.tick().text, 'FREERIDE');
+  assert.equal(runtime.dispatchMenuAction('right').selected, 1);
+});
+
 test('OSD animation interval follows Java steps and direction', () => {
   assert.deepEqual(osdMotionInterval(50, { operation: 'runAnimation', speed: 0.2, steps: 25, direction: 1, axis: 'X' }), [-200, 50]);
   assert.deepEqual(osdMotionInterval(50, { operation: 'teleport', speed: 0.1, steps: 50, direction: 1, axis: 'X' }), [300, 50]);

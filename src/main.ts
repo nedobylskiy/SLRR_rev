@@ -146,11 +146,11 @@ async function openMainMenu() {
       if (item.command === 0xa008) { trackDriveButton.click(); return; }
       if (item.command === 0xb004) { stopDrive(); status('Каталог ресурсов'); return; }
       menu.showMessage('Этот раздел станет доступен после переноса игровой логики.');
-    }, () => { void menu.animateOut(runtime.cleanupVisuals()).then(() => { stopDrive(); status('Каталог ресурсов'); }); }, localInstallation ? '/api/game/menu-video' : undefined);
+    }, () => { void menu.animateOut(runtime.cleanupVisuals()).then(() => { stopDrive(); status('Каталог ресурсов'); }); }, localInstallation ? '/api/game/menu-video' : undefined, () => runtime.tick(), runtime.versionText);
     disposeOsdMenu = () => { runtime.exit(); menu.dispose(); };
     el('filename').textContent = 'Главное меню · MainMenu.java'; el('format').textContent = 'JAVA / OSD';
     el('scene-help').textContent = '←/→ — выбор · Enter — открыть · Esc — каталог';
-    el('details').textContent = 'MainMenu.enter(), Gates.buildSlidingMenu() и навигация Gates.osdCommand() выполняются из установленного Java-исходника. Свободная поездка открывает текущую трассу; прочие команды ждут игровую логику.';
+    el('details').textContent = 'MainMenu.enter(), Gates.show(), Gates.buildSlidingMenu(), Gates.run() и Gates.osdCommand() выполняются из установленного Java-исходника. Вызовы других игровых систем пока заглушены. Свободная поездка открывает текущую трассу; прочие разделы ждут игровой логики.';
     status('Главное меню');
   } catch (error) { if (request === sequence) { status('Ошибка исполнения MainMenu.java', true); el('details').textContent = String(error); } }
 }

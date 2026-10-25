@@ -4,7 +4,8 @@ import type { MainMenuItem, MainMenuLayout, MenuMotion, MenuResource } from '../
 
 export function mountMainMenu(viewport: HTMLElement, assets: Assets, items: readonly MainMenuItem[], initialSelection: number,
   layout: MainMenuLayout, motions: readonly MenuMotion[], dispatch: (action: 'left' | 'right' | 'select') => { selected: number; command?: number },
-  onCommand: (item: MainMenuItem) => void, onClose: () => void, backgroundVideoUrl?: string) {
+  onCommand: (item: MainMenuItem) => void, onClose: () => void, backgroundVideoUrl?: string,
+  tick?: () => { text: string; color: number }, versionText = '') {
   if (!items.length || initialSelection < 0 || initialSelection >= items.length) throw new Error('Invalid main menu items');
   const osd = new OsdLayer(viewport, assets);
   const resource = (id: number): OsdResource => ({ pack: 'frontend.rpk', id });
@@ -27,18 +28,20 @@ export function mountMainMenu(viewport: HTMLElement, assets: Assets, items: read
   let selected = initialSelection;
   let closing = false;
   let ready = motions.length === 0;
+  let animationTimer: number | undefined;
   const spacing = layout.spacing * 0.6;
-  const slots = Array.from({ length: 7 }, (_, index) => {
-    const offset = index - 3, item = items[(selected + offset + items.length) % items.length];
+  const slots = items.map((item, index) => {
+    const offset = index - selected;
     const scale = offset ? 1.1 : 1.43;
     const icon = osd.createButton(item.label, offset * spacing, layout.y, item.width * scale, item.height * scale, offset ? item.depth : item.depth + 1,
-      itemResource(offset ? item.disabled : item.active), () => offset ? change(offset) : activate());
+      itemResource(offset ? item.disabled : item.active), () => index === selected ? activate() : change(index - selected));
     icon.node.classList.add('osd-menu-icon');
+    if (Math.abs(offset) > 3) icon.hide();
     return icon;
   });
   const title = osd.createText(items[selected].label, 'center', 0, 0.75, 3);
   title.node.classList.add('osd-menu-title');
-  const version = osd.createText('v2.3.1 (build 940)', 'left', -0.975, 0.95, 3);
+  const version = osd.createText(versionText, 'left', -0.975, 0.95, 3);
   version.node.classList.add('osd-menu-version');
   const message = osd.createText('', 'center', 0, 0.89, 3);
   message.node.classList.add('osd-menu-message');
@@ -55,16 +58,30 @@ export function mountMainMenu(viewport: HTMLElement, assets: Assets, items: read
   const playMotion = (sequence: readonly MenuMotion[]) => Promise.all(sequence.flatMap(motion =>
     (moving[motion.target] ?? []).map(element => motionController.animate(element.node, motion))));
 
+  function arrange(previous: number) {
+    const duration = Math.round(160 / Math.max(0.1, layout.speed));
+    slots.forEach((icon, index) => {
+      const item = items[index], offset = index - selected;
+      if (Math.abs(offset) <= 3 || Math.abs(index - previous) <= 3) icon.show();
+      const scale = offset ? 1.1 : 1.43;
+      icon.node.style.transition = `left ${duration}ms ease-in-out, width ${duration}ms ease-in-out, height ${duration}ms ease-in-out`;
+      icon.setBounds(offset * spacing, layout.y, item.width * scale, item.height * scale, offset ? item.depth : item.depth + 1);
+      icon.setResource(itemResource(offset ? item.disabled : item.active));
+    });
+    window.setTimeout(() => {
+      slots.forEach((icon, index) => { if (Math.abs(index - selected) > 3) icon.hide(); });
+      ready = true;
+    }, duration);
+  }
+
   function change(direction: number) {
     if (closing || !ready) return;
+    const previous = selected;
     for (let step = 0; step < Math.abs(direction); step++) selected = dispatch(direction < 0 ? 'left' : 'right').selected;
-    const item = items[selected];
-    slots.forEach((icon, index) => {
-      const offset = index - 3, visible = items[(selected + offset + items.length) % items.length];
-      icon.setResource(itemResource(offset ? visible.disabled : visible.active));
-      icon.node.setAttribute('aria-label', visible.label);
-    });
-    title.setText(item.label); message.setText('');
+    if (previous === selected) return;
+    ready = false;
+    arrange(previous);
+    message.setText('');
   }
   function activate() {
     if (closing || !ready) return;
@@ -78,6 +95,16 @@ export function mountMainMenu(viewport: HTMLElement, assets: Assets, items: read
     else if (event.key === 'Enter') { event.preventDefault(); activate(); }
   }
   window.addEventListener('keydown', keydown);
+  if (tick) animationTimer = window.setInterval(() => {
+    if (!ready || closing) return;
+    const frame = tick();
+    if (title.node.textContent !== frame.text) {
+      title.setText(frame.text);
+      title.node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
+    }
+    const argb = frame.color >>> 0;
+    title.node.style.color = `rgba(${(argb >>> 16) & 255},${(argb >>> 8) & 255},${argb & 255},${((argb >>> 24) & 255) / 255})`;
+  }, 10);
   osd.show(); osd.focus();
   if (motions.length) {
     void playMotion(motions)
@@ -89,7 +116,7 @@ export function mountMainMenu(viewport: HTMLElement, assets: Assets, items: read
       closing = true; osd.hideGroup(arrows); title.hide();
       await playMotion(sequence);
     },
-    dispose: () => { window.removeEventListener('keydown', keydown); video?.pause(); video?.removeAttribute('src'); osd.dispose(); },
+    dispose: () => { if (animationTimer !== undefined) window.clearInterval(animationTimer); window.removeEventListener('keydown', keydown); video?.pause(); video?.removeAttribute('src'); osd.dispose(); },
     get selectedCommand() { return items[selected].command; },
   };
 }

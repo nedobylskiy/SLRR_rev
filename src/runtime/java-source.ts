@@ -6,7 +6,7 @@ interface Token { text: string; line: number; value?: JavaValue }
 type Expr = { kind: string; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
 type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
 export interface SourceMethod { owner: string; name: string; parameters: { type: string; name: string }[]; result: string; isStatic: boolean; body: Stmt; line: number }
-export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue> }
+export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr }[] }
 export interface JavaHost {
   global(name: string): JavaValue;
   get(receiver: JavaValue, name: string): JavaValue;
@@ -76,7 +76,9 @@ class Parser {
       const expr = this.expression(); this.need(')'); return expr;
     }
     if (token.text === 'new') {
-      const name = this.name(); this.need('('); const items: Expr[] = [];
+      const name = this.name();
+      if (this.eat('[')) { const right = this.expression(); this.need(']'); return { kind: 'arrayNew', text: name, right }; }
+      this.need('('); const items: Expr[] = [];
       if (!this.eat(')')) { do { items.push(this.expression()); } while (this.eat(',')); this.need(')'); }
       return { kind: 'new', text: name, items };
     }
@@ -84,11 +86,12 @@ class Parser {
     throw new Error(`Java expression: unsupported ${token.text} at line ${token.line}`);
   }
   declaration(): Stmt | undefined {
-    const start = this.at; this.eat('final');
+    const start = this.at;
+    while (this.peek() === 'final' || this.peek() === 'static') this.at++;
     if (this.peek() === 'new') { this.at = start; return; }
     if (!/^[A-Za-z_$][\w$]*$/.test(this.peek() ?? '')) { this.at = start; return; }
     let type = this.tokens[this.at++].text;
-    while (this.eat('[')) { this.need(']'); type += '[]'; }
+    while (this.peek() === '[' && this.peek(1) === ']') { this.at += 2; type += '[]'; }
     if (!/^[A-Za-z_$][\w$]*$/.test(this.peek() ?? '')) { this.at = start; return; }
     const declarations: NonNullable<Stmt['declarations']> = [];
     do { const name = this.name(), expr = this.eat('=') ? this.expression() : undefined; declarations.push({ type, name, expr }); } while (this.eat(','));
@@ -126,11 +129,22 @@ class Parser {
 export function parseSourceClass(source: string, selected = new Set(['save', 'load', 'createFromFile']), className?: string): SourceClass {
   const tokens = lex(source), ci = tokens.findIndex((t, i) => t.text === 'class' && (!className || tokens[i + 1]?.text === className)); if (ci < 0) throw new Error(`Java class missing: ${className ?? '(first)'}`);
   const name = tokens[ci + 1].text, parent = tokens[ci + 2]?.text === 'extends' ? tokens[ci + 3].text : null;
-  const methods: SourceMethod[] = [], constants = new Map<string, JavaValue>(); let depth = 0;
+  const methods: SourceMethod[] = [], constants = new Map<string, JavaValue>();
+  const fields: SourceClass['fields'] = []; let depth = 0;
   for (let i = tokens.findIndex((t, at) => at > ci && t.text === '{'); i < tokens.length; i++) {
     const t = tokens[i]; if (t.text === '{') { depth++; continue; } if (t.text === '}') { depth--; if (depth === 0) break; continue; }
     if (depth === 1 && /^[A-Z][A-Z0-9_]*$/.test(t.text) && tokens[i + 1]?.text === '=' && tokens[i + 2]?.value && tokens[i + 3]?.text === ';')
       constants.set(t.text, coerce(tokens[i - 1].text, tokens[i + 2].value!));
+    if (depth === 1 && (i === 0 || [';', '{', '}'].includes(tokens[i - 1]?.text))) {
+      const fieldParser = new Parser(tokens); fieldParser.at = i;
+      const declaration = fieldParser.declaration();
+      if (declaration && fieldParser.eat(';')) {
+        fields.push(...declaration.declarations!);
+        for (const field of declaration.declarations!) if (/^[A-Z][A-Z0-9_]*$/.test(field.name) && field.expr?.kind === 'literal')
+          constants.set(field.name, coerce(field.type, field.expr.value!));
+        i = fieldParser.at - 1; continue;
+      }
+    }
     if (depth !== 1 || !selected.has(t.text) || tokens[i + 1]?.text !== '(') continue;
     const parser = new Parser(tokens); parser.at = i + 2;
     const parameters: SourceMethod['parameters'] = [];
@@ -141,7 +155,7 @@ export function parseSourceClass(source: string, selected = new Set(['save', 'lo
     methods.push({ owner: name, name: t.text, result: tokens[i - 1].text, isStatic: tokens.slice(header + 1, i).some(t => t.text === 'static'), parameters, body, line: t.line });
     i = parser.at - 1;
   }
-  return { name, parent, methods, constants };
+  return { name, parent, methods, constants, fields };
 }
 
 class Scope {
@@ -159,7 +173,7 @@ const truth = (v: JavaValue) => v.value !== null && v.value !== false && v.value
 type Flow = { kind: 'return' | 'break' | 'continue'; value?: JavaValue } | undefined;
 
 export class JavaSourceMachine {
-  private remaining = 0; private depth = 0;
+  private remaining = 0; private depth = 0; private singleIteration = false;
   constructor(readonly host: JavaHost, readonly budget = 1_000_000, readonly maxDepth = 128) {}
   invoke(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): JavaValue {
     if (this.depth === 0) this.remaining = this.budget;
@@ -171,6 +185,21 @@ export class JavaSourceMachine {
     catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${method.line}): ${e instanceof Error ? e.message : e}`); }
     finally { this.depth--; }
   }
+  invokeTick(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): JavaValue {
+    this.singleIteration = true;
+    try { return this.invoke(method, receiver, args); }
+    finally { this.singleIteration = false; }
+  }
+  initializeFields(cls: SourceClass, receiver: JavaValue) {
+    if (this.depth === 0) this.remaining = this.budget;
+    const scope = new Scope();
+    const initializer: SourceMethod = { owner: cls.name, name: '<fields>', parameters: [], result: 'void', isStatic: false,
+      body: { kind: 'block', statements: [] }, line: 0 };
+    for (const field of cls.fields) {
+      const value = field.expr ? this.expression(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
+      this.host.set(receiver, field.name, coerce(field.type, value));
+    }
+  }
   private step() { if (--this.remaining < 0) throw new Error('Java execution budget exceeded'); }
   private reference(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod) {
     if (expr.kind === 'name') {
@@ -179,6 +208,12 @@ export class JavaSourceMachine {
         : { get: () => this.host.get(self, expr.text!), set: (v: JavaValue) => this.host.set(self, expr.text!, v) };
     }
     if (expr.kind === 'member') { const obj = this.expression(expr.left!, scope, self, method); return { get: () => this.host.get(obj, expr.text!), set: (v: JavaValue) => this.host.set(obj, expr.text!, v) }; }
+    if (expr.kind === 'index') {
+      const array = this.expression(expr.left!, scope, self, method), index = Number(this.expression(expr.right!, scope, self, method).value);
+      if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
+      const values = array.value as unknown[];
+      return { get: () => jv('int', values[index]), set: (v: JavaValue) => { values[index] = v.value; } };
+    }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }
   private expression(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod): JavaValue {
@@ -193,6 +228,12 @@ export class JavaSourceMachine {
       }
       case 'member': return this.host.get(ev(expr.left!), expr.text!);
       case 'new': return this.host.construct(expr.text!, expr.items!.map(ev));
+      case 'arrayNew': {
+        const length = Number(ev(expr.right!).value);
+        if (!Number.isInteger(length) || length < 0 || length > 100_000) throw new Error('Invalid Java array length');
+        return jv(`${expr.text}[]`, Array(length).fill(['int', 'float', 'double'].includes(expr.text!) ? 0 : null));
+      }
+      case 'index': return this.reference(expr, scope, self, method).get();
       case 'cast': return coerce(expr.text!, ev(expr.left!));
       case 'call': {
         const callee = expr.left!;
@@ -260,9 +301,11 @@ export class JavaSourceMachine {
       case 'continue': return { kind: 'continue' };
       case 'while': case 'for': {
         const inner = new Scope(scope); if (stmt.init) run(stmt.init, inner);
+        let iterations = 0;
         while (!stmt.condition || truth(this.expression(stmt.condition, inner, self, method))) {
           this.step(); const flow = run(stmt.body!, inner); if (flow?.kind === 'return') return flow; if (flow?.kind === 'break') break;
           if (stmt.update) this.expression(stmt.update, inner, self, method);
+          if (this.singleIteration && ++iterations >= 1) break;
         } return;
       }
       default: throw new Error(`Unsupported Java statement ${stmt.kind}`);
