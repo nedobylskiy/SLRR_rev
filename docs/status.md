@@ -1,6 +1,6 @@
 # Verified status
 
-This repository is an unfinished independent SLRR engine. Current work focuses on a shared world, resource loading, vehicle assembly, the script/native boundary, and physics. Multiplayer depends on that foundation.
+This repository is an unfinished independent SLRR engine. Current work focuses on a shared world, resource loading, vehicle assembly, the script/native boundary, and physics. Multiplayer depends on that foundation. Runtime work currently targets original `.java` sources through [SLRR-JVM](../packages/slrr-jvm/README.md); TUFA `.class` execution is paused.
 
 ## Checks
 

@@ -21,11 +21,11 @@ Determine Part/Chassis host model, stable IDs and ownership. Restore sufficient 
 
 Ready: real assembled new world machine → buffer → new independent machine; parts/slots/conditions/damage/painting match; the old machine does not change until a successful commit; error rollback releases everything allocated. 1000 repetitions with real native resources do not increase the counters/heap.
 
-## 2. TUFA VM and native API
+## 2. Java source runtime and native API
 
-Fields and calls by descriptor, inheritance/static initialization, arrays, branching, arithmetic, native adapter. Check with small sources and classes, do not transfer heuristic hacks of external reconstruction. Execution in Worker with limits, errors with source info.
+Extend [SLRR-JVM](../packages/slrr-jvm/README.md) around original `.java` sources: fields and calls by signature, inheritance/static initialization, arrays, branching, arithmetic, and native adapters. The application supplies a callback resolver for imports and registers native capabilities. Check behavior against small source examples, run with limits, and include source locations in errors. TUFA `.class` execution is paused; existing format research remains available but is not the runtime path for this stage.
 
-Ready: initial part constructors and their save/load are executed; the list of missing natives is reproduced; unknown op is not skipped. Then minimal GameLogic/garage loading. The `.java` compiler is a standalone task, including resource literals and int truthiness.
+Ready: initial Part constructors and save/load methods execute from Java source; missing native methods are reported precisely; unsupported syntax is rejected. Then load minimal GameLogic/garage behavior. Broader parsing of the SLRR Java dialect, including resource literals and integer truthiness, remains a separate compatibility task.
 
 ## 3. World resources and car assembly
 

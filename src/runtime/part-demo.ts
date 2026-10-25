@@ -1,5 +1,5 @@
 import { PartAssemblyRuntime, type AssemblyPart } from './part-assembly';
-import { jv, type JavaValue } from './java-source';
+import { jv, type JavaValue } from 'slrr-jvm';
 
 export const partSourcePaths = [
   'parts/scripts/src/Part.java', 'parts/scripts/src/BodyPart.java', 'parts/scripts/bodypart/Src/Chassis.java',

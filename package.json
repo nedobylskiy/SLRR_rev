@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": ["packages/slrr-jvm"],
   "scripts": {
+    "postinstall": "npm run build:jvm",
+    "predev": "npm run build:jvm",
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
-    "test": "tsx --test tests/*.test.ts",
+    "build": "npm run build:jvm && tsc --noEmit && vite build",
+    "build:jvm": "tsc -p packages/slrr-jvm/tsconfig.json",
+    "test": "npm run build:jvm && tsx --test tests/*.test.ts",
     "audit": "tsx tools/audit.ts",
     "audit:map-physics": "tsx tools/audit-map-physics.ts",
     "audit:map-lighting": "tsx tools/audit-map-lighting.ts",
@@ -29,6 +33,7 @@
     "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify"
   },
   "dependencies": {
+    "slrr-jvm": "file:packages/slrr-jvm",
     "three": "^0.180.0"
   },
   "devDependencies": {

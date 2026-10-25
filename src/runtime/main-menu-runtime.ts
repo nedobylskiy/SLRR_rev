@@ -1,4 +1,4 @@
-import { JavaSourceMachine, jv, nil, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from './java-source';
+import { JavaSourceMachine, jv, nil, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from 'slrr-jvm';
 
 export interface MenuResource { pack: string; id: number }
 export interface MainMenuItem { label: string; active: MenuResource; disabled: MenuResource; command: number; width: number; height: number; depth: number }

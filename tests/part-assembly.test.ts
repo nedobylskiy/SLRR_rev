@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PartAssemblyRuntime } from '../src/runtime/part-assembly';
-import { jv, parseSourceClass } from '../src/runtime/java-source';
+import { jv, parseSourceClass } from 'slrr-jvm';
 import { parseSdat, serializeSdat } from '../src/formats/sdat';
 
 // Authored synthetic programs, not redistributed game sources. They deliberately use

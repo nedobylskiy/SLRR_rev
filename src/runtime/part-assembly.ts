@@ -1,7 +1,7 @@
 import { normalizePath } from '../assets';
 import { parseSdat, serializeSdat, type Sdat, type SavedResource } from '../formats/sdat';
 import { MemoryFile } from './memory-file';
-import { JavaSourceMachine, coerce, jv, nil, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from './java-source';
+import { JavaSourceMachine, coerce, jv, nil, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from 'slrr-jvm';
 
 export interface PartDefinition { resource: SavedResource; className: string; slots: number[]; fields?: Record<string, JavaValue> }
 interface NativeRecord { tag: string; fields: Map<string, JavaValue> }

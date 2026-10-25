@@ -2,7 +2,7 @@
 
 An independent TypeScript/WebGL 2 engine for Street Legal Racing: Redline assets. This is a **research prototype**, not a complete replacement for the game.
 
-The project reads original RPK, SCX v3/v4, and TUFA `.class` files, and provides a resource inspector and WebGL scene. Its RPK/CFG factory assembles a Baiern from 33 base parts; mounts have also been checked on Einvagen, Duhen, Ninja, and Zed. The [driving prototype](docs/mounts-and-driving.md) and [Test Track loader](docs/maps.md) exercise the current physics and rendering systems. A limited Java source runtime executes original `Part.save/load` against an in-memory test vehicle, while TUFA execution has been verified for the leaf method `Object.equals`. See [engine architecture](docs/engine-world.md) for the implemented boundaries; the full VM, native game API, garage, and networked game loop remain open work.
+The project reads original RPK and SCX v3/v4 assets and provides a resource inspector and WebGL scene. Its RPK/CFG factory assembles a Baiern from 33 base parts; mounts have also been checked on Einvagen, Duhen, Ninja, and Zed. The [driving prototype](docs/mounts-and-driving.md) and [Test Track loader](docs/maps.md) exercise the current physics and rendering systems. The [SLRR-JVM package](packages/slrr-jvm/README.md) interprets selected original `.java` methods with host-provided imports and native functions; menu logic and `Part.save/load` use this source path. Existing TUFA parsing remains research code, but current runtime development focuses on Java source rather than `.class` execution. See [engine architecture](docs/engine-world.md) for the implemented boundaries; the full Java dialect, native game API, garage, and networked game loop remain open work.
 
 ## Launch
 

@@ -1,0 +1,19 @@
+{
+  "name": "slrr-jvm",
+  "version": "0.1.0",
+  "description": "Source-only interpreter for the SLRR Java dialect",
+  "type": "module",
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
