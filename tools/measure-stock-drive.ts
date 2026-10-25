@@ -30,20 +30,21 @@ try {
   suspension.step(dt, { ...input, gearUp: true }); body.integrate(dt);
   for (let i = 1; i < 480; i++) { suspension.step(dt, input); body.integrate(dt); }
   assert.equal(suspension.mechanics!.gear, 1, 'first gear is selected before timing the run');
-  const start = body.position.clone(), samples: object[] = [];
+  const start = body.position.clone(), samples: object[] = [], tireTrace: object[] = [];
   const shifts: { seconds: number; from: number; to: number; speedKph: number; rpm: number }[] = [];
   let previousGear = suspension.mechanics!.gear, zeroTo100Seconds: number | null = null;
   let quarterMile: { seconds: number; trapKph: number } | null = null, mile: { seconds: number; trapKph: number } | null = null;
   for (let step = 1; step <= 240 * 45; step++) {
     suspension.step(dt, { ...input, throttle: 1 }); body.integrate(dt);
     const t = step * dt, speedKph = Math.max(0, -body.velocity.z * 3.6), distance = start.z - body.position.z, gear = suspension.mechanics!.gear;
+    if (process.argv.includes('--tire-trace') && step % 60 === 0 && t <= 4) tireTrace.push({ seconds: t, speedKph: Number(speedKph.toFixed(1)), wheels: suspension.wheels.map(w => ({ slip: Number(w.slip.toFixed(2)), slipSpeed: Number(w.slipSpeed.toFixed(1)), lateralSpeed: Number(w.lateralSpeed.toFixed(1)), load: Math.round(w.force) })) });
     if (gear !== previousGear) { shifts.push({ seconds: Number(t.toFixed(3)), from: previousGear, to: gear, speedKph: Number(speedKph.toFixed(1)), rpm: Math.round(suspension.mechanics!.rpm) }); previousGear = gear; }
     if (step % 240 === 0 && (t <= 10 || t % 5 === 0)) samples.push({ seconds: t, speedKph: Number(speedKph.toFixed(1)), rpm: Math.round(suspension.mechanics!.rpm), gear, rearSlip: suspension.wheels.slice(2).map(w => Number(w.slip.toFixed(2))), contacts: suspension.wheels.filter(w => w.contact).length });
     if (zeroTo100Seconds === null && speedKph >= 100) zeroTo100Seconds = t;
     if (!quarterMile && distance >= 402.336) quarterMile = { seconds: t, trapKph: speedKph };
     if (!mile && distance >= 1609.344) { mile = { seconds: t, trapKph: speedKph }; break; }
   }
-  const report = { zeroTo100: { gameSeconds: reference.testTrackResults.zeroTo100Seconds, modelSeconds: zeroTo100Seconds }, quarterMile: { gameSeconds: reference.testTrackResults.quarterMileSeconds, gameTrapKph: reference.testTrackResults.quarterMileTrapKph, model: quarterMile }, mile: { gameSeconds: reference.testTrackResults.mileSeconds, gameTrapKph: reference.testTrackResults.mileTrapKph, model: mile }, massKg: mass, cfgBodyMassKg: rawMass, startHeightM: Number(start.y.toFixed(3)), shifts, samples };
+  const report = { zeroTo100: { gameSeconds: reference.testTrackResults.zeroTo100Seconds, modelSeconds: zeroTo100Seconds }, quarterMile: { gameSeconds: reference.testTrackResults.quarterMileSeconds, gameTrapKph: reference.testTrackResults.quarterMileTrapKph, model: quarterMile }, mile: { gameSeconds: reference.testTrackResults.mileSeconds, gameTrapKph: reference.testTrackResults.mileTrapKph, model: mile }, massKg: mass, cfgBodyMassKg: rawMass, startHeightM: Number(start.y.toFixed(3)), shifts, samples, ...(tireTrace.length ? { tireTrace } : {}) };
   if (process.argv.includes('--verify')) {
     assert.ok(zeroTo100Seconds !== null && Math.abs(zeroTo100Seconds - reference.testTrackResults.zeroTo100Seconds) < 0.25, `0–100 mismatch: ${zeroTo100Seconds}`);
     assert.ok(quarterMile && Math.abs(quarterMile.seconds - reference.testTrackResults.quarterMileSeconds) < 0.6, `quarter mile mismatch: ${quarterMile?.seconds}`);

@@ -13,12 +13,15 @@ const contact = (changes: Partial<TireContactState> = {}): TireContactState => (
 test('tyre visual effects require supported scrub and keep marks on the selected surface', () => {
   assert.equal(tireScrub(contact({ contact: false })), 0);
   assert.equal(tireScrub(contact({ slipSpeed: 0.4, lateralSpeed: 0.2 })), 0);
-  assert.equal(tireScrub(contact({ slipSpeed: 3, lateralSpeed: 0 })), 0);
-  assert.ok(tireScrub(contact({ slipSpeed: 0, lateralSpeed: 5 })) > 0);
-  assert.equal(tireSmoke(contact()), 0);
+  assert.equal(tireScrub(contact({ slipSpeed: 2, lateralSpeed: 0 })), 0);
+  assert.equal(tireScrub(contact({ slipSpeed: 0, lateralSpeed: 5 })), 0);
+  assert.ok(tireScrub(contact({ slipSpeed: 0, lateralSpeed: 6 })) > 0);
+  // Stock Baiern launches with ~0.72 rear-wheel slip at 5.5 m/s, while the fronts roll freely.
+  assert.ok(tireScrub(contact({ slip: 0.72, slipSpeed: 5.5 })) > 0);
+  assert.ok(tireSmoke(contact({ slip: 0.72, slipSpeed: 5.5 })) > 0);
+  assert.equal(tireSmoke(contact({ slip: 0.01, slipSpeed: 0 })), 0);
+  assert.equal(tireSmoke(contact({ slip: 0.12, slipSpeed: 5.5 })), 0);
   assert.equal(tireSmoke(contact({ slipSpeed: 0, lateralSpeed: 9 })), 0);
-  assert.equal(tireSmoke(contact({ slipSpeed: 10 })), 0);
-  assert.ok(tireSmoke(contact({ slipSpeed: 10, slip: 0.9 })) > 0);
   const effects = new TireEffects();
   const road = effects.group.children[0] as Mesh, grass = effects.group.children[1] as Mesh;
   const smoke = effects.group.children[3] as Points;
@@ -28,8 +31,8 @@ test('tyre visual effects require supported scrub and keep marks on the selected
   effects.update(0.05, [contact({ contact: false })]);
   assert.equal((road.geometry as BufferGeometry).drawRange.count, 0);
   assert.equal((smoke.geometry as BufferGeometry).drawRange.count, 0);
-  effects.update(0.05, [contact({ surface: 'grass' })]);
-  effects.update(0.05, [contact({ surface: 'grass', contactPoint: new Vector3(0, 0.012, -0.56) })]);
+  effects.update(0.05, [contact({ surface: 'grass', slipSpeed: 3 })]);
+  effects.update(0.05, [contact({ surface: 'grass', slipSpeed: 3, contactPoint: new Vector3(0, 0.012, -0.56) })]);
   assert.ok((grass.geometry as BufferGeometry).drawRange.count > 0);
   assert.equal((road.geometry as BufferGeometry).drawRange.count, 0);
   assert.equal((smoke.geometry as BufferGeometry).drawRange.count, 0);
@@ -48,4 +51,18 @@ test('surface presets distinguish named grass and loose ground without mistaking
   assert.equal(tireSurfaceForTexture('maps\\textures\\GrassySand.dds'), 'dirt');
   assert.equal(tireSurfaceForTexture('maps\\textures\\asphalt02.dds'), 'road');
   assert.equal(tireSurfaceForTexture('maps\\textures\\sand.dds'), 'dirt');
+});
+
+test('stock launch leaves rear marks and smoke without marking freely rolling fronts', () => {
+  const effects = new TireEffects();
+  const front = contact({ slip: 0.01, slipSpeed: 0 });
+  const rear = contact({ slip: 0.72, slipSpeed: 5.5 });
+  const road = effects.group.children[0] as Mesh, smoke = effects.group.children[3] as Points;
+  effects.update(1 / 60, [front, front, rear, rear]);
+  assert.equal((smoke.geometry as BufferGeometry).drawRange.count, 10);
+  assert.equal((road.geometry as BufferGeometry).drawRange.count, 0);
+  const movedRear = contact({ slip: 0.67, slipSpeed: 6.3, contactPoint: new Vector3(0, 0.012, -0.12) });
+  effects.update(1 / 60, [front, front, movedRear, movedRear]);
+  assert.equal((road.geometry as BufferGeometry).drawRange.count, 12);
+  effects.dispose();
 });
