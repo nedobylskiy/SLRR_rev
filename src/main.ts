@@ -87,7 +87,7 @@ trackDriveButton.onclick = async () => {
     const start = new Vector3(0, map.terrain.height(0, -1461.785) + 0.15, -1461.785);
     if (start.y < -100) throw new Error('У стартовой линии нет поверхности карты');
     beforeDrivingDetails = el('details').textContent ?? '';
-    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI });
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI }, assets);
     crashSession.chassisCrumple(Number(crumpleSlider.value));
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
     el('viewport').parentElement?.classList.add('physics-scene');
@@ -130,7 +130,7 @@ crashButton.onclick = async () => {
   if (request !== sequence || !engineRoot || !viewer) return;
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
-    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true); disposeDriving = crashSession;
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, undefined, assets); disposeDriving = crashSession;
     crashSession.chassisCrumple(Number(crumpleSlider.value));
     el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
