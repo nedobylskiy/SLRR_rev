@@ -36,3 +36,20 @@ test('interpreted Java Text updates an OSD element through its native calls', as
   bridge.dispose();
   assert.equal(record.removed, true);
 });
+
+test('the original fade font glyph is not rendered as a literal letter', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  jvm.natives.register('java.util.resource.ResourceRef', 'id', [], () => jv('int', 0x1a25));
+  let displayed = 'unset';
+  const surface = { createText(): OsdElement {
+    return { node: { style: {} } as HTMLElement, setText(value) { displayed = value; },
+      setResource() {}, setBounds() {}, show() {}, hide() {} };
+  } };
+  new OsdTextNative(jvm, surface);
+  const text = jv('Text', { className: 'java.render.Text', fields: new Map([['text', jv('String', 'a')]]) });
+  const font = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  jvm.natives.invoke('java.render.Text', 'create', text,
+    [jv('ResourceRef', null), font, jv('float', 0), jv('float', 0.7)]);
+  jvm.natives.invoke('java.render.Text', 'update', text, []);
+  assert.equal(displayed, '');
+});

@@ -1,7 +1,7 @@
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { OsdAlign, OsdElement, OsdLayer } from '../osd/osd-layer';
 
-interface TextState { element?: OsdElement; x: number; y: number; align: OsdAlign; scaleX: number; scaleY: number; fontSize: number }
+interface TextState { element?: OsdElement; x: number; y: number; align: OsdAlign; scaleX: number; scaleY: number; fontSize: number; fadeGlyph: boolean }
 
 /** Native Text operations; the original Java constructors and changeText logic still execute. */
 export class OsdTextNative {
@@ -15,16 +15,18 @@ export class OsdTextNative {
       const object = this.object(receiver);
       const x = Number(args[2].value), y = Number(args[3].value);
       const fontId = Number(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', args[1], [])?.value ?? 0) & 0xffff;
+      const fadeGlyph = fontId === 0x1a25 || fontId === 0x1a26;
       const fontSize = [0x139, 0xc02a, 0xc02d, 0xc12a].includes(fontId) ? 15
         : fontId === 0x138 ? 10 : fontId === 0xb2 ? 7 : 24;
       const element = this.layer?.createText('', 'left', x, y);
       if (element) element.node.style.fontSize = `${fontSize}px`;
       if (element) this.live.add(element);
-      this.states.set(object, { element, x, y, align: 'left', scaleX: 1, scaleY: 1, fontSize });
+      this.states.set(object, { element, x, y, align: 'left', scaleX: 1, scaleY: 1, fontSize, fadeGlyph });
       return nil();
     });
     jvm.natives.register(owner, 'update', [], ({ receiver }) => {
-      this.state(receiver).element?.setText(String(this.object(receiver).fields.get('text')?.value ?? ''));
+      const state = this.state(receiver);
+      state.element?.setText(state.fadeGlyph ? '' : String(this.object(receiver).fields.get('text')?.value ?? ''));
       return nil();
     });
     jvm.natives.register(owner, 'changeAlign', ['int'], ({ receiver, args }) => {
