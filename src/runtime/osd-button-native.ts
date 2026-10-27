@@ -7,6 +7,7 @@ interface HitBox { group: JavaValue; width: number; height: number; label: strin
 export class OsdButtonNative {
   private readonly boxes = new WeakMap<JavaObject, HitBox>();
   private readonly live = new Set<OsdElement>();
+  private readonly activeBoxes = new Set<HitBox>();
 
   constructor(private readonly jvm: SlrrJvm,
     private readonly layer?: Pick<OsdLayer, 'createHitTarget'>,
@@ -17,9 +18,11 @@ export class OsdButtonNative {
       const group = args[0];
       if (this.object(group)?.className !== 'java.render.Group')
         throw new Error('PhysicsRef.createBox currently supports OSD groups only');
-      this.boxes.set(this.requireObject(receiver), {
+      const box = {
         group, width: Number(args[1].value), height: Number(args[2].value), label: String(args[4].value ?? ''),
-      });
+      };
+      this.boxes.set(this.requireObject(receiver), box);
+      this.activeBoxes.add(box);
       return nil();
     });
     jvm.natives.register(owner, 'setMatrix', ['Vector3', 'Ypr'], ({ receiver, args }) => {
@@ -39,7 +42,7 @@ export class OsdButtonNative {
       else {
         box.element = this.layer?.createHitTarget(box.label, x, y, box.width / scaleX, box.height / scaleY, 3,
           () => { void this.activate(receiver).catch(this.report); });
-        if (box.element) this.live.add(box.element);
+        if (box.element) { this.live.add(box.element); this.sync(); }
       }
       return nil();
     });
@@ -49,7 +52,7 @@ export class OsdButtonNative {
     const box = this.boxes.get(this.requireObject(physics));
     if (!box) return;
     const group = this.requireObject(box.group);
-    if (!Number(group.fields.get('active')?.value ?? 1)) return;
+    if (!this.visible(box)) return;
     const gadgetVector = group.fields.get('gadget');
     if (!gadgetVector) return;
     const count = Number((await this.jvm.invokeAsync(gadgetVector, 'size')).value);
@@ -61,6 +64,19 @@ export class OsdButtonNative {
       await this.jvm.invokeAsync(jv(object.className.split('.').at(-1)!, object), 'click');
       return;
     }
+  }
+
+  sync(): void {
+    for (const box of this.activeBoxes) {
+      if (this.visible(box)) box.element?.show();
+      else box.element?.hide();
+    }
+  }
+
+  private visible(box: HitBox): boolean {
+    const group = this.requireObject(box.group);
+    const osd = this.object(group.fields.get('osd'));
+    return Boolean(Number(group.fields.get('active')?.value ?? 0) && osd?.fields.get('cam')?.value != null);
   }
 
   private object(value: JavaValue | undefined): JavaObject | undefined {
@@ -83,5 +99,6 @@ export class OsdButtonNative {
   dispose(): void {
     for (const element of this.live) element.node.remove();
     this.live.clear();
+    this.activeBoxes.clear();
   }
 }

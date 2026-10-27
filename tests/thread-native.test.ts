@@ -35,3 +35,18 @@ test('a Java thread yields at wait while the caller continues, then notify resum
   assert.equal((await jvm.invokeAsync(thread, 'isAlive')).value, 0);
   assert.deepEqual(errors, []);
 });
+
+test('Object.notifyAll resumes every Java monitor waiter and disposal cancels sleeps', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const bridge = new ThreadNative(jvm, () => {});
+  const monitor = jv('Object', { className: 'java.lang.Object', fields: new Map() });
+  const first = jvm.invokeAsync(monitor, 'wait');
+  const second = jvm.invokeAsync(monitor, 'wait');
+  await Promise.resolve();
+  await jvm.invokeAsync(monitor, 'notifyAll');
+  await Promise.all([first, second]);
+  const sleeper = jvm.natives.invokeAsync('java.lang.Thread', 'sleep', jv('class', 'java.lang.Thread'),
+    [jv('float', 10_000)]);
+  bridge.dispose();
+  await assert.rejects(sleeper, /disposed/);
+});

@@ -12,6 +12,8 @@ interface ThreadState {
 export class ThreadNative {
   private readonly states = new WeakMap<object, ThreadState>();
   private readonly live = new Set<ThreadState>();
+  private readonly objectWaiters = new Map<object, Set<{ resolve: (value: JavaValue) => void; reject: (error: Error) => void }>>();
+  private readonly sleeps = new Set<{ timer: ReturnType<typeof setTimeout>; reject: (error: Error) => void }>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (message: string) => void,
     owner = 'java.lang.Thread') {
@@ -59,9 +61,28 @@ export class ThreadNative {
       state.pending = undefined;
       return nil();
     });
-    jvm.natives.registerAsync(owner, 'sleep', ['float'], ({ args }) => new Promise<JavaValue>(resolve => {
-      setTimeout(() => resolve(nil()), Math.max(0, Number(args[0].value)));
+    jvm.natives.registerAsync(owner, 'sleep', ['float'], ({ args }) => new Promise<JavaValue>((resolve, reject) => {
+      const pending = { timer: setTimeout(() => { this.sleeps.delete(pending); resolve(nil()); },
+        Math.max(0, Number(args[0].value))), reject };
+      this.sleeps.add(pending);
     }));
+    const objectOwner = 'java.lang.Object';
+    jvm.natives.registerAsync(objectOwner, 'wait', [], ({ receiver }) => new Promise<JavaValue>((resolve, reject) => {
+      const key = this.monitor(receiver);
+      const waiters = this.objectWaiters.get(key) ?? new Set();
+      waiters.add({ resolve, reject }); this.objectWaiters.set(key, waiters);
+    }));
+    for (const [name, all] of [['notify', false], ['notifyAll', true]] as const)
+      jvm.natives.register(objectOwner, name, [], ({ receiver }) => {
+        const key = this.monitor(receiver), waiters = this.objectWaiters.get(key);
+        if (!waiters) return nil();
+        for (const waiter of [...waiters]) {
+          waiters.delete(waiter); waiter.resolve(nil());
+          if (!all) break;
+        }
+        if (!waiters.size) this.objectWaiters.delete(key);
+        return nil();
+      });
   }
 
   dispose(): void {
@@ -71,6 +92,20 @@ export class ThreadNative {
       state.pending = undefined;
     }
     this.live.clear();
+    for (const waiters of this.objectWaiters.values())
+      for (const waiter of waiters) waiter.reject(new Error('Java monitor disposed'));
+    this.objectWaiters.clear();
+    for (const pending of this.sleeps) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Java thread sleep disposed'));
+    }
+    this.sleeps.clear();
+  }
+
+  private monitor(receiver: JavaValue): object {
+    const object = receiver.value;
+    if (!object || typeof object !== 'object') throw new Error('Java Object monitor unavailable');
+    return object;
   }
 
   private state(receiver: JavaValue): ThreadState {

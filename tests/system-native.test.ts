@@ -54,3 +54,14 @@ test('native System and Debug messages reach the game console', async () => {
   jvm.invoke(jv('class', 'java.lang.Debug'), 'giveWarning', [jv('String', 'slow')]);
   assert.deepEqual(events.map(event => event.message), ['ready', '[system.log] loaded', 'Warning: slow']);
 });
+
+test('loading status stays active until Java resets the loading screen wait', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const system = new SystemNative(jvm, () => {});
+  const receiver = jv('class', 'java.lang.System');
+  assert.equal(jvm.natives.invoke('java.lang.System', 'isLoading', receiver, [])?.value, 0);
+  system.beginLoading();
+  assert.equal(jvm.natives.invoke('java.lang.System', 'isLoading', receiver, [])?.value, 1);
+  jvm.natives.invoke('java.lang.System', 'isLoadingReset', receiver, []);
+  assert.equal(jvm.natives.invoke('java.lang.System', 'isLoading', receiver, [])?.value, 0);
+});

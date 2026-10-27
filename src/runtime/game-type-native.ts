@@ -30,6 +30,7 @@ export class GameTypeNative {
   private nextClonedResourceId = 0x40000000;
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
+  private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void;
 
@@ -171,6 +172,19 @@ export class GameTypeNative {
     });
     jvm.natives.register(gameType, 'clearEventMask', ['int'], ({ receiver, args }) => {
       this.require(receiver).clearEventMask(Number(args[0].value) | 0); return voidValue();
+    });
+    jvm.natives.register(gameType, 'registerCallback', ['int'], ({ receiver, args }) => {
+      const object = this.object(receiver), callbacks = this.callbacks.get(object) ?? new Set<number>();
+      callbacks.add(Number(args[0].value) | 0); this.callbacks.set(object, callbacks);
+      return voidValue();
+    });
+    jvm.natives.register(gameType, 'unregisterCallback', ['int'], ({ receiver, args }) => {
+      this.callbacks.get(this.object(receiver))?.delete(Number(args[0].value) | 0);
+      return voidValue();
+    });
+    jvm.natives.register(gameType, 'unregisterCallbacks', [], ({ receiver }) => {
+      this.callbacks.get(this.object(receiver))?.clear();
+      return voidValue();
     });
     jvm.natives.register(gameType, 'addTimer', ['float', 'int'], ({ receiver, args }) => {
       const delay = Number(args[0].value);

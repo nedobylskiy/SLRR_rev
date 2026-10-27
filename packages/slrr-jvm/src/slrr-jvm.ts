@@ -14,6 +14,8 @@ export interface SlrrJvmOptions {
   selectMethods?(className: string): Iterable<string> | undefined;
   /** Float literal conversion observed in a particular SLRR build; B is the Build 940 default. */
   floatMode?: FloatMode;
+  /** Allow the SLRR source dialect to narrow a float variable when only an int overload exists. */
+  allowNumericNarrowing?: boolean;
   /** Resolve a resource literal to the integer used by the source file's owning RPK. */
   resolveResourceId?(resource: ResourceIdentity, sourcePath: string): number | undefined;
   budget?: number;
@@ -540,6 +542,7 @@ export class SlrrJvm implements JavaHost {
     if (argument.type === 'int' && parameter === 'double') return 2;
     if (argument.type === 'float' && parameter === 'double') return 1;
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
+    if (this.options.allowNumericNarrowing && parameter === 'int' && ['float', 'double'].includes(argument.type)) return 6;
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {

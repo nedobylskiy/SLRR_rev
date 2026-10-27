@@ -23,16 +23,18 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   let clickFromHtml: (() => void) | undefined;
   let bounds: number[] = [];
   let removed = false;
+  let visible = false;
   const node = { remove() { removed = true; } } as unknown as HTMLElement;
   const surface = { createHitTarget(_label: string, x: number, y: number, width: number, height: number,
     _depth: number, action: () => void): OsdElement {
     clickFromHtml = action;
     bounds = [x, y, width, height];
-    return { node, setText() {}, setResource() {}, setBounds() {}, show() {}, hide() {} };
+    return { node, setText() {}, setResource() {}, setBounds() {},
+      show() { visible = true; }, hide() { visible = false; } };
   } };
   const bridge = new OsdButtonNative(jvm, surface);
   const osd = object('java.render.Osd', {
-    vpAspect: jv('float', 4 / 3), vpWidth: jv('float', 1), vpHeight: jv('float', 1),
+    vpAspect: jv('float', 4 / 3), vpWidth: jv('float', 1), vpHeight: jv('float', 1), cam: jv('Camera', null),
   });
   const physics = object('java.util.resource.PhysicsRef');
   const gadget = object('java.render.Button', { phy: physics, disabled: jv('int', 0) });
@@ -47,10 +49,21 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   assert.ok(clickFromHtml);
   assert.ok(Math.abs(bounds[2] - 2) < 0.01);
   assert.ok(Math.abs(bounds[3] - 2) < 0.01);
+  assert.equal(visible, false);
+  (osd.value as { fields: Map<string, JavaValue> }).fields.set('cam', object('java.render.Camera'));
+  bridge.sync();
+  assert.equal(visible, true);
   assert.equal((await jvm.invokeAsync(vector, 'size')).value, 1);
   assert.equal(((await jvm.invokeAsync(vector, 'elementAt', [jv('int', 0)])).value as JavaValue).value, gadget.value);
   await bridge.activate(physics);
   assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'count').value, 1);
+  (osd.value as { fields: Map<string, JavaValue> }).fields.set('cam', jv('Camera', null));
+  bridge.sync();
+  assert.equal(visible, false);
+  await bridge.activate(physics);
+  assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'count').value, 1);
+  (osd.value as { fields: Map<string, JavaValue> }).fields.set('cam', object('java.render.Camera'));
+  bridge.sync();
   (gadget.value as { fields: Map<string, JavaValue> }).fields.set('disabled', jv('int', 1));
   await bridge.activate(physics);
   assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'count').value, 1);

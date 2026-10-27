@@ -30,7 +30,11 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java method/native missing: java.game.LoadingScreen.hide()';
+if (process.argv.includes('--diagnose')) {
+  result.dispose();
+  process.exit(result.error ? 1 : 0);
+}
+const expected = 'Java native implementation missing: java.sound.Sound.changeMusicSet(int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

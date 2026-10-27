@@ -8,6 +8,8 @@ export class SystemNative {
   private gameTimeSeconds = 0;
   private lastSample: number;
   private warp = 1;
+  private loadPriority = 0;
+  private loading = false;
 
   constructor(jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly now: () => number = () => performance.now()) {
@@ -28,6 +30,15 @@ export class SystemNative {
       if (requested >= 0) this.warp = requested;
       return jv('float', Math.fround(previous));
     });
+    jvm.natives.register(owner, 'setLdPriority', ['int'], ({ args }) => {
+      this.loadPriority = Number(args[0].value) | 0;
+      return jv('void', undefined);
+    });
+    jvm.natives.register(owner, 'isLoadingReset', [], () => {
+      this.loading = false;
+      return jv('void', undefined);
+    });
+    jvm.natives.register(owner, 'isLoading', [], () => jv('int', Number(this.loading)));
     for (const name of ['gc', 'runFinalization'])
       jvm.natives.register(owner, name, [], () => jv('int', 0));
     jvm.natives.register(owner, 'compileAll', ['String'], () => jv('int', 0));
@@ -59,4 +70,5 @@ export class SystemNative {
   }
 
   gameTime(): number { return this.gameTimeSeconds; }
+  beginLoading(): void { this.loading = true; }
 }

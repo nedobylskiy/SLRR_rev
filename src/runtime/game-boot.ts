@@ -89,6 +89,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
   }
   const jvm = new SlrrJvm({
+    allowNumericNarrowing: true,
     resolveResourceId: (resource, path) => {
       const sourcePath = normalizePath(path);
       const owner = sourcePacks.get(sourcePath)
@@ -150,7 +151,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   new StringNative(jvm);
-  new SystemNative(jvm, report);
+  const system = new SystemNative(jvm, report);
   const threads = new ThreadNative(jvm, message => report({ level: 'error', message }));
   const osdText = new OsdTextNative(jvm, osd);
   const osdButtons = new OsdButtonNative(jvm, osd, error => report({ level: 'error', message: `OSD click: ${error.message}` }));
@@ -249,7 +250,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const controller = 'java.io.Controller';
   jvm.natives.registerField(controller, 'controlFile', jv('String', ''));
   native('java.game.Frontend', 'init', []);
-  native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
+  const realLoadingScreen = ['src/loadingscreen.java', 'decompiled/loadingscreen.java', 'loadingscreen.class']
+    .some(path => assets.byPath.has(`system/scripts/render/${path}`));
+  if (!realLoadingScreen) native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
+  jvm.natives.register('java.render.GfxEngine', 'forceRendering', [], () => voidValue());
+  jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', 0));
   native('java.sound.Sound', 'init', []);
   jvm.natives.register('java.sound.Sound', 'enableDebugDump', ['ResourceRef'], () => jv('int', 0));
   native('java.io.Input', 'initControllers', ['Init', 'String'], args => {
@@ -258,18 +263,66 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   jvm.natives.register('java.io.Input', 'getDeviceName', ['int'], ({ args }) =>
     jv('String', ['SysKeyboard', 'SysMouse'][Number(args[0].value)] ?? null));
   native('java.io.Input', 'enablePointingDevice', []);
-  jvm.natives.registerField('java.game.Frontend', 'loadingScreen', jv('LoadingScreen', {}));
+  if (['src/object.java', 'decompiled/object.java', 'object.class']
+    .some(path => assets.byPath.has(`system/scripts/lang/${path}`)))
+    await jvm.loadClass('java.lang.Object');
+  if (realLoadingScreen) {
+    await jvm.loadClass('java.render.LoadingScreen');
+    await jvm.loadClass('java.render.Frontend');
+    await jvm.globalAsync('java.render.Frontend');
+    await jvm.invokeAsync(jv('class', 'java.render.Frontend'), 'setFonts');
+  }
+  const loadingScreen = realLoadingScreen
+    ? jv('LoadingScreen', { className: 'java.render.LoadingScreen', fields: new Map([
+      ['init', jv('int', 0)],
+      ['waitForUser', jv('int', 0)],
+      ['waitForUserTimeLimit', jv('float', -1)],
+      ['loadingDialog', jv('LoadingDialog', null)],
+      ['flashTextThread', jv('Thread', null)],
+      ['fadeThread', jv('Thread', null)],
+      ['termSig', jv('Object', { className: 'java.lang.Object', fields: new Map() })],
+    ]) }) : jv('LoadingScreen', {});
+  jvm.natives.registerField('java.game.Frontend', 'loadingScreen', loadingScreen);
+  if (realLoadingScreen) jvm.natives.registerField('java.render.Frontend', 'loadingScreen', loadingScreen);
+  const renderSignal = jv('GfxEngine', { className: 'java.render.GfxEngine', fields: new Map() });
+  if (realLoadingScreen) {
+    jvm.natives.registerField('java.render.Frontend', 'render', renderSignal);
+    jvm.natives.registerField('java.game.Frontend', 'render', renderSignal);
+    jvm.natives.registerField('java.game.Frontend', 'inputQueue',
+      jvm.get(jv('class', 'java.render.Frontend'), 'inputQueue'));
+    for (const name of ['largeFont', 'mediumFont', 'smallFont', 'largeFont_strong', 'smallFont_strong',
+      'largeFont_russian', 'largeFont_scale', 'smallFont_scale', 'largeFont_strong_scale',
+      'smallFont_strong_scale', 'largeFont_russian_scale', 'defLoadingPic', 'fadeRes', 'fadeRes_HD', 'pointers'])
+      jvm.natives.registerField('java.game.Frontend', name,
+        jvm.get(jv('class', 'java.render.Frontend'), name));
+  }
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
   for (const name of ['SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
     jvm.natives.registerField('java.game.Frontend', name, jv('int', 0));
 
   const entry = `${sourceRoot}Init.java`;
-  const dispose = () => { gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); };
+  let renderTicker: ReturnType<typeof setInterval> | undefined;
+  let disposed = false;
+  const dispose = () => {
+    disposed = true;
+    if (renderTicker) clearInterval(renderTicker);
+    gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose();
+  };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
     if (['src', 'decompiled'].some(folder => assets.byPath.has(`system/scripts/lang/${folder}/string.java`)))
       await jvm.loadClass('java.lang.String');
     await jvm.loadClass('java.game.Init');
+    if (realLoadingScreen) {
+      system.beginLoading();
+      renderTicker = setInterval(() => {
+        osdButtons.sync();
+        jvm.natives.invoke('java.lang.Object', 'notifyAll', renderSignal, []);
+      }, 50);
+      void jvm.invokeAsync(loadingScreen, 'run').catch(reason => {
+        if (!disposed) report({ level: 'error', message: `LoadingScreen.run: ${reason instanceof Error ? reason.message : String(reason)}` });
+      });
+    }
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });

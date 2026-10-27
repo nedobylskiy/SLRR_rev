@@ -7,3 +7,5 @@ This is cooperative concurrency in the browser, not CPU parallelism. Java code t
 The boot verification checks that `GameLogic` starts its time-refresher thread. A separate test checks that a Java caller proceeds while another Java execution waits, and that `notify()` resumes it.
 
 `GameType.addTimer(seconds, id)` schedules an `EVENT_TIME` callback through the same Java event queue used by input. The callback can schedule another timer. Restarting Java cancels timers and stops waiting script threads from the previous run. The optional `verify:java-boot -- --timer-smoke` check observes multiple game-time updates while the host event loop continues running.
+
+`LoadingScreen.run()` also executes on the shared JVM. A host frame signal wakes its `Frontend.render.wait()` monitor every 50 ms. The Java `SoftTimer` and `Object.wait()`/`notifyAll()` methods control `userWait()` and `hide()`; restart cancels pending waits and sleeps. This keeps the browser event loop responsive during the loading screen.
