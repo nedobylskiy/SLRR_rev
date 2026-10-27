@@ -30,7 +30,7 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.game.parts.DynoData.calcDyno(int)';
+const expected = 'Java native implementation missing: java.game.parts.bodypart.Chassis.getMass()';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -70,6 +70,14 @@ if (!engine?.value || !/LP_V12_engine_block_racing/.test(result.gameTypes.getRes
 if (whisper && result.chassis.scriptSfx(result.gameTypes.reference(whisper), 0).length === 0) {
   process.stderr.write('Java engine script did not populate its native SfxTable\n');
   process.exitCode = 1;
+}
+if (engine?.value) {
+  const dynodata = result.jvm.get(engine, 'dynodata');
+  const curve = dynodata.value == null ? undefined : result.dyno.curve(dynodata);
+  if (!curve || curve.torque.length < 2 || !curve.torque.some(torque => torque > 0)) {
+    process.stderr.write('Java DynoData did not produce a usable torque curve\n');
+    process.exitCode = 1;
+  }
 }
 if (!nodes.some(node => /[\\/]seat_Torino\.class$/i.test(node.resourceScript ?? '')
   && node.className === 'java.game.parts.interior.seat_Torino')) {

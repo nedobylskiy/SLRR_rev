@@ -15,6 +15,7 @@ import { StringNative } from './string-native';
 import { SystemNative } from './system-native';
 import { PartNative } from './part-native';
 import { ChassisNative } from './chassis-native';
+import { DynoNative } from './dyno-native';
 import { parsePartConfig } from '../formats/cfg';
 import type { RpkPack } from '../formats/rpk';
 import { browserKeyValue, type KeyValue } from './key-value';
@@ -23,7 +24,7 @@ import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -199,8 +200,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     }, id => packedResources.get(id) ?? undefined);
   chassisNative = new ChassisNative(jvm, gameTypes);
   partNative = new PartNative(jvm, gameTypes);
-  jvm.natives.register('java.game.parts.DynoData', 'newNative', [], () => voidValue());
-  jvm.natives.register('java.game.parts.DynoData', 'deleteNative', [], () => voidValue());
+  const dyno = new DynoNative(jvm);
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
     const asset = assets.byPath.get(path.toLowerCase());
@@ -265,11 +265,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, chassis: chassisNative, viewports, renderRefs, cameras, input, files };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, chassis: chassisNative, viewports, renderRefs, cameras, input, files, error };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, error };
   }
 }
