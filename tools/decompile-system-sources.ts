@@ -3,7 +3,8 @@ import { dirname, join, parse } from 'node:path';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { gameRoot, walk } from './game-files';
 
-const root = process.argv[2] ?? gameRoot;
+const overwrite = process.argv.includes('--overwrite');
+const root = process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? gameRoot;
 const scripts = join(root, 'system', 'scripts');
 const selected = new Map<string, { file: string; cls: ReturnType<typeof parseTufa>[number]; output: string }>();
 let duplicates = 0;
@@ -22,15 +23,24 @@ for (const file of await walk(scripts)) {
       selected.set(key, { file, cls, output });
   }
 }
-let created = 0, existing = 0;
+let created = 0, updated = 0, existing = 0;
 for (const { file, cls, output } of selected.values()) {
   const { source, diagnostics } = decompileClass(cls);
   if (diagnostics.length) throw new Error(`${file}: ${diagnostics.join('; ')}`);
   await mkdir(dirname(output), { recursive: true });
+  if (overwrite) {
+    let previous: string | null = null;
+    try { previous = await readFile(output, 'utf8'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (previous === source) { existing++; continue; }
+    await writeFile(output, source);
+    if (previous === null) created++; else updated++;
+    continue;
+  }
   try { await writeFile(output, source, { flag: 'wx' }); created++; }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     existing++;
   }
 }
-console.log(`System Java sources: ${created} created, ${existing} already present, ${duplicates} duplicate class entries in ${scripts}`);
+console.log(`System Java sources: ${created} created, ${updated} updated, ${existing} unchanged or already present, ${duplicates} duplicate class entries in ${scripts}`);

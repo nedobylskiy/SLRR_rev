@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "slrr-jvm": "file:packages/slrr-jvm",
-    "slrr-jvm-decompiler": "github:nedobylskiy/SLRR-JVM-decompiler#b3e2344",
+    "slrr-jvm-decompiler": "github:nedobylskiy/SLRR-JVM-decompiler#76cc4127ae86756d325f35cec9dc733dca4d2b5d",
     "three": "^0.180.0"
   },
   "devDependencies": {
