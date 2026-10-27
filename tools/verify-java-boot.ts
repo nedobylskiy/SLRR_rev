@@ -17,14 +17,17 @@ const eventNames = (await readdir(join(root, 'sl/Scripts/game/CareerEvents'), { 
   .filter(name => /\.(rpk|java)$/i.test(name))
   .map(name => `sl/Scripts/game/CareerEvents/${name.replaceAll('\\', '/')}`);
 const trackNames = (await readdir(join(root, 'multibot/maps'), { recursive: true }))
-  .filter(name => /(?:^|[\\/])t_data\.rpk$/i.test(name))
+  .filter(name => /(?:^|[\\/])t_data\.rpk$|[\\/]data[\\/]src[\\/][^\\/]+\.java$/i.test(name))
   .map(name => `multibot/maps/${name.replaceAll('\\', '/')}`);
-const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, 'system.rpk'].map(async path => {
+const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { recursive: true }))
+  .filter(name => /\.(rpk|java)$/i.test(name))
+  .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
+const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, 'system.rpk'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java method/native missing: java.util.resource.GameRef.init()';
+const expected = 'Java String receiver is not text';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -38,6 +41,11 @@ const vehicles = mounted.filter(node => /_VT\.class$/i.test(node.resourceScript 
 const events = mounted.filter(node => /CareerEvents[\\/]\w+\.class$/i.test(node.resourceScript ?? '')).length;
 if (vehicles < 25 || events < 59) {
   process.stderr.write(`Scripted resource factories incomplete: ${vehicles} vehicle types, ${events} career events\n`);
+  process.exitCode = 1;
+}
+const trackData = mounted.filter(node => /[\\/]track_data\.class$/i.test(node.resourceScript ?? ''));
+if (trackData.length < 5 || new Set(trackData.map(node => node.className)).size < 5) {
+  process.stderr.write(`Pack-scoped track scripts incomplete: ${trackData.length} instances, ${new Set(trackData.map(node => node.className)).size} classes\n`);
   process.exitCode = 1;
 }
 const tracks = result.jvm.get(jv('class', 'java.game.GameLogic'), 'mapStack').value;

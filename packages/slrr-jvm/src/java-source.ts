@@ -2,7 +2,8 @@
 import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
 import type { Expr as ParsedExpr, Stmt as ParsedStmt, FloatMode } from 'slrr-jvm-compiler';
 import { floatLiteralBits } from './float-literal.js';
-export interface JavaValue { type: string; value: unknown }
+export interface ResourceIdentity { pack: string; id: number }
+export interface JavaValue { type: string; value: unknown; resource?: ResourceIdentity }
 export const jv = (type: string, value: unknown): JavaValue => ({ type, value });
 export const nil = () => jv('Object', null);
 type Expr = { kind: string; line: number; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
@@ -33,7 +34,10 @@ function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
     return text.startsWith("'") ? jv('int', decoded.charCodeAt(0)) : jv('String', decoded);
   }
   const resource = /^(.*):0[xX]([\da-fA-F]+)r$/.exec(text);
-  if (resource) return jv('ResourceRef', { pack: resource[1], id: Number.parseInt(resource[2], 16) });
+  if (resource) {
+    const identity = { pack: resource[1], id: Number.parseInt(resource[2], 16) };
+    return { ...jv('ResourceRef', identity), resource: identity };
+  }
   if (!/^0[xX]/.test(text) && /[.eEfFdD]/.test(text)) {
     const bits = floatLiteralBits(text, floatMode);
     const buffer = new ArrayBuffer(4), view = new DataView(buffer);
@@ -100,7 +104,9 @@ export function coerce(type: string, value: JavaValue): JavaValue {
   if (type === 'int') {
     const resource = value.type === 'ResourceRef' && value.value && typeof value.value === 'object' && 'id' in value.value
       ? Number(value.value.id) : Number(value.value);
-    return jv(type, resource | 0);
+    const result = jv(type, resource | 0);
+    if (value.resource) result.resource = value.resource;
+    return result;
   }
   if (type === 'float') return jv(type, Math.fround(Number(value.value)));
   if (type === 'double') return jv(type, Number(value.value));

@@ -77,6 +77,8 @@ Java execution waits for each Promise before evaluating the next expression. Syn
 
 Host-native objects can be created from Java `new` expressions by registering a method named `<init>` for that class. The constructor callback returns a `JavaValue`; subsequent calls on that value dispatch to other registered methods of the same class.
 
+An SLRR resource literal assigned to an `int` retains its numeric ID in `value` and its pack identity in the optional `JavaValue.resource` field. Native callbacks can use both to distinguish equal local IDs from different RPK files. Arithmetic creates a new numeric value without this identity.
+
 ## Current limits
 
 - The shared parser accepts the 3,453 `.java` files currently visible in one Build 940 installation (the original `MainMenu.java` is temporarily renamed for a separate compiler runtime test). It yields 3,499 classes and 5,952 method bodies. Parsing does not imply every method can execute with the current host bindings.

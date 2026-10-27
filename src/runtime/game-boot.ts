@@ -105,7 +105,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   new StringNative(jvm);
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
-    .filter(path => assets.byPath.has(path))
+    .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
   const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog,
     async (script, typeId) => {
@@ -113,17 +113,35 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const sourcePath = compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
       const source = assets.byPath.get(sourcePath);
       if (!source) throw new Error(`Resource Java source missing: ${sourcePath}`);
-      const content = new TextDecoder().decode(await assets.read(source.path));
+      let content = new TextDecoder().decode(await assets.read(source.path));
       const packageName = /\bpackage\s+([\w.]+)\s*;/.exec(content)?.[1];
       if (!packageName) throw new Error(`Resource Java package missing: ${source.path}`);
-      const simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.java$/i, '');
-      const className = `${packageName}.${simpleName}`;
+      let simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.java$/i, '');
+      let className = `${packageName}.${simpleName}`;
+      if (dynamicSources.has(className) && normalizePath(dynamicSources.get(className)!.path) !== normalizePath(source.path)) {
+        // Resource packs may declare the same Java class name (for example, every map has track_data).
+        // Give the host-loaded copy a unique identity while keeping its Java method bodies intact.
+        const originalName = simpleName;
+        const path = normalizePath(source.path);
+        let hash = 2166136261;
+        for (let i = 0; i < path.length; i++) hash = Math.imul(hash ^ path.charCodeAt(i), 16777619);
+        simpleName = `${originalName}_${(hash >>> 0).toString(16)}`;
+        const declaration = new RegExp(`\\bclass\\s+${originalName}\\b`);
+        if (!declaration.test(content)) throw new Error(`Resource Java class missing: ${source.path}`);
+        content = content.replace(declaration, `class ${simpleName}`)
+          .replace(new RegExp(`\\b${originalName}(?=\\s*\\()`, 'g'), simpleName);
+        className = `${packageName}.${simpleName}`;
+      }
       dynamicSources.set(className, { path: source.path, source: content });
       sources.set(normalizePath(source.path), content);
       await jvm.loadClass(className);
       const constructors = [...content.matchAll(new RegExp(`\\b${simpleName}\\s*\\(([^)]*)\\)`, 'g'))];
       const takesId = constructors.some(match => /^\s*int\s+\w+\s*$/.test(match[1]));
       return jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);
+    }, async pack => {
+      const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
+      if (!assets.byPath.has(normalizePath(path))) return;
+      resourceCatalog.addPack(path, await assets.pack(path));
     });
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');

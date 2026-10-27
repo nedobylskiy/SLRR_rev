@@ -82,12 +82,12 @@ test('GameRef native calls update the same object created by GameType', () => {
   assert.equal(host.get(child)?.eventMask, 0x10000);
 });
 
-test('GameRef.create uses its last string argument as the tree alias', () => {
+test('GameRef.create uses its last string argument as the tree alias', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const host = new GameTypeNative(jvm, () => {});
   const resource = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map([['typeID', jv('int', 27)]]) });
   const receiver = ref('java.util.resource.GameRef');
-  const created = jvm.natives.invoke('java.util.resource.GameRef', 'create', receiver,
+  const created = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'create', receiver,
     [jv('GameRef', null), resource, jv('String', '0,0,0'), jv('String', 'menu scene')]);
   assert.equal(created?.value, receiver.value);
   assert.equal(host.get(receiver)?.typeId, 27);

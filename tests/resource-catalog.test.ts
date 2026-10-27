@@ -22,4 +22,6 @@ test('resource catalog joins child types through an RPK dependency slot', () => 
     script: 'cars\\racers\\Baiern_data\\scripts\\Baiern_VT.class',
   }]);
   assert.deepEqual(catalog.childrenOf('cars/racers/Baiern.rpk', 0x15f).map(item => item.alias), ['Baiern_model']);
+  assert.equal(catalog.resolve('cars.racers.Baiern', 0x15f)?.script,
+    'cars\\racers\\Baiern_data\\scripts\\Baiern_VT.class');
 });
