@@ -35,6 +35,44 @@ test('source package resolves Java imports through a host callback and dispatche
   assert.deepEqual(requests, ['game.Main:entry', 'game.Helper:game/Main.java', 'game.HostMath:game/Main.java']);
 });
 
+test('async native suspends Java expressions and resumes with its resolved value', async () => {
+  const source = `package demo; import demo.Remote;
+    class Main {
+      int base = Remote.read(2);
+      Main() { base += Remote.read(1); }
+      int run() { int sum = base; for (int i = 0; i < 2; i++) sum += Remote.read(i); return sum; }
+    }`;
+  const jvm = new SlrrJvm({
+    resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null,
+    selectMethods: () => ['Main', 'run']
+  });
+  const calls: number[] = [];
+  jvm.natives.registerAsync('demo.Remote', 'read', ['int'], async ({ args }) => {
+    const value = Number(args[0].value);
+    await Promise.resolve();
+    calls.push(value);
+    return jv('int', value + 10);
+  });
+  await jvm.loadClass('demo.Main');
+  const main = await jvm.constructAsync('demo.Main', []);
+  assert.equal((await jvm.invokeAsync(main, 'run')).value, 44);
+  assert.deepEqual(calls, [2, 1, 0, 1]);
+  assert.throws(() => jvm.invoke(main, 'run'), /Async Java native requires invokeAsync/);
+});
+
+test('async native failure retains Java source location', async () => {
+  const source = `package demo; import demo.Remote;
+    class Main { int run() {
+      return Remote.fail();
+    } }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main'
+    ? { path: 'Main.java', source } : null, selectMethods: () => ['run'] });
+  jvm.natives.registerAsync('demo.Remote', 'fail', [], async () => { throw new Error('adapter offline'); });
+  await jvm.loadClass('demo.Main');
+  await assert.rejects(jvm.invokeAsync(await jvm.constructAsync('demo.Main', []), 'run'),
+    /Main\.run \(source line 3\): adapter offline/);
+});
+
 test('unresolved imports and unregistered native calls fail explicitly', async () => {
   const source = `package game; import game.Missing; class Main { int run() { return Missing.value(); } }`;
   const runtime = new SlrrJvm({

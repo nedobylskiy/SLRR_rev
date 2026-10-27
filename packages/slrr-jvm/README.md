@@ -60,6 +60,21 @@ console.log(result.value); // 13
 
 Native methods are **opt-in** host callbacks registered by class, method, and exact argument types. The game session owns these bindings and registers them before loading source classes that import native classes. The interpreter exposes no ambient filesystem, DOM, network, or SLRR engine APIs. Missing imports and native calls raise errors rather than silently succeeding.
 
+For host capabilities that return a Promise (for example, a file or network adapter), use the async execution path:
+
+```ts
+jvm.natives.registerAsync('demo.Files', 'readNumber', ['String'], async ({ args }) => {
+  const response = await fetch(`/api/value?name=${encodeURIComponent(String(args[0].value))}`);
+  return jv('int', Number(await response.text()));
+});
+
+await jvm.loadClass('demo.Main');
+const main = await jvm.constructAsync('demo.Main', []);
+const result = await jvm.invokeAsync(main, 'run');
+```
+
+Java execution waits for each Promise before evaluating the next expression. Synchronous registrations also work through `constructAsync` and `invokeAsync`. Existing `construct` and `invoke` remain synchronous and fail explicitly if they encounter a native registered with `registerAsync`. Execute one Java call at a time on a JVM instance while using the async path; concurrent execution contexts are not isolated yet.
+
 Host-native objects can be created from Java `new` expressions by registering a method named `<init>` for that class. The constructor callback returns a `JavaValue`; subsequent calls on that value dispatch to other registered methods of the same class.
 
 ## Current limits

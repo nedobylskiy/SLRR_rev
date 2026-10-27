@@ -8,6 +8,7 @@ import { CameraNative } from './camera-native';
 import { ControllerNative } from './controller-native';
 import { InputNative } from './input-native';
 import { FileNative } from './file-native';
+import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
@@ -50,6 +51,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
+    files.indexOriginalPath(asset.path);
     if (!/^save\/controls\/[^/]+$/i.test(asset.path.replaceAll('\\', '/'))) continue;
     files.mountOriginal(asset.path, await assets.read(asset.path));
   }
@@ -96,6 +98,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
   new FileNative(jvm, files, gameTypes);
+  new FindFileNative(jvm, files, new AssetCatalogAdapter(assets));
   new MathNative(jvm);
   const collector = 'java.lang.GarbageCollector';
   jvm.natives.register(collector, '<init>', [], () => {
@@ -128,7 +131,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
     await jvm.loadClass('java.game.Init');
-    jvm.construct('java.game.Init', [jv('int', 0)]);
+    await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
     return { jvm, gameTypes, viewports, renderRefs, cameras, input, files };

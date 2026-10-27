@@ -18,6 +18,11 @@ export interface JavaHost {
   constructorCall(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): JavaValue;
   parent(name: string): string | null;
   isInstance(receiver: JavaValue, name: string): boolean;
+  globalAsync?(name: string): Promise<JavaValue>;
+  getAsync?(receiver: JavaValue, name: string): Promise<JavaValue>;
+  callAsync?(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): Promise<JavaValue>;
+  constructAsync?(name: string, args: JavaValue[]): Promise<JavaValue>;
+  constructorCallAsync?(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): Promise<JavaValue>;
 }
 
 function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
@@ -126,6 +131,37 @@ export class JavaSourceMachine {
     try { return this.invoke(method, receiver, args); }
     finally { this.singleIteration = false; }
   }
+  async invokeAsync(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): Promise<JavaValue> {
+    this.requireAsyncHost();
+    if (this.depth === 0) this.remaining = this.budget;
+    if (args.length !== method.parameters.length) throw new Error(`Java argument count: ${method.owner}.${method.name}`);
+    if (this.depth >= this.maxDepth) throw new Error('Java call depth exceeded');
+    this.depth++;
+    const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
+    try { const flow = await this.statementAsync(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
+    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${e instanceof Error ? e.message : e}`); }
+    finally { this.depth--; }
+  }
+  async initializeFieldsAsync(cls: SourceClass, receiver: JavaValue, staticOnly = false): Promise<void> {
+    this.requireAsyncHost();
+    if (this.depth === 0) this.remaining = this.budget;
+    const scope = new Scope();
+    const initializer: SourceMethod = { owner: cls.name, name: '<fields>', parameters: [], result: 'void', isStatic: false,
+      body: { kind: 'block', statements: [] }, line: 0 };
+    for (const field of cls.fields.filter(field => field.isStatic === staticOnly)) {
+      try {
+        const value = field.expr ? await this.expressionAsync(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
+        this.host.set(receiver, field.name, coerce(field.type, value));
+      } catch (error) {
+        const line = error instanceof JavaSourceLocationError ? error.line : field.expr?.line ?? 0;
+        throw new Error(`${cls.name}.<fields> (source line ${line}): ${error instanceof Error ? error.message : error}`);
+      }
+    }
+  }
+  private requireAsyncHost(): void {
+    if (!this.host.globalAsync || !this.host.getAsync || !this.host.callAsync || !this.host.constructAsync || !this.host.constructorCallAsync)
+      throw new Error('Async Java execution requires async host callbacks');
+  }
   initializeFields(cls: SourceClass, receiver: JavaValue, staticOnly = false) {
     if (this.depth === 0) this.remaining = this.budget;
     const scope = new Scope();
@@ -217,6 +253,95 @@ export class JavaSourceMachine {
       throw new JavaSourceLocationError(expr.line, error instanceof Error ? error.message : String(error));
     }
   }
+  private async referenceAsync(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod): Promise<{ get: () => Promise<JavaValue>; set: (value: JavaValue) => void }> {
+    if (expr.kind === 'name') {
+      const owner = scope.owner(expr.text!);
+      return owner ? { get: async () => owner.values.get(expr.text!)!, set: v => { owner.values.set(expr.text!, coerce(owner.values.get(expr.text!)!.type, v)); } }
+        : { get: () => this.host.getAsync!(self, expr.text!), set: v => this.host.set(self, expr.text!, v) };
+    }
+    if (expr.kind === 'member') {
+      const obj = await this.expressionAsync(expr.left!, scope, self, method);
+      return { get: () => this.host.getAsync!(obj, expr.text!), set: v => this.host.set(obj, expr.text!, v) };
+    }
+    if (expr.kind === 'index') {
+      const array = await this.expressionAsync(expr.left!, scope, self, method);
+      const index = Number((await this.expressionAsync(expr.right!, scope, self, method)).value);
+      if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
+      const values = array.value as unknown[];
+      return { get: async () => jv('int', values[index]), set: v => { values[index] = v.value; } };
+    }
+    throw new Error(`Unsupported Java assignment target ${expr.kind}`);
+  }
+  private async expressionAsync(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod): Promise<JavaValue> {
+    this.step(); const ev = (e: Expr) => this.expressionAsync(e, scope, self, method);
+    const args = async (items: Expr[] = []) => { const result: JavaValue[] = []; for (const item of items) result.push(await ev(item)); return result; };
+    try {
+      switch (expr.kind) {
+        case 'literal': return expr.value!;
+        case 'name': {
+          if (expr.text === 'this') return self;
+          if (expr.text === 'super') return jv('super', { receiver: self, owner: method.owner });
+          const local = scope.owner(expr.text!); if (local) return local.values.get(expr.text!)!;
+          try { return await this.host.getAsync!(self, expr.text!); }
+          catch (error) {
+            if (!(error instanceof Error) || !error.message.startsWith('Missing Java field ')) throw error;
+            return await this.host.globalAsync!(expr.text!);
+          }
+        }
+        case 'member': return await this.host.getAsync!(await ev(expr.left!), expr.text!);
+        case 'new': return await this.host.constructAsync!(expr.text!, await args(expr.items));
+        case 'arrayNew': {
+          const length = Number((await ev(expr.right!)).value);
+          if (!Number.isInteger(length) || length < 0 || length > 100_000) throw new Error('Invalid Java array length');
+          return jv(`${expr.text}[]`, Array(length).fill(['int', 'float', 'double'].includes(expr.text!) ? 0 : null));
+        }
+        case 'index': return await (await this.referenceAsync(expr, scope, self, method)).get();
+        case 'cast': return coerce(expr.text!, await ev(expr.left!));
+        case 'call': {
+          const callee = expr.left!;
+          if (callee.kind === 'name' && (callee.text === 'super' || callee.text === 'this'))
+            return await this.host.constructorCallAsync!(self, method.owner, callee.text, await args(expr.items));
+          if (callee.kind === 'name') return await this.host.callAsync!(self, callee.text!, await args(expr.items));
+          if (callee.kind !== 'member') throw new Error('Only named Java calls supported');
+          const receiver = await ev(callee.left!), values = await args(expr.items);
+          if (receiver.type === 'super') {
+            const s = receiver.value as { receiver: JavaValue; owner: string }, parent = this.host.parent(s.owner);
+            if (!parent) throw new Error('Missing superclass');
+            return await this.host.callAsync!(s.receiver, callee.text!, values, parent);
+          }
+          return await this.host.callAsync!(receiver, callee.text!, values);
+        }
+        case 'assign': {
+          const ref = await this.referenceAsync(expr.left!, scope, self, method), value = await ev(expr.right!);
+          ref.set(expr.text === '=' ? value : this.binary(expr.text!.slice(0, -1), await ref.get(), value));
+          return await ref.get();
+        }
+        case 'postfix': case 'unary': {
+          if (expr.text === '++' || expr.text === '--') {
+            const ref = await this.referenceAsync(expr.left!, scope, self, method), before = await ref.get();
+            ref.set(this.binary(expr.text === '++' ? '+' : '-', before, jv('int', 1)));
+            return expr.kind === 'postfix' ? before : await ref.get();
+          }
+          const v = await ev(expr.left!);
+          if (expr.text === '!') return jv('int', truth(v) ? 0 : 1);
+          if (expr.text === '~') return jv('int', ~Number(v.value));
+          return coerce(v.type, jv(v.type, expr.text === '-' ? -Number(v.value) : Number(v.value)));
+        }
+        case 'binary': {
+          const a = await ev(expr.left!);
+          if (expr.text === '&&') return jv('int', truth(a) && truth(await ev(expr.right!)) ? 1 : 0);
+          if (expr.text === '||') return jv('int', truth(a) || truth(await ev(expr.right!)) ? 1 : 0);
+          return this.binary(expr.text!, a, await ev(expr.right!));
+        }
+        case 'ternary': return await (truth(await ev(expr.left!)) ? ev(expr.right!) : ev(expr.extra!));
+        case 'instanceof': return jv('int', this.host.isInstance(await ev(expr.left!), expr.right!.text!) ? 1 : 0);
+        default: throw new Error(`Unsupported Java expression ${expr.kind}`);
+      }
+    } catch (error) {
+      if (error instanceof JavaSourceLocationError) throw error;
+      throw new JavaSourceLocationError(expr.line, error instanceof Error ? error.message : String(error));
+    }
+  }
   private binary(op: string, a: JavaValue, b: JavaValue): JavaValue {
     if (op === '+' && (a.type === 'String' || b.type === 'String')) return jv('String', String(a.value) + String(b.value));
     if (op === '==' || op === '!=') return jv('int', (a.value === b.value) === (op === '==') ? 1 : 0);
@@ -273,6 +398,67 @@ export class JavaSourceMachine {
           for (const update of stmt.updates ?? []) this.expression(update, inner, self, method);
           if (this.singleIteration && ++iterations >= 1) break;
         } return;
+      }
+      default: throw new Error(`Unsupported Java statement ${stmt.kind}`);
+    }
+  }
+  private async statementAsync(stmt: Stmt, scope: Scope, self: JavaValue, method: SourceMethod): Promise<Flow> {
+    this.step(); const ev = (e: Expr) => this.expressionAsync(e, scope, self, method);
+    const run = (s: Stmt, sc = scope) => this.statementAsync(s, sc, self, method);
+    switch (stmt.kind) {
+      case 'block': {
+        const inner = new Scope(scope);
+        for (const part of stmt.statements!) { const flow = await run(part, inner); if (flow) return flow; }
+        return;
+      }
+      case 'exprs': for (const part of stmt.statements!) { const flow = await run(part); if (flow) return flow; } return;
+      case 'var': for (const item of stmt.declarations!) {
+        if (scope.values.has(item.name)) throw new Error(`Duplicate local ${item.name}`);
+        scope.values.set(item.name, item.expr ? coerce(item.type, await ev(item.expr))
+          : jv(item.type, ['int', 'float', 'double'].includes(item.type) ? 0 : null));
+      } return;
+      case 'expr': await ev(stmt.expr!); return;
+      case 'if': if (truth(await ev(stmt.condition!))) return run(stmt.body!); else if (stmt.otherwise) return run(stmt.otherwise); return;
+      case 'switch': {
+        const key = (await ev(stmt.condition!)).value, cases = stmt.cases!;
+        let start = -1;
+        for (let i = 0; i < cases.length; i++) if (cases[i].value && (await ev(cases[i].value!)).value === key) { start = i; break; }
+        if (start < 0) start = cases.findIndex(entry => !entry.value);
+        if (start < 0) return;
+        const inner = new Scope(scope);
+        for (let i = start; i < cases.length; i++) for (const part of cases[i].statements) {
+          const flow = await run(part, inner);
+          if (flow?.kind === 'break') return;
+          if (flow) return flow;
+        }
+        return;
+      }
+      case 'return': return { kind: 'return', value: stmt.expr ? await ev(stmt.expr) : jv('void', undefined) };
+      case 'break': return { kind: 'break' };
+      case 'continue': return { kind: 'continue' };
+      case 'do': {
+        let iterations = 0;
+        do {
+          this.step(); const flow = await run(stmt.body!);
+          if (flow?.kind === 'return') return flow;
+          if (flow?.kind === 'break') break;
+          if (this.singleIteration && ++iterations >= 1) break;
+        } while (truth(await ev(stmt.condition!)));
+        return;
+      }
+      case 'while': case 'for': {
+        const inner = new Scope(scope);
+        if (stmt.init) await run(stmt.init, inner);
+        let iterations = 0;
+        while (!stmt.condition || truth(await this.expressionAsync(stmt.condition, inner, self, method))) {
+          this.step(); const flow = await run(stmt.body!, inner);
+          if (flow?.kind === 'return') return flow;
+          if (flow?.kind === 'break') break;
+          if (stmt.update) await this.expressionAsync(stmt.update, inner, self, method);
+          for (const update of stmt.updates ?? []) await this.expressionAsync(update, inner, self, method);
+          if (this.singleIteration && ++iterations >= 1) break;
+        }
+        return;
       }
       default: throw new Error(`Unsupported Java statement ${stmt.kind}`);
     }

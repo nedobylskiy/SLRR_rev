@@ -5,7 +5,6 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './tools/game-files';
-import { isSavedVehiclePath } from './src/assets';
 
 const audioTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav' };
 const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', ...Object.keys(audioTypes)]);
@@ -43,14 +42,18 @@ function gameAssets(): Plugin {
           const url = new URL(req.url ?? '/', 'http://127.0.0.1');
           res.setHeader('Cache-Control', 'no-store');
           if (url.pathname === '/index') {
-            index ??= walk(gameRoot).then(files => Promise.all(files.filter(f => allowed.has(path.extname(f).toLowerCase()) || isSavedVehiclePath(relativeGamePath(f))).map(async f => ({ path: relativeGamePath(f), size: (await stat(f)).size }))));
+            index ??= walk(gameRoot).then(files => Promise.all(files.map(async f => {
+              const relative = relativeGamePath(f);
+              const readable = allowed.has(path.extname(f).toLowerCase()) || relative.toLowerCase().startsWith('save/');
+              return { path: relative, size: readable ? (await stat(f)).size : 0 };
+            })));
             res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(await index));
           } else if (url.pathname === '/menu-video') {
             const video = await browserMenuVideo();
             res.setHeader('Content-Type', 'video/webm'); res.setHeader('Content-Length', video.length); res.end(video);
           } else if (url.pathname === '/file') {
             const f = await safeGamePath(url.searchParams.get('path') ?? '');
-            if (!allowed.has(path.extname(f).toLowerCase()) && !isSavedVehiclePath(relativeGamePath(f))) { res.statusCode = 403; res.end(); return; }
+            if (!allowed.has(path.extname(f).toLowerCase()) && !relativeGamePath(f).toLowerCase().startsWith('save/')) { res.statusCode = 403; res.end(); return; }
             const info = await stat(f), audioType = audioTypes[path.extname(f).toLowerCase()];
             if (audioType) {
               const range = req.headers.range;

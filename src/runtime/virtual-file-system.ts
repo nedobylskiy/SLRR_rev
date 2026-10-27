@@ -4,6 +4,7 @@ import type { KeyValue } from './key-value';
 /** Read-only installation files with a persistent writable overlay. */
 export class VirtualFileSystem {
   private readonly originals = new Map<string, Uint8Array>();
+  private readonly originalNames = new Set<string>();
   private readonly overlay = new Map<string, Uint8Array | null>();
   private pending: Promise<void> = Promise.resolve();
 
@@ -17,8 +18,12 @@ export class VirtualFileSystem {
   }
 
   mountOriginal(path: string, bytes: Uint8Array): void {
-    this.originals.set(normalizePath(path), Uint8Array.from(bytes));
+    const key = normalizePath(path);
+    this.originalNames.add(key);
+    this.originals.set(key, Uint8Array.from(bytes));
   }
+
+  indexOriginalPath(path: string): void { this.originalNames.add(normalizePath(path)); }
 
   read(path: string): Uint8Array | null {
     const key = normalizePath(path);
@@ -26,7 +31,19 @@ export class VirtualFileSystem {
     return bytes ? Uint8Array.from(bytes) : null;
   }
 
-  exists(path: string): boolean { return this.read(path) !== null; }
+  exists(path: string): boolean {
+    const key = normalizePath(path);
+    return this.overlay.has(key) ? this.overlay.get(key) !== null : this.originalNames.has(key);
+  }
+
+  /** Writable entries include tombstones, which hide installation files. */
+  overlayEntries(): ReadonlyArray<readonly [string, boolean]> {
+    return [...this.overlay].map(([path, bytes]) => [path, bytes !== null]);
+  }
+
+  originalPaths(): readonly string[] { return [...this.originals.keys()]; }
+
+  shadows(path: string): boolean { return this.overlay.has(normalizePath(path)); }
 
   write(path: string, bytes: Uint8Array): void {
     this.change(normalizePath(path), Uint8Array.from(bytes));
