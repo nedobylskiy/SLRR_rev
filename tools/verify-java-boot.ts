@@ -4,6 +4,7 @@ import { Assets } from '../src/assets';
 import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
 import { packedResourceId } from '../src/runtime/resource-ids';
+import type { OsdLayer } from '../src/osd/osd-layer';
 
 const root = process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? 'C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline';
 const classOnly = process.argv.includes('--class-only');
@@ -29,7 +30,16 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
-const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
+let osdRectangles = 0;
+const element = () => ({ node: { style: {}, classList: { add() {}, remove() {} }, remove() {} },
+  setText() {}, setResource() {}, setBounds() {}, show() {}, hide() {} });
+const osd = {
+  createText: element,
+  createHitTarget: element,
+  createRectangle: () => { osdRectangles++; return element(); },
+} as unknown as OsdLayer;
+const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`),
+  undefined, undefined, osd);
 if (process.argv.includes('--diagnose')) {
   result.dispose();
   process.exit(result.error ? 1 : 0);
@@ -38,6 +48,10 @@ if (result.error) {
   process.stderr.write(`Java boot stopped: ${result.error.message}\n`);
   process.exitCode = 1;
 }
+if (osdRectangles < 10) {
+  process.stderr.write(`Java OSD emitted only ${osdRectangles} visible rectangle resources\n`);
+  process.exitCode = 1;
+} else process.stdout.write(`Java OSD rectangles: ${osdRectangles}\n`);
 const colors = result.jvm.get(jv('class', 'java.game.GameLogic'), 'CARCOLORS').value;
 const expectedColor = packedResourceId(await assets.pack('frontend.rpk'), { pack: 'cars', id: 0x2a });
 if (!Array.isArray(colors) || colors[0] !== expectedColor) {

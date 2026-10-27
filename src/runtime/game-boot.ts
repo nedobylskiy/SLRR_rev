@@ -25,6 +25,7 @@ import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
+import { OsdRectangleNative } from './osd-rectangle-native';
 import type { OsdLayer } from '../osd/osd-layer';
 import type { SoundJavaBridge } from '../audio/sound-java';
 import type { OsdVideo } from '../osd/osd-video';
@@ -64,7 +65,7 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
 export async function bootGame(assets: Assets, report: (event: BootEvent) => void,
   viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 }),
   renderChanged?: (node: RenderObject) => void,
-  osd?: Pick<OsdLayer, 'createText' | 'createHitTarget'>,
+  osd?: Pick<OsdLayer, 'createText' | 'createHitTarget' | 'createRectangle'>,
   sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
@@ -77,6 +78,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const carScripts = new Map<string, string>();
   const javaSourcesByName = new Map<string, string[]>();
   const frontendPack = assets.byPath.has('frontend.rpk') ? await assets.pack('frontend.rpk') : null;
+  const frontendTextureIds = new Set(frontendPack?.entries.filter(entry => entry.type === 7).map(entry => entry.typeId));
   const partsPack = assets.byPath.has('parts.rpk') ? await assets.pack('parts.rpk') : null;
   const sourcePacks = new Map<string, RpkPack>();
   const packedResources = new Map<number, ResourceIdentity | null>();
@@ -158,12 +160,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const threads = new ThreadNative(jvm, message => report({ level: 'error', message }));
   const osdText = new OsdTextNative(jvm, osd);
   const osdButtons = new OsdButtonNative(jvm, osd, error => report({ level: 'error', message: `OSD click: ${error.message}` }));
+  let osdRectangles: OsdRectangleNative | undefined;
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
-  const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog,
+  const gameTypes = new GameTypeNative(jvm, report, node => {
+    if (!osdRectangles?.sync(node)) renderChanged?.(node);
+  }, resourceCatalog,
     async (script, typeId, pack) => {
       const compiled = normalizePath(script);
       const sourcePath = compiled.endsWith('.class')
@@ -208,7 +213,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    }, id => packedResources.get(id) ?? undefined);
+    }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node));
+  osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
+    packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined));
   chassisNative = new ChassisNative(jvm, gameTypes);
   partNative = new PartNative(jvm, gameTypes);
   const dyno = new DynoNative(jvm);
@@ -316,7 +323,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); video?.dispose();
+    gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
@@ -327,6 +334,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       system.beginLoading();
       renderTicker = setInterval(() => {
         osdButtons.sync();
+        osdRectangles?.syncVisibility();
         jvm.natives.invoke('java.lang.Object', 'notifyAll', renderSignal, []);
       }, 50);
       void jvm.invokeAsync(loadingScreen, 'run').catch(reason => {

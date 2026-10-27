@@ -39,7 +39,8 @@ export class GameTypeNative {
     private readonly catalog?: ResourceCatalog,
     private readonly instantiateResourceScript?: (script: string, typeId: number, pack: string | null) => Promise<JavaValue>,
     private readonly loadResourcePack?: (pack: string) => Promise<void>,
-    private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined) {
+    private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined,
+    private readonly renderRemoved?: (node: RenderObject) => void) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -152,6 +153,7 @@ export class GameTypeNative {
     jvm.natives.register(resourceRef, 'destroy', [], ({ receiver }) => {
       const node = this.getResource(receiver);
       if (!node) return voidValue();
+      if (node instanceof RenderObject) this.renderRemoved?.(node);
       this.cancelTimers(this.object(receiver));
       node.setParent(null);
       for (const child of [...node.children]) child.setParent(null);
@@ -315,6 +317,10 @@ export class GameTypeNative {
   }
   getById(id: number): ResourceObject | undefined {
     return this.liveByResourceId.get(id) ?? this.objects.get(id);
+  }
+  getByResourceId(id: number): ResourceObject | undefined {
+    for (const node of this.objects.values()) if (node.resourceId === id) return node;
+    return undefined;
   }
   reference(node: ResourceObject | null): JavaValue { return this.handle(node); }
   setCommandHandler(handler: (receiver: JavaValue, command: string) => void): void {
