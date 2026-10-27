@@ -77,3 +77,17 @@ class Main {
   assert.throws(() => jvm.get(jv('class', 'game.Main'), 'CENTER'),
     /Main\.<fields> \(source line 3\): Java constructor\/native missing: Vector3\(\)/);
 });
+
+test('an explicit super call reaches implicit java.lang.Object', async () => {
+  const source = 'package java.lang; class Native { Native() { super(); } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'java.lang.Native' ? { path: 'Native.java', source } : null });
+  await jvm.loadClass('java.lang.Native');
+  assert.equal(jvm.construct('java.lang.Native', []).type, 'Native');
+});
+
+test('a resource literal exposes its type ID to source constructors', async () => {
+  const source = 'package demo; class Main { int read() { ResourceRef ref = system:0x1br; return ref.typeID; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0x1b);
+});

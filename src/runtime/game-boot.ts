@@ -1,4 +1,5 @@
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
+import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { MathNative } from './math-native';
@@ -7,6 +8,7 @@ export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
+const systemRoot = 'system/scripts/';
 const voidValue = () => jv('void', undefined);
 
 function sourceDiagnostic(message: string, sources: Map<string, string>, assets: Assets): string {
@@ -29,10 +31,23 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
 export async function bootGame(assets: Assets, report: (event: BootEvent) => void): Promise<BootResult> {
   const sources = new Map<string, string>();
   const jvm = new SlrrJvm({
-    resolveImport: ({ className }) => {
-      if (!/^java\.game\.[^.]+$/.test(className)) return null;
-      const path = `${sourceRoot}${className.split('.').at(-1)}.java`;
-      return assets.byPath.has(path.toLowerCase()) ? { path } : null;
+    resolveImport: async ({ className }) => {
+      if (/^java\.game\.[^.]+$/.test(className)) {
+        const path = `${sourceRoot}${className.split('.').at(-1)}.java`;
+        if (assets.byPath.has(path.toLowerCase())) return { path };
+      }
+      if (!/^java\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(className)) return null;
+      const path = `${systemRoot}${className.slice('java.'.length).replaceAll('.', '/')}.class`;
+      const sourcePath = path.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
+      if (assets.byPath.has(sourcePath.toLowerCase())) return { path: sourcePath };
+      if (!assets.byPath.has(path.toLowerCase())) return null;
+      const classes = parseTufa(await assets.read(path));
+      const cls = classes.find(entry => entry.name === className);
+      if (!cls) throw new Error(`TUFA class missing in ${path}: ${className}`);
+      const result = decompileClass(cls);
+      if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${path}: ${result.diagnostics.join('; ')}`);
+      sources.set(path.toLowerCase(), result.source);
+      return { path, source: result.source };
     },
     readSource: async path => {
       const source = new TextDecoder().decode(await assets.read(path));
@@ -58,6 +73,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   });
   native(collector, 'push', ['Object']);
   native(collector, 'flush', []);
+  native('java.util.resource.ResourceRef', 'newNative', []);
+  native('java.util.resource.ResourceRef', 'set', ['int']);
+  native('java.util.resource.ResourceRef', 'set', ['ResourceRef']);
+  native('java.util.resource.ResourceRef', 'precache', []);
+  native('java.util.resource.ResourceRef', 'cache', []);
   const controller = 'java.io.Controller';
   jvm.natives.registerField(controller, 'controlFile', jv('String', ''));
   native('java.game.Frontend', 'init', []);
@@ -67,9 +87,6 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     jvm.natives.setField(controller, 'controlFile', args[1]);
   });
   native('java.io.Input', 'enablePointingDevice', []);
-  native('java.sound.SfxRef', 'precache', []);
-  jvm.natives.register('java.sound.SfxRef', '<init>', ['int'], ({ args }) => jv('SfxRef', { id: args[0].value }));
-  jvm.natives.register('java.util.resource.ResourceRef', '<init>', ['ResourceRef'], ({ args }) => jv('ResourceRef', args[0].value));
   jvm.natives.registerField('java.game.Frontend', 'loadingScreen', jv('LoadingScreen', {}));
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
   for (const name of ['SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])

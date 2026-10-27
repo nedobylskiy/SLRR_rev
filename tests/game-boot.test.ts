@@ -93,3 +93,18 @@ test('boot resolves a class from the same Java package without an import', async
   assert.match(result.error?.message ?? '', /GameLogic\.GameLogic .*missingNext/);
   assert.doesNotMatch(result.error?.message ?? '', /Unknown Java name City|Java import unresolved: java\.game\.City/);
 });
+
+test('boot prefers a system src file over its compiled class', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { Vector3 center = new Vector3(); missingNext(); } }'],
+    ['system/scripts/lang/src/Vector3.java', 'package java.lang; class Vector3 { Vector3() {} }'],
+  ]);
+  const classPath = 'system/scripts/lang/Vector3.class';
+  const files = [...sources].map(([path, source]) => ({ path, size: source.length }));
+  files.push({ path: classPath, size: 4 });
+  const assets = new Assets(files, async path => path === classPath
+    ? new Uint8Array([0, 0, 0, 0]) : new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.match(result.error?.message ?? '', /missingNext/);
+  assert.doesNotMatch(result.error?.message ?? '', /TUFA|Java constructor\/native missing: Vector3/);
+});

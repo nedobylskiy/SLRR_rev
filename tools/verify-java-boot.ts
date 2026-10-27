@@ -3,15 +3,19 @@ import { join } from 'node:path';
 import { Assets } from '../src/assets';
 import { bootGame } from '../src/runtime/game-boot';
 
-const root = process.argv[2] ?? 'C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline';
-const names = (await readdir(join(root, 'sl/Scripts/game/src'))).filter(name => name.toLowerCase().endsWith('.java'));
-const files = await Promise.all(names.map(async name => {
-  const path = `sl/Scripts/game/src/${name}`;
+const root = process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? 'C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline';
+const classOnly = process.argv.includes('--class-only');
+const names = (await readdir(join(root, 'sl/Scripts/game/src')))
+  .filter(name => name.toLowerCase().endsWith('.java')).map(name => `sl/Scripts/game/src/${name}`);
+const systemNames = (await readdir(join(root, 'system/scripts'), { recursive: true }))
+  .filter(name => (classOnly ? /\.class$/i : /\.(java|class)$/i).test(name))
+  .map(name => `system/scripts/${name.replaceAll('\\', '/')}`);
+const files = await Promise.all([...names, ...systemNames].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Scene.<fields> (source line 30): Java constructor/native missing: Vector3()';
+const expected = 'GameLogic.GameLogic (source line 299): Java method/native missing: java.io.Input.isPlayerActive(int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

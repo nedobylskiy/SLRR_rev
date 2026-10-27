@@ -228,6 +228,8 @@ export class SlrrJvm implements JavaHost {
 
   get(receiver: JavaValue, name: string): JavaValue {
     if (Array.isArray(receiver.value) && name === 'length') return jv('int', receiver.value.length);
+    if (receiver.type === 'ResourceRef' && name === 'typeID' && receiver.value && typeof receiver.value === 'object' && 'id' in receiver.value)
+      return jv('int', Number(receiver.value.id));
     const object = this.object(receiver);
     if (object) {
       const field = object.fields.get(name);
@@ -304,7 +306,8 @@ export class SlrrJvm implements JavaHost {
 
   parent(name: string): string | null {
     const entry = this.classes.get(this.resolveName(name));
-    if (!entry?.parsed.parent) return null;
+    if (!entry) return null;
+    if (!entry.parsed.parent) return entry.name === 'java.lang.Object' ? null : 'java.lang.Object';
     return entry.imports.get(entry.parsed.parent) ?? this.resolveName(entry.parsed.parent);
   }
 
