@@ -36,10 +36,14 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   });
   native(collector, 'push', ['Object']);
   native(collector, 'flush', []);
+  const controller = 'java.io.Controller';
+  jvm.natives.registerField(controller, 'controlFile', jv('String', ''));
   native('java.game.Frontend', 'init', []);
   native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   native('java.sound.Sound', 'init', []);
-  native('java.game.Input', 'initControllers', ['Init', 'String']);
+  native('java.game.Input', 'initControllers', ['Init', 'String'], args => {
+    jvm.natives.setField(controller, 'controlFile', args[1]);
+  });
   native('java.game.Input', 'enablePointingDevice', []);
   native('java.sound.SfxRef', 'precache', []);
   jvm.natives.register('java.sound.SfxRef', '<init>', ['int'], ({ args }) => jv('SfxRef', { id: args[0].value }));

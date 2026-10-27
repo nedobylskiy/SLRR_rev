@@ -59,3 +59,23 @@ test('boot executes a sibling class constructor declared inside GameLogic.java',
   assert.match(result.error?.message ?? '', /missingNext/);
   assert.doesNotMatch(result.error?.message ?? '', /CareerGoal/);
 });
+
+test('Input controller path reaches GameLogic through java.io.Controller', async () => {
+  const initPath = 'sl/scripts/game/src/Init.java';
+  const logicPath = 'sl/scripts/game/src/GameLogic.java';
+  const sources = new Map([
+    [initPath, 'package java.game; class Init extends GameType { Init(int id) { Input.initControllers(this, "save/controls/active_control_set"); new GameLogic(); } }'],
+    [logicPath, `package java.game;
+import java.io.*;
+class GameLogic extends GameType {
+  static String activeControlFile;
+  GameLogic() { activeControlFile = Controller.controlFile;
+    missingNext();
+  }
+}`],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })), async path => new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.equal(result.jvm.get({ type: 'class', value: 'java.game.GameLogic' }, 'activeControlFile').value, 'save/controls/active_control_set');
+  assert.match(result.error?.message ?? '', /GameLogic\.GameLogic \(source line 6\): Java method\/native missing: java\.game\.GameLogic\.missingNext/);
+});

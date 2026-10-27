@@ -11,7 +11,7 @@ const files = await Promise.all(names.map(async name => {
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Unknown Java name Controller';
+const expected = 'GameLogic.GameLogic (source line 276): Unknown Java name Math';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

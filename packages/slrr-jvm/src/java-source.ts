@@ -5,7 +5,7 @@ import { floatLiteralBits } from './float-literal.js';
 export interface JavaValue { type: string; value: unknown }
 export const jv = (type: string, value: unknown): JavaValue => ({ type, value });
 export const nil = () => jv('Object', null);
-type Expr = { kind: string; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
+type Expr = { kind: string; line: number; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
 type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; updates?: Expr[]; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
 export interface SourceMethod { owner: string; name: string; parameters: { type: string; name: string }[]; result: string; isStatic: boolean; body: Stmt; line: number }
 export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr; isStatic: boolean }[] }
@@ -41,11 +41,11 @@ function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
 function adaptExpr(expr: ParsedExpr, floatMode: FloatMode): Expr {
   const child = (value: ParsedExpr | undefined) => value ? adaptExpr(value, floatMode) : undefined;
   if (expr.kind === 'paren') return adaptExpr(expr.left!, floatMode);
-  if (expr.kind === 'literal') return { kind: 'literal', value: sourceLiteral(expr.value!, floatMode) };
-  if (expr.kind === 'this' || expr.kind === 'super') return { kind: 'name', text: expr.kind };
-  if (expr.kind === 'newarray') return { kind: 'arrayNew', text: expr.text, right: child(expr.right) };
+  if (expr.kind === 'literal') return { kind: 'literal', line: expr.token.line, value: sourceLiteral(expr.value!, floatMode) };
+  if (expr.kind === 'this' || expr.kind === 'super') return { kind: 'name', line: expr.token.line, text: expr.kind };
+  if (expr.kind === 'newarray') return { kind: 'arrayNew', line: expr.token.line, text: expr.text, right: child(expr.right) };
   return {
-    kind: expr.kind, text: expr.text,
+    kind: expr.kind, line: expr.token.line, text: expr.text,
     left: child(expr.left), right: child(expr.right), extra: child(expr.third),
     items: expr.args?.map(arg => adaptExpr(arg, floatMode)),
   };
@@ -100,6 +100,10 @@ export function coerce(type: string, value: JavaValue): JavaValue {
 const truth = (v: JavaValue) => v.value !== null && v.value !== false && v.value !== 0;
 type Flow = { kind: 'return' | 'break' | 'continue'; value?: JavaValue } | undefined;
 
+class JavaSourceLocationError extends Error {
+  constructor(readonly line: number, message: string) { super(message); }
+}
+
 export class JavaSourceMachine {
   private remaining = 0; private depth = 0; private singleIteration = false;
   constructor(readonly host: JavaHost, readonly budget = 1_000_000, readonly maxDepth = 128) {}
@@ -110,7 +114,7 @@ export class JavaSourceMachine {
     this.depth++;
     const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
     try { const flow = this.statement(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
-    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${method.line}): ${e instanceof Error ? e.message : e}`); }
+    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${e instanceof Error ? e.message : e}`); }
     finally { this.depth--; }
   }
   invokeTick(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): JavaValue {
@@ -146,6 +150,7 @@ export class JavaSourceMachine {
   }
   private expression(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod): JavaValue {
     this.step(); const ev = (e: Expr) => this.expression(e, scope, self, method);
+    try {
     switch (expr.kind) {
       case 'literal': return expr.value!;
       case 'name': {
@@ -197,6 +202,10 @@ export class JavaSourceMachine {
       case 'ternary': return truth(ev(expr.left!)) ? ev(expr.right!) : ev(expr.extra!);
       case 'instanceof': return jv('int', this.host.isInstance(ev(expr.left!), expr.right!.text!) ? 1 : 0);
       default: throw new Error(`Unsupported Java expression ${expr.kind}`);
+    }
+    } catch (error) {
+      if (error instanceof JavaSourceLocationError) throw error;
+      throw new JavaSourceLocationError(expr.line, error instanceof Error ? error.message : String(error));
     }
   }
   private binary(op: string, a: JavaValue, b: JavaValue): JavaValue {
