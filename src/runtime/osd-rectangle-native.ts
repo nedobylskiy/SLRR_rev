@@ -2,6 +2,7 @@ import type { JavaObject, JavaValue, ResourceIdentity } from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import type { GameTypeNative } from './game-type-native';
 import type { RenderObject } from './render-object';
+import { osdDepth } from './osd-depth';
 
 interface RectangleView { render: RenderObject; group: JavaObject; element: OsdElement }
 
@@ -11,12 +12,14 @@ export class OsdRectangleNative {
 
   constructor(private readonly resources: GameTypeNative,
     private readonly layer?: Pick<OsdLayer, 'createRectangle'>,
-    private readonly resourceIdentity?: (id: number) => ResourceIdentity | null | undefined) {}
+    private readonly resourceIdentity?: (id: number) => ResourceIdentity | null | undefined,
+    private readonly viewportPriority: (group: JavaValue) => number = () => 0) {}
 
   sync(render: RenderObject): boolean {
     if (render.alias !== 'Rectangle' || render.parent?.className !== 'java.render.Group') return false;
     if (!this.layer) return true;
-    const group = this.object(this.resources.reference(render.parent));
+    const groupRef = this.resources.reference(render.parent);
+    const group = this.object(groupRef);
     const osd = this.object(group?.fields.get('osd'));
     const type = render.renderType;
     if (!group || !osd || !type) return true;
@@ -38,7 +41,7 @@ export class OsdRectangleNative {
     const normalizedPosition = this.normalizedPosition(render, osd);
     const x = normalizedPosition ? render.position.x / aspect : render.position.x / scaleX;
     const y = -render.position.y / scaleY;
-    const depth = Math.round(render.position.z * 1000);
+    const depth = osdDepth(this.viewportPriority(groupRef), Math.round(render.position.z * 1000));
     if (![x, y, width, height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
     if (!view) {
