@@ -3,6 +3,13 @@ import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 
 interface HitBox { group: JavaValue; width: number; height: number; label: string; element?: OsdElement }
 
+/** At equal Java depth, a small control wins over a broad dialog shield or ghost area. */
+export function osdHitDepth(z: number, width: number, height: number): number {
+  const plane = Math.round(z * 1000);
+  const specificity = Math.round(999 / (1 + Math.abs(width * height)));
+  return plane * 1000 + specificity;
+}
+
 /** Maps OSD PhysicsRef hit boxes to HTML controls and dispatches clicks back into Java. */
 export class OsdButtonNative {
   private readonly boxes = new WeakMap<JavaObject, HitBox>();
@@ -38,9 +45,11 @@ export class OsdButtonNative {
       const scaleY = 1.469 * viewportHeight;
       const x = Number(position.fields.get('x')?.value ?? 0) / scaleX;
       const y = -Number(position.fields.get('y')?.value ?? 0) / scaleY;
-      if (box.element) box.element.setBounds(x, y, box.width / scaleX, box.height / scaleY, 3);
+      const width = box.width / scaleX, height = box.height / scaleY;
+      const depth = osdHitDepth(Number(position.fields.get('z')?.value ?? 0), width, height);
+      if (box.element) box.element.setBounds(x, y, width, height, depth);
       else {
-        box.element = this.layer?.createHitTarget(box.label, x, y, box.width / scaleX, box.height / scaleY, 3,
+        box.element = this.layer?.createHitTarget(box.label, x, y, width, height, depth,
           () => { void this.activate(receiver).catch(this.report); });
         if (box.element) { this.live.add(box.element); this.sync(); }
       }

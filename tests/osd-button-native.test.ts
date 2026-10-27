@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
-import { OsdButtonNative } from '../src/runtime/osd-button-native';
+import { OsdButtonNative, osdHitDepth } from '../src/runtime/osd-button-native';
 import type { OsdElement } from '../src/osd/osd-layer';
 
 const object = (className: string, fields: Record<string, JavaValue> = {}) =>
@@ -22,14 +22,16 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   await jvm.loadClass('java.render.Clicks');
   let clickFromHtml: (() => void) | undefined;
   let bounds: number[] = [];
+  let depth = NaN;
   let removed = false;
   let visible = false;
   const node = { remove() { removed = true; } } as unknown as HTMLElement;
   const surface = { createHitTarget(_label: string, x: number, y: number, width: number, height: number,
-    _depth: number, action: () => void): OsdElement {
+    layerDepth: number, action: () => void): OsdElement {
     clickFromHtml = action;
     bounds = [x, y, width, height];
-    return { node, setText() {}, setResource() {}, setBounds() {},
+    depth = layerDepth;
+    return { node, setText() {}, setResource() {}, setBounds(_x, _y, _width, _height, nextDepth) { depth = nextDepth; },
       show() { visible = true; }, hide() { visible = false; } };
   } };
   const bridge = new OsdButtonNative(jvm, surface);
@@ -44,8 +46,12 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   const nil = jv('Ypr', null);
   jvm.natives.invoke('java.util.resource.PhysicsRef', 'createBox', physics,
     [groupRef, jv('float', 3.917), jv('float', 2.938), jv('float', 0.001), jv('String', ' ')]);
-  const position = object('java.lang.Vector3', { x: jv('float', 0), y: jv('float', 0), z: jv('float', 0) });
+  const position = object('java.lang.Vector3', { x: jv('float', 0), y: jv('float', 0), z: jv('float', -0.002) });
   jvm.natives.invoke('java.util.resource.PhysicsRef', 'setMatrix', physics, [position, nil]);
+  assert.equal(depth, osdHitDepth(-0.002, bounds[2], bounds[3]));
+  (position.value as { fields: Map<string, JavaValue> }).fields.set('z', jv('float', 3));
+  jvm.natives.invoke('java.util.resource.PhysicsRef', 'setMatrix', physics, [position, nil]);
+  assert.equal(depth, osdHitDepth(3, bounds[2], bounds[3]), 'a moved arrow hotspot must rise above the shield');
   assert.ok(clickFromHtml);
   assert.ok(Math.abs(bounds[2] - 2) < 0.01);
   assert.ok(Math.abs(bounds[3] - 2) < 0.01);
@@ -69,4 +75,9 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'count').value, 1);
   bridge.dispose();
   assert.equal(removed, true);
+});
+
+test('small arrow hitboxes outrank the central ghost area on the same Java depth plane', () => {
+  assert.ok(osdHitDepth(3, 0.11, 0.11) > osdHitDepth(3, 1.15, 0.21));
+  assert.ok(osdHitDepth(3, 1.15, 0.21) > osdHitDepth(-0.002, 2, 2));
 });
