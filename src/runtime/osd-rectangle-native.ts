@@ -45,7 +45,11 @@ export class OsdRectangleNative {
     const viewport = this.viewportLayout(groupRef);
     const projected = projectOsdBounds(viewport, x, y, width, height);
     // Style buttons use raw screen-space mesh dimensions, unlike Osd.createRectangle templates.
-    if (mode === 'style') {
+    // Dialog.createBG uses Osd.createRectangle, but its Vector may not yet be
+    // populated when the native RenderRef callback first reaches this bridge.
+    const dialogBackground = texture.pack.toLowerCase().includes('frontend') &&
+      [0xe, 0x93f5, 0x93f6, 0x93fc, 0x93fd, 0x9402, 0x9403, 0x9404].includes(texture.id);
+    if (mode === 'style' && !dialogBackground) {
       projected.width = mesh.meshScale.x / (1.47 * this.stageAspect());
       projected.height = mesh.meshScale.y / 1.47;
     }

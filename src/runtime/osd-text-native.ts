@@ -2,11 +2,12 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { OsdAlign, OsdElement, OsdLayer } from '../osd/osd-layer';
 import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
 
-interface TextState { element?: OsdElement; group?: JavaObject; x: number; y: number; viewport: OsdViewport; align: OsdAlign; scaleX: number; scaleY: number; fontSize: number; fadeGlyph: boolean; depth: number }
+interface TextState { object: JavaObject; element?: OsdElement; group?: JavaObject; x: number; y: number; viewport: OsdViewport; align: OsdAlign; scaleX: number; scaleY: number; fontSize: number; fadeGlyph: boolean; depth: number; labelAdjusted: boolean }
 
 /** Native Text operations; the original Java constructors and changeText logic still execute. */
 export class OsdTextNative {
   private readonly states = new WeakMap<JavaObject, TextState>();
+  private readonly activeStates = new Set<TextState>();
   private readonly live = new Set<OsdElement>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly layer?: Pick<OsdLayer, 'createText'>,
@@ -28,8 +29,11 @@ export class OsdTextNative {
       if (element) element.node.style.color = '#ffffff';
       if (element) this.live.add(element);
       const group = args[0].value as JavaObject | null;
-      this.states.set(object, { element, group: group?.fields instanceof Map ? group : undefined,
-        x, y, viewport, align: 'left', scaleX: 1, scaleY: 1, fontSize, fadeGlyph, depth });
+      const state = { object, element, group: group?.fields instanceof Map ? group : undefined,
+        x, y, viewport, align: 'left' as OsdAlign, scaleX: 1, scaleY: 1, fontSize, fadeGlyph, depth,
+        labelAdjusted: false };
+      this.states.set(object, state);
+      this.activeStates.add(state);
       return nil();
     });
     jvm.natives.register(owner, 'update', [], ({ receiver }) => {
@@ -92,8 +96,39 @@ export class OsdTextNative {
     return state;
   }
 
+  syncVisibility(): void {
+    for (const state of this.activeStates) {
+      if (!state.element) continue;
+      const osd = state.group?.fields.get('osd')?.value as JavaObject | null | undefined;
+      if (osd?.fields instanceof Map) {
+        const active = Number(state.group?.fields.get('active')?.value ?? 1);
+        if (active && osd.fields.get('cam')?.value != null) state.element.show();
+        else state.element.hide();
+      }
+      if (!state.labelAdjusted && this.isImageButtonLabel(state)) {
+        state.element.node.classList?.add('osd-image-button-label');
+        state.labelAdjusted = true;
+      }
+    }
+  }
+
+  private isImageButtonLabel(state: TextState): boolean {
+    const vector = state.group?.fields.get('gadget')?.value as JavaObject | null | undefined;
+    const data = vector?.fields?.get('elementData')?.value;
+    const count = Number(vector?.fields?.get('elementCount')?.value ?? 0);
+    if (!Array.isArray(data)) return false;
+    for (const value of data.slice(0, count) as JavaValue[]) {
+      const gadget = value?.value as JavaObject | null;
+      const label = gadget?.fields?.get('label')?.value as JavaObject | null | undefined;
+      if (gadget?.fields?.get('rect')?.value != null && label?.fields?.get('txt')?.value === state.object)
+        return true;
+    }
+    return false;
+  }
+
   dispose(): void {
     for (const element of this.live) element.node.remove();
     this.live.clear();
+    this.activeStates.clear();
   }
 }

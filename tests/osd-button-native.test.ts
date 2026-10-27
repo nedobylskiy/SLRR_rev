@@ -9,8 +9,14 @@ const object = (className: string, fields: Record<string, JavaValue> = {}) =>
 
 test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', async () => {
   const source = `package java.render;
-    class Clicks { static int count; }
-    class Button { void click() { Clicks.count++; } }
+    class Clicks { static int count; static int hover; static int leave; }
+    class Gadget { void focus() { Clicks.hover++; } void unfocus() { Clicks.leave++; } }
+    class Button extends Gadget { void click() { Clicks.count++; } }
+    class Group {}
+    class Osd { Gadget pointedGadget;
+      void activateText(Group group, Gadget gadget) { pointedGadget = gadget; gadget.focus(); }
+      void deactivateText() { pointedGadget.unfocus(); pointedGadget = null; }
+    }
     class Vector { Object[] elementData; int elementCount;
       int size() { return elementCount; }
       Object elementAt(int index) { return elementData[index]; }
@@ -20,15 +26,20 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   await jvm.loadClass('java.render.Button');
   await jvm.loadClass('java.render.Vector');
   await jvm.loadClass('java.render.Clicks');
+  await jvm.loadClass('java.render.Osd');
   let clickFromHtml: (() => void) | undefined;
+  let hoverFromHtml: (() => void) | undefined;
+  let leaveFromHtml: (() => void) | undefined;
   let bounds: number[] = [];
   let depth = NaN;
   let removed = false;
   let visible = false;
   const node = { remove() { removed = true; } } as unknown as HTMLElement;
   const surface = { createHitTarget(_label: string, x: number, y: number, width: number, height: number,
-    layerDepth: number, action: () => void): OsdElement {
+    layerDepth: number, action: () => void, hover?: () => void, leave?: () => void): OsdElement {
     clickFromHtml = action;
+    hoverFromHtml = hover;
+    leaveFromHtml = leave;
     bounds = [x, y, width, height];
     depth = layerDepth;
     return { node, setText() {}, setResource() {}, setBounds(_x, _y, _width, _height, nextDepth) { depth = nextDepth; },
@@ -53,12 +64,17 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   jvm.natives.invoke('java.util.resource.PhysicsRef', 'setMatrix', physics, [position, nil]);
   assert.equal(depth, osdHitDepth(3, bounds[2], bounds[3]), 'a moved arrow hotspot must rise above the shield');
   assert.ok(clickFromHtml);
+  assert.ok(hoverFromHtml && leaveFromHtml);
   assert.ok(Math.abs(bounds[2] - 2) < 0.01);
   assert.ok(Math.abs(bounds[3] - 2) < 0.01);
   assert.equal(visible, false);
   (osd.value as { fields: Map<string, JavaValue> }).fields.set('cam', object('java.render.Camera'));
   bridge.sync();
   assert.equal(visible, true);
+  await bridge.hover(physics);
+  assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'hover').value, 1);
+  await bridge.leave(physics);
+  assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'leave').value, 1);
   assert.equal((await jvm.invokeAsync(vector, 'size')).value, 1);
   assert.equal(((await jvm.invokeAsync(vector, 'elementAt', [jv('int', 0)])).value as JavaValue).value, gadget.value);
   await bridge.activate(physics);

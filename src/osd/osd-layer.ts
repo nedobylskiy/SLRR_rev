@@ -145,12 +145,14 @@ export class OsdLayer {
   }
 
   createHitTarget(label: string, x: number, y: number, width: number, height: number, depth: number,
-    action: () => void) {
+    action: () => void, hover?: () => void, leave?: () => void) {
     const node = this.place(document.createElement('button'), x, y, width, height, depth) as HTMLButtonElement;
     node.type = 'button';
     node.classList.add('osd-hit-target');
     node.setAttribute('aria-label', label.trim() || 'OSD action');
     node.onclick = action;
+    if (hover) node.onmouseenter = hover;
+    if (leave) node.onmouseleave = leave;
     return this.handle(node);
   }
 

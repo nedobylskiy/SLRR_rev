@@ -75,3 +75,29 @@ test('only Osd.dark turns a fade glyph into a full-screen dimmer', () => {
   jvm.natives.invoke('java.render.Text', 'changeColor', text, [jv('int', 0x0f000000)]);
   assert.equal(classes.has('osd-fade-overlay'), true);
 });
+
+test('hiding a Java OSD also hides its text and dark overlay', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  jvm.natives.register('java.util.resource.ResourceRef', 'id', [], () => jv('int', 0x1a25));
+  let shown = false;
+  const surface = { createText(): OsdElement {
+    return { node: { style: {}, classList: { add() {} } } as unknown as HTMLElement,
+      setText() {}, setResource() {}, setBounds() {}, show() { shown = true; }, hide() { shown = false; } };
+  } };
+  const bridge = new OsdTextNative(jvm, surface);
+  const text = jv('Text', { className: 'java.render.Text', fields: new Map() });
+  const osd = jv('Osd', { className: 'java.render.Osd', fields: new Map([['cam', jv('Camera', {})]]) });
+  const group = jv('ResourceRef', { className: 'java.render.Group', fields: new Map([
+    ['osd', osd], ['active', jv('int', 1)],
+  ]) });
+  const font = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  jvm.natives.invoke('java.render.Text', 'create', text,
+    [group, font, jv('float', 0), jv('float', 0)]);
+  (osd.value as { fields: Map<string, unknown> }).fields.set('dark', text);
+  jvm.natives.invoke('java.render.Text', 'changeColor', text, [jv('int', 0x7f000000)]);
+  bridge.syncVisibility();
+  assert.equal(shown, true);
+  (osd.value as { fields: Map<string, unknown> }).fields.set('cam', jv('Camera', null));
+  bridge.syncVisibility();
+  assert.equal(shown, false);
+});

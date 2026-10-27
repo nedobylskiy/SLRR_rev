@@ -57,7 +57,9 @@ export class OsdButtonNative {
       if (box.element) box.element.setBounds(projected.x, projected.y, width, height, depth);
       else {
         box.element = this.layer?.createHitTarget(box.label, projected.x, projected.y, width, height, depth,
-          () => { void this.activate(receiver).catch(this.report); });
+          () => { void this.activate(receiver).catch(this.report); },
+          () => { void this.hover(receiver).catch(this.report); },
+          () => { void this.leave(receiver).catch(this.report); });
         if (box.element) { this.live.add(box.element); this.sync(); }
       }
       return nil();
@@ -67,19 +69,46 @@ export class OsdButtonNative {
   async activate(physics: JavaValue): Promise<void> {
     const box = this.boxes.get(this.requireObject(physics));
     if (!box) return;
-    const group = this.requireObject(box.group);
     if (!this.visible(box)) return;
+    const gadget = await this.findGadget(box, physics);
+    if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0)) return;
+    await this.jvm.invokeAsync(jv(gadget.className.split('.').at(-1)!, gadget), 'click');
+  }
+
+  async hover(physics: JavaValue): Promise<void> {
+    const box = this.boxes.get(this.requireObject(physics));
+    if (!box || !this.visible(box)) return;
+    const gadget = await this.findGadget(box, physics);
+    if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0) || Number(gadget.fields.get('nofocus')?.value ?? 0)) return;
+    const group = this.requireObject(box.group);
+    const osd = this.object(group.fields.get('osd'));
+    if (!osd || osd.fields.get('pointedGadget')?.value === gadget) return;
+    if (osd.fields.get('pointedGadget')?.value)
+      await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
+    await this.jvm.invokeAsync(jv('Osd', osd), 'activateText', [jv('Group', group), jv('Gadget', gadget)]);
+  }
+
+  async leave(physics: JavaValue): Promise<void> {
+    const box = this.boxes.get(this.requireObject(physics));
+    if (!box) return;
+    const gadget = await this.findGadget(box, physics);
+    const osd = this.object(this.requireObject(box.group).fields.get('osd'));
+    if (gadget && osd?.fields.get('pointedGadget')?.value === gadget)
+      await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
+  }
+
+  private async findGadget(box: HitBox, physics: JavaValue): Promise<JavaObject | undefined> {
+    const group = this.requireObject(box.group);
     const gadgetVector = group.fields.get('gadget');
-    if (!gadgetVector) return;
+    if (!gadgetVector) return undefined;
     const count = Number((await this.jvm.invokeAsync(gadgetVector, 'size')).value);
     for (let index = count - 1; index >= 0; index--) {
       const gadget = await this.jvm.invokeAsync(gadgetVector, 'elementAt', [jv('int', index)]);
       const object = this.object(gadget);
       if (!object || object.fields.get('phy')?.value !== physics.value) continue;
-      if (Number(object.fields.get('disabled')?.value ?? 0)) return;
-      await this.jvm.invokeAsync(jv(object.className.split('.').at(-1)!, object), 'click');
-      return;
+      return object;
     }
+    return undefined;
   }
 
   sync(): void {

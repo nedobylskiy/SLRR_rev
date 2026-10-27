@@ -342,6 +342,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       system.beginLoading();
       renderTicker = setInterval(() => {
         osdButtons.sync();
+        osdText.syncVisibility();
         osdRectangles?.syncVisibility();
         jvm.natives.invoke('java.lang.Object', 'notifyAll', renderSignal, []);
       }, 50);
