@@ -142,7 +142,7 @@ class JavaSourceLocationError extends Error {
 export class JavaSourceMachine {
   private remaining = 0; private depth = 0; private singleIteration = false;
   private readonly arrayResourceOrigins = new WeakMap<unknown[], Map<number, Pick<JavaValue, 'resource' | 'resourceId'>>>();
-  constructor(readonly host: JavaHost, readonly budget = 1_000_000, readonly maxDepth = 128) {}
+  constructor(readonly host: JavaHost, readonly budget = Infinity, readonly maxDepth = 128) {}
   invoke(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): JavaValue {
     if (this.depth === 0) this.remaining = this.budget;
     if (args.length !== method.parameters.length) throw new Error(`Java argument count: ${method.owner}.${method.name}`);
@@ -204,7 +204,7 @@ export class JavaSourceMachine {
       }
     }
   }
-  private step() { if (--this.remaining < 0) throw new Error('Java execution budget exceeded'); }
+  private step() { if (this.budget !== Infinity && --this.remaining < 0) throw new Error('Java execution budget exceeded'); }
   private arrayElement(values: unknown[], index: number, type: string): JavaValue {
     return { ...jv(type, values[index]), ...this.arrayResourceOrigins.get(values)?.get(index) };
   }

@@ -30,7 +30,7 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java execution budget exceeded';
+const expected = 'Java constructor missing: java.lang.Thread(2)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

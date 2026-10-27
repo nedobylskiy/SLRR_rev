@@ -2,7 +2,7 @@
 
 **SLRR-JVM interprets original Street Legal Racing: Redline `.java` source files. It does not execute `.class` bytecode.** In particular, the game's TUFA `.class` format is outside this package. No conversion from `.class` to JavaScript or standard JVM bytecode takes place.
 
-This is an early TypeScript runtime for the Java dialect found in SLRR scripts. It uses the source parser from [SLRR-JVM-compiler](https://github.com/nedobylskiy/SLRR-JVM-compiler), then executes the parsed source AST with a step budget and explicit host capabilities. The project is being developed separately from the game-specific renderer, physics, menu, and asset loaders in [SLRR_rev](https://github.com/nedobylskiy/SLRR_rev).
+This is an early TypeScript runtime for the Java dialect found in SLRR scripts. It uses the source parser from [SLRR-JVM-compiler](https://github.com/nedobylskiy/SLRR-JVM-compiler), then executes the parsed source AST with explicit host capabilities. Execution has no step limit by default; hosts may set an optional budget for diagnostics. The project is being developed separately from the game-specific renderer, physics, menu, and asset loaders in [SLRR_rev](https://github.com/nedobylskiy/SLRR_rev).
 
 ## Try it
 
