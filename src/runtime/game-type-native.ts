@@ -29,7 +29,8 @@ export class GameTypeNative {
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
-    private readonly catalog?: ResourceCatalog) {
+    private readonly catalog?: ResourceCatalog,
+    private readonly instantiateResourceScript?: (script: string, typeId: number) => Promise<JavaValue>) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -139,9 +140,17 @@ export class GameTypeNative {
       return receiver;
     });
     // Build 940 passes ResourceRef[] elements to the GameRef-typed native factory.
-    jvm.natives.register(gameRef, 'create', ['GameRef', 'ResourceRef', 'String', 'String'], ({ receiver, args }) => {
-      const script = this.getResource(args[1])?.resourceScript;
-      if (script) throw new Error(`Resource script instantiation missing: ${script}`);
+    jvm.natives.registerAsync(gameRef, 'create', ['GameRef', 'ResourceRef', 'String', 'String'], async ({ receiver, args }) => {
+      const type = this.getResource(args[1]);
+      if (type?.resourceScript) {
+        if (!this.instantiateResourceScript) throw new Error(`Resource script instantiation missing: ${type.resourceScript}`);
+        const scripted = await this.instantiateResourceScript(type.resourceScript, type.typeId);
+        this.create(scripted, args[0], type.typeId, args[2], args[3]);
+        const node = this.require(scripted);
+        node.resourcePack = type.resourcePack;
+        node.resourceScript = type.resourceScript;
+        return scripted;
+      }
       this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
       return receiver;
     });

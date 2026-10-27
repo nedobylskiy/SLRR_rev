@@ -1,6 +1,6 @@
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
-import { Assets } from '../assets';
+import { Assets, normalizePath } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { MathNative } from './math-native';
 import { ViewportNative, type ViewportSize } from './viewport-native';
@@ -57,8 +57,19 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     files.mountOriginal(asset.path, await assets.read(asset.path));
   }
   const sources = new Map<string, string>();
+  const dynamicSources = new Map<string, { path: string; source: string }>();
+  const carScripts = new Map<string, string>();
+  for (const asset of assets.files) {
+    const path = normalizePath(asset.path);
+    const match = /^cars\/.+\/scripts\/src\/([a-z_$][\w$]*)\.java$/i.exec(path);
+    if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
+  }
   const jvm = new SlrrJvm({
     resolveImport: async ({ className }) => {
+      const dynamicSource = dynamicSources.get(className);
+      if (dynamicSource) return dynamicSource;
+      const carScript = carScripts.get(className.toLowerCase());
+      if (carScript) return { path: carScript };
       if (/^java\.game\.[^.]+$/.test(className)) {
         const path = `${sourceRoot}${className.split('.').at(-1)}.java`;
         if (assets.byPath.has(path.toLowerCase())) return { path };
@@ -91,16 +102,45 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       return voidValue();
     });
   };
-  const resourceCatalog = new ResourceCatalog(assets.byPath.has('cars.rpk')
-    ? [['cars.rpk', await assets.pack('cars.rpk')] as const] : []);
-  const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog);
+  const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
+    .filter(path => assets.byPath.has(path))
+    .map(async path => [path, await assets.pack(path)] as const)));
+  const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog,
+    async (script, typeId) => {
+      const compiled = normalizePath(script);
+      const sourcePath = compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
+      const source = assets.byPath.get(sourcePath);
+      if (!source) throw new Error(`Resource Java source missing: ${sourcePath}`);
+      const content = new TextDecoder().decode(await assets.read(source.path));
+      const packageName = /\bpackage\s+([\w.]+)\s*;/.exec(content)?.[1];
+      if (!packageName) throw new Error(`Resource Java package missing: ${source.path}`);
+      const simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.java$/i, '');
+      const className = `${packageName}.${simpleName}`;
+      dynamicSources.set(className, { path: source.path, source: content });
+      sources.set(normalizePath(source.path), content);
+      await jvm.loadClass(className);
+      const constructors = [...content.matchAll(new RegExp(`\\b${simpleName}\\s*\\(([^)]*)\\)`, 'g'))];
+      const takesId = constructors.some(match => /^\s*int\s+\w+\s*$/.test(match[1]));
+      return jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);
+    });
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
     const asset = assets.byPath.get(path.toLowerCase());
     if (!asset || !path.toLowerCase().endsWith('.rpk')) return jv('int', 0);
-    // Vehicle libraries are needed to enumerate cars:0x1000r during GameLogic startup.
-    if (path.toLowerCase().startsWith('cars/')) resourceCatalog.addPack(path, await assets.pack(path));
+    // Large track packs remain unopened in the resource catalog until track streaming is implemented.
+    if (asset.size <= 2 * 1024 * 1024) resourceCatalog.addPack(path, await assets.pack(path));
     return jv('int', 1);
+  });
+  jvm.natives.register('java.lang.System', 'arraycopy', ['Object', 'int', 'Object', 'int', 'int'], ({ args }) => {
+    const source = args[0].value, target = args[2].value;
+    const from = Number(args[1].value), to = Number(args[3].value), count = Number(args[4].value);
+    if (!Array.isArray(source) || !Array.isArray(target)) throw new Error('System.arraycopy requires arrays');
+    if (![from, to, count].every(Number.isInteger) || from < 0 || to < 0 || count < 0
+      || from + count > source.length || to + count > target.length)
+      throw new Error('System.arraycopy index out of bounds');
+    const copied = source.slice(from, from + count);
+    for (let i = 0; i < count; i++) target[to + i] = copied[i];
+    return voidValue();
   });
   const viewports = new ViewportNative(jvm, gameTypes, viewportSize);
   const renderRefs = new RenderRefNative(jvm, gameTypes);
@@ -136,7 +176,6 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
   for (const name of ['SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
     jvm.natives.registerField('java.game.Frontend', name, jv('int', 0));
-  jvm.natives.registerField('java.game.Config', 'restart_apply', jv('int', 0));
 
   const entry = `${sourceRoot}Init.java`;
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
