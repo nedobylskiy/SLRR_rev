@@ -34,3 +34,15 @@ test('GameType inherited no-argument wrapper creates a node linked to the Java o
   assert.deepEqual(host.get(vehicle), { id: 1, className: 'java.game.Vehicle', parentId: null, typeId: 0, params: null, alias: 'Vehicle' });
   assert.ok(events.some(event => event.message.includes('GameType instance #1')));
 });
+
+test('GarbageCollector can be constructed and its temporary methods are explicit host stubs', async () => {
+  const path = 'sl/scripts/game/src/Init.java';
+  const source = 'package java.game; class Init extends GameType { Init(int id) { GarbageCollector gc = new GarbageCollector(); gc.push(null); gc.flush(); missingNext(); } }';
+  const assets = new Assets([{ path, size: source.length }], async () => new TextEncoder().encode(source));
+  const events: BootEvent[] = [];
+  const result = await bootGame(assets, event => events.push(event));
+  assert.match(result.error?.message ?? '', /missingNext/);
+  assert.ok(events.some(event => event.message.includes('GarbageCollector.<init>')));
+  assert.ok(events.some(event => event.message.includes('GarbageCollector.push')));
+  assert.ok(events.some(event => event.message.includes('GarbageCollector.flush')));
+});

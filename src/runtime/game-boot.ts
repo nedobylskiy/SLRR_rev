@@ -29,6 +29,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   const gameTypes = new GameTypeNative(jvm, report);
+  const collector = 'java.lang.GarbageCollector';
+  jvm.natives.register(collector, '<init>', [], () => {
+    report({ level: 'native', message: 'Host stub: java.lang.GarbageCollector.<init>()' });
+    return jv('GarbageCollector', {});
+  });
+  native(collector, 'push', ['Object']);
+  native(collector, 'flush', []);
   native('java.game.Frontend', 'init', []);
   native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   native('java.sound.Sound', 'init', []);
