@@ -70,6 +70,11 @@ export class OsdLayer {
     this.stage.style.height = `${width * 9 / 16}px`;
   }
 
+  getViewportSize() {
+    return { width: Number.parseFloat(this.stage.style.width) || this.stage.clientWidth || 16,
+      height: Number.parseFloat(this.stage.style.height) || this.stage.clientHeight || 9 };
+  }
+
   private place(node: HTMLElement, x: number, y: number, width: number, height: number, depth: number) {
     const bounds = osdBounds(x, y, width, height);
     node.style.left = `${bounds.left}%`;

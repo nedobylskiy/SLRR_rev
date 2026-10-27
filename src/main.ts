@@ -60,7 +60,7 @@ async function runGameBoot() {
   el('java-run-state').textContent = 'Running Init.java';
   el<HTMLButtonElement>('java-retry').disabled = true;
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
-    () => viewer?.getViewportSize() ?? { width: 1, height: 1 },
+    () => gameOsd.getViewportSize(),
     node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); },
     gameOsd, music ? new SoundJavaBridge(music) : undefined, undefined, gameVideo);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
