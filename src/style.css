@@ -330,6 +330,7 @@ body:has(.osd-layer:not(.osd-layer-game)){overflow:hidden}
 .osd-rectangle img,.osd-button img{display:block;width:100%;height:100%;object-fit:fill}
 .osd-button{padding:0;border:0;border-radius:0;background:transparent;cursor:pointer}
 .osd-button:hover,.osd-button:focus-visible{transform:scale(1.08);filter:brightness(1.12);outline:0}
+.osd-hit-target{padding:0;border:0;background:transparent;opacity:0;pointer-events:auto;cursor:pointer}
 .osd-menu-icon:hover,.osd-menu-icon:focus-visible{transform:none;filter:brightness(1.08)}
 .osd-text{white-space:nowrap;color:#171717;font:600 clamp(12px,1.7vw,24px)/1.2 Arial,sans-serif;transform:translateY(-50%);pointer-events:none}
 .osd-align-center{transform:translate(-50%,-50%)}

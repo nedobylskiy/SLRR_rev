@@ -139,6 +139,16 @@ export class OsdLayer {
     return this.handle(node);
   }
 
+  createHitTarget(label: string, x: number, y: number, width: number, height: number, depth: number,
+    action: () => void) {
+    const node = this.place(document.createElement('button'), x, y, width, height, depth) as HTMLButtonElement;
+    node.type = 'button';
+    node.classList.add('osd-hit-target');
+    node.setAttribute('aria-label', label.trim() || 'OSD action');
+    node.onclick = action;
+    return this.handle(node);
+  }
+
   createButton(label: string, x: number, y: number, width: number, height: number, depth: number, resource: OsdResource, action: () => void) {
     const node = this.place(document.createElement('button'), x, y, width, height, depth) as HTMLButtonElement;
     node.type = 'button'; node.classList.add('osd-button'); node.setAttribute('aria-label', label);
