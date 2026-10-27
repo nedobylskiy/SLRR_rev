@@ -20,8 +20,11 @@ export class OsdRectangleNative {
     const osd = this.object(group?.fields.get('osd'));
     const type = render.renderType;
     if (!group || !osd || !type) return true;
-    const texture = [...type.resourceReplacements.values()]
-      .map(id => this.resourceIdentity?.(id)).find((identity): identity is ResourceIdentity => Boolean(identity));
+    const texture = [...type.resourceReplacements]
+      .map(([slot, id]) => {
+        const pack = type.resourceReplacementPacks.get(slot);
+        return pack ? { pack, id: id & 0xffff } : this.resourceIdentity?.(id);
+      }).find((identity): identity is ResourceIdentity => Boolean(identity));
     const mesh = [...type.resourceReplacements.values()]
       .map(id => this.resources.getByResourceId(id)).find(resource => resource?.copiedFromResourceId != null);
     if (!texture || !mesh) return true;
@@ -32,8 +35,9 @@ export class OsdRectangleNative {
     const scaleY = 1.469 * vpHeight;
     const width = mesh.meshScale.x / (1.47 * aspect * vpWidth);
     const height = mesh.meshScale.y / (1.47 * vpHeight);
-    const x = render.position.x / scaleX;
-    const y = -render.position.y / scaleY;
+    const normalizedPosition = this.normalizedPosition(render, osd);
+    const x = normalizedPosition ? render.position.x : render.position.x / scaleX;
+    const y = normalizedPosition ? -render.position.y : -render.position.y / scaleY;
     const depth = Math.round(render.position.z * 1000);
     if (![x, y, width, height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
@@ -47,7 +51,7 @@ export class OsdRectangleNative {
     return true;
   }
 
-  syncVisibility(): void { for (const view of this.views.values()) this.syncView(view); }
+  syncVisibility(): void { for (const view of this.views.values()) this.sync(view.render); }
 
   remove(render: RenderObject): void {
     const view = this.views.get(render);
@@ -64,6 +68,21 @@ export class OsdRectangleNative {
     if (Number(view.group.fields.get('active')?.value ?? 0) && osd?.fields.get('cam')?.value != null)
       view.element.show();
     else view.element.hide();
+  }
+
+  private normalizedPosition(render: RenderObject, osd: JavaObject): boolean {
+    const vector = this.object(osd.fields.get('rectangles'));
+    const data = vector?.fields.get('elementData')?.value;
+    const count = Number(vector?.fields.get('elementCount')?.value ?? 0);
+    if (!Array.isArray(data)) return false;
+    for (const value of data.slice(0, count) as JavaValue[]) {
+      const rectangle = this.object(value);
+      if (!rectangle) continue;
+      const instance = rectangle.fields.get('ins');
+      if (instance && this.resources.getRender(instance) === render)
+        return rectangle.fields.get('rev_pos')?.value != null;
+    }
+    return false;
   }
 
   private object(value: JavaValue | undefined): JavaObject | undefined {

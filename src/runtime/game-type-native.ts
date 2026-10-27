@@ -101,6 +101,8 @@ export class GameTypeNative {
       target.setParent(source.parent);
       target.resourceReplacements.clear();
       for (const [before, after] of source.resourceReplacements) target.resourceReplacements.set(before, after);
+      target.resourceReplacementPacks.clear();
+      for (const [before, pack] of source.resourceReplacementPacks) target.resourceReplacementPacks.set(before, pack);
       target.meshScale = { ...source.meshScale };
       // Clonable resource kinds are 5/7/13/14. Until RPK type lookup exists,
       // an untyped resource is copied so later mutations cannot change its source.
@@ -119,7 +121,11 @@ export class GameTypeNative {
     jvm.natives.register('java.util.resource.RenderRef', 'changeResource', ['ResourceRef', 'ResourceRef'],
       ({ receiver, args }) => {
         const node = this.requireResource(receiver);
-        node.resourceReplacements.set(this.resourceId(args[0]), this.resourceId(args[1]));
+        const before = this.resourceId(args[0]);
+        node.resourceReplacements.set(before, this.resourceId(args[1]));
+        const pack = this.getResource(args[1])?.resourcePack;
+        if (pack) node.resourceReplacementPacks.set(before, pack);
+        else node.resourceReplacementPacks.delete(before);
         return voidValue();
       });
     jvm.natives.register(resourceRef, 'id', [], ({ receiver }) => {
