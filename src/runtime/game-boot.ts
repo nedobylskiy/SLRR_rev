@@ -31,6 +31,7 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
   const native = /Java native implementation missing: ([\w.]+)\.([\w$]+)\(/.exec(message);
   const nativeClass = native?.[1].split('.').at(-1);
   const declaration = native && [...sources].find(([path]) => path.endsWith(`/src/${nativeClass}.java`.toLowerCase())
+    || path.endsWith(`/decompiled/${nativeClass}.java`.toLowerCase())
     || path.endsWith(`/${nativeClass}.class`.toLowerCase()));
   const nativeLine = declaration?.[1].split(/\r?\n/).findIndex(line => new RegExp(`\\bnative\\b.*\\b${native![2]}\\s*\\(`).test(line));
   const nativeDetail = declaration && nativeLine !== undefined && nativeLine >= 0
@@ -88,8 +89,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       }
       if (!/^java\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(className)) return null;
       const path = `${systemRoot}${className.slice('java.'.length).replaceAll('.', '/')}.class`;
-      const sourcePath = path.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
-      if (assets.byPath.has(sourcePath.toLowerCase())) return { path: sourcePath };
+      for (const folder of ['src', 'decompiled']) {
+        const sourcePath = path.replace(/\/([^/]+)\.class$/i, `/${folder}/$1.java`);
+        if (assets.byPath.has(sourcePath.toLowerCase())) return { path: sourcePath };
+      }
       const simpleName = className.split('.').at(-1)!;
       for (const candidate of javaSourcesByName.get(`${simpleName.toLowerCase()}.java`) ?? []) {
         const candidatePath = normalizePath(candidate);
@@ -227,7 +230,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const entry = `${sourceRoot}Init.java`;
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
-    if (assets.byPath.has('system/scripts/lang/src/string.java')) await jvm.loadClass('java.lang.String');
+    if (['src', 'decompiled'].some(folder => assets.byPath.has(`system/scripts/lang/${folder}/string.java`)))
+      await jvm.loadClass('java.lang.String');
     await jvm.loadClass('java.game.Init');
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();

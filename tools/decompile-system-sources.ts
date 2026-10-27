@@ -5,19 +5,32 @@ import { gameRoot, walk } from './game-files';
 
 const root = process.argv[2] ?? gameRoot;
 const scripts = join(root, 'system', 'scripts');
-let created = 0, existing = 0;
+const selected = new Map<string, { file: string; cls: ReturnType<typeof parseTufa>[number]; output: string }>();
+let duplicates = 0;
 for (const file of await walk(scripts)) {
   if (!file.toLowerCase().endsWith('.class')) continue;
   for (const cls of parseTufa(new Uint8Array(await readFile(file)))) {
-    const { source, diagnostics } = decompileClass(cls);
-    if (diagnostics.length) throw new Error(`${file}: ${diagnostics.join('; ')}`);
-    const output = join(dirname(file), 'src', `${cls.name.split('.').at(-1) ?? parse(file).name}.java`);
-    await mkdir(dirname(output), { recursive: true });
-    try { await writeFile(output, source, { flag: 'wx' }); created++; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      existing++;
-    }
+    const simpleName = cls.name.split('.').at(-1) ?? parse(file).name;
+    // Keep recovered Java away from the original game's auto-compiled src folders.
+    const output = join(dirname(file), 'decompiled', `${simpleName}.java`);
+    const key = output.toLowerCase();
+    const previous = selected.get(key);
+    if (previous) duplicates++;
+    // Some TUFA containers repeat classes also stored in their own files.
+    // The dedicated class file is the canonical source when the copies differ.
+    if (!previous || (parse(previous.file).name !== simpleName && parse(file).name === simpleName))
+      selected.set(key, { file, cls, output });
   }
 }
-console.log(`System Java sources: ${created} created, ${existing} already present in ${scripts}`);
+let created = 0, existing = 0;
+for (const { file, cls, output } of selected.values()) {
+  const { source, diagnostics } = decompileClass(cls);
+  if (diagnostics.length) throw new Error(`${file}: ${diagnostics.join('; ')}`);
+  await mkdir(dirname(output), { recursive: true });
+  try { await writeFile(output, source, { flag: 'wx' }); created++; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    existing++;
+  }
+}
+console.log(`System Java sources: ${created} created, ${existing} already present, ${duplicates} duplicate class entries in ${scripts}`);

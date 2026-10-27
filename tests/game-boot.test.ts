@@ -120,12 +120,30 @@ test('boot resolves Java classes in nested game folders by declared package', as
   assert.doesNotMatch(result.error?.message ?? '', /Java import unresolved|wrongClass/);
 });
 
-test('boot prefers a system src file over its compiled class', async () => {
+test('boot prefers a system src file over decompiled source and compiled class', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { Vector3 center = new Vector3(); missingNext(); } }'],
     ['system/scripts/lang/src/Vector3.java', 'package java.lang; class Vector3 { Vector3() {} }'],
+    ['system/scripts/lang/decompiled/Vector3.java', 'package java.lang; class Vector3 { Vector3() { wrongSource(); } }'],
   ]);
   const classPath = 'system/scripts/lang/Vector3.class';
+  const files = [...sources].map(([path, source]) => ({ path, size: source.length }));
+  files.push({ path: classPath, size: 4 });
+  const assets = new Assets(files, async path => path === classPath
+    ? new Uint8Array([0, 0, 0, 0]) : new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.match(result.error?.message ?? '', /missingNext/);
+  assert.doesNotMatch(result.error?.message ?? '', /TUFA|wrongSource|Java constructor\/native missing: Vector3/);
+});
+
+test('boot loads a decompiled system source without using the game src folder', async () => {
+  const initPath = 'sl/scripts/game/src/Init.java';
+  const decompiledPath = 'system/scripts/lang/decompiled/Vector3.java';
+  const classPath = 'system/scripts/lang/Vector3.class';
+  const sources = new Map([
+    [initPath, 'package java.game; class Init extends GameType { Init(int id) { Vector3 center = new Vector3(); missingNext(); } }'],
+    [decompiledPath, 'package java.lang; class Vector3 { Vector3() {} }'],
+  ]);
   const files = [...sources].map(([path, source]) => ({ path, size: source.length }));
   files.push({ path: classPath, size: 4 });
   const assets = new Assets(files, async path => path === classPath
