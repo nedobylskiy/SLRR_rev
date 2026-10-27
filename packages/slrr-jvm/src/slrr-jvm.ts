@@ -50,7 +50,7 @@ function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
   };
   add(cls.parent);
   for (const member of cls.members) {
-    if (member.kind === 'field') { add(member.type); expression(member.initial); }
+    if (member.kind === 'field') expression(member.initial);
     else if (selected.has(member.name)) {
       add(member.result);
       for (const parameter of member.params) add(parameter.type);

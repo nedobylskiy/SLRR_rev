@@ -80,3 +80,16 @@ class GameLogic extends GameType {
   assert.match(result.error?.message ?? '', /GameLogic\.GameLogic \(source line 6\): Java method\/native missing: java\.game\.GameLogic\.missingNext/);
   assert.match(result.error?.message ?? '', /sl\/scripts\/game\/src\/GameLogic\.java:6\n> missingNext\(\);/);
 });
+
+test('boot resolves a class from the same Java package without an import', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { new GameLogic(); } }'],
+    ['sl/scripts/game/src/GameLogic.java', 'package java.game; class GameLogic extends GameType { GameLogic() { int value = City.MAGIC; missingNext(); } }'],
+    ['sl/scripts/game/src/City.java', 'package java.game; class City { static int MAGIC = 17; }'],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
+    async path => new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.match(result.error?.message ?? '', /GameLogic\.GameLogic .*missingNext/);
+  assert.doesNotMatch(result.error?.message ?? '', /Unknown Java name City|Java import unresolved: java\.game\.City/);
+});

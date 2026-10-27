@@ -128,8 +128,13 @@ export class JavaSourceMachine {
     const initializer: SourceMethod = { owner: cls.name, name: '<fields>', parameters: [], result: 'void', isStatic: false,
       body: { kind: 'block', statements: [] }, line: 0 };
     for (const field of cls.fields.filter(field => field.isStatic === staticOnly)) {
-      const value = field.expr ? this.expression(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
-      this.host.set(receiver, field.name, coerce(field.type, value));
+      try {
+        const value = field.expr ? this.expression(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
+        this.host.set(receiver, field.name, coerce(field.type, value));
+      } catch (error) {
+        const line = error instanceof JavaSourceLocationError ? error.line : field.expr?.line ?? 0;
+        throw new Error(`${cls.name}.<fields> (source line ${line}): ${error instanceof Error ? error.message : error}`);
+      }
     }
   }
   private step() { if (--this.remaining < 0) throw new Error('Java execution budget exceeded'); }

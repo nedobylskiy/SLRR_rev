@@ -7,11 +7,10 @@ export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
-const sourceClasses = new Set(['java.game.Init', 'java.game.GameLogic']);
 const voidValue = () => jv('void', undefined);
 
 function sourceDiagnostic(message: string, sources: Map<string, string>, assets: Assets): string {
-  const frames = [...message.matchAll(/\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*) \(source line (\d+)\)/g)];
+  const frames = [...message.matchAll(/\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*|<fields>) \(source line (\d+)\)/g)];
   const frame = frames.at(-1);
   if (!frame) return message;
   const [, className, , lineText] = frame, line = Number(lineText);
@@ -31,7 +30,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const sources = new Map<string, string>();
   const jvm = new SlrrJvm({
     resolveImport: ({ className }) => {
-      if (!sourceClasses.has(className)) return null;
+      if (!/^java\.game\.[^.]+$/.test(className)) return null;
       const path = `${sourceRoot}${className.split('.').at(-1)}.java`;
       return assets.byPath.has(path.toLowerCase()) ? { path } : null;
     },

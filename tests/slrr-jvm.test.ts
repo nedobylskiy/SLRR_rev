@@ -66,3 +66,14 @@ test('separate resolvers select different Java versions without changing the run
   assert.equal(await run(1), 1);
   assert.equal(await run(2), 2);
 });
+
+test('static field failures retain the declaring class and source line', async () => {
+  const source = `package game;
+class Main {
+  static Vector3 CENTER = new Vector3();
+}`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'game.Main' ? { path: 'Main.java', source } : null });
+  await jvm.loadClass('game.Main');
+  assert.throws(() => jvm.get(jv('class', 'game.Main'), 'CENTER'),
+    /Main\.<fields> \(source line 3\): Java constructor\/native missing: Vector3\(\)/);
+});
