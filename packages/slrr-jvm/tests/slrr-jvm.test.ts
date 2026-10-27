@@ -234,6 +234,21 @@ test('child field initializers run after the parent constructor', async () => {
   assert.equal(jvm.invoke(jvm.construct('demo.Child', []), 'value').value, 3);
 });
 
+test('SLRR constructors can pass a literal instance field to super', async () => {
+  const source = `package demo;
+    class Base { String title; Base(String value) { title = value; } }
+    class Child extends Base {
+      String defTitle = "OPTIONS";
+      Child() { super(defTitle); }
+      String getTitle() { return title; }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Child'
+    ? { path: 'Child.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  assert.equal(jvm.invoke(jvm.construct('demo.Child', []), 'getTitle').value, 'OPTIONS');
+  assert.equal((await jvm.invokeAsync(await jvm.constructAsync('demo.Child', []), 'getTitle')).value, 'OPTIONS');
+});
+
 test('this constructor chaining initializes instance fields once', async () => {
   const source = `class Chain {
     int x = 1;
@@ -486,6 +501,17 @@ test('numeric literals narrow to int while variables retain their declared type'
   assert.equal(jvm.invoke(main, 'asConstructor').value, -2);
   assert.equal(jvm.invoke(main, 'direct').value, 10);
   assert.throws(() => jvm.invoke(main, 'variable'), /Java constructor missing: demo.Counter\(1\)/);
+});
+
+test('SLRR numeric narrowing permits a float variable to call an int-only method', async () => {
+  const source = `package demo; class Main {
+    int take(int value) { return value; }
+    int run() { float value = 1.9; return take(value); }
+  }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main'
+    ? { path: 'Main.java', source } : null, allowNumericNarrowing: true });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 1);
 });
 
 test('a host-resolved resource literal becomes the packed integer in an int array', async () => {

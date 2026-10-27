@@ -24,6 +24,7 @@ export interface SlrrJvmOptions {
 
 export interface JavaObject { className: string; fields: Map<string, JavaValue> }
 interface LoadedClass { name: string; path: string; source: string; sourceMethods: Set<string>; hintedMethods: Set<string>; parsed: SourceClass; imports: Map<string, string>; nativeMethods: { name: string; parameters: string[] }[] }
+type SourceExpression = NonNullable<SourceClass['fields'][number]['expr']>;
 
 function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
   const hints = new Set<string>();
@@ -204,6 +205,7 @@ export class SlrrJvm implements JavaHost {
     if (!ctor && args.length && !entry.parsed.parent) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     const first = ctor?.body.kind === 'block' ? ctor.body.statements?.[0] : ctor?.body;
     const explicit = first?.kind === 'expr' && first.expr?.kind === 'call' && first.expr.left?.kind === 'name' && ['super', 'this'].includes(first.expr.left.text ?? '');
+    if (explicit && first.expr?.left?.text === 'super') this.prepareSuperArgumentFields(entry, receiver, first.expr.items ?? []);
     if (!explicit) {
       if (entry.parsed.parent) await this.constructorCallAsync(receiver, entry.name, 'super', ctor ? [] : args);
       await this.initializeInstanceFieldsAsync(entry, receiver);
@@ -230,6 +232,7 @@ export class SlrrJvm implements JavaHost {
     if (!ctor && args.length && !entry.parsed.parent) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     const first = ctor?.body.kind === 'block' ? ctor.body.statements?.[0] : ctor?.body;
     const explicit = first?.kind === 'expr' && first.expr?.kind === 'call' && first.expr.left?.kind === 'name' && ['super', 'this'].includes(first.expr.left.text ?? '');
+    if (explicit && first.expr?.left?.text === 'super') this.prepareSuperArgumentFields(entry, receiver, first.expr.items ?? []);
     if (!explicit) {
       if (entry.parsed.parent) this.constructorCall(receiver, entry.name, 'super', ctor ? [] : args);
       this.initializeInstanceFields(entry, receiver);
@@ -247,6 +250,24 @@ export class SlrrJvm implements JavaHost {
     this.activeClasses.push(entry.name);
     try { this.machine.initializeFields(entry.parsed, receiver); }
     finally { this.activeClasses.pop(); }
+  }
+
+  /** SLRR's source dialect permits literal instance fields in explicit super arguments. */
+  private prepareSuperArgumentFields(entry: LoadedClass, receiver: JavaValue, arguments_: SourceExpression[]): void {
+    const names = new Set<string>();
+    const visit = (expr?: SourceExpression): void => {
+      if (!expr) return;
+      if (expr.kind === 'name' && expr.text) names.add(expr.text);
+      visit(expr.left);
+      visit(expr.right);
+      visit(expr.extra);
+      for (const item of expr.items ?? []) visit(item);
+    };
+    for (const argument of arguments_) visit(argument);
+    for (const field of entry.parsed.fields) {
+      if (!field.isStatic && names.has(field.name) && field.expr?.kind === 'literal' && field.expr.value)
+        this.set(receiver, field.name, field.expr.value);
+    }
   }
 
   constructorCall(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): JavaValue {
