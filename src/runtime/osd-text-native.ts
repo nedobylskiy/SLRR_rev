@@ -10,18 +10,23 @@ export class OsdTextNative {
   private readonly renderStates = new WeakMap<JavaObject, TextState>();
   private readonly activeStates = new Set<TextState>();
   private readonly live = new Set<OsdElement>();
+  private measureContext?: CanvasRenderingContext2D | null;
 
   constructor(private readonly jvm: SlrrJvm, private readonly layer?: Pick<OsdLayer, 'createText'>,
     private readonly viewportLayout: (group: JavaValue) => OsdViewport = () => FULL_OSD_VIEWPORT) {
     const owner = 'java.render.Text';
     const nil = () => jv('void', undefined);
+    jvm.natives.register(owner, 'getWidthPixels', ['String', 'ResourceRef'], ({ args }) => {
+      const value = args[0].value == null ? '' : String(args[0].value);
+      const fontId = Number(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', args[1], [])?.value ?? 0) & 0xffff;
+      return jv('float', this.widthPixels(value, this.fontSize(fontId)));
+    });
     jvm.natives.register(owner, 'create', ['ResourceRef', 'ResourceRef', 'float', 'float'], ({ receiver, args }) => {
       const object = this.object(receiver);
       const x = Number(args[2].value), y = Number(args[3].value);
       const fontId = Number(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', args[1], [])?.value ?? 0) & 0xffff;
       const fadeGlyph = fontId === 0x1a25 || fontId === 0x1a26;
-      const fontSize = [0x139, 0xc02a, 0xc02d, 0xc12a].includes(fontId) ? 15
-        : fontId === 0x138 ? 10 : fontId === 0xb2 ? 7 : 24;
+      const fontSize = this.fontSize(fontId);
       const viewport = this.viewportLayout(args[0]);
       const depth = osdDepth(viewport.priority, 2);
       const point = projectOsdBounds(viewport, x, y);
@@ -83,6 +88,30 @@ export class OsdTextNative {
       if (state.element) state.element.node.style.fontSize = `${Math.max(1, state.fontSize * state.scaleY)}px`;
       return nil();
     });
+  }
+
+  private fontSize(fontId: number): number {
+    if ([0x139, 0xc02a, 0xc02d, 0xc12a].includes(fontId)) return 15;
+    if ([0x25, 0xc02b, 0xc02c, 0xc12b, 0xc02e, 0xc02f].includes(fontId)) return 24;
+    if (fontId === 0x138 || fontId === 0x23 || fontId === 0xc03b) return 10;
+    if (fontId === 0xb2) return 7;
+    if (fontId === 0x22) return 40;
+    if (fontId === 0x20) return 20;
+    if (fontId === 0x8c) return 14;
+    if (fontId === 0x2e) return 28;
+    return 20;
+  }
+
+  private widthPixels(value: string, fontSize: number): number {
+    if (!value) return 0;
+    if (this.measureContext === undefined)
+      this.measureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+    if (this.measureContext) {
+      this.measureContext.font = `600 ${fontSize}px Arial`;
+      return this.measureContext.measureText(value).width;
+    }
+    // The headless verifier has no canvas; use a stable width until a browser renders the text.
+    return [...value].reduce((sum, glyph) => sum + fontSize * (/\s/.test(glyph) ? 0.33 : /[il.,:;!|]/.test(glyph) ? 0.28 : 0.58), 0);
   }
 
   /** Text.renderinst is a native handle for the text glyph, not a standalone scene render. */

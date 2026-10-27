@@ -95,6 +95,23 @@ if (process.argv.includes('--name-request-smoke') && !result.error) {
   result.dispose();
   process.exit(process.exitCode ?? 0);
 }
+if (process.argv.includes('--text-dialog-smoke') && !result.error) {
+  try {
+    await result.jvm.loadClass('java.render.osd.dialog.TextDialog');
+    const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
+    const controller = result.jvm.get(player, 'controller');
+    const dialog = await result.jvm.constructAsync('java.render.osd.dialog.TextDialog',
+      [controller, jv('int', 0), jv('String', 'Information'), jv('String', 'OK'),
+        jv('String', 'This paragraph exercises the original Java TextBox line wrapping.')]);
+    await result.jvm.invokeAsync(dialog, 'show');
+    process.stdout.write('TextDialog.show completed\n');
+  } catch (error) {
+    process.stderr.write(`TextDialog.show stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
+}
 if (osdRectangles < 10) {
   process.stderr.write(`Java OSD emitted only ${osdRectangles} visible rectangle resources\n`);
   process.exitCode = 1;

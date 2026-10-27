@@ -56,6 +56,19 @@ test('the original fade font glyph is not rendered as a literal letter', () => {
   assert.equal(displayed, '');
 });
 
+test('Text.getWidthPixels returns a font-sized width for TextBox wrapping', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  jvm.natives.register('java.util.resource.ResourceRef', 'id', [], () => jv('int', 0x20));
+  new OsdTextNative(jvm);
+  const font = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  const width = (value: string | null) => Number(jvm.natives.invoke('java.render.Text', 'getWidthPixels',
+    jv('class', 'java.render.Text'), [jv('String', value), font])?.value);
+  assert.equal(width(null), 0);
+  assert.equal(width(''), 0);
+  assert.ok(width('Credits') > width('Credit'));
+  assert.ok(width('Credits') > 40);
+});
+
 test('Text.renderinst.setMatrix moves the HTML glyph used by CreditsDialog', () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const resources = new GameTypeNative(jvm, () => {});
