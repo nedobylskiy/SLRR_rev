@@ -11,6 +11,7 @@ import { FileNative } from './file-native';
 import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
 import { StringNative } from './string-native';
+import { PartNative } from './part-native';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
@@ -60,8 +61,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const sources = new Map<string, string>();
   const dynamicSources = new Map<string, { path: string; source: string }>();
   const carScripts = new Map<string, string>();
+  const javaSourcesByName = new Map<string, string[]>();
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
+    if (path.endsWith('.java')) {
+      const name = path.split('/').at(-1)!;
+      const matches = javaSourcesByName.get(name) ?? [];
+      matches.push(asset.path);
+      javaSourcesByName.set(name, matches);
+    }
     const match = /^cars\/.+\/scripts\/src\/([a-z_$][\w$]*)\.java$/i.exec(path);
     if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
   }
@@ -79,6 +87,14 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = `${systemRoot}${className.slice('java.'.length).replaceAll('.', '/')}.class`;
       const sourcePath = path.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
       if (assets.byPath.has(sourcePath.toLowerCase())) return { path: sourcePath };
+      const simpleName = className.split('.').at(-1)!;
+      for (const candidate of javaSourcesByName.get(`${simpleName.toLowerCase()}.java`) ?? []) {
+        const candidatePath = normalizePath(candidate);
+        const source = sources.get(candidatePath) ?? new TextDecoder().decode(await assets.read(candidate));
+        if (!new RegExp(`\\bpackage\\s+${className.slice(0, -simpleName.length - 1).replaceAll('.', '\\.')}\\s*;`).test(source)) continue;
+        sources.set(candidatePath, source);
+        return { path: candidate, source };
+      }
       if (!assets.byPath.has(path.toLowerCase())) return null;
       const classes = parseTufa(await assets.read(path));
       const cls = classes.find(entry => entry.name === className);
@@ -104,6 +120,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   new StringNative(jvm);
+  new PartNative(jvm);
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));

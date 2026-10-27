@@ -22,12 +22,14 @@ const trackNames = (await readdir(join(root, 'multibot/maps'), { recursive: true
 const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { recursive: true }))
   .filter(name => /\.(rpk|java)$/i.test(name))
   .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
-const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, 'system.rpk'].map(async path => {
+const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
+  .filter(name => /\.(rpk|java)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
+const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, 'system.rpk'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java String receiver is not text';
+const expected = 'Java constructor missing: java.game.Vehicle(7)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -46,6 +48,14 @@ if (vehicles < 25 || events < 59) {
 const trackData = mounted.filter(node => /[\\/]track_data\.class$/i.test(node.resourceScript ?? ''));
 if (trackData.length < 5 || new Set(trackData.map(node => node.className)).size < 5) {
   process.stderr.write(`Pack-scoped track scripts incomplete: ${trackData.length} instances, ${new Set(trackData.map(node => node.className)).size} classes\n`);
+  process.exitCode = 1;
+}
+const nodes = mounted.flatMap(function visit(node: (typeof mounted)[number]): typeof mounted {
+  return [node, ...[...node.children].flatMap(visit)];
+});
+if (!nodes.some(node => /[\\/]seat_Torino\.class$/i.test(node.resourceScript ?? '')
+  && node.className === 'java.game.parts.interior.seat_Torino')) {
+  process.stderr.write('Prize part did not resolve to its Java class\n');
   process.exitCode = 1;
 }
 const tracks = result.jvm.get(jv('class', 'java.game.GameLogic'), 'mapStack').value;

@@ -101,6 +101,25 @@ test('boot resolves a class from the same Java package without an import', async
   assert.doesNotMatch(result.error?.message ?? '', /Unknown Java name City|Java import unresolved: java\.game\.City/);
 });
 
+test('boot resolves Java classes in nested game folders by declared package', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', `package java.game;
+      import java.game.parts.bodypart.*;
+      class Init extends GameType { Init(int id) {
+        FrontSeat seat = new FrontSeat();
+        if (seat.value() != 27) wrongClass();
+        missingNext();
+      } }`],
+    ['parts/scripts/bodypart/Src/FrontSeat.java',
+      'package java.game.parts.bodypart; class FrontSeat { int value() { return 27; } }'],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
+    async path => new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.match(result.error?.message ?? '', /missingNext/);
+  assert.doesNotMatch(result.error?.message ?? '', /Java import unresolved|wrongClass/);
+});
+
 test('boot prefers a system src file over its compiled class', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { Vector3 center = new Vector3(); missingNext(); } }'],
