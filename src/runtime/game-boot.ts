@@ -11,6 +11,7 @@ import { FileNative } from './file-native';
 import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
 import { StringNative } from './string-native';
+import { SystemNative } from './system-native';
 import { PartNative } from './part-native';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
@@ -120,6 +121,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   new StringNative(jvm);
+  new SystemNative(jvm, report);
   new PartNative(jvm);
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
