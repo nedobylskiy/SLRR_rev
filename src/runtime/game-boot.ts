@@ -6,11 +6,14 @@ import { MathNative } from './math-native';
 import { ViewportNative, type ViewportSize } from './viewport-native';
 import { CameraNative } from './camera-native';
 import { ControllerNative } from './controller-native';
+import { FileNative } from './file-native';
+import { browserKeyValue, type KeyValue } from './key-value';
+import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; files: VirtualFileSystem; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -42,7 +45,13 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
 /** Starts the game's original Java source. Every host capability is explicitly registered. */
 export async function bootGame(assets: Assets, report: (event: BootEvent) => void,
   viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 }),
-  renderChanged?: (node: RenderObject) => void): Promise<BootResult> {
+  renderChanged?: (node: RenderObject) => void,
+  keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
+  const files = await VirtualFileSystem.load(keyValue);
+  for (const asset of assets.files) {
+    if (!/^save\/controls\/[^/]+$/i.test(asset.path.replaceAll('\\', '/'))) continue;
+    files.mountOriginal(asset.path, await assets.read(asset.path));
+  }
   const sources = new Map<string, string>();
   const jvm = new SlrrJvm({
     resolveImport: async ({ className }) => {
@@ -83,6 +92,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const renderRefs = new RenderRefNative(jvm, gameTypes);
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   new ControllerNative(jvm);
+  new FileNative(jvm, files, gameTypes);
   new MathNative(jvm);
   const collector = 'java.lang.GarbageCollector';
   jvm.natives.register(collector, '<init>', [], () => {
@@ -117,11 +127,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.loadClass('java.game.Init');
     jvm.construct('java.game.Init', [jv('int', 0)]);
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, viewports, renderRefs, cameras };
+    return { jvm, gameTypes, viewports, renderRefs, cameras, files };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, viewports, renderRefs, cameras, error };
+    return { jvm, gameTypes, viewports, renderRefs, cameras, files, error };
   }
 }
