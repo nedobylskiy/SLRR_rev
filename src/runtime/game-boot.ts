@@ -10,15 +10,36 @@ const sourceRoot = 'sl/scripts/game/src/';
 const sourceClasses = new Set(['java.game.Init', 'java.game.GameLogic']);
 const voidValue = () => jv('void', undefined);
 
+function sourceDiagnostic(message: string, sources: Map<string, string>, assets: Assets): string {
+  const frames = [...message.matchAll(/\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*) \(source line (\d+)\)/g)];
+  const frame = frames.at(-1);
+  if (!frame) return message;
+  const [, className, , lineText] = frame, line = Number(lineText);
+  const preferred = `${sourceRoot}${className}.java`.toLowerCase();
+  const found = sources.has(preferred)
+    ? preferred
+    : [...sources.keys()].find(path => new RegExp(`\\bclass\\s+${className}\\b`).test(sources.get(path)!));
+  if (!found) return message;
+  const code = sources.get(found)!.split(/\r?\n/)[line - 1]?.trim();
+  if (!code) return message;
+  const path = assets.byPath.get(found)?.path ?? found;
+  return `${message}\n${path}:${line}\n> ${code}`;
+}
+
 /** Starts the game's original Java source. Every host capability is explicitly registered. */
 export async function bootGame(assets: Assets, report: (event: BootEvent) => void): Promise<BootResult> {
+  const sources = new Map<string, string>();
   const jvm = new SlrrJvm({
     resolveImport: ({ className }) => {
       if (!sourceClasses.has(className)) return null;
       const path = `${sourceRoot}${className.split('.').at(-1)}.java`;
       return assets.byPath.has(path.toLowerCase()) ? { path } : null;
     },
-    readSource: async path => new TextDecoder().decode(await assets.read(path)),
+    readSource: async path => {
+      const source = new TextDecoder().decode(await assets.read(path));
+      sources.set(path.toLowerCase(), source);
+      return source;
+    },
     selectMethods: className => [className.split('.').at(-1)!],
   });
 
@@ -64,7 +85,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     report({ level: 'info', message: 'Init.java completed' });
     return { jvm, gameTypes };
   } catch (reason) {
-    const error = reason instanceof Error ? reason : new Error(String(reason));
+    const original = reason instanceof Error ? reason : new Error(String(reason));
+    const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
     return { jvm, gameTypes, error };
   }

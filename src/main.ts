@@ -53,7 +53,9 @@ async function runGameBoot() {
   el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
   status(result.error ? 'Java boot blocked' : 'Java boot ready', !!result.error);
   if (result.error) {
-    el('filename').textContent = 'Init.java'; el('format').textContent = 'JAVA / ENTRY POINT';
+    const location = /\n([^\n]+\.java):(\d+)\n>/.exec(result.error.message);
+    el('filename').textContent = location ? `${location[1]}:${location[2]}` : 'Init.java';
+    el('format').textContent = 'JAVA / ERROR';
     el('details').textContent = result.error.message;
   }
 }
