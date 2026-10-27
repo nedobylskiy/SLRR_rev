@@ -23,6 +23,8 @@ import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
+import { OsdTextNative } from './osd-text-native';
+import type { OsdLayer } from '../osd/osd-layer';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
@@ -59,7 +61,7 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
 export async function bootGame(assets: Assets, report: (event: BootEvent) => void,
   viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 }),
   renderChanged?: (node: RenderObject) => void,
-  keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
+  osd?: Pick<OsdLayer, 'createText'>, keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -149,6 +151,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   new StringNative(jvm);
   new SystemNative(jvm, report);
   const threads = new ThreadNative(jvm, message => report({ level: 'error', message }));
+  const osdText = new OsdTextNative(jvm, osd);
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
@@ -259,7 +262,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     jvm.natives.registerField('java.game.Frontend', name, jv('int', 0));
 
   const entry = `${sourceRoot}Init.java`;
-  const dispose = () => { gameTypes.dispose(); threads.dispose(); };
+  const dispose = () => { gameTypes.dispose(); threads.dispose(); osdText.dispose(); };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
     if (['src', 'decompiled'].some(folder => assets.byPath.has(`system/scripts/lang/${folder}/string.java`)))

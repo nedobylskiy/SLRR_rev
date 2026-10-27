@@ -318,7 +318,9 @@ body.track-drive-expanded{overflow:hidden}
   display:none
 }
 .osd-layer{position:fixed;inset:0;z-index:50;background:#111;overflow:hidden}
-body:has(.osd-layer){overflow:hidden}
+.osd-layer-game{position:absolute;inset:0;z-index:4;background:transparent;pointer-events:none}
+.osd-layer-game .osd-stage{background:transparent}
+body:has(.osd-layer:not(.osd-layer-game)){overflow:hidden}
 .osd-layer[hidden],.osd-item[hidden]{display:none}
 .osd-stage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);overflow:hidden;background:#d4d4d4}
 .osd-stage:focus{outline:none}

@@ -9,6 +9,7 @@ import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
 import { mountMainMenu } from './osd/main-menu';
+import { OsdLayer } from './osd/osd-layer';
 import { MainMenuRuntime, INITIAL_MENU_STATE } from './runtime/main-menu-runtime';
 import { MusicEngine, MUSIC_SET, type MusicState } from './audio/music-engine';
 import { SoundJavaBridge } from './audio/sound-java';
@@ -25,6 +26,7 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElem
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
 let disposeJavaInput: (() => void) | undefined;
 let disposeGameBoot: (() => void) | undefined;
+let disposeGameOsd: (() => void) | undefined;
 let localInstallation = false;
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
@@ -47,14 +49,18 @@ async function runGameBoot() {
   if (!assets) return;
   disposeJavaInput?.(); disposeJavaInput = undefined;
   disposeGameBoot?.(); disposeGameBoot = undefined;
+  disposeGameOsd?.(); disposeGameOsd = undefined;
   const source = assets, run = sequence;
+  const gameOsd = new OsdLayer(el('viewport'), source);
+  gameOsd.root.classList.add('osd-layer-game');
+  disposeGameOsd = () => gameOsd.dispose();
   el('java-log').replaceChildren();
   el('java-run-state').textContent = 'Running Init.java';
   el<HTMLButtonElement>('java-retry').disabled = true;
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
     () => viewer?.getViewportSize() ?? { width: 1, height: 1 },
-    node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); });
-  if (source !== assets || run !== sequence) { result.dispose(); return; }
+    node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); }, gameOsd);
+  if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   disposeGameBoot = () => result.dispose();
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const poll = window.setInterval(() => {
@@ -426,6 +432,7 @@ async function connect() {
 function attach(source: Assets, label: string, local = false) {
   disposeJavaInput?.(); disposeJavaInput = undefined;
   disposeGameBoot?.(); disposeGameBoot = undefined;
+  disposeGameOsd?.(); disposeGameOsd = undefined;
   stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); sequence++;
   driveButton.disabled = false;
   assets = source; localInstallation = local; el('connection').textContent = label;
