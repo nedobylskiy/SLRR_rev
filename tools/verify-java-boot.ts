@@ -34,7 +34,7 @@ if (process.argv.includes('--diagnose')) {
   result.dispose();
   process.exit(result.error ? 1 : 0);
 }
-const expected = 'Java native implementation missing: java.sound.Sound.changeMusicSet(int)';
+const expected = 'Java native implementation missing: java.render.GfxEngine.openVideo(String,int,int,int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

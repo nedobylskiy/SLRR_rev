@@ -2,8 +2,13 @@ import { jv, nil, type JavaValue } from 'slrr-jvm';
 import { MUSIC_SET, SOUND_CHANNEL, type MusicEngine } from './music-engine';
 
 const constants: Record<string, number> = {
-  ...Object.fromEntries(Object.entries(MUSIC_SET).map(([name, value]) => [`MUSIC_SET_${name}`, value])),
+  MUSIC_SET_NONE: -1, MUSIC_SET_GARAGE: 0, MUSIC_SET_DRIVING: 1,
+  MUSIC_SET_RACE: 2, MUSIC_SET_MENU: 3, MUSIC_SET_MISC: 4, MUSIC_SET_ANIM: 5,
   ...Object.fromEntries(Object.entries(SOUND_CHANNEL).map(([name, value]) => [`CHANNEL_${name}`, value])),
+};
+const internalSet: Record<number, number> = {
+  [-1]: MUSIC_SET.NONE, 0: MUSIC_SET.GARAGE, 1: MUSIC_SET.DRIVING,
+  2: MUSIC_SET.RACE, 3: MUSIC_SET.MENU, 4: MUSIC_SET.MISC, 5: MUSIC_SET.ANIM,
 };
 const number = (value: JavaValue) => {
   if (typeof value.value !== 'number' || !Number.isFinite(value.value)) throw new Error('Sound argument must be numeric');
@@ -18,7 +23,12 @@ export class SoundJavaBridge {
     const arg = (index: number) => { if (!args[index]) throw new Error(`Sound.${name} missing argument ${index}`); return number(args[index]); };
     switch (name) {
       case 'init': this.music.init(); return nil();
-      case 'changeMusicSet': this.music.changeMusicSet(arg(0)); return nil();
+      case 'changeMusicSet': {
+        const set = arg(0);
+        if (!(set in internalSet)) throw new Error(`Unknown Java music set ${set}`);
+        this.music.changeMusicSet(internalSet[set]);
+        return nil();
+      }
       case 'firstTrack': this.music.firstTrack(); return nil();
       case 'nextTrack': this.music.nextTrack(); return nil();
       case 'prevTrack': this.music.prevTrack(); return nil();

@@ -1,12 +1,12 @@
 import type { Assets, Asset } from '../assets';
 
-// Internal identifiers supplied to interpreted Java Sound constants. The
-// original Sound.class is not executed, so callers use names rather than IDs.
-export const MUSIC_SET = { NONE: 0, MENU: 1, GARAGE: 2, RACE: 3, DRIVING: 4, MISC: 5 } as const;
+// Internal playlist identifiers. SoundJavaBridge maps original Java Sound set IDs to these values.
+export const MUSIC_SET = { NONE: 0, MENU: 1, GARAGE: 2, RACE: 3, DRIVING: 4, MISC: 5, ANIM: 6 } as const;
 export const SOUND_CHANNEL = { EFFECTS: 0, MUSIC: 1, ENGINE: 2 } as const;
 const FOLDERS: Record<number, string> = {
   [MUSIC_SET.MENU]: 'main_menu', [MUSIC_SET.GARAGE]: 'garage_shop',
   [MUSIC_SET.RACE]: 'race_chase', [MUSIC_SET.DRIVING]: 'roam_ride', [MUSIC_SET.MISC]: 'misc_menu',
+  [MUSIC_SET.ANIM]: 'anim_scene',
 };
 
 export interface MusicTrack { path: string; title: string; artist?: string; album?: string; format: string; size: number }

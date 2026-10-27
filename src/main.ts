@@ -59,7 +59,8 @@ async function runGameBoot() {
   el<HTMLButtonElement>('java-retry').disabled = true;
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
     () => viewer?.getViewportSize() ?? { width: 1, height: 1 },
-    node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); }, gameOsd);
+    node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); },
+    gameOsd, music ? new SoundJavaBridge(music) : undefined);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   disposeGameBoot = () => result.dispose();
   const detachKeyboard = result.input.attachBrowserKeyboard(window);

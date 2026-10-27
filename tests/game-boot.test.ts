@@ -4,6 +4,25 @@ import { Assets } from '../src/assets';
 import { bootGame, type BootEvent } from '../src/runtime/game-boot';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { SlrrJvm } from 'slrr-jvm';
+import { SoundJavaBridge } from '../src/audio/sound-java';
+import type { MusicEngine } from '../src/audio/music-engine';
+
+test('Init.java routes original Sound.changeMusicSet through the music player', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', `package java.game; import java.sound.*;
+      class Init extends GameType { Init(int id) { Sound.changeMusicSet(Sound.MUSIC_SET_MENU); missingNext(); } }`],
+    ['system/scripts/sound/src/Sound.java', `package java.sound; class Sound {
+      static final int MUSIC_SET_MENU = 3; static native void changeMusicSet(int set); }`],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
+    async path => new TextEncoder().encode(sources.get(path)!));
+  const selected: number[] = [];
+  const sound = new SoundJavaBridge({ changeMusicSet: (set: number) => selected.push(set) } as unknown as MusicEngine);
+  const result = await bootGame(assets, () => {}, undefined, undefined, undefined, sound);
+  assert.deepEqual(selected, [1]);
+  assert.match(result.error?.message ?? '', /missingNext/);
+  result.dispose();
+});
 
 test('boot executes supplied Init.java and reports the next missing Java method', async () => {
   const path = 'sl/scripts/game/src/Init.java';

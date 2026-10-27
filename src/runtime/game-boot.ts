@@ -26,6 +26,7 @@ import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
 import type { OsdLayer } from '../osd/osd-layer';
+import type { SoundJavaBridge } from '../audio/sound-java';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
@@ -62,7 +63,8 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
 export async function bootGame(assets: Assets, report: (event: BootEvent) => void,
   viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 }),
   renderChanged?: (node: RenderObject) => void,
-  osd?: Pick<OsdLayer, 'createText' | 'createHitTarget'>, keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
+  osd?: Pick<OsdLayer, 'createText' | 'createHitTarget'>,
+  sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -256,6 +258,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   jvm.natives.register('java.render.GfxEngine', 'forceRendering', [], () => voidValue());
   jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', 0));
   native('java.sound.Sound', 'init', []);
+  if (sound) jvm.natives.register('java.sound.Sound', 'changeMusicSet', ['int'], ({ args }) =>
+    sound.call('changeMusicSet', [...args]));
+  else native('java.sound.Sound', 'changeMusicSet', ['int']);
   jvm.natives.register('java.sound.Sound', 'enableDebugDump', ['ResourceRef'], () => jv('int', 0));
   native('java.io.Input', 'initControllers', ['Init', 'String'], args => {
     jvm.natives.setField(controller, 'controlFile', args[1]);

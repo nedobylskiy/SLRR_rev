@@ -11,10 +11,12 @@ test('original music-set names select files from the installed folders', () => {
     { path: 'music/Misc_Menu/02_Ending.mp3', size: 12 },
     { path: 'music/Misc_Menu/01_EventList.mp3', size: 12 },
     { path: 'music/Main_Menu/readme.txt', size: 12 },
+    { path: 'music/Anim_Scene/intro.mp3', size: 12 },
   ];
   assert.deepEqual(tracksForSet(files, MUSIC_SET.MENU).map(f => f.path), ['music/Main_Menu/theme.mp3']);
   assert.deepEqual(tracksForSet(files, MUSIC_SET.DRIVING).map(f => f.path), ['music/Roam_Ride/drive.mp3']);
   assert.deepEqual(tracksForSet(files, MUSIC_SET.MISC).map(f => f.path), ['music/Misc_Menu/01_EventList.mp3', 'music/Misc_Menu/02_Ending.mp3']);
+  assert.deepEqual(tracksForSet(files, MUSIC_SET.ANIM).map(f => f.path), ['music/Anim_Scene/intro.mp3']);
 });
 
 test('ID3 title, artist, and album are read from MP3 text frames', () => {
@@ -40,6 +42,7 @@ test('Java Sound calls reach the host and extended readback returns playing meta
       positionSeconds: 13.5, durationSeconds: 120, index: 0, count: 1, playing: true }),
   } as unknown as MusicEngine;
   const bridge = new SoundJavaBridge(music);
+  assert.equal(bridge.constant('MUSIC_SET_MENU')?.value, 3);
   bridge.call('changeMusicSet', [bridge.constant('MUSIC_SET_MENU')!]);
   bridge.call('nextTrack', []);
   bridge.call('playTrack', [jv('String', 'Music\\Main_Menu\\theme.mp3')]);
@@ -50,4 +53,13 @@ test('Java Sound calls reach the host and extended readback returns playing meta
   assert.equal(bridge.call('getTotalTracks', []).value, 1);
   assert.equal(bridge.constant('CHANNEL_MUSIC')?.value, 1);
   assert.throws(() => bridge.call('seekTrack', [jv('float', NaN)]), /numeric/);
+});
+
+test('original Java music-set IDs map to the host playlists', () => {
+  const sets: number[] = [];
+  const bridge = new SoundJavaBridge({ changeMusicSet: (set: number) => sets.push(set) } as unknown as MusicEngine);
+  for (const name of ['NONE', 'GARAGE', 'DRIVING', 'RACE', 'MENU', 'MISC', 'ANIM'])
+    bridge.call('changeMusicSet', [bridge.constant(`MUSIC_SET_${name}`)!]);
+  assert.deepEqual(sets, [MUSIC_SET.NONE, MUSIC_SET.GARAGE, MUSIC_SET.DRIVING,
+    MUSIC_SET.RACE, MUSIC_SET.MENU, MUSIC_SET.MISC, MUSIC_SET.ANIM]);
 });
