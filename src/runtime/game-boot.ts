@@ -10,11 +10,13 @@ import { InputNative } from './input-native';
 import { FileNative } from './file-native';
 import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
+import { packedResourceId } from './resource-ids';
 import { StringNative } from './string-native';
 import { SystemNative } from './system-native';
 import { PartNative } from './part-native';
 import { ChassisNative } from './chassis-native';
 import { parsePartConfig } from '../formats/cfg';
+import type { RpkPack } from '../formats/rpk';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
@@ -66,6 +68,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dynamicSources = new Map<string, { path: string; source: string }>();
   const carScripts = new Map<string, string>();
   const javaSourcesByName = new Map<string, string[]>();
+  const frontendPack = assets.byPath.has('frontend.rpk') ? await assets.pack('frontend.rpk') : null;
+  const partsPack = assets.byPath.has('parts.rpk') ? await assets.pack('parts.rpk') : null;
+  const sourcePacks = new Map<string, RpkPack>();
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
     if (path.endsWith('.java')) {
@@ -78,6 +83,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
   }
   const jvm = new SlrrJvm({
+    resolveResourceId: (resource, path) => {
+      const sourcePath = normalizePath(path);
+      const owner = sourcePacks.get(sourcePath)
+        ?? (sourcePath.startsWith(sourceRoot) ? frontendPack : null)
+        ?? (sourcePath.startsWith('parts/scripts/') ? partsPack : null);
+      return owner ? packedResourceId(owner, resource) : undefined;
+    },
     resolveImport: async ({ className }) => {
       const dynamicSource = dynamicSources.get(className);
       if (dynamicSource) return dynamicSource;
@@ -159,6 +171,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       }
       dynamicSources.set(className, { path: source.path, source: content });
       sources.set(normalizePath(source.path), content);
+      if (pack && assets.byPath.has(normalizePath(pack)))
+        sourcePacks.set(normalizePath(source.path), await assets.pack(pack));
       await jvm.loadClass(className);
       const cfgPath = pack && resourceCatalog.resolve(pack, typeId)?.cfgPath;
       const cfg = cfgPath && assets.byPath.has(cfgPath)

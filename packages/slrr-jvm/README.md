@@ -77,7 +77,7 @@ Java execution waits for each Promise before evaluating the next expression. Syn
 
 Host-native objects can be created from Java `new` expressions by registering a method named `<init>` for that class. The constructor callback returns a `JavaValue`; subsequent calls on that value dispatch to other registered methods of the same class.
 
-An SLRR resource literal assigned to an `int` retains its numeric ID in `value` and its pack identity in the optional `JavaValue.resource` field. Native callbacks can use both to distinguish equal local IDs from different RPK files. Arithmetic creates a new numeric value without this identity.
+An SLRR resource literal assigned to an `int` retains its numeric ID in `value` and its pack identity in the optional `JavaValue.resource` field. By default the numeric value is the local ID. A host can supply `resolveResourceId(resource, sourcePath)` to encode the owning RPK's dependency slot; for example, a `cars:0x2Ar` literal in a source owned by `frontend.rpk` becomes `0x0003002A` when `cars.rpk` is dependency slot 3. This conversion also applies when storing the literal in an `int[]`. Arithmetic creates a new numeric value without the pack identity.
 
 SLRR source calls can pass a floating numeric literal to an `int` parameter. The interpreter accepts that narrowing conversion during overload selection and truncates toward zero. A `float` variable or computed expression does not gain this implicit conversion; an exact `float` overload still wins when available.
 

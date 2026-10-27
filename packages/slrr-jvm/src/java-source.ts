@@ -3,7 +3,7 @@ import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
 import type { Expr as ParsedExpr, Stmt as ParsedStmt, FloatMode } from 'slrr-jvm-compiler';
 import { floatLiteralBits } from './float-literal.js';
 export interface ResourceIdentity { pack: string; id: number }
-export interface JavaValue { type: string; value: unknown; resource?: ResourceIdentity; numericLiteral?: boolean }
+export interface JavaValue { type: string; value: unknown; resource?: ResourceIdentity; resourceId?: number; numericLiteral?: boolean }
 export const jv = (type: string, value: unknown): JavaValue => ({ type, value });
 export const nil = () => jv('Object', null);
 type Expr = { kind: string; line: number; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
@@ -26,7 +26,8 @@ export interface JavaHost {
   constructorCallAsync?(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): Promise<JavaValue>;
 }
 
-function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
+function sourceLiteral(text: string, floatMode: FloatMode,
+  resolveResourceId?: (resource: ResourceIdentity) => number | undefined): JavaValue {
   if (text === 'null') return nil();
   if (text === 'true' || text === 'false') return jv('int', text === 'true' ? 1 : 0);
   if (text.startsWith('"') || text.startsWith("'")) {
@@ -36,7 +37,10 @@ function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
   const resource = /^(.*):0[xX]([\da-fA-F]+)r$/.exec(text);
   if (resource) {
     const identity = { pack: resource[1], id: Number.parseInt(resource[2], 16) };
-    return { ...jv('ResourceRef', identity), resource: identity };
+    const resourceId = resolveResourceId?.(identity);
+    if (resourceId !== undefined && !Number.isInteger(resourceId)) throw new Error(`Invalid resource ID for ${text}`);
+    return { ...jv('ResourceRef', identity), resource: identity,
+      ...(resourceId === undefined ? {} : { resourceId: resourceId | 0 }) };
   }
   if (!/^0[xX]/.test(text) && /[.eEfFdD]/.test(text)) {
     const bits = floatLiteralBits(text, floatMode);
@@ -47,37 +51,46 @@ function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
   return { ...jv('int', Number(text) | 0), numericLiteral: true };
 }
 
-function adaptExpr(expr: ParsedExpr, floatMode: FloatMode): Expr {
-  const child = (value: ParsedExpr | undefined) => value ? adaptExpr(value, floatMode) : undefined;
-  if (expr.kind === 'paren') return adaptExpr(expr.left!, floatMode);
-  if (expr.kind === 'literal') return { kind: 'literal', line: expr.token.line, value: sourceLiteral(expr.value!, floatMode) };
+function adaptExpr(expr: ParsedExpr, floatMode: FloatMode,
+  resolveResourceId?: (resource: ResourceIdentity) => number | undefined): Expr {
+  const child = (value: ParsedExpr | undefined) => value ? adaptExpr(value, floatMode, resolveResourceId) : undefined;
+  if (expr.kind === 'paren') return adaptExpr(expr.left!, floatMode, resolveResourceId);
+  if (expr.kind === 'literal') return { kind: 'literal', line: expr.token.line,
+    value: sourceLiteral(expr.value!, floatMode, resolveResourceId) };
   if (expr.kind === 'this' || expr.kind === 'super') return { kind: 'name', line: expr.token.line, text: expr.kind };
   if (expr.kind === 'newarray') return { kind: 'arrayNew', line: expr.token.line, text: expr.text, right: child(expr.right) };
   return {
     kind: expr.kind, line: expr.token.line, text: expr.text,
     left: child(expr.left), right: child(expr.right), extra: child(expr.third),
-    items: expr.args?.map(arg => adaptExpr(arg, floatMode)),
+    items: expr.args?.map(arg => adaptExpr(arg, floatMode, resolveResourceId)),
   };
 }
 
-function adaptStmt(stmt: ParsedStmt, floatMode: FloatMode): Stmt {
-  const child = (value: ParsedStmt | undefined) => value ? adaptStmt(value, floatMode) : undefined;
+function adaptStmt(stmt: ParsedStmt, floatMode: FloatMode,
+  resolveResourceId?: (resource: ResourceIdentity) => number | undefined): Stmt {
+  const child = (value: ParsedStmt | undefined) => value ? adaptStmt(value, floatMode, resolveResourceId) : undefined;
+  const expression = (value: ParsedExpr) => adaptExpr(value, floatMode, resolveResourceId);
   switch (stmt.kind) {
     case 'empty': return { kind: 'block', statements: [] };
-    case 'block': return { kind: 'block', statements: (stmt.items ?? []).map(x => adaptStmt(x, floatMode)) };
-    case 'exprs': return { kind: 'exprs', statements: (stmt.items ?? []).map(x => adaptStmt(x, floatMode)) };
-    case 'local': return { kind: 'var', declarations: (stmt.declarations ?? []).map(x => ({ type: x.type, name: x.name, expr: x.initial ? adaptExpr(x.initial, floatMode) : undefined })) };
-    case 'if': return { kind: 'if', condition: adaptExpr(stmt.expr!, floatMode), body: child(stmt.body), otherwise: child(stmt.elseBody) };
-    case 'while': case 'do': return { kind: stmt.kind, condition: adaptExpr(stmt.expr!, floatMode), body: child(stmt.body) };
-    case 'for': return { kind: 'for', init: child(stmt.init), condition: stmt.expr ? adaptExpr(stmt.expr, floatMode) : undefined, updates: stmt.update?.map(x => adaptExpr(x, floatMode)), body: child(stmt.body) };
-    case 'switch': return { kind: 'switch', condition: adaptExpr(stmt.expr!, floatMode), cases: (stmt.cases ?? []).map(x => ({ value: x.value ? adaptExpr(x.value, floatMode) : undefined, statements: x.items.map(item => adaptStmt(item, floatMode)) })) };
-    case 'return': case 'expr': return { kind: stmt.kind, expr: stmt.expr ? adaptExpr(stmt.expr, floatMode) : undefined };
+    case 'block': return { kind: 'block', statements: (stmt.items ?? []).map(x => child(x)!) };
+    case 'exprs': return { kind: 'exprs', statements: (stmt.items ?? []).map(x => child(x)!) };
+    case 'local': return { kind: 'var', declarations: (stmt.declarations ?? []).map(x => ({ type: x.type, name: x.name,
+      expr: x.initial ? expression(x.initial) : undefined })) };
+    case 'if': return { kind: 'if', condition: expression(stmt.expr!), body: child(stmt.body), otherwise: child(stmt.elseBody) };
+    case 'while': case 'do': return { kind: stmt.kind, condition: expression(stmt.expr!), body: child(stmt.body) };
+    case 'for': return { kind: 'for', init: child(stmt.init), condition: stmt.expr ? expression(stmt.expr) : undefined,
+      updates: stmt.update?.map(expression), body: child(stmt.body) };
+    case 'switch': return { kind: 'switch', condition: expression(stmt.expr!), cases: (stmt.cases ?? []).map(x => ({
+      value: x.value ? expression(x.value) : undefined, statements: x.items.map(item => child(item)!),
+    })) };
+    case 'return': case 'expr': return { kind: stmt.kind, expr: stmt.expr ? expression(stmt.expr) : undefined };
     case 'break': case 'continue': return { kind: stmt.kind };
     default: throw new Error(`Unsupported Java statement ${stmt.kind} at line ${stmt.token.line}`);
   }
 }
 
-export function parseSourceClass(source: string, selected?: ReadonlySet<string>, className?: string, floatMode: FloatMode = 'B'): SourceClass {
+export function parseSourceClass(source: string, selected?: ReadonlySet<string>, className?: string, floatMode: FloatMode = 'B',
+  resolveResourceId?: (resource: ResourceIdentity) => number | undefined): SourceClass {
   const program = parseSlrrSource(source);
   const cls = className ? program.classes.find(x => x.name === className || x.fullName === className) : program.classes[0];
   if (!cls) throw new Error(`Java class missing: ${className ?? '(first)'}`);
@@ -85,11 +98,12 @@ export function parseSourceClass(source: string, selected?: ReadonlySet<string>,
   const methods: SourceMethod[] = [], constants = new Map<string, JavaValue>(), fields: SourceClass['fields'] = [];
   for (const member of cls.members) {
     if (member.kind === 'field') {
-      const initial = member.initial ? adaptExpr(member.initial, floatMode) : undefined;
+      const initial = member.initial ? adaptExpr(member.initial, floatMode, resolveResourceId) : undefined;
       fields.push({ type: member.type, name: member.name, expr: initial, isStatic: member.flags.includes('static') });
       if (/^[A-Z][A-Z0-9_]*$/.test(member.name) && initial?.kind === 'literal') constants.set(member.name, coerce(member.type, initial.value!));
     } else if (member.body && included.has(member.name)) {
-      methods.push({ owner: cls.name, name: member.name, result: member.result, isStatic: member.flags.includes('static'), parameters: member.params, body: adaptStmt(member.body, floatMode), line: member.token.line });
+      methods.push({ owner: cls.name, name: member.name, result: member.result, isStatic: member.flags.includes('static'),
+        parameters: member.params, body: adaptStmt(member.body, floatMode, resolveResourceId), line: member.token.line });
     }
   }
   return { name: cls.name, parent: cls.parent ?? null, methods, constants, fields };
@@ -102,15 +116,21 @@ class Scope {
 }
 export function coerce(type: string, value: JavaValue): JavaValue {
   if (type === 'int') {
-    const resource = value.type === 'ResourceRef' && value.value && typeof value.value === 'object' && 'id' in value.value
-      ? Number(value.value.id) : Number(value.value);
+    const resource = value.resourceId ?? (value.type === 'ResourceRef' && value.value && typeof value.value === 'object' && 'id' in value.value
+      ? Number(value.value.id) : Number(value.value));
     const result = jv(type, resource | 0);
     if (value.resource) result.resource = value.resource;
+    if (value.resourceId !== undefined) result.resourceId = value.resourceId;
     return result;
   }
   if (type === 'float') return jv(type, Math.fround(Number(value.value)));
   if (type === 'double') return jv(type, Number(value.value));
-  return jv(type, value.value);
+  const result = jv(type, value.value);
+  if (type === 'ResourceRef' && value.resource) {
+    result.resource = value.resource;
+    if (value.resourceId !== undefined) result.resourceId = value.resourceId;
+  }
+  return result;
 }
 const truth = (v: JavaValue) => v.value !== null && v.value !== false && v.value !== 0;
 type Flow = { kind: 'return' | 'break' | 'continue'; value?: JavaValue } | undefined;
@@ -196,7 +216,7 @@ export class JavaSourceMachine {
       if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
       const values = array.value as unknown[];
       const elementType = array.type.endsWith('[]') ? array.type.slice(0, -2) : 'int';
-      return { get: () => jv(elementType, values[index]), set: (v: JavaValue) => { values[index] = v.value; } };
+      return { get: () => jv(elementType, values[index]), set: (v: JavaValue) => { values[index] = coerce(elementType, v).value; } };
     }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }
@@ -278,7 +298,7 @@ export class JavaSourceMachine {
       if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
       const values = array.value as unknown[];
       const elementType = array.type.endsWith('[]') ? array.type.slice(0, -2) : 'int';
-      return { get: async () => jv(elementType, values[index]), set: v => { values[index] = v.value; } };
+      return { get: async () => jv(elementType, values[index]), set: v => { values[index] = coerce(elementType, v).value; } };
     }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }

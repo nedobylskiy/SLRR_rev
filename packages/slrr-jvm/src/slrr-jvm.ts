@@ -1,4 +1,4 @@
-import { JavaSourceMachine, coerce, jv, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from './java-source.js';
+import { JavaSourceMachine, coerce, jv, parseSourceClass, type JavaHost, type JavaValue, type ResourceIdentity, type SourceClass } from './java-source.js';
 import { JavaNativeRegistry } from './native.js';
 import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
 import type { Expr as ParsedExpr, FloatMode, SourceClass as ParsedClass, Stmt as ParsedStmt } from 'slrr-jvm-compiler';
@@ -14,6 +14,8 @@ export interface SlrrJvmOptions {
   selectMethods?(className: string): Iterable<string> | undefined;
   /** Float literal conversion observed in a particular SLRR build; B is the Build 940 default. */
   floatMode?: FloatMode;
+  /** Resolve a resource literal to the integer used by the source file's owning RPK. */
+  resolveResourceId?(resource: ResourceIdentity, sourcePath: string): number | undefined;
   budget?: number;
   maxDepth?: number;
 }
@@ -112,7 +114,8 @@ export class SlrrJvm implements JavaHost {
     for (const cls of program.classes) this.sourceLocations.set(cls.fullName, { path: location.path, source });
     const selectedNames = this.options.selectMethods?.(className);
     const selected = selectedNames ? new Set(selectedNames) : undefined;
-    const parsed = parseSourceClass(source, selected, shortName, this.options.floatMode ?? 'B');
+    const parsed = parseSourceClass(source, selected, shortName, this.options.floatMode ?? 'B',
+      resource => this.options.resolveResourceId?.(resource, location.path));
     const imports = new Map<string, string>();
     const nativeMethods = declaration.members.flatMap(member => member.kind === 'method' && member.flags.includes('native')
       ? [{ name: member.name, parameters: member.params.map(parameter => parameter.type) }] : []);
@@ -397,7 +400,8 @@ export class SlrrJvm implements JavaHost {
       if (entry) {
         this.ensureInitialized(entry);
         if (entry.sourceMethods.has(name) && !entry.parsed.methods.some(method => method.name === name)) {
-          const parsed = parseSourceClass(entry.source, new Set([name]), entry.name.split('.').at(-1), this.options.floatMode ?? 'B');
+          const parsed = parseSourceClass(entry.source, new Set([name]), entry.name.split('.').at(-1), this.options.floatMode ?? 'B',
+            resource => this.options.resolveResourceId?.(resource, entry.path));
           entry.parsed.methods.push(...parsed.methods.filter(method => method.name === name));
         }
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
@@ -427,7 +431,8 @@ export class SlrrJvm implements JavaHost {
       if (entry) {
         await this.ensureInitializedAsync(entry);
         if (entry.sourceMethods.has(name) && !entry.parsed.methods.some(method => method.name === name)) {
-          const parsed = parseSourceClass(entry.source, new Set([name]), entry.name.split('.').at(-1), this.options.floatMode ?? 'B');
+          const parsed = parseSourceClass(entry.source, new Set([name]), entry.name.split('.').at(-1), this.options.floatMode ?? 'B',
+            resource => this.options.resolveResourceId?.(resource, entry.path));
           entry.parsed.methods.push(...parsed.methods.filter(method => method.name === name));
         }
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);

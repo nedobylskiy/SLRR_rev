@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { Assets } from '../src/assets';
 import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
+import { packedResourceId } from '../src/runtime/resource-ids';
 
 const root = process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? 'C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline';
 const classOnly = process.argv.includes('--class-only');
@@ -24,14 +25,20 @@ const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { 
   .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
 const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
   .filter(name => /\.(rpk|java)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
-const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, 'system.rpk'].map(async path => {
+const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, 'system.rpk', 'frontend.rpk'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.game.parts.Part.setTexture(int)';
+const expected = 'Java native implementation missing: java.game.parts.Part.getCar()';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
+  process.exitCode = 1;
+}
+const colors = result.jvm.get(jv('class', 'java.game.GameLogic'), 'CARCOLORS').value;
+const expectedColor = packedResourceId(await assets.pack('frontend.rpk'), { pack: 'cars', id: 0x2a });
+if (!Array.isArray(colors) || colors[0] !== expectedColor) {
+  process.stderr.write(`GameLogic.CARCOLORS[0] did not match the frontend RPK's cars:0x2A ID: ${Array.isArray(colors) ? colors[0] : colors}\n`);
   process.exitCode = 1;
 }
 if (result.input.registeredHotkeys() < 5) {

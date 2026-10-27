@@ -4,6 +4,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
+  private readonly texture = new WeakMap<JavaObject, number>();
 
   constructor(jvm: SlrrJvm) {
     const owner = 'java.game.parts.Part';
@@ -23,6 +24,15 @@ export class PartNative {
       if (!Number.isFinite(limit) || limit < 0) throw new Error('Invalid part maximum wear');
       this.maxWear.set(receiver.value as JavaObject, limit);
       return jv('void', undefined);
+    });
+    jvm.natives.register(owner, 'getTexture', [], ({ receiver }) =>
+      jv('int', this.texture.get(receiver.value as JavaObject) ?? 0));
+    jvm.natives.register(owner, 'setTexture', ['int'], ({ receiver, args }) => {
+      const id = Number(args[0].value);
+      if (!Number.isInteger(id)) throw new Error('Invalid part texture resource ID');
+      this.texture.set(receiver.value as JavaObject, id | 0);
+      // The original native reports success even when no render object is bound yet.
+      return jv('int', 1);
     });
   }
 

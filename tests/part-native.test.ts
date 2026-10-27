@@ -8,6 +8,7 @@ test('Java part wear belongs to each instance while tear remains pristine', asyn
     native float getWear(); native float setWear(float value);
     native float getTear(); native float setTear(float value);
     native void setMaxWear(float value);
+    native int getTexture(); native int setTexture(int id);
     float condition() { return getWear() * getTear(); }
   }`;
   const jvm = new SlrrJvm({ resolveImport: ({ className }) =>
@@ -25,4 +26,8 @@ test('Java part wear belongs to each instance while tear remains pristine', asyn
   assert.equal(jvm.invoke(worn, 'condition').value, Math.fround(0.4));
   jvm.invoke(worn, 'setMaxWear', [jv('float', 500)]);
   assert.equal(native.wearLimit(worn), 500);
+  assert.equal(jvm.invoke(worn, 'getTexture').value, 0);
+  assert.equal(jvm.invoke(worn, 'setTexture', [jv('int', 196650)]).value, 1);
+  assert.equal(jvm.invoke(worn, 'getTexture').value, 196650);
+  assert.equal(jvm.invoke(newPart, 'getTexture').value, 0);
 });
