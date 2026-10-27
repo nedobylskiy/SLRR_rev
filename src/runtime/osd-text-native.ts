@@ -7,6 +7,7 @@ interface TextState { object: JavaObject; element?: OsdElement; group?: JavaObje
 /** Native Text operations; the original Java constructors and changeText logic still execute. */
 export class OsdTextNative {
   private readonly states = new WeakMap<JavaObject, TextState>();
+  private readonly renderStates = new WeakMap<JavaObject, TextState>();
   private readonly activeStates = new Set<TextState>();
   private readonly live = new Set<OsdElement>();
 
@@ -33,6 +34,8 @@ export class OsdTextNative {
         x, y, viewport, align: 'left' as OsdAlign, scaleX: 1, scaleY: 1, fontSize, fadeGlyph, depth,
         labelAdjusted: false };
       this.states.set(object, state);
+      const renderinst = object.fields.get('renderinst')?.value as JavaObject | null | undefined;
+      if (renderinst?.fields instanceof Map) this.renderStates.set(renderinst, state);
       this.activeStates.add(state);
       return nil();
     });
@@ -65,9 +68,7 @@ export class OsdTextNative {
     });
     jvm.natives.register(owner, 'setPos', ['float', 'float'], ({ receiver, args }) => {
       const state = this.state(receiver);
-      state.x = Number(args[0].value); state.y = Number(args[1].value);
-      const point = projectOsdBounds(state.viewport, state.x, state.y);
-      state.element?.setBounds(point.x, point.y, 0, 0, state.depth);
+      this.setPosition(state, Number(args[0].value), Number(args[1].value));
       return nil();
     });
     jvm.natives.register(owner, 'getPos', [], ({ receiver }) => {
@@ -82,6 +83,22 @@ export class OsdTextNative {
       if (state.element) state.element.node.style.fontSize = `${Math.max(1, state.fontSize * state.scaleY)}px`;
       return nil();
     });
+  }
+
+  /** Text.renderinst is a native handle for the text glyph, not a standalone scene render. */
+  setRenderMatrix(receiver: JavaValue, position: { x: number; y: number; z: number }): boolean {
+    const object = receiver.value as JavaObject | null;
+    if (!object || !(object.fields instanceof Map)) return false;
+    const state = this.renderStates.get(object);
+    if (!state) return false;
+    this.setPosition(state, position.x, position.y);
+    return true;
+  }
+
+  private setPosition(state: TextState, x: number, y: number): void {
+    state.x = x; state.y = y;
+    const point = projectOsdBounds(state.viewport, x, y);
+    state.element?.setBounds(point.x, point.y, 0, 0, state.depth);
   }
 
   private object(receiver: JavaValue): JavaObject {

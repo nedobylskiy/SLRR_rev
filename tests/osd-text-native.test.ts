@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { OsdTextNative } from '../src/runtime/osd-text-native';
+import { GameTypeNative } from '../src/runtime/game-type-native';
+import { RenderRefNative } from '../src/runtime/render-ref-native';
 import type { OsdAlign, OsdElement } from '../src/osd/osd-layer';
 
 test('interpreted Java Text updates an OSD element through its native calls', async () => {
@@ -52,6 +54,32 @@ test('the original fade font glyph is not rendered as a literal letter', () => {
     [jv('ResourceRef', null), font, jv('float', 0), jv('float', 0.7)]);
   jvm.natives.invoke('java.render.Text', 'update', text, []);
   assert.equal(displayed, '');
+});
+
+test('Text.renderinst.setMatrix moves the HTML glyph used by CreditsDialog', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {});
+  let position = { x: 0, y: 0 };
+  const surface = { createText(): OsdElement {
+    return { node: { style: {} } as HTMLElement, setText() {}, setResource() {},
+      setBounds(x, y) { position = { x, y }; }, show() {}, hide() {} };
+  } };
+  const textNative = new OsdTextNative(jvm, surface);
+  new RenderRefNative(jvm, resources, (receiver, matrix) => textNative.setRenderMatrix(receiver, matrix));
+  const renderinst = jv('RenderRef', { className: 'java.util.resource.RenderRef', fields: new Map() });
+  const text = jv('Text', { className: 'java.render.Text', fields: new Map([['renderinst', renderinst]]) });
+  const font = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', font, []);
+  jvm.natives.invoke('java.render.Text', 'create', text,
+    [jv('ResourceRef', null), font, jv('float', 0), jv('float', 0)]);
+  const next = jv('Vector3', { className: 'java.lang.Vector3', fields: new Map([
+    ['x', jv('float', -0.2)], ['y', jv('float', 0.7)], ['z', jv('float', 0)],
+  ]) });
+  jvm.natives.invoke('java.util.resource.RenderRef', 'setMatrix', renderinst, [next, jv('Ypr', null)]);
+  assert.deepEqual(position, { x: -0.2, y: 0.7 });
+  const reported = jvm.natives.invoke('java.render.Text', 'getPos', text, []);
+  assert.equal(reported && jvm.get(reported, 'x').value, -0.2);
+  assert.equal(reported && jvm.get(reported, 'y').value, 0.7);
 });
 
 test('only Osd.dark turns a fade glyph into a full-screen dimmer', () => {

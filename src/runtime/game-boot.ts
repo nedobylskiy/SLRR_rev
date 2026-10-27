@@ -248,7 +248,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     return voidValue();
   });
   viewports = new ViewportNative(jvm, gameTypes, viewportSize);
-  const renderRefs = new RenderRefNative(jvm, gameTypes);
+  const renderRefs = new RenderRefNative(jvm, gameTypes,
+    (receiver, position) => osdText.setRenderMatrix(receiver, position));
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));

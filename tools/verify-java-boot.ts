@@ -60,6 +60,19 @@ if (process.argv.includes('--options-smoke') && !result.error) {
   result.dispose();
   process.exit(process.exitCode ?? 0);
 }
+if (process.argv.includes('--credits-smoke') && !result.error) {
+  try {
+    await result.jvm.loadClass('java.game.CreditsDialog');
+    const dialog = await result.jvm.constructAsync('java.game.CreditsDialog', []);
+    await result.jvm.invokeAsync(dialog, 'show');
+    process.stdout.write('CreditsDialog.show completed\n');
+  } catch (error) {
+    process.stderr.write(`CreditsDialog.show stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
+}
 if (osdRectangles < 10) {
   process.stderr.write(`Java OSD emitted only ${osdRectangles} visible rectangle resources\n`);
   process.exitCode = 1;

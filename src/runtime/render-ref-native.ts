@@ -7,7 +7,8 @@ const zeroRotation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
 
 /** Java RenderRef methods over visual instances in the host resource tree. */
 export class RenderRefNative {
-  constructor(jvm: SlrrJvm, private readonly resources: GameTypeNative) {
+  constructor(jvm: SlrrJvm, private readonly resources: GameTypeNative,
+    private readonly setTextMatrix?: (receiver: JavaValue, position: Vector3State) => boolean) {
     const owner = 'java.util.resource.RenderRef';
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'create', ['ResourceRef', 'RenderRef', 'String'], ({ receiver, args }) => {
@@ -17,7 +18,10 @@ export class RenderRefNative {
     });
     jvm.natives.register(owner, 'setMatrix', ['Vector3', 'Ypr'], ({ receiver, args }) => {
       const render = this.resources.getRender(receiver);
-      if (!render) throw new Error('RenderRef.setMatrix has no render instance');
+      if (!render) {
+        if (this.setTextMatrix?.(receiver, this.vector(jvm, args[0]))) return voidValue();
+        throw new Error('RenderRef.setMatrix has no render instance');
+      }
       render.setMatrix(this.vector(jvm, args[0]), this.orientation(jvm, args[1]));
       this.resources.notifyRenderChanged(render);
       return voidValue();
