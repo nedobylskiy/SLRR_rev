@@ -36,8 +36,8 @@ export class OsdRectangleNative {
     const width = mesh.meshScale.x / (1.47 * aspect * vpWidth);
     const height = mesh.meshScale.y / (1.47 * vpHeight);
     const normalizedPosition = this.normalizedPosition(render, osd);
-    const x = normalizedPosition ? render.position.x : render.position.x / scaleX;
-    const y = normalizedPosition ? -render.position.y : -render.position.y / scaleY;
+    const x = normalizedPosition ? render.position.x / aspect : render.position.x / scaleX;
+    const y = -render.position.y / scaleY;
     const depth = Math.round(render.position.z * 1000);
     if (![x, y, width, height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
