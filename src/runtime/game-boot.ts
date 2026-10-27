@@ -10,6 +10,7 @@ import { InputNative } from './input-native';
 import { FileNative } from './file-native';
 import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
+import { StringNative } from './string-native';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
@@ -102,6 +103,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       return voidValue();
     });
   };
+  new StringNative(jvm);
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(path))
     .map(async path => [path, await assets.pack(path)] as const)));
@@ -181,6 +183,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const entry = `${sourceRoot}Init.java`;
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
+    if (assets.byPath.has('system/scripts/lang/src/string.java')) await jvm.loadClass('java.lang.String');
     await jvm.loadClass('java.game.Init');
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
