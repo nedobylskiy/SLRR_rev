@@ -5,6 +5,7 @@ import { GameTypeNative } from './game-type-native';
 import { MathNative } from './math-native';
 import { ViewportNative, type ViewportSize } from './viewport-native';
 import { CameraNative } from './camera-native';
+import { ControllerNative } from './controller-native';
 import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
 
@@ -81,6 +82,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const viewports = new ViewportNative(jvm, gameTypes, viewportSize);
   const renderRefs = new RenderRefNative(jvm, gameTypes);
   const cameras = new CameraNative(jvm, gameTypes, viewports);
+  new ControllerNative(jvm);
   new MathNative(jvm);
   const collector = 'java.lang.GarbageCollector';
   jvm.natives.register(collector, '<init>', [], () => {
@@ -100,6 +102,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   native('java.io.Input', 'initControllers', ['Init', 'String'], args => {
     jvm.natives.setField(controller, 'controlFile', args[1]);
   });
+  jvm.natives.register('java.io.Input', 'getDeviceName', ['int'], ({ args }) =>
+    jv('String', ['SysKeyboard', 'SysMouse'][Number(args[0].value)] ?? null));
   native('java.io.Input', 'enablePointingDevice', []);
   jvm.natives.registerField('java.game.Frontend', 'loadingScreen', jv('LoadingScreen', {}));
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
