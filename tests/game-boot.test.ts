@@ -64,7 +64,7 @@ test('Input controller path reaches GameLogic through java.io.Controller', async
   const initPath = 'sl/scripts/game/src/Init.java';
   const logicPath = 'sl/scripts/game/src/GameLogic.java';
   const sources = new Map([
-    [initPath, 'package java.game; class Init extends GameType { Init(int id) { Input.initControllers(this, "save/controls/active_control_set"); new GameLogic(); } }'],
+    [initPath, 'package java.game; import java.io.*; class Init extends GameType { Init(int id) { Input.initControllers(this, "save/controls/active_control_set"); new GameLogic(); } }'],
     [logicPath, `package java.game;
 import java.io.*;
 class GameLogic extends GameType {
