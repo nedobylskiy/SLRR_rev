@@ -273,6 +273,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     .some(path => assets.byPath.has(`system/scripts/render/${path}`));
   if (!realLoadingScreen) native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   jvm.natives.register('java.render.GfxEngine', 'forceRendering', [], () => voidValue());
+  native('java.render.GfxEngine', 'flush', []);
   for (const signature of [['String', 'int', 'int'], ['String', 'int', 'int', 'int']])
     jvm.natives.register('java.render.GfxEngine', 'openVideo', signature, ({ args }) =>
       jv('int', video?.openVideo(String(args[0].value), Number(args[1].value) !== 0) ?? 1));

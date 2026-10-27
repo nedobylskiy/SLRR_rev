@@ -12,7 +12,11 @@ export class SystemNative {
   private loading = false;
 
   constructor(jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
-    private readonly now: () => number = () => performance.now()) {
+    private readonly now: () => number = () => performance.now(),
+    private readonly memoryBytes: () => number = () => {
+      const browserPerformance = globalThis.performance as (Performance & { memory?: { usedJSHeapSize?: number } }) | undefined;
+      return browserPerformance?.memory?.usedJSHeapSize ?? 0;
+    }) {
     this.startedAt = this.now();
     this.lastSample = this.startedAt;
     const owner = 'java.lang.System';
@@ -23,6 +27,11 @@ export class SystemNative {
       return jv('void', undefined);
     });
     jvm.natives.register(owner, 'buildNumber', [], () => jv('int', 940));
+    // SLRR reports kilobytes; scripts compare this with thresholds such as 900 * 1024.
+    jvm.natives.register(owner, 'memUsage', [], () => {
+      const bytes = this.memoryBytes();
+      return jv('int', Number.isFinite(bytes) && bytes > 0 ? Math.min(0x7fffffff, Math.floor(bytes / 1024)) : 0);
+    });
     jvm.natives.register(owner, 'timeWarp', ['float'], ({ args }) => {
       this.sampleSimulation();
       const previous = this.warp;

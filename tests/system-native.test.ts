@@ -65,3 +65,14 @@ test('loading status stays active until Java resets the loading screen wait', ()
   jvm.natives.invoke('java.lang.System', 'isLoadingReset', receiver, []);
   assert.equal(jvm.natives.invoke('java.lang.System', 'isLoading', receiver, [])?.value, 0);
 });
+
+test('System.memUsage reports host memory in the kilobytes expected by Java scripts', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  let bytes = 900 * 1024 * 1024;
+  new SystemNative(jvm, () => {}, () => 0, () => bytes);
+  const receiver = jv('class', 'java.lang.System');
+  const read = () => Number(jvm.natives.invoke('java.lang.System', 'memUsage', receiver, [])?.value);
+  assert.equal(read(), 900 * 1024);
+  bytes = 0;
+  assert.equal(read(), 0);
+});
