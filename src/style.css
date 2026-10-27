@@ -253,9 +253,18 @@ nav button.active{
   width:100%;
   height:100%
 }
-.track-window-button[hidden]{display:none}
-body.track-drive-expanded{overflow:hidden}
-.workspace.track-drive-expanded{
+.viewport-expand-button,.viewport-window-button{
+  position:absolute;
+  top:12px;
+  right:12px;
+  z-index:6;
+  background:#0b1014d9;
+  border-color:#8097a3;
+  color:#f3f7f9
+}
+.viewport-expand-button[hidden],.viewport-window-button[hidden]{display:none}
+body.viewport-expanded{overflow:hidden}
+.workspace.viewport-expanded{
   position:fixed;
   inset:0;
   z-index:40;
@@ -263,10 +272,10 @@ body.track-drive-expanded{overflow:hidden}
   height:100dvh;
   background:#0b1014
 }
-.workspace.track-drive-expanded .toolbar,
-.workspace.track-drive-expanded .detail{display:none}
-.workspace.track-drive-expanded #viewport{min-height:0}
-.workspace.track-drive-expanded .scene-help{
+.workspace.viewport-expanded .toolbar,
+.workspace.viewport-expanded .detail{display:none}
+.workspace.viewport-expanded #viewport{min-height:0}
+.workspace.viewport-expanded .scene-help{
   position:absolute;
   bottom:0;
   left:50%;
@@ -279,7 +288,7 @@ body.track-drive-expanded{overflow:hidden}
   background:#0b1014b8;
   color:#d1d9df
 }
-.workspace.track-drive-expanded .map-debug-panel{
+.workspace.viewport-expanded .map-debug-panel{
   position:absolute;
   bottom:44px;
   right:12px;
@@ -287,7 +296,7 @@ body.track-drive-expanded{overflow:hidden}
   width:min(320px,calc(100% - 24px));
   background:#101a20de
 }
-.workspace.track-drive-expanded .tire-tuning-panel{
+.workspace.viewport-expanded .tire-tuning-panel{
   position:absolute;
   bottom:44px;
   left:12px;
@@ -297,7 +306,7 @@ body.track-drive-expanded{overflow:hidden}
   overflow:auto;
   background:#101a20e8
 }
-.workspace.track-drive-expanded .engine-tuning-panel{
+.workspace.viewport-expanded .engine-tuning-panel{
   position:absolute;
   top:58px;
   right:12px;
@@ -305,14 +314,8 @@ body.track-drive-expanded{overflow:hidden}
   width:min(340px,calc(100% - 24px));
   background:#101a20e8
 }
-.workspace.track-drive-expanded .track-window-button{
-  position:absolute;
-  top:12px;
-  right:12px;
-  z-index:5;
-  background:#0b1014d9;
-  border-color:#8097a3;
-  color:#f3f7f9
+.workspace.viewport-expanded .viewport-window-button{
+  z-index:6
 }
 #viewport[hidden],#inspector[hidden]{
   display:none
@@ -528,5 +531,5 @@ button:disabled{opacity:.45;cursor:default}
 .java-log-native { color: #8fa9b6; }
 .java-log-error { color: #ff9c81; }
 .java-log-info { color: #bce8d7; }
-.workspace.track-drive-expanded .java-console { display: none; }
+.workspace.viewport-expanded .java-console { display: none; }
  .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }

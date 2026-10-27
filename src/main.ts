@@ -90,21 +90,24 @@ menuButton.onclick = () => openMainMenu();
 const worldButton = textElement('button', 'Assemble Baiern');
 const mapButton = textElement('button', 'Test Track');
 const trackDriveButton = textElement('button', 'Drive Test Track');
-const trackWindowButton = textElement('button', 'Minimize view · Esc', 'track-window-button');
-trackWindowButton.hidden = true; el('viewport').after(trackWindowButton);
+const viewportExpandButton = textElement('button', 'Expand view', 'viewport-expand-button');
+el('viewport').append(viewportExpandButton);
+const viewportCollapseButton = textElement('button', 'Minimize view · Esc', 'viewport-window-button');
+viewportCollapseButton.hidden = true; el('viewport').after(viewportCollapseButton);
 let trackDriving = false;
-function setTrackExpanded(expanded: boolean) {
-  const active = expanded && trackDriving;
-  el('viewport').parentElement?.classList.toggle('track-drive-expanded', active);
-  document.body.classList.toggle('track-drive-expanded', active);
-  trackWindowButton.hidden = !active;
+function setViewportExpanded(expanded: boolean) {
+  el('viewport').parentElement?.classList.toggle('viewport-expanded', expanded);
+  document.body.classList.toggle('viewport-expanded', expanded);
+  viewportExpandButton.hidden = expanded;
+  viewportCollapseButton.hidden = !expanded;
   trackDriveButton.textContent = trackDriving ? 'Expand drive view' : 'Drive Test Track';
-  if (trackDriving) el('viewport').querySelector('canvas')?.focus({ preventScroll: true });
+  if (expanded && trackDriving) el('viewport').querySelector('canvas')?.focus({ preventScroll: true });
 }
-trackWindowButton.onclick = () => setTrackExpanded(false);
+viewportExpandButton.onclick = () => setViewportExpanded(true);
+viewportCollapseButton.onclick = () => setViewportExpanded(false);
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && trackDriving && !trackWindowButton.hidden) {
-    event.preventDefault(); setTrackExpanded(false);
+  if (event.key === 'Escape' && !viewportCollapseButton.hidden) {
+    event.preventDefault(); event.stopImmediatePropagation(); setViewportExpanded(false);
   }
 });
 const driveButton = textElement('button', 'Test drive') as HTMLButtonElement;
@@ -253,7 +256,7 @@ function showMusicState(state: MusicState) {
 }
 el('memory-lab').before(worldButton, driveButton, mapButton, trackDriveButton);
 trackDriveButton.onclick = async () => {
-  if (trackDriving) { setTrackExpanded(true); return; }
+  if (trackDriving) { setViewportExpanded(true); return; }
   if (!assets || !viewer) return;
   await openWorld('cars/racers/Baiern.rpk', 6);
   const request = sequence;
@@ -274,7 +277,7 @@ trackDriveButton.onclick = async () => {
     showTireControls();
     showEngineControls(engineRoot);
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
-    trackDriving = true; setTrackExpanded(true);
+    trackDriving = true; setViewportExpanded(true);
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · driving'; el('format').textContent = 'MAP / PHYSICS';
     el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · I restart engine · R reset to start';
@@ -303,7 +306,7 @@ mapButton.onclick = async () => {
 function stopDrive() {
   const wasTrackDriving = trackDriving;
   disposeOsdMenu?.(); disposeOsdMenu = undefined;
-  trackDriving = false; setTrackExpanded(false);
+  trackDriving = false; setViewportExpanded(false);
   el('viewport').parentElement?.classList.remove('physics-scene');
   mapDebugPanel.hidden = true;
   tirePanel.hidden = true;
