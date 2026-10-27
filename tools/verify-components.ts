@@ -25,6 +25,12 @@ const visualAxis = async (part: EnginePart) => {
 try {
   assert.deepEqual(built.warnings, []);
   assert.equal(built.world.parts.size, 72);
+  assert.equal(built.world.wheelRefs.length, 4);
+  for (const wheel of built.world.wheelRefs) {
+    assert.ok(wheel && Math.abs(wheel.friction - 1.76863) < 0.001, 'stock Java tyre source sets WheelRef friction');
+    assert.ok(Math.abs(wheel.radius - 0.32865) < 0.001, 'stock Java tyre source sets WheelRef radius');
+    assert.ok(wheel.pacejka[4] > 17 && wheel.pacejka[4] < 18, 'stock Java tyre source sets WheelRef stiffness');
+  }
   const mechanics = new MechanicalSystem(built.root);
   for (const [index, corner] of mechanics.corners.entries()) {
     const wheelX = built.root.definition.config.wheels[index].position[0];

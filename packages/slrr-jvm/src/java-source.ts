@@ -1,161 +1,89 @@
 /** Restricted, parsed Java source interpreter. No eval/Function or ambient JS access. */
+import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
+import type { Expr as ParsedExpr, Stmt as ParsedStmt, FloatMode } from 'slrr-jvm-compiler';
+import { floatLiteralBits } from './float-literal.js';
 export interface JavaValue { type: string; value: unknown }
 export const jv = (type: string, value: unknown): JavaValue => ({ type, value });
 export const nil = () => jv('Object', null);
-interface Token { text: string; line: number; value?: JavaValue }
 type Expr = { kind: string; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
-type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
+type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; updates?: Expr[]; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
 export interface SourceMethod { owner: string; name: string; parameters: { type: string; name: string }[]; result: string; isStatic: boolean; body: Stmt; line: number }
-export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr }[] }
+export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr; isStatic: boolean }[] }
 export interface JavaHost {
   global(name: string): JavaValue;
   get(receiver: JavaValue, name: string): JavaValue;
   set(receiver: JavaValue, name: string, value: JavaValue): void;
   call(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): JavaValue;
   construct(name: string, args: JavaValue[]): JavaValue;
+  constructorCall(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): JavaValue;
   parent(name: string): string | null;
+  isInstance(receiver: JavaValue, name: string): boolean;
 }
 
-function lex(source: string): Token[] {
-  const tokens: Token[] = []; let offset = 0, line = 1;
-  while (offset < source.length) {
-    const tail = source.slice(offset);
-    const skip = /^(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/)/.exec(tail);
-    if (skip) { line += (skip[0].match(/\n/g) ?? []).length; offset += skip[0].length; continue; }
-    const str = /^"(?:\\.|[^"\\])*"/.exec(tail);
-    if (str) {
-      const decoded = str[0].slice(1, -1).replace(/\\(u[0-9a-fA-F]{4}|[nrtbf"'\\])/g, (_m, c: string) => c[0] === 'u' ? String.fromCharCode(parseInt(c.slice(1), 16)) : ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' }[c] ?? c));
-      tokens.push({ text: str[0], line, value: jv('String', decoded) }); offset += str[0].length; continue;
-    }
-    const resource = /^([A-Za-z_$][\w$]*):(0[xX][\da-fA-F]+)r\b/.exec(tail);
-    if (resource) { tokens.push({ text: resource[0], line, value: jv('ResourceRef', { pack: resource[1], id: Number(resource[2]) }) }); offset += resource[0].length; continue; }
-    const number = /^(?:0[xX][\da-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdD]?)/.exec(tail);
-    if (number) { const s = number[0], floating = !/^0x/i.test(s) && /[.eEfFdD]/.test(s); tokens.push({ text: s, line, value: jv(floating ? 'float' : 'int', floating ? Math.fround(Number(s.replace(/[fFdD]$/, ''))) : Number(s) | 0) }); offset += s.length; continue; }
-    const word = /^[A-Za-z_$][\w$]*/.exec(tail);
-    if (word) { tokens.push({ text: word[0], line }); offset += word[0].length; continue; }
-    const op = /^(?:>>>|<<|>>|\+\+|--|==|!=|<=|>=|&&|\|\||\+=|-=|\*=|\/=|[{}()[\];,.?:+\-*/%<>=!&|^~])/.exec(tail);
-    if (!op) {
-      // Non-selected methods can contain character literals; tokenize them without interpreting.
-      const char = /^'(?:\\.|[^'\\])'/.exec(tail);
-      if (char) { tokens.push({ text: char[0], line }); offset += char[0].length; continue; }
-      throw new Error(`Java lexer: unsupported character ${JSON.stringify(tail[0])} at line ${line}`);
-    }
-    tokens.push({ text: op[0], line }); offset += op[0].length;
+function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
+  if (text === 'null') return nil();
+  if (text === 'true' || text === 'false') return jv('int', text === 'true' ? 1 : 0);
+  if (text.startsWith('"') || text.startsWith("'")) {
+    const decoded = text.slice(1, -1).replace(/\\(u[0-9a-fA-F]{4}|[nrtbf"'\\])/g, (_m, c: string) => c[0] === 'u' ? String.fromCharCode(parseInt(c.slice(1), 16)) : ({ n: '\n', r: '\r', t: '\t', b: '\b', f: '\f' }[c] ?? c));
+    return text.startsWith("'") ? jv('int', decoded.charCodeAt(0)) : jv('String', decoded);
   }
-  return tokens;
+  const resource = /^(.*):0[xX]([\da-fA-F]+)r$/.exec(text);
+  if (resource) return jv('ResourceRef', { pack: resource[1], id: Number.parseInt(resource[2], 16) });
+  if (!/^0[xX]/.test(text) && /[.eEfFdD]/.test(text)) {
+    const bits = floatLiteralBits(text, floatMode);
+    const buffer = new ArrayBuffer(4), view = new DataView(buffer);
+    view.setUint32(0, bits, true);
+    return jv('float', view.getFloat32(0, true));
+  }
+  return jv('int', Number(text) | 0);
 }
 
-const precedence: Record<string, number> = { '=': 1, '+=': 1, '-=': 1, '*=': 1, '/=': 1, '||': 3, '&&': 4, '|': 5, '^': 6, '&': 7, '==': 8, '!=': 8, '<': 9, '>': 9, '<=': 9, '>=': 9, '<<': 10, '>>': 10, '>>>': 10, '+': 11, '-': 11, '*': 12, '/': 12, '%': 12 };
-class Parser {
-  at = 0;
-  constructor(readonly tokens: Token[]) {}
-  peek(n = 0) { return this.tokens[this.at + n]?.text; }
-  eat(s: string) { if (this.peek() === s) { this.at++; return true; } return false; }
-  need(s: string) { if (!this.eat(s)) throw new Error(`Java parser line ${this.tokens[this.at]?.line}: expected '${s}', got '${this.peek()}'`); }
-  name() { const name = this.tokens[this.at++]?.text; if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) throw new Error(`Java parser: expected name, got ${name}`); return name; }
-  expression(min = 1): Expr {
-    let left = this.prefix();
-    for (;;) {
-      if (this.eat('.')) { left = { kind: 'member', left, text: this.name() }; continue; }
-      if (this.eat('(')) { const items: Expr[] = []; if (!this.eat(')')) { do { items.push(this.expression()); } while (this.eat(',')); this.need(')'); } left = { kind: 'call', left, items }; continue; }
-      if (this.eat('[')) { const right = this.expression(); this.need(']'); left = { kind: 'index', left, right }; continue; }
-      if (this.peek() === '++' || this.peek() === '--') { left = { kind: 'postfix', left, text: this.tokens[this.at++].text }; continue; }
-      if (this.peek() === '?' && min <= 2) { this.at++; const right = this.expression(); this.need(':'); left = { kind: 'ternary', left, right, extra: this.expression(2) }; continue; }
-      const op = this.peek(), p = precedence[op ?? '']; if (p === undefined || p < min) break;
-      this.at++; left = { kind: p === 1 ? 'assign' : 'binary', text: op, left, right: this.expression(p === 1 ? p : p + 1) };
-    }
-    return left;
-  }
-  prefix(): Expr {
-    const token = this.tokens[this.at++]; if (!token) throw new Error('Java expression truncated');
-    if (token.value) return { kind: 'literal', value: token.value };
-    if (['null', 'true', 'false'].includes(token.text)) return { kind: 'literal', value: token.text === 'null' ? nil() : jv('int', token.text === 'true' ? 1 : 0) };
-    if (['!', '-', '+', '~', '++', '--'].includes(token.text)) return { kind: 'unary', text: token.text, left: this.expression(13) };
-    if (token.text === '(') {
-      if (['int', 'float', 'double', 'String'].includes(this.peek() ?? '') && this.peek(1) === ')') { const type = this.tokens[this.at++].text; this.at++; return { kind: 'cast', text: type, left: this.expression(13) }; }
-      const expr = this.expression(); this.need(')'); return expr;
-    }
-    if (token.text === 'new') {
-      const name = this.name();
-      if (this.eat('[')) { const right = this.expression(); this.need(']'); return { kind: 'arrayNew', text: name, right }; }
-      this.need('('); const items: Expr[] = [];
-      if (!this.eat(')')) { do { items.push(this.expression()); } while (this.eat(',')); this.need(')'); }
-      return { kind: 'new', text: name, items };
-    }
-    if (/^[A-Za-z_$][\w$]*$/.test(token.text)) return { kind: 'name', text: token.text };
-    throw new Error(`Java expression: unsupported ${token.text} at line ${token.line}`);
-  }
-  declaration(): Stmt | undefined {
-    const start = this.at;
-    while (this.peek() === 'final' || this.peek() === 'static') this.at++;
-    if (this.peek() === 'new') { this.at = start; return; }
-    if (!/^[A-Za-z_$][\w$]*$/.test(this.peek() ?? '')) { this.at = start; return; }
-    let type = this.tokens[this.at++].text;
-    while (this.peek() === '[' && this.peek(1) === ']') { this.at += 2; type += '[]'; }
-    if (!/^[A-Za-z_$][\w$]*$/.test(this.peek() ?? '')) { this.at = start; return; }
-    const declarations: NonNullable<Stmt['declarations']> = [];
-    do { const name = this.name(), expr = this.eat('=') ? this.expression() : undefined; declarations.push({ type, name, expr }); } while (this.eat(','));
-    return { kind: 'var', declarations };
-  }
-  statement(): Stmt {
-    if (this.eat('{')) { const statements: Stmt[] = []; while (!this.eat('}')) { if (!this.peek()) throw new Error('Unclosed Java block'); statements.push(this.statement()); } return { kind: 'block', statements }; }
-    if (this.eat(';')) return { kind: 'block', statements: [] };
-    if (this.eat('switch')) {
-      this.need('('); const condition = this.expression(); this.need(')'); this.need('{');
-      const cases: NonNullable<Stmt['cases']> = [];
-      while (!this.eat('}')) {
-        if (!this.peek()) throw new Error('Unclosed Java switch');
-        if (this.eat('case')) { const wrapped = this.eat('('); const value = this.expression(); if (wrapped) this.need(')'); this.need(':'); cases.push({ value, statements: [] }); }
-        else if (this.eat('default')) { this.need(':'); cases.push({ statements: [] }); }
-        else if (cases.length) cases[cases.length - 1].statements.push(this.statement());
-        else throw new Error('Java switch statement before first case');
-      }
-      return { kind: 'switch', condition, cases };
-    }
-    if (this.eat('if')) { this.need('('); const condition = this.expression(); this.need(')'); const body = this.statement(), otherwise = this.eat('else') ? this.statement() : undefined; return { kind: 'if', condition, body, otherwise }; }
-    if (this.eat('while')) { this.need('('); const condition = this.expression(); this.need(')'); return { kind: 'while', condition, body: this.statement() }; }
-    if (this.eat('for')) {
-      this.need('('); const init = this.peek() === ';' ? undefined : this.declaration() ?? { kind: 'expr', expr: this.expression() }; this.need(';');
-      const condition = this.peek() === ';' ? undefined : this.expression(); this.need(';');
-      const update = this.peek() === ')' ? undefined : this.expression(); this.need(')'); return { kind: 'for', init, condition, update, body: this.statement() };
-    }
-    if (this.eat('return')) { const expr = this.peek() === ';' ? undefined : this.expression(); this.need(';'); return { kind: 'return', expr }; }
-    if (this.eat('break')) { this.need(';'); return { kind: 'break' }; }
-    if (this.eat('continue')) { this.need(';'); return { kind: 'continue' }; }
-    const stmt = this.declaration() ?? { kind: 'expr', expr: this.expression() }; this.need(';'); return stmt;
+function adaptExpr(expr: ParsedExpr, floatMode: FloatMode): Expr {
+  const child = (value: ParsedExpr | undefined) => value ? adaptExpr(value, floatMode) : undefined;
+  if (expr.kind === 'paren') return adaptExpr(expr.left!, floatMode);
+  if (expr.kind === 'literal') return { kind: 'literal', value: sourceLiteral(expr.value!, floatMode) };
+  if (expr.kind === 'this' || expr.kind === 'super') return { kind: 'name', text: expr.kind };
+  if (expr.kind === 'newarray') return { kind: 'arrayNew', text: expr.text, right: child(expr.right) };
+  return {
+    kind: expr.kind, text: expr.text,
+    left: child(expr.left), right: child(expr.right), extra: child(expr.third),
+    items: expr.args?.map(arg => adaptExpr(arg, floatMode)),
+  };
+}
+
+function adaptStmt(stmt: ParsedStmt, floatMode: FloatMode): Stmt {
+  const child = (value: ParsedStmt | undefined) => value ? adaptStmt(value, floatMode) : undefined;
+  switch (stmt.kind) {
+    case 'empty': return { kind: 'block', statements: [] };
+    case 'block': return { kind: 'block', statements: (stmt.items ?? []).map(x => adaptStmt(x, floatMode)) };
+    case 'exprs': return { kind: 'exprs', statements: (stmt.items ?? []).map(x => adaptStmt(x, floatMode)) };
+    case 'local': return { kind: 'var', declarations: (stmt.declarations ?? []).map(x => ({ type: x.type, name: x.name, expr: x.initial ? adaptExpr(x.initial, floatMode) : undefined })) };
+    case 'if': return { kind: 'if', condition: adaptExpr(stmt.expr!, floatMode), body: child(stmt.body), otherwise: child(stmt.elseBody) };
+    case 'while': case 'do': return { kind: stmt.kind, condition: adaptExpr(stmt.expr!, floatMode), body: child(stmt.body) };
+    case 'for': return { kind: 'for', init: child(stmt.init), condition: stmt.expr ? adaptExpr(stmt.expr, floatMode) : undefined, updates: stmt.update?.map(x => adaptExpr(x, floatMode)), body: child(stmt.body) };
+    case 'switch': return { kind: 'switch', condition: adaptExpr(stmt.expr!, floatMode), cases: (stmt.cases ?? []).map(x => ({ value: x.value ? adaptExpr(x.value, floatMode) : undefined, statements: x.items.map(item => adaptStmt(item, floatMode)) })) };
+    case 'return': case 'expr': return { kind: stmt.kind, expr: stmt.expr ? adaptExpr(stmt.expr, floatMode) : undefined };
+    case 'break': case 'continue': return { kind: stmt.kind };
+    default: throw new Error(`Unsupported Java statement ${stmt.kind} at line ${stmt.token.line}`);
   }
 }
 
-export function parseSourceClass(source: string, selected = new Set(['save', 'load', 'createFromFile']), className?: string): SourceClass {
-  const tokens = lex(source), ci = tokens.findIndex((t, i) => t.text === 'class' && (!className || tokens[i + 1]?.text === className)); if (ci < 0) throw new Error(`Java class missing: ${className ?? '(first)'}`);
-  const name = tokens[ci + 1].text, parent = tokens[ci + 2]?.text === 'extends' ? tokens[ci + 3].text : null;
-  const methods: SourceMethod[] = [], constants = new Map<string, JavaValue>();
-  const fields: SourceClass['fields'] = []; let depth = 0;
-  for (let i = tokens.findIndex((t, at) => at > ci && t.text === '{'); i < tokens.length; i++) {
-    const t = tokens[i]; if (t.text === '{') { depth++; continue; } if (t.text === '}') { depth--; if (depth === 0) break; continue; }
-    if (depth === 1 && /^[A-Z][A-Z0-9_]*$/.test(t.text) && tokens[i + 1]?.text === '=' && tokens[i + 2]?.value && tokens[i + 3]?.text === ';')
-      constants.set(t.text, coerce(tokens[i - 1].text, tokens[i + 2].value!));
-    if (depth === 1 && (i === 0 || [';', '{', '}'].includes(tokens[i - 1]?.text))) {
-      const fieldParser = new Parser(tokens); fieldParser.at = i;
-      const declaration = fieldParser.declaration();
-      if (declaration && fieldParser.eat(';')) {
-        fields.push(...declaration.declarations!);
-        for (const field of declaration.declarations!) if (/^[A-Z][A-Z0-9_]*$/.test(field.name) && field.expr?.kind === 'literal')
-          constants.set(field.name, coerce(field.type, field.expr.value!));
-        i = fieldParser.at - 1; continue;
-      }
+export function parseSourceClass(source: string, selected?: ReadonlySet<string>, className?: string, floatMode: FloatMode = 'B'): SourceClass {
+  const program = parseSlrrSource(source);
+  const cls = className ? program.classes.find(x => x.name === className || x.fullName === className) : program.classes[0];
+  if (!cls) throw new Error(`Java class missing: ${className ?? '(first)'}`);
+  const included = selected ?? new Set(cls.members.filter(x => x.kind === 'method').map(x => x.name));
+  const methods: SourceMethod[] = [], constants = new Map<string, JavaValue>(), fields: SourceClass['fields'] = [];
+  for (const member of cls.members) {
+    if (member.kind === 'field') {
+      const initial = member.initial ? adaptExpr(member.initial, floatMode) : undefined;
+      fields.push({ type: member.type, name: member.name, expr: initial, isStatic: member.flags.includes('static') });
+      if (/^[A-Z][A-Z0-9_]*$/.test(member.name) && initial?.kind === 'literal') constants.set(member.name, coerce(member.type, initial.value!));
+    } else if (member.body && included.has(member.name)) {
+      methods.push({ owner: cls.name, name: member.name, result: member.result, isStatic: member.flags.includes('static'), parameters: member.params, body: adaptStmt(member.body, floatMode), line: member.token.line });
     }
-    if (depth !== 1 || !selected.has(t.text) || tokens[i + 1]?.text !== '(') continue;
-    const parser = new Parser(tokens); parser.at = i + 2;
-    const parameters: SourceMethod['parameters'] = [];
-    if (!parser.eat(')')) { do { let type = parser.name(); while (parser.eat('[')) { parser.need(']'); type += '[]'; } parameters.push({ type, name: parser.name() }); } while (parser.eat(',')); parser.need(')'); }
-    if (parser.peek() !== '{') continue;
-    const body = parser.statement();
-    let header = i - 1; while (header > 0 && ![';', '{', '}'].includes(tokens[header].text)) header--;
-    methods.push({ owner: name, name: t.text, result: tokens[i - 1].text, isStatic: tokens.slice(header + 1, i).some(t => t.text === 'static'), parameters, body, line: t.line });
-    i = parser.at - 1;
   }
-  return { name, parent, methods, constants, fields };
+  return { name: cls.name, parent: cls.parent ?? null, methods, constants, fields };
 }
 
 class Scope {
@@ -190,12 +118,12 @@ export class JavaSourceMachine {
     try { return this.invoke(method, receiver, args); }
     finally { this.singleIteration = false; }
   }
-  initializeFields(cls: SourceClass, receiver: JavaValue) {
+  initializeFields(cls: SourceClass, receiver: JavaValue, staticOnly = false) {
     if (this.depth === 0) this.remaining = this.budget;
     const scope = new Scope();
     const initializer: SourceMethod = { owner: cls.name, name: '<fields>', parameters: [], result: 'void', isStatic: false,
       body: { kind: 'block', statements: [] }, line: 0 };
-    for (const field of cls.fields) {
+    for (const field of cls.fields.filter(field => field.isStatic === staticOnly)) {
       const value = field.expr ? this.expression(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
       this.host.set(receiver, field.name, coerce(field.type, value));
     }
@@ -224,7 +152,11 @@ export class JavaSourceMachine {
         if (expr.text === 'this') return self;
         if (expr.text === 'super') return jv('super', { receiver: self, owner: method.owner });
         const local = scope.owner(expr.text!); if (local) return local.values.get(expr.text!)!;
-        try { return this.host.get(self, expr.text!); } catch { return this.host.global(expr.text!); }
+        try { return this.host.get(self, expr.text!); }
+        catch (error) {
+          if (!(error instanceof Error) || !error.message.startsWith('Missing Java field ')) throw error;
+          return this.host.global(expr.text!);
+        }
       }
       case 'member': return this.host.get(ev(expr.left!), expr.text!);
       case 'new': return this.host.construct(expr.text!, expr.items!.map(ev));
@@ -237,6 +169,8 @@ export class JavaSourceMachine {
       case 'cast': return coerce(expr.text!, ev(expr.left!));
       case 'call': {
         const callee = expr.left!;
+        if (callee.kind === 'name' && (callee.text === 'super' || callee.text === 'this'))
+          return this.host.constructorCall(self, method.owner, callee.text, expr.items!.map(ev));
         if (callee.kind === 'name') return this.host.call(self, callee.text!, expr.items!.map(ev));
         if (callee.kind !== 'member') throw new Error('Only named Java calls supported');
         const receiver = ev(callee.left!), args = expr.items!.map(ev);
@@ -261,6 +195,7 @@ export class JavaSourceMachine {
         return this.binary(expr.text!, a, ev(expr.right!));
       }
       case 'ternary': return truth(ev(expr.left!)) ? ev(expr.right!) : ev(expr.extra!);
+      case 'instanceof': return jv('int', this.host.isInstance(ev(expr.left!), expr.right!.text!) ? 1 : 0);
       default: throw new Error(`Unsupported Java expression ${expr.kind}`);
     }
   }
@@ -279,6 +214,7 @@ export class JavaSourceMachine {
     this.step(); const ev = (e: Expr) => this.expression(e, scope, self, method), run = (s: Stmt, sc = scope) => this.statement(s, sc, self, method);
     switch (stmt.kind) {
       case 'block': { const inner = new Scope(scope); for (const s of stmt.statements!) { const flow = run(s, inner); if (flow) return flow; } return; }
+      case 'exprs': for (const s of stmt.statements!) { const flow = run(s); if (flow) return flow; } return;
       case 'var': for (const d of stmt.declarations!) { if (scope.values.has(d.name)) throw new Error(`Duplicate local ${d.name}`); scope.values.set(d.name, d.expr ? coerce(d.type, ev(d.expr)) : jv(d.type, ['int', 'float', 'double'].includes(d.type) ? 0 : null)); } return;
       case 'expr': ev(stmt.expr!); return;
       case 'if': if (truth(ev(stmt.condition!))) return run(stmt.body!); else if (stmt.otherwise) return run(stmt.otherwise); return;
@@ -299,12 +235,24 @@ export class JavaSourceMachine {
       case 'return': return { kind: 'return', value: stmt.expr ? ev(stmt.expr) : jv('void', undefined) };
       case 'break': return { kind: 'break' };
       case 'continue': return { kind: 'continue' };
+      case 'do': {
+        let iterations = 0;
+        do {
+          this.step();
+          const flow = run(stmt.body!);
+          if (flow?.kind === 'return') return flow;
+          if (flow?.kind === 'break') break;
+          if (this.singleIteration && ++iterations >= 1) break;
+        } while (truth(ev(stmt.condition!)));
+        return;
+      }
       case 'while': case 'for': {
         const inner = new Scope(scope); if (stmt.init) run(stmt.init, inner);
         let iterations = 0;
         while (!stmt.condition || truth(this.expression(stmt.condition, inner, self, method))) {
           this.step(); const flow = run(stmt.body!, inner); if (flow?.kind === 'return') return flow; if (flow?.kind === 'break') break;
           if (stmt.update) this.expression(stmt.update, inner, self, method);
+          for (const update of stmt.updates ?? []) this.expression(update, inner, self, method);
           if (this.singleIteration && ++iterations >= 1) break;
         } return;
       }

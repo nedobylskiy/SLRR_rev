@@ -1,12 +1,14 @@
 import { defineConfig, type Plugin } from 'vite';
 import { readFile, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import ffmpegPath from 'ffmpeg-static';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './tools/game-files';
 import { isSavedVehiclePath } from './src/assets';
 
-const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp']);
+const audioTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav' };
+const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', ...Object.keys(audioTypes)]);
 function gameAssets(): Plugin {
   let index: Promise<{ path: string; size: number }[]> | undefined;
   let menuVideo: Promise<Buffer> | undefined;
@@ -49,7 +51,23 @@ function gameAssets(): Plugin {
           } else if (url.pathname === '/file') {
             const f = await safeGamePath(url.searchParams.get('path') ?? '');
             if (!allowed.has(path.extname(f).toLowerCase()) && !isSavedVehiclePath(relativeGamePath(f))) { res.statusCode = 403; res.end(); return; }
-            if ((await stat(f)).size > 128 * 1024 * 1024) throw new Error('File exceeds 128 MiB browser import limit');
+            const info = await stat(f), audioType = audioTypes[path.extname(f).toLowerCase()];
+            if (audioType) {
+              const range = req.headers.range;
+              let start = 0, end = info.size - 1;
+              if (range) {
+                const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+                if (!match || Number(match[1]) >= info.size) { res.statusCode = 416; res.setHeader('Content-Range', `bytes */${info.size}`); res.end(); return; }
+                start = Number(match[1]); end = match[2] ? Math.min(Number(match[2]), end) : end;
+                if (end < start) { res.statusCode = 416; res.end(); return; }
+                res.statusCode = 206; res.setHeader('Content-Range', `bytes ${start}-${end}/${info.size}`);
+              }
+              res.setHeader('Content-Type', audioType); res.setHeader('Accept-Ranges', 'bytes');
+              res.setHeader('Content-Length', end - start + 1);
+              createReadStream(f, { start, end }).pipe(res);
+              return;
+            }
+            if (info.size > 128 * 1024 * 1024) throw new Error('File exceeds 128 MiB browser import limit');
             res.setHeader('Content-Type', 'application/octet-stream'); res.end(await readFile(f));
           } else { res.statusCode = 404; res.end(); }
         } catch (e) { res.statusCode = 400; res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.end(String(e)); }
@@ -57,4 +75,8 @@ function gameAssets(): Plugin {
     }
   };
 }
-export default defineConfig({ plugins: [gameAssets()], server: { host: '127.0.0.1', port: 5173, strictPort: true } });
+export default defineConfig({
+  plugins: [gameAssets()],
+  resolve: { alias: [{ find: /^slrr-jvm-compiler$/, replacement: path.resolve('src/runtime/jvm-compiler-browser.ts') }] },
+  server: { host: '127.0.0.1', port: 5173, strictPort: true },
+});

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { BufferGeometry, Mesh, MeshBasicMaterial, Points, Texture, Vector3 } from 'three';
 import { tireSurfaceForTexture } from '../src/engine/map-terrain';
-import { TireEffects, tireScrub, tireSmoke } from '../src/render/tire-effects';
+import { TireEffects, skidMarkOpacity, tireScrub, tireSmoke } from '../src/render/tire-effects';
 import type { TireContactState } from '../src/engine/suspension-3d';
 
 const contact = (changes: Partial<TireContactState> = {}): TireContactState => ({
@@ -109,6 +109,21 @@ test('skid mark fades in at the start and fades out when wheelspin ends', () => 
   assert.equal(colors.getW(11), 0);
   assert.ok(colors.getW(8) > 0 && colors.getW(8) < 1);
   effects.dispose();
+});
+
+test('fast wheel scrub paints a lighter mark than a slow burnout', () => {
+  assert.equal(skidMarkOpacity(0), 1);
+  assert.ok(Math.abs(skidMarkOpacity(30) - 0.32) < 1e-12);
+  const alphaAt = (speed: number) => {
+    const effects = new TireEffects();
+    const road = effects.group.children[0] as Mesh;
+    for (const z of [0, -0.25, -0.5, -0.75])
+      effects.update(1 / 60, [contact({ contactPoint: new Vector3(0, 0.012, z) })], speed);
+    const alpha = (road.geometry as BufferGeometry).getAttribute('color').getW(11);
+    effects.dispose();
+    return alpha;
+  };
+  assert.ok(Math.abs(alphaAt(30) - alphaAt(0) * 0.32) < 1e-6);
 });
 
 test('smoke grows into a wider plume as it leaves the tire', () => {

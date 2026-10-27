@@ -9,7 +9,11 @@ import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
 import { mountMainMenu } from './osd/main-menu';
-import { MainMenuRuntime } from './runtime/main-menu-runtime';
+import { MainMenuRuntime, INITIAL_MENU_STATE } from './runtime/main-menu-runtime';
+import { MusicEngine, MUSIC_SET, type MusicState } from './audio/music-engine';
+import { SoundJavaBridge } from './audio/sound-java';
+import { gameSoundVolume, setGameSoundVolume } from './audio/audio-settings';
+import { DEFAULT_TIRE_MODEL, type TireModelSettings } from './engine/tire-model';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Connecting…</span><button id="memory-lab">Memory stream</button><label class="button">Open game folder<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -23,6 +27,7 @@ let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
 let beforeDrivingDetails = '';
 let disposeOsdMenu: (() => void) | undefined;
+let music: MusicEngine | undefined, disconnectMusic: (() => void) | undefined;
 const menuButton = textElement('button', 'Main menu');
 el('memory-lab').before(menuButton);
 menuButton.onclick = () => openMainMenu();
@@ -62,6 +67,74 @@ for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side f
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
 const showMapDebugControls = () => { mapDebugPanel.hidden = false; mapDebugPanel.open = false; for (const input of mapDebugChecks) input.checked = false; };
 let crashSession: ReturnType<Viewer['drive']> | undefined;
+const tirePanel = document.createElement('details'); tirePanel.className = 'tire-tuning-panel'; tirePanel.hidden = true;
+tirePanel.append(textElement('summary', 'Tire model · Pacejka'));
+const tireControls = textElement('div', '', 'tire-tuning-controls'); tirePanel.append(tireControls); el('scene-help').before(tirePanel);
+const tireSettings: TireModelSettings = structuredClone(DEFAULT_TIRE_MODEL);
+const tireStorageKey = 'slrr.tire-model.v1';
+let storedTires: Partial<TireModelSettings> | undefined;
+try { storedTires = JSON.parse(localStorage.getItem(tireStorageKey) ?? 'null') ?? undefined; } catch { /* Ignore invalid saved tuning. */ }
+if (storedTires?.model === 'legacy') tireSettings.model = 'legacy';
+const modelLabel = textElement('label', 'Magic Formula (Pacejka)'), modelCheck = document.createElement('input');
+modelCheck.type = 'checkbox'; modelCheck.checked = tireSettings.model === 'pacejka'; modelLabel.prepend(modelCheck); tireControls.append(modelLabel);
+const tireSliders: { input: HTMLInputElement; output: HTMLOutputElement; axis: 'longitudinal' | 'lateral'; parameter: 'B' | 'C' | 'D' | 'E' }[] = [];
+const updateTireModel = () => { tireSettings.model = modelCheck.checked ? 'pacejka' : 'legacy'; tirePanel.querySelector('summary')!.textContent = `Tire model · ${modelCheck.checked ? 'Pacejka' : 'legacy'}`; try { localStorage.setItem(tireStorageKey, JSON.stringify(tireSettings)); } catch { /* Live tuning still works without storage. */ } crashSession?.tireModel(tireSettings); };
+modelCheck.onchange = updateTireModel;
+for (const [axis, title] of [['longitudinal', 'Longitudinal grip'], ['lateral', 'Lateral grip']] as const) {
+  tireControls.append(textElement('strong', title));
+  for (const [parameter, label, min, max, step, hint] of [
+    ['B', 'B · stiffness', 2, axis === 'lateral' ? 40 : 30, 0.5, 'How quickly grip rises with slip'],
+    ['C', 'C · curve shape', 1, 2.5, 0.05, 'Shape near and after the grip peak'],
+    ['D', 'D · peak grip', 0.3, 2, 0.05, 'Peak force relative to wheel load'],
+    ['E', 'E · falloff', -2, 2, 0.05, 'Curvature beyond the initial rise'],
+  ] as const) {
+    const row = textElement('label', label), input = document.createElement('input'), output = document.createElement('output');
+    input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step);
+    const saved = storedTires?.[axis]?.[parameter];
+    if (typeof saved === 'number' && Number.isFinite(saved) && saved >= min && saved <= max) tireSettings[axis][parameter] = saved;
+    input.value = String(tireSettings[axis][parameter]); input.title = hint; input.setAttribute('aria-label', `${title}: ${label}`);
+    output.value = Number(input.value).toFixed(2);
+    input.oninput = () => { tireSettings[axis][parameter] = Number(input.value); output.value = Number(input.value).toFixed(2); updateTireModel(); };
+    row.append(input, output); tireControls.append(row); tireSliders.push({ input, output, axis, parameter });
+  }
+}
+const resetTires = textElement('button', 'Reset tire parameters');
+resetTires.onclick = () => { Object.assign(tireSettings, structuredClone(DEFAULT_TIRE_MODEL)); modelCheck.checked = true; for (const { input, output, axis, parameter } of tireSliders) { input.value = String(tireSettings[axis][parameter]); output.value = Number(input.value).toFixed(2); } updateTireModel(); };
+const copyTires = textElement('button', 'Copy parameters');
+copyTires.onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(tireSettings, null, 2)); copyTires.textContent = 'Copied'; } catch { copyTires.textContent = 'Copy unavailable'; } setTimeout(() => { copyTires.textContent = 'Copy parameters'; }, 1800); };
+tireControls.append(resetTires, copyTires);
+const showTireControls = () => { tirePanel.hidden = false; tirePanel.open = false; updateTireModel(); };
+const enginePanel = document.createElement('details'); enginePanel.className = 'engine-tuning-panel'; enginePanel.hidden = true;
+enginePanel.append(textElement('summary', 'Engine tuning'));
+const engineControls = textElement('div', '', 'engine-tuning-controls'); enginePanel.append(engineControls); el('scene-help').before(enginePanel);
+const engineTuning = { idle: 900, redline: 6500 };
+const engineSliders = {} as Record<'idle' | 'redline', { input: HTMLInputElement; output: HTMLOutputElement }>;
+let engineStorageKey = '';
+const applyEngineTuning = () => { crashSession?.engineTuning(engineTuning.idle, engineTuning.redline); try { localStorage.setItem(engineStorageKey, JSON.stringify(engineTuning)); } catch { /* Live tuning still works without storage. */ } };
+for (const [key, title, min, max, step] of [['idle', 'Idle', 150, 2500, 50], ['redline', 'Redline', 3000, 12000, 250]] as const) {
+  const row = textElement('label', title), input = document.createElement('input'), output = document.createElement('output');
+  input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step);
+  input.setAttribute('aria-label', `${title} RPM`);
+  input.oninput = () => { engineTuning[key] = Number(input.value); output.value = `${input.value} RPM`; applyEngineTuning(); };
+  row.append(input, output); engineControls.append(row); engineSliders[key] = { input, output };
+}
+engineControls.append(textElement('small', 'A low idle may stall the engine. Press I to restart (N or Shift for manual).'));
+const resetEngineTuning = textElement('button', 'Reset engine tuning');
+resetEngineTuning.onclick = () => { const block = engineRoot && [...engineRoot.world.parts.values()].find(part => !!part.definition.mechanics?.values.cylinders); engineTuning.idle = block?.definition.mechanics?.values.rpm_idle ?? 900; engineTuning.redline = block?.definition.mechanics?.values.RPM_limit ?? 6500; for (const [key, control] of Object.entries(engineSliders) as ['idle' | 'redline', { input: HTMLInputElement; output: HTMLOutputElement }][]) { control.input.value = String(engineTuning[key]); control.output.value = `${control.input.value} RPM`; } applyEngineTuning(); };
+engineControls.append(resetEngineTuning);
+const showEngineControls = (root: EnginePart) => {
+  const block = [...root.world.parts.values()].find(part => !!part.definition.mechanics?.values.cylinders);
+  engineTuning.idle = block?.definition.mechanics?.values.rpm_idle ?? 900;
+  engineTuning.redline = block?.definition.mechanics?.values.RPM_limit ?? 6500;
+  engineStorageKey = `slrr.engine-tuning.${root.definition.key.pack}:${root.definition.key.id}.v1`;
+  try {
+    const saved = JSON.parse(localStorage.getItem(engineStorageKey) ?? 'null');
+    if (Number.isFinite(saved?.idle) && saved.idle >= 150 && saved.idle <= 2500) engineTuning.idle = saved.idle;
+    if (Number.isFinite(saved?.redline) && saved.redline >= 3000 && saved.redline <= 12000) engineTuning.redline = saved.redline;
+  } catch { /* Use the installed block's values. */ }
+  for (const [key, control] of Object.entries(engineSliders) as ['idle' | 'redline', { input: HTMLInputElement; output: HTMLOutputElement }][]) { control.input.value = String(engineTuning[key]); control.output.value = `${control.input.value} RPM`; }
+  enginePanel.hidden = false; enginePanel.open = false; applyEngineTuning();
+};
 for (const [label, speed] of [['Impact at 10 km/h', 10 / 3.6], ['Impact at 50 km/h', 50 / 3.6], ['Reset', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
@@ -95,6 +168,33 @@ const resetHood = textElement('button', 'Reset hood'); resetHood.onclick = () =>
 const cageLabel = textElement('label', ' Physics frame');
 const cage = document.createElement('input'); cage.type = 'checkbox'; cage.onchange = () => hood?.wireframe(cage.checked); cageLabel.prepend(cage); hoodControls.append(cageLabel);
 const driveHud = textElement('div', '', 'drive-hud'); driveHud.hidden = true; driveHud.setAttribute('aria-label', 'Vehicle speed'); el('viewport').append(driveHud);
+const musicPanel = document.createElement('details'); musicPanel.className = 'music-panel'; musicPanel.hidden = true;
+const musicSummary = textElement('summary', 'Music'); musicPanel.append(musicSummary);
+const musicTitle = textElement('strong', 'No track'), musicArtist = textElement('span', ''), musicPosition = textElement('span', '0:00 / 0:00');
+const musicButtons = textElement('div', '', 'music-buttons');
+const previousSong = textElement('button', 'Previous'), playSong = textElement('button', 'Play'), nextSong = textElement('button', 'Next');
+previousSong.onclick = () => music?.prevTrack();
+playSong.onclick = () => { if (!music) return; if (!music.snapshot().track) music.changeMusicSet(MUSIC_SET.MENU); else if (music.snapshot().playing) music.pause(); else void music.resume(); };
+nextSong.onclick = () => music?.nextTrack(); musicButtons.append(previousSong, playSong, nextSong);
+const musicSeek = document.createElement('input'); musicSeek.type = 'range'; musicSeek.min = '0'; musicSeek.max = '1'; musicSeek.step = '0.1'; musicSeek.setAttribute('aria-label', 'Track position');
+musicSeek.onchange = () => music?.seek(Number(musicSeek.value));
+const musicVolume = document.createElement('input'); musicVolume.type = 'range'; musicVolume.min = '0'; musicVolume.max = '1'; musicVolume.step = '0.01'; musicVolume.setAttribute('aria-label', 'Music volume');
+musicVolume.oninput = () => music?.setVolume(1, Number(musicVolume.value));
+const musicVolumeLabel = textElement('label', 'Volume'); musicVolumeLabel.append(musicVolume);
+const gameVolume = document.createElement('input'); gameVolume.type = 'range'; gameVolume.min = '0'; gameVolume.max = '1'; gameVolume.step = '0.01'; gameVolume.value = String(gameSoundVolume); gameVolume.setAttribute('aria-label', 'Game sound volume');
+gameVolume.oninput = () => setGameSoundVolume(Number(gameVolume.value));
+const gameVolumeLabel = textElement('label', 'Game sounds'); gameVolumeLabel.append(gameVolume);
+musicPanel.append(musicTitle, musicArtist, musicButtons, musicSeek, musicPosition, musicVolumeLabel, gameVolumeLabel); document.body.append(musicPanel);
+const musicTime = (seconds: number) => `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
+function showMusicState(state: MusicState) {
+  musicSummary.textContent = state.blocked ? 'Music · press Play' : state.track ? `Music · ${state.track.title}` : 'Music';
+  musicTitle.textContent = state.track?.title ?? 'No track'; musicArtist.textContent = state.track?.artist ?? state.track?.path ?? '';
+  musicSeek.max = String(Math.max(1, state.durationSeconds ?? 1)); musicSeek.value = String(Math.min(state.positionSeconds, Number(musicSeek.max)));
+  musicSeek.disabled = !state.track || state.durationSeconds === null;
+  musicPosition.textContent = `${musicTime(state.positionSeconds)} / ${state.durationSeconds === null ? '?:??' : musicTime(state.durationSeconds)}`;
+  musicVolume.value = String(state.volume); playSong.textContent = state.playing ? 'Pause' : 'Play';
+  playSong.title = state.blocked ? 'Browser requires a click before music can play' : state.error ?? '';
+}
 el('memory-lab').before(worldButton, driveButton, mapButton, trackDriveButton);
 trackDriveButton.onclick = async () => {
   if (trackDriving) { setTrackExpanded(true); return; }
@@ -109,16 +209,19 @@ trackDriveButton.onclick = async () => {
     }, true);
     if (request !== sequence || !engineRoot) return;
     showMapDebugControls();
+    music?.changeMusicSet(MUSIC_SET.DRIVING);
     const start = new Vector3(0, map.terrain.height(0, -1461.785) + 0.15, -1461.785);
     if (start.y < -100) throw new Error('No track surface at the start line');
     beforeDrivingDetails = el('details').textContent ?? '';
-    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI }, assets);
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, { terrain: map.terrain, collision: map.collision, position: start, yaw: Math.PI }, assets, music);
     crashSession.chassisCrumple(Number(crumpleSlider.value));
+    showTireControls();
+    showEngineControls(engineRoot);
     disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
     trackDriving = true; setTrackExpanded(true);
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · driving'; el('format').textContent = 'MAP / PHYSICS';
-    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · R reset to start';
+    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · I restart engine · R reset to start';
     el('details').textContent = `${map.loaded} map models · ${map.objects} RDB/CFG objects · ${map.collision.boxes} collision boxes · ${map.terrain.faces} support triangles. The start position comes from the quarter-mile straight in TestTrack.java. Placed objects use original RDB positions and CFG box shapes; the remaining map collision currently comes from SCX.`;
     status('Driving on Test Track');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Drive unavailable', true); el('details').textContent = String(error); } }
@@ -142,15 +245,19 @@ mapButton.onclick = async () => {
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
 };
 function stopDrive() {
+  const wasTrackDriving = trackDriving;
   disposeOsdMenu?.(); disposeOsdMenu = undefined;
   trackDriving = false; setTrackExpanded(false);
   el('viewport').parentElement?.classList.remove('physics-scene');
   mapDebugPanel.hidden = true;
+  tirePanel.hidden = true;
+  enginePanel.hidden = true;
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
   hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
   disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Test drive';
   el('scene-help').textContent = 'Left drag: rotate · Wheel: zoom · Right drag: pan';
+  if (wasTrackDriving) music?.changeMusicSet(MUSIC_SET.NONE);
 }
 async function openMainMenu() {
   if (!assets?.byPath.has('frontend.rpk')) { status('Menu assets unavailable', true); return; }
@@ -161,7 +268,7 @@ async function openMainMenu() {
   try {
     const source = new TextDecoder().decode(await assets.read('sl/scripts/game/src/MainMenu.java'));
     if (request !== sequence) return;
-    const runtime = new MainMenuRuntime(source), built = runtime.enter();
+    const runtime = new MainMenuRuntime(source, INITIAL_MENU_STATE, music ? new SoundJavaBridge(music) : undefined), built = runtime.enter();
     const menu = mountMainMenu(document.body, assets, built.items, built.selected, built.layout, runtime.primaryVisuals(), action => runtime.dispatchMenuAction(action), item => {
       if (item.command === 0xa008) { trackDriveButton.click(); return; }
       if (item.command === 0xb004) { stopDrive(); status('Asset catalog'); return; }
@@ -180,12 +287,14 @@ crashButton.onclick = async () => {
   if (request !== sequence || !engineRoot || !viewer) return;
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
-    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, undefined, assets); disposeDriving = crashSession;
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, undefined, assets, music); disposeDriving = crashSession;
     crashSession.chassisCrumple(Number(crumpleSlider.value));
+    showTireControls();
+    showEngineControls(engineRoot);
     el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; internals.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'End drive';
-    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · R restore car';
+    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · I restart engine · R restore car';
     el('details').textContent = 'Original struts, springs, dampers, brakes, and engine are installed using Java addStockParts and CFG mounts. Their condition affects wheel support, damping, braking, and power; wheel misalignment starts below 10% strut condition. At zero condition, the strut remains on the chassis while the wheel detaches. The engine falls as one body with its nested parts. Detachment buttons set condition to 0% for diagnostics. Internal parts hides the body shell for inspection. R restores the assembly.';
     el('filename').textContent = 'Baiern · suspension and damage'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('3D impact test');
   } catch (error) { stopDrive(); viewer.clear(); status('Test error', true); el('details').textContent = String(error); }
@@ -258,7 +367,7 @@ async function connect() {
       const result = await fetch(`/api/game/file?path=${encodeURIComponent(path)}`);
       if (!result.ok) throw new Error(await result.text());
       return new Uint8Array(await result.arrayBuffer());
-    }), 'Local installation');
+    }), 'Local installation', true);
     const example = files.find(f => /baiern_data\/meshes\/chassis\.scx$/i.test(f.path)) ?? files.find(f => /steeringwheel_4spoke_01\.scx$/i.test(f.path));
     if (assets.byPath.has('frontend.rpk')) openMainMenu();
     else if (assets.byPath.has('cars/racers/baiern.rpk')) await openWorld('cars/racers/Baiern.rpk', 6);
@@ -270,10 +379,14 @@ async function connect() {
   }
 }
 
-function attach(source: Assets, label: string) {
+function attach(source: Assets, label: string, local = false) {
   stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); sequence++;
   driveButton.disabled = false;
-  assets = source; el('connection').textContent = label;
+  assets = source; localInstallation = local; el('connection').textContent = label;
+  disconnectMusic?.(); music?.dispose();
+  music = new MusicEngine(source, local);
+  disconnectMusic = music.onState(showMusicState);
+  musicPanel.hidden = !source.files.some(file => file.path.replaceAll('\\', '/').toLowerCase().startsWith('music/'));
   el('counts').replaceChildren(...['scx', 'rpk', 'class'].map(ext => {
     const card = document.createElement('div'); card.append(textElement('b', source.files.filter(f => f.path.toLowerCase().endsWith(`.${ext}`)).length.toLocaleString('en-US')), textElement('span', ext.toUpperCase())); return card;
   }));
@@ -398,7 +511,7 @@ el<HTMLInputElement>('folder').onchange = event => {
   const files = [...((event.target as HTMLInputElement).files ?? [])]; if (!files.length) return;
   const map = new Map(files.map(f => [f.webkitRelativePath.split('/').slice(1).join('/'), f]));
   localInstallation = false;
-  attach(new Assets([...map].map(([path, f]) => ({ path, size: f.size })), async p => new Uint8Array(await map.get(p)!.arrayBuffer())), 'Selected folder');
+  attach(new Assets([...map].map(([path, f]) => ({ path, size: f.size })), async p => new Uint8Array(await map.get(p)!.arrayBuffer())), 'Selected folder', false);
   if (assets.byPath.has('frontend.rpk')) openMainMenu();
   else status('Catalog connected');
 };
@@ -421,4 +534,4 @@ el('memory-lab').onclick = async () => {
     el('details').textContent = 'A restricted Java interpreter executes the original source methods. Their TUFA bytecode is not executed yet. Assembly data passes through the project slot model and an in-memory stream.';
   } catch (e) { if (request === sequence) { status('Source error', true); el('details').textContent = String(e); } }
 };
-if (import.meta.hot) import.meta.hot.dispose(() => { sequence++; stopDrive(); engineWorld?.dispose(); disposeMemoryLab?.(); viewer?.dispose(); });
+if (import.meta.hot) import.meta.hot.dispose(() => { sequence++; stopDrive(); engineWorld?.dispose(); disposeMemoryLab?.(); viewer?.dispose(); disconnectMusic?.(); music?.dispose(); });

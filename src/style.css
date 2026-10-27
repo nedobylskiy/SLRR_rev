@@ -287,6 +287,24 @@ body.track-drive-expanded{overflow:hidden}
   width:min(320px,calc(100% - 24px));
   background:#101a20de
 }
+.workspace.track-drive-expanded .tire-tuning-panel{
+  position:absolute;
+  bottom:44px;
+  left:12px;
+  z-index:4;
+  width:min(340px,calc(100% - 24px));
+  max-height:calc(100dvh - 72px);
+  overflow:auto;
+  background:#101a20e8
+}
+.workspace.track-drive-expanded .engine-tuning-panel{
+  position:absolute;
+  top:58px;
+  right:12px;
+  z-index:4;
+  width:min(340px,calc(100% - 24px));
+  background:#101a20e8
+}
 .workspace.track-drive-expanded .track-window-button{
   position:absolute;
   top:12px;
@@ -469,6 +487,33 @@ button:disabled{opacity:.45;cursor:default}
  .map-debug-options { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 10px 0 2px; }
  .map-debug-options label { display: flex; align-items: center; gap: 6px; }
  .map-debug-options input { width: auto; accent-color: #76e5c4; }
+ .tire-tuning-panel { padding: 8px 18px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .tire-tuning-panel[hidden] { display: none; }
+ .tire-tuning-panel summary { cursor: pointer; color: #76e5c4; }
+ .tire-tuning-controls { display: grid; gap: 8px; padding: 12px 0 4px; }
+ .tire-tuning-controls strong { margin-top: 5px; color: #f3f7f9; }
+ .tire-tuning-controls label { display: grid; grid-template-columns: 110px 1fr 38px; align-items: center; gap: 8px; }
+ .tire-tuning-controls label:first-child { display: flex; gap: 8px; }
+ .tire-tuning-controls input[type="range"] { width: 100%; accent-color: #76e5c4; }
+ .tire-tuning-controls output { font-variant-numeric: tabular-nums; text-align: right; }
+ .tire-tuning-controls button { justify-self: start; }
+ .engine-tuning-panel { padding: 8px 18px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .engine-tuning-panel[hidden] { display: none; }
+ .engine-tuning-panel summary { cursor: pointer; color: #76e5c4; }
+ .engine-tuning-controls { display: grid; gap: 10px; padding: 12px 0 4px; }
+ .engine-tuning-controls label { display: grid; grid-template-columns: 55px 1fr 75px; align-items: center; gap: 8px; }
+ .engine-tuning-controls input[type="range"] { width: 100%; accent-color: #76e5c4; }
+ .engine-tuning-controls output { font-variant-numeric: tabular-nums; text-align: right; }
+ .engine-tuning-controls small { color: #9cafb9; }
+ .engine-tuning-controls button { justify-self: start; }
+ .music-panel { position: fixed; right: 14px; bottom: 14px; z-index: 60; width: min(315px, calc(100vw - 28px)); padding: 9px 12px; border: 1px solid #567078; border-radius: 8px; background: #101a20ef; color: #dce9ec; box-shadow: 0 8px 30px #0008; font-size: 12px; }
+ .music-panel[hidden] { display: none; }
+ .music-panel summary { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; color: #76e5c4; }
+ .music-panel strong, .music-panel span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 8px; }
+ .music-panel .music-buttons { display: flex; gap: 7px; margin-top: 10px; }
+ .music-panel .music-buttons button { flex: 1; }
+ .music-panel input[type="range"] { display: block; width: 100%; margin: 10px 0 2px; accent-color: #76e5c4; }
+ .music-panel label { display: block; margin-top: 8px; }
  .hood-telemetry { width: 100%; color: #9fe1c9; font: 11px/1.6 Consolas, monospace; }
  .crash-hud { font: 11px/1.7 Consolas, monospace; white-space: pre-line; top: 10px; left: 10px; padding: 7px 10px; }
  .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }

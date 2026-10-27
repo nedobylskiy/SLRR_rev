@@ -1,4 +1,5 @@
 import { JavaSourceMachine, jv, nil, parseSourceClass, type JavaHost, type JavaValue, type SourceClass } from 'slrr-jvm';
+import type { SoundJavaBridge } from '../audio/sound-java';
 
 export interface MenuResource { pack: string; id: number }
 export interface MainMenuItem { label: string; active: MenuResource; disabled: MenuResource; command: number; width: number; height: number; depth: number }
@@ -32,7 +33,7 @@ export class MainMenuRuntime implements JavaHost {
   private messageColor = 0xff000000;
   versionText = '';
 
-  constructor(source: string, readonly state: MainMenuState = INITIAL_MENU_STATE) {
+  constructor(source: string, readonly state: MainMenuState = INITIAL_MENU_STATE, private readonly sound?: SoundJavaBridge) {
     this.mainClass = parseSourceClass(source, new Set(['enter', 'exit']), 'MainMenu');
     this.gatesClass = parseSourceClass(source, new Set(['Gates', 'show', 'hide', 'buildSlidingMenu', 'osdCommand', 'showPrimaryVisuals', 'cleanup', 'run']), 'Gates');
     this.colorBankClass = source.includes('class ColorBank') ? parseSourceClass(source, new Set(['ColorBank', 'getColor']), 'ColorBank') : undefined;
@@ -103,6 +104,14 @@ export class MainMenuRuntime implements JavaHost {
   }
 
   parent(name: string) { return name === 'Gates' ? 'Dialog' : null; }
+  constructorCall(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): JavaValue {
+    if (target === 'super' && this.parent(fromClass) === 'Dialog') return nil();
+    const cls = fromClass === 'Gates' ? this.gatesClass : fromClass === 'ColorBank' ? this.colorBankClass : undefined;
+    const method = cls?.methods.find(method => method.name === fromClass && method.parameters.length === args.length);
+    if (target === 'this' && method) return this.machine.invoke(method, receiver, args);
+    throw new Error(`Unsupported menu constructor call ${fromClass}.${target}(${args.length})`);
+  }
+  isInstance(receiver: JavaValue, name: string) { return receiver.value !== null && (receiver.type === name || receiver.type === 'Gates' && name === 'Dialog'); }
   global(name: string): JavaValue {
     if (name === 'GameLogic') return jv('GameLogic', this.gameLogic);
     if (name === 'SlidingMenu') return jv('class', 'SlidingMenu');
@@ -133,7 +142,7 @@ export class MainMenuRuntime implements JavaHost {
     if (receiver.value === 'Input' && name === 'AXIS_SELECT') return jv('int', -1);
     if (receiver.value === 'Input' && name === 'cursor') return jv('Cursor', { tag: 'Cursor' });
     if (receiver.value === 'Input' && name === 'VIRTUAL') return jv('int', 1);
-    if (receiver.value === 'Sound' && name === 'MUSIC_SET_MENU') return jv('int', 1);
+    if (receiver.value === 'Sound') { const constant = this.sound?.constant(name); if (constant) return constant; if (name === 'MUSIC_SET_MENU') return jv('int', 1); }
     if (receiver.value === 'Frontend') return jv(name === 'loadingScreen' ? 'LoadingScreen' : 'Font', { name });
     if (receiver.value === 'Config' && name === 'version') return jv('String', 'v2.3.1');
     if (receiver.value === 'Steam' && name === 'ready') return jv('int', 1);
@@ -160,7 +169,7 @@ export class MainMenuRuntime implements JavaHost {
       if ('name' in obj && name === 'text') return jv('String', this.messageText);
       if ('fields' in obj && (obj as Gates).fields.has(name)) return (obj as Gates).fields.get(name)!;
     }
-    throw new Error(`Missing menu field ${receiver.type}.${name}`);
+    throw new Error(`Missing Java field ${receiver.type}.${name}`);
   }
   set(receiver: JavaValue, name: string, value: JavaValue): void {
     if (receiver.value === this.menu && name === 'window') { this.menu.window = value.value as Gates | null; return; }
@@ -200,7 +209,7 @@ export class MainMenuRuntime implements JavaHost {
     if (receiver.value === 'GfxEngine' && name === 'openVideo') return jv('int', 0);
     if (receiver.value === 'GfxEngine' && name === 'closeVideo') return nil();
     if (receiver.value === 'System' && name === 'buildNumber') return jv('int', 940);
-    if (receiver.value === 'Sound' && name === 'changeMusicSet') return nil();
+    if (receiver.value === 'Sound') { if (this.sound) return this.sound.call(name, args); if (name === 'changeMusicSet') return nil(); }
     if (receiver.type === 'ResourceRef' && ['cache', 'precache'].includes(name)) return nil();
     if (receiver.type === 'LoadingScreen' && ['show', 'userWait'].includes(name)) return nil();
     if (receiver.type === 'MenuText' && name === 'changeColor' && args.length === 1) return nil();

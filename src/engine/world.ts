@@ -8,6 +8,8 @@ import { slotMatrix } from './slot-frames';
 import { SCX_TO_WORLD } from './model-transform';
 import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
+import { executeTyreSource } from '../runtime/tyre-java';
+import type { WheelRefState } from '../runtime/wheel-ref-native';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
@@ -42,6 +44,7 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  wheelRefs: (WheelRefState | undefined)[] = [];
   create(definition: PartDefinition) {
     if (this.disposed) throw new Error('World disposed');
     if (this.parts.size >= 10000) throw new Error('World part limit');
@@ -164,6 +167,21 @@ export class PartFactory {
       };
       await enqueue(root.definition);
       if (options.mechanical) {
+        const tyreRefs = await source.tyreEntries(root.definition, env);
+        if (tyreRefs.length) {
+          const basePath = [...this.assets.byPath.keys()].find(path => path.endsWith('/reciprocatingrgearpart/src/tyre.java'));
+          if (!basePath) warnings.push('Original Tyre.java source missing; stock tyre parameters unavailable');
+          else {
+            const baseSource = new TextDecoder('windows-1252').decode(await this.assets.read(basePath));
+            for (const [index, ref] of tyreRefs.entries()) {
+              if (!ref) continue;
+              try {
+                const definition = await this.definition(ref), tyreSource = await source.source(definition);
+                world.wheelRefs[index] = executeTyreSource(baseSource, tyreSource, index);
+              } catch (error) { warnings.push(`Stock tyre ${index} parameters unavailable: ${String(error)}`); }
+            }
+          }
+        }
         for (const ref of await source.entries(root.definition, env, true)) {
           const definition = await this.definition(ref), mechanics = await source.profile(definition); pending.push({ ...definition, mechanics });
         }
