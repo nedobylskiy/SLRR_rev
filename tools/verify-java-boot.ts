@@ -34,9 +34,8 @@ if (process.argv.includes('--diagnose')) {
   result.dispose();
   process.exit(result.error ? 1 : 0);
 }
-const expected = 'Java native implementation missing: java.render.GfxEngine.openVideo(String,int,int,int)';
-if (!result.error?.message.includes(expected)) {
-  process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
+if (result.error) {
+  process.stderr.write(`Java boot stopped: ${result.error.message}\n`);
   process.exitCode = 1;
 }
 const colors = result.jvm.get(jv('class', 'java.game.GameLogic'), 'CARCOLORS').value;

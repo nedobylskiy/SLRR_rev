@@ -27,6 +27,7 @@ import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
 import type { OsdLayer } from '../osd/osd-layer';
 import type { SoundJavaBridge } from '../audio/sound-java';
+import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
@@ -64,7 +65,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 }),
   renderChanged?: (node: RenderObject) => void,
   osd?: Pick<OsdLayer, 'createText' | 'createHitTarget'>,
-  sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue()): Promise<BootResult> {
+  sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -256,7 +257,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     .some(path => assets.byPath.has(`system/scripts/render/${path}`));
   if (!realLoadingScreen) native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   jvm.natives.register('java.render.GfxEngine', 'forceRendering', [], () => voidValue());
-  jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', 0));
+  for (const signature of [['String', 'int', 'int'], ['String', 'int', 'int', 'int']])
+    jvm.natives.register('java.render.GfxEngine', 'openVideo', signature, ({ args }) =>
+      jv('int', video?.openVideo(String(args[0].value), Number(args[1].value) !== 0) ?? 1));
+  jvm.natives.register('java.render.GfxEngine', 'closeVideo', [], () => { video?.closeVideo(); return voidValue(); });
+  jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', video?.isPlayingVideo() ?? 0));
   native('java.sound.Sound', 'init', []);
   if (sound) jvm.natives.register('java.sound.Sound', 'changeMusicSet', ['int'], ({ args }) =>
     sound.call('changeMusicSet', [...args]));
@@ -311,7 +316,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose();
+    gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {

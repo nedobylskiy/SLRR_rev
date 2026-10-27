@@ -7,6 +7,42 @@ import { SlrrJvm } from 'slrr-jvm';
 import { SoundJavaBridge } from '../src/audio/sound-java';
 import type { MusicEngine } from '../src/audio/music-engine';
 
+test('Init.java controls the OSD video through both GfxEngine.openVideo overloads', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', `package java.game; import java.render.*;
+      class Init extends GameType { Init(int id) {
+        if (GfxEngine.openVideo("data/fmv/intro.avi", 1, 1, 1) != 0) wrongOpen();
+        if (!GfxEngine.isPlayingVideo()) wrongState();
+        GfxEngine.closeVideo();
+        if (GfxEngine.isPlayingVideo()) wrongClose();
+        if (GfxEngine.openVideo("data/fmv/outro.avi", 0, 0) != 0) wrongOverload();
+        missingNext();
+      } }`],
+    ['system/scripts/render/src/GfxEngine.java', `package java.render; class GfxEngine {
+      static native int openVideo(String path, int a, int b, int c);
+      static native int openVideo(String path, int a, int b);
+      static native void closeVideo(); static native int isPlayingVideo(); }`],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
+    async path => new TextEncoder().encode(sources.get(path)!));
+  const opened: { path: string; loop: boolean }[] = [];
+  let playing = false;
+  const video = {
+    openVideo(path: string, loop: boolean) { opened.push({ path, loop }); playing = true; return 0; },
+    closeVideo() { playing = false; },
+    isPlayingVideo() { return Number(playing); },
+    dispose() { playing = false; },
+  };
+  const result = await bootGame(assets, () => {}, undefined, undefined, undefined, undefined, undefined, video);
+  assert.deepEqual(opened, [
+    { path: 'data/fmv/intro.avi', loop: true },
+    { path: 'data/fmv/outro.avi', loop: false },
+  ]);
+  assert.match(result.error?.message ?? '', /missingNext/);
+  result.dispose();
+  assert.equal(playing, false);
+});
+
 test('Init.java routes original Sound.changeMusicSet through the music player', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', `package java.game; import java.sound.*;

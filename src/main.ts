@@ -10,6 +10,7 @@ import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
 import { mountMainMenu } from './osd/main-menu';
 import { OsdLayer } from './osd/osd-layer';
+import { OsdVideo } from './osd/osd-video';
 import { MainMenuRuntime, INITIAL_MENU_STATE } from './runtime/main-menu-runtime';
 import { MusicEngine, MUSIC_SET, type MusicState } from './audio/music-engine';
 import { SoundJavaBridge } from './audio/sound-java';
@@ -53,6 +54,7 @@ async function runGameBoot() {
   const source = assets, run = sequence;
   const gameOsd = new OsdLayer(el('viewport'), source);
   gameOsd.root.classList.add('osd-layer-game');
+  const gameVideo = new OsdVideo(gameOsd, source, localInstallation);
   disposeGameOsd = () => gameOsd.dispose();
   el('java-log').replaceChildren();
   el('java-run-state').textContent = 'Running Init.java';
@@ -60,7 +62,7 @@ async function runGameBoot() {
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
     () => viewer?.getViewportSize() ?? { width: 1, height: 1 },
     node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); },
-    gameOsd, music ? new SoundJavaBridge(music) : undefined);
+    gameOsd, music ? new SoundJavaBridge(music) : undefined, undefined, gameVideo);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   disposeGameBoot = () => result.dispose();
   const detachKeyboard = result.input.attachBrowserKeyboard(window);

@@ -10,26 +10,28 @@ const audioTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.ogg': 'audi
 const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', ...Object.keys(audioTypes)]);
 function gameAssets(): Plugin {
   let index: Promise<{ path: string; size: number }[]> | undefined;
-  let menuVideo: Promise<Buffer> | undefined;
-  function browserMenuVideo() {
-    menuVideo ??= (async () => {
-      const binary = ffmpegPath;
-      if (!binary) throw new Error('FFmpeg unavailable');
-      const hd = path.join(gameRoot, 'data', 'Fmv', 'background_motion_HD.avi');
-      const sd = path.join(gameRoot, 'data', 'Fmv', 'background_motion.avi');
-      const source = await stat(hd).then(() => hd, () => sd);
-      await stat(source);
-      return new Promise<Buffer>((resolve, reject) => {
-        const child = spawn(binary, ['-hide_banner', '-loglevel', 'error', '-i', source,
-          '-vf', 'fps=15,scale=1280:720', '-an', '-c:v', 'libvpx-vp9', '-deadline', 'realtime',
-          '-cpu-used', '8', '-b:v', '950k', '-f', 'webm', 'pipe:1'], { windowsHide: true });
-        const chunks: Buffer[] = []; let size = 0;
-        child.stdout.on('data', (chunk: Buffer) => { size += chunk.length; if (size > 32 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
-        child.on('error', reject);
-        child.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`Menu video conversion failed (${code})`)));
-      });
-    })().catch(error => { menuVideo = undefined; throw error; });
-    return menuVideo;
+  const videos = new Map<string, Promise<Buffer>>();
+  function browserVideo(requested: string) {
+    let video = videos.get(requested);
+    if (!video) {
+      video = (async () => {
+        const binary = ffmpegPath;
+        if (!binary) throw new Error('FFmpeg unavailable');
+        const source = await safeGamePath(requested);
+        if (!/\.(avi|mp4|webm)$/i.test(source)) throw new Error('Unsupported video source');
+        return new Promise<Buffer>((resolve, reject) => {
+          const child = spawn(binary, ['-hide_banner', '-loglevel', 'error', '-i', source,
+            '-vf', 'fps=15,scale=1280:720', '-an', '-c:v', 'libvpx-vp9', '-deadline', 'realtime',
+            '-cpu-used', '8', '-b:v', '950k', '-f', 'webm', 'pipe:1'], { windowsHide: true });
+          const chunks: Buffer[] = []; let size = 0;
+          child.stdout.on('data', (chunk: Buffer) => { size += chunk.length; if (size > 32 * 1024 * 1024) child.kill(); else chunks.push(chunk); });
+          child.on('error', reject);
+          child.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`Video conversion failed (${code})`)));
+        });
+      })().catch(error => { videos.delete(requested); throw error; });
+      videos.set(requested, video);
+    }
+    return video;
   }
   return {
     name: 'local-slrr-assets',
@@ -48,8 +50,13 @@ function gameAssets(): Plugin {
               return { path: relative, size: readable ? (await stat(f)).size : 0 };
             })));
             res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(await index));
-          } else if (url.pathname === '/menu-video') {
-            const video = await browserMenuVideo();
+          } else if (url.pathname === '/video' || url.pathname === '/menu-video') {
+            const hd = 'data/Fmv/background_motion_HD.avi';
+            const sd = 'data/Fmv/background_motion.avi';
+            const requested = url.pathname === '/menu-video'
+              ? await stat(path.join(gameRoot, hd)).then(() => hd, () => sd)
+              : url.searchParams.get('path') ?? '';
+            const video = await browserVideo(requested);
             res.setHeader('Content-Type', 'video/webm'); res.setHeader('Content-Length', video.length); res.end(video);
           } else if (url.pathname === '/file') {
             const f = await safeGamePath(url.searchParams.get('path') ?? '');
