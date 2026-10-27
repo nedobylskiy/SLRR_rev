@@ -13,6 +13,7 @@ export class GameTypeNative {
   private readonly objects = new Map<number, ResourceObject>();
   private readonly handles = new WeakMap<ResourceObject, JavaValue>();
   private nextId = 1;
+  private nextClonedResourceId = 0x40000000;
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void) {
     const resourceRef = 'java.util.resource.ResourceRef';
@@ -23,6 +24,7 @@ export class GameTypeNative {
       const node = this.allocate(receiver);
       node.resourceId = Number(args[0].value) | 0;
       node.typeId = node.resourceId;
+      node.copiedFromResourceId = null;
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['ResourceRef'], ({ receiver, args }) => {
@@ -32,8 +34,43 @@ export class GameTypeNative {
         : args[0].value == null ? null : this.getResource(args[0]);
       node.resourceId = source?.resourceId ?? literal?.id ?? 0;
       node.typeId = source?.typeId ?? node.resourceId;
+      node.resourceType = source?.resourceType ?? 0;
+      node.copiedFromResourceId = null;
       return voidValue();
     });
+    jvm.natives.register(resourceRef, 'duplicate', ['ResourceRef'], ({ receiver, args }) => {
+      if (args[0].value == null) return voidValue();
+      const source = this.requireResource(args[0]);
+      const target = this.allocate(receiver);
+      if (source === target) return voidValue();
+      target.typeId = source.typeId;
+      target.resourceType = source.resourceType;
+      target.params = source.params;
+      target.alias = source.alias;
+      target.setParent(source.parent);
+      target.resourceReplacements.clear();
+      for (const [before, after] of source.resourceReplacements) target.resourceReplacements.set(before, after);
+      target.meshScale = { ...source.meshScale };
+      // Clonable resource kinds are 5/7/13/14. Until RPK type lookup exists,
+      // an untyped resource is copied so later mutations cannot change its source.
+      const cloned = [5, 7, 13, 14].includes(source.resourceType)
+        || source.resourceType === 0;
+      target.resourceId = cloned ? this.nextClonedResourceId++ : source.resourceId;
+      target.copiedFromResourceId = cloned ? source.resourceId : null;
+      return voidValue();
+    });
+    jvm.natives.register(resourceRef, 'scaleMesh', ['float', 'float', 'float'], ({ receiver, args }) => {
+      const node = this.requireResource(receiver);
+      node.meshScale = { x: node.meshScale.x * Number(args[0].value),
+        y: node.meshScale.y * Number(args[1].value), z: node.meshScale.z * Number(args[2].value) };
+      return voidValue();
+    });
+    jvm.natives.register('java.util.resource.RenderRef', 'changeResource', ['ResourceRef', 'ResourceRef'],
+      ({ receiver, args }) => {
+        const node = this.requireResource(receiver);
+        node.resourceReplacements.set(this.resourceId(args[0]), this.resourceId(args[1]));
+        return voidValue();
+      });
     jvm.natives.register(resourceRef, 'id', [], ({ receiver }) => {
       if (receiver.value == null) return jv('int', 0);
       const literal = receiver.value as { id?: number } | null;
@@ -167,6 +204,13 @@ export class GameTypeNative {
     const raw = value.value;
     if (typeof raw === 'object' && 'id' in raw && !('fields' in raw)) return Number(raw.id) | 0;
     return (this.getResource(value)?.typeId ?? Number(this.jvm.get(value, 'typeID').value)) | 0;
+  }
+
+  private resourceId(value: JavaValue): number {
+    if (value.value == null) return 0;
+    const raw = value.value;
+    if (typeof raw === 'object' && 'id' in raw && !('fields' in raw)) return Number(raw.id) | 0;
+    return this.requireResource(value).resourceId;
   }
 
   private readNumber(value: JavaValue, field: string): number {

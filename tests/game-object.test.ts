@@ -136,3 +136,31 @@ test('ResourceRef keeps its resource ID separate from the host object ID', () =>
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', handle, [jv('ResourceRef', null)]);
   assert.equal(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', handle, [])?.value, 0);
 });
+
+test('ResourceRef.duplicate copies a resource binding into a separate tree node', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const host = new GameTypeNative(jvm, () => {});
+  const parent = ref('java.util.resource.ResourceRef');
+  const source = ref('java.util.resource.RenderRef');
+  const target = ref('java.util.resource.RenderRef');
+  for (const item of [parent, source, target]) jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', item, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', source, [jv('int', 0xd7)]);
+  host.getResource(source)!.setParent(host.getResource(parent)!);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'duplicate', target, [jv('ResourceRef', source.value)]);
+  const copy = host.getResource(target)!;
+  assert.notEqual(copy.id, host.getResource(source)?.id);
+  assert.equal(copy.parent, host.getResource(parent));
+  assert.equal(copy.copiedFromResourceId, 0xd7);
+  assert.notEqual(copy.resourceId, 0xd7);
+  assert.equal(host.getResource(source)?.resourceId, 0xd7);
+  const texture = ref('java.util.resource.ResourceRef');
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', texture, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', texture, [jv('int', 0xaf)]);
+  jvm.natives.invoke('java.util.resource.RenderRef', 'changeResource', target,
+    [jv('ResourceRef', source.value), jv('ResourceRef', texture.value)]);
+  assert.equal(copy.resourceReplacements.get(0xd7), 0xaf);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'scaleMesh', target,
+    [jv('float', 2), jv('float', 3), jv('float', 1)]);
+  assert.deepEqual(copy.meshScale, { x: 2, y: 3, z: 1 });
+  assert.deepEqual(host.getResource(source)?.meshScale, { x: 1, y: 1, z: 1 });
+});

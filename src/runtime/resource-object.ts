@@ -6,6 +6,10 @@ export class ResourceObject {
   resourceId = 0;
   /** ResourceRef.type(); zero until a host resource has been created. */
   resourceType = 0;
+  /** Source resource ID when this binding was duplicated as an independent resource. */
+  copiedFromResourceId: number | null = null;
+  readonly resourceReplacements = new Map<number, number>();
+  meshScale = { x: 1, y: 1, z: 1 };
 
   constructor(readonly id: number, readonly className: string, public typeId = 0,
     public params: string | null = null, public alias = className.split('.').at(-1)!) {}
