@@ -108,3 +108,16 @@ test('boot prefers a system src file over its compiled class', async () => {
   assert.match(result.error?.message ?? '', /missingNext/);
   assert.doesNotMatch(result.error?.message ?? '', /TUFA|Java constructor\/native missing: Vector3/);
 });
+
+test('boot keeps executable methods from system Java sources', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { new GameLogic(); } }'],
+    ['sl/scripts/game/src/GameLogic.java', 'package java.game; import java.io.*; class GameLogic extends GameType { GameLogic() { if (Input.isPlayerActive(0)) missingNext(); } }'],
+    ['system/scripts/io/src/Input.java', 'package java.io; class Input { static int isPlayerActive(int n) { return n == 0; } }'],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
+    async path => new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.match(result.error?.message ?? '', /missingNext/);
+  assert.doesNotMatch(result.error?.message ?? '', /isPlayerActive\(int\)/);
+});

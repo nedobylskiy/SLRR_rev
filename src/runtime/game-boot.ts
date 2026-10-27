@@ -12,19 +12,26 @@ const systemRoot = 'system/scripts/';
 const voidValue = () => jv('void', undefined);
 
 function sourceDiagnostic(message: string, sources: Map<string, string>, assets: Assets): string {
+  const native = /Java native implementation missing: ([\w.]+)\.([\w$]+)\(/.exec(message);
+  const nativeClass = native?.[1].split('.').at(-1);
+  const declaration = native && [...sources].find(([path]) => path.endsWith(`/src/${nativeClass}.java`.toLowerCase())
+    || path.endsWith(`/${nativeClass}.class`.toLowerCase()));
+  const nativeLine = declaration?.[1].split(/\r?\n/).findIndex(line => new RegExp(`\\bnative\\b.*\\b${native![2]}\\s*\\(`).test(line));
+  const nativeDetail = declaration && nativeLine !== undefined && nativeLine >= 0
+    ? `\nNative declaration: ${assets.byPath.get(declaration[0])?.path ?? declaration[0]}:${nativeLine + 1}\n> ${declaration[1].split(/\r?\n/)[nativeLine].trim()}` : '';
   const frames = [...message.matchAll(/\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*|<fields>) \(source line (\d+)\)/g)];
   const frame = frames.at(-1);
-  if (!frame) return message;
+  if (!frame) return message + nativeDetail;
   const [, className, , lineText] = frame, line = Number(lineText);
   const preferred = `${sourceRoot}${className}.java`.toLowerCase();
   const found = sources.has(preferred)
     ? preferred
     : [...sources.keys()].find(path => new RegExp(`\\bclass\\s+${className}\\b`).test(sources.get(path)!));
-  if (!found) return message;
+  if (!found) return message + nativeDetail;
   const code = sources.get(found)!.split(/\r?\n/)[line - 1]?.trim();
-  if (!code) return message;
+  if (!code) return message + nativeDetail;
   const path = assets.byPath.get(found)?.path ?? found;
-  return `${message}\n${path}:${line}\n> ${code}`;
+  return `${message}\n${path}:${line}\n> ${code}${nativeDetail}`;
 }
 
 /** Starts the game's original Java source. Every host capability is explicitly registered. */
@@ -54,7 +61,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       sources.set(path.toLowerCase(), source);
       return source;
     },
-    selectMethods: className => [className.split('.').at(-1)!],
+    selectMethods: className => className.startsWith('java.game.') ? [className.split('.').at(-1)!] : undefined,
   });
 
   const native = (owner: string, method: string, signature: string[], effect?: (args: readonly JavaValue[]) => void) => {

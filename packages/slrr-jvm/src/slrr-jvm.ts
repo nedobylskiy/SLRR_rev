@@ -11,7 +11,7 @@ export interface SlrrJvmOptions {
   /** Optional when resolveImport always supplies source. No filesystem is built into the package. */
   readSource?(path: string): string | Promise<string>;
   /** Optional execution filter. Omit to make every source method available. */
-  selectMethods?(className: string): Iterable<string>;
+  selectMethods?(className: string): Iterable<string> | undefined;
   /** Float literal conversion observed in a particular SLRR build; B is the Build 940 default. */
   floatMode?: FloatMode;
   budget?: number;
@@ -19,7 +19,7 @@ export interface SlrrJvmOptions {
 }
 
 export interface JavaObject { className: string; fields: Map<string, JavaValue> }
-interface LoadedClass { name: string; path: string; parsed: SourceClass; imports: Map<string, string> }
+interface LoadedClass { name: string; path: string; parsed: SourceClass; imports: Map<string, string>; nativeMethods: { name: string; parameters: string[] }[] }
 
 function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
   const hints = new Set<string>();
@@ -109,10 +109,13 @@ export class SlrrJvm implements JavaHost {
     const declaration = program.classes.find(cls => cls.fullName === className);
     if (!declaration) throw new Error(`Java class missing in ${location.path}: ${className}`);
     for (const cls of program.classes) this.sourceLocations.set(cls.fullName, { path: location.path, source });
-    const selected = this.options.selectMethods ? new Set(this.options.selectMethods(className)) : undefined;
+    const selectedNames = this.options.selectMethods?.(className);
+    const selected = selectedNames ? new Set(selectedNames) : undefined;
     const parsed = parseSourceClass(source, selected, shortName, this.options.floatMode ?? 'B');
     const imports = new Map<string, string>();
-    const entry: LoadedClass = { name: className, path: location.path, parsed, imports };
+    const nativeMethods = declaration.members.flatMap(member => member.kind === 'method' && member.flags.includes('native')
+      ? [{ name: member.name, parameters: member.params.map(parameter => parameter.type) }] : []);
+    const entry: LoadedClass = { name: className, path: location.path, parsed, imports, nativeMethods };
     this.classes.set(className, entry);
     this.aliases.set(shortName, className);
     try {
@@ -299,7 +302,14 @@ export class SlrrJvm implements JavaHost {
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
         if (method) return this.invokeSource(entry, method, receiver, args);
       }
-      if (this.natives.has(current, name, argumentTypes)) return this.natives.invoke(current, name, receiver, args)!;
+      const native = this.natives.invoke(current, name, receiver, args);
+      if (native) return native;
+    }
+    for (const current of visited) {
+      const declared = this.classes.get(current)?.nativeMethods.some(method => method.name === name
+        && method.parameters.length === args.length
+        && method.parameters.every((parameter, index) => Number.isFinite(this.parameterScore(parameter, args[index]))));
+      if (declared) throw new Error(`Java native implementation missing: ${current}.${name}(${argumentTypes.join(',')})`);
     }
     throw new Error(`Java method/native missing: ${className}.${name}(${argumentTypes.join(',')})`);
   }

@@ -91,3 +91,19 @@ test('a resource literal exposes its type ID to source constructors', async () =
   await jvm.loadClass('demo.Main');
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0x1b);
 });
+
+test('a missing native implementation is distinguished from a missing Java method', async () => {
+  const source = 'package demo; class Base { native void setFlags(int flags); } class Child extends Base { void run() { setFlags(1); } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['demo.Base', 'demo.Child'].includes(className) ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  assert.throws(() => jvm.invoke(jvm.construct('demo.Child', []), 'run'),
+    /Java native implementation missing: demo\.Base\.setFlags\(int\)/);
+});
+
+test('null can match a reference parameter in a registered native', async () => {
+  const source = 'package demo; import demo.Host; class Main { int run() { return Host.read(null); } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
+  jvm.natives.register('demo.Host', 'read', ['String'], () => jv('int', 7));
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
+});
