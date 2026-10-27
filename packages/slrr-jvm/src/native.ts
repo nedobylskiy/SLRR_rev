@@ -42,18 +42,23 @@ export class JavaNativeRegistry {
 
   hasClass(name: string): boolean { return this.classes.has(name); }
 
-  invoke(className: string, method: string, receiver: JavaValue, args: readonly JavaValue[]): JavaValue | undefined {
+  invoke(className: string, method: string, receiver: JavaValue, args: readonly JavaValue[],
+    score?: (parameter: string, argument: JavaValue) => number): JavaValue | undefined {
     const key = this.key(className, method, args.map(arg => arg.type));
     const exact = this.entries.get(key);
     if (exact) return exact({ receiver, args });
-    if (!args.some(arg => arg.value === null)) return undefined;
+    if (!score && !args.some(arg => arg.value === null)) return undefined;
     const prefix = `${className}#${method}(`;
     const primitives = new Set(['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long']);
     const matches = [...this.signatures].filter(([signature, parameters]) => signature.startsWith(prefix)
-      && parameters.length === args.length && parameters.every((parameter, index) => args[index].value === null
-        ? !primitives.has(parameter) : parameter === args[index].type));
-    if (matches.length > 1) throw new Error(`Ambiguous Java native overload: ${className}.${method}`);
-    return matches.length ? this.entries.get(matches[0][0])!({ receiver, args }) : undefined;
+      && parameters.length === args.length).map(([signature, parameters]) => ({ signature,
+        rank: parameters.reduce((total, parameter, index) => total + (score
+          ? score(parameter, args[index]) : args[index].value === null && !primitives.has(parameter) ? 5
+            : parameter === args[index].type ? 0 : Infinity), 0),
+      })).filter(match => Number.isFinite(match.rank)).sort((left, right) => left.rank - right.rank);
+    if (matches.length > 1 && matches[0].rank === matches[1].rank)
+      throw new Error(`Ambiguous Java native overload: ${className}.${method}`);
+    return matches.length ? this.entries.get(matches[0].signature)!({ receiver, args }) : undefined;
   }
 
   has(className: string, method: string, parameters: readonly string[]): boolean {

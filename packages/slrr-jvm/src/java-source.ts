@@ -92,7 +92,11 @@ class Scope {
   owner(name: string): Scope | undefined { return this.values.has(name) ? this : this.parent?.owner(name); }
 }
 export function coerce(type: string, value: JavaValue): JavaValue {
-  if (type === 'int') return jv(type, Number(value.value) | 0);
+  if (type === 'int') {
+    const resource = value.type === 'ResourceRef' && value.value && typeof value.value === 'object' && 'id' in value.value
+      ? Number(value.value.id) : Number(value.value);
+    return jv(type, resource | 0);
+  }
   if (type === 'float') return jv(type, Math.fround(Number(value.value)));
   if (type === 'double') return jv(type, Number(value.value));
   return jv(type, value.value);

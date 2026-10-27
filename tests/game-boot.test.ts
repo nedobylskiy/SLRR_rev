@@ -31,7 +31,14 @@ test('GameType inherited no-argument wrapper creates a node linked to the Java o
   const host = new GameTypeNative(jvm, event => events.push(event));
   await jvm.loadClass('java.game.Vehicle');
   const vehicle = jvm.construct('java.game.Vehicle', []);
-  assert.deepEqual(host.get(vehicle), { id: 1, className: 'java.game.Vehicle', parentId: null, typeId: 0, params: null, alias: 'Vehicle' });
+  const node = host.get(vehicle)!;
+  assert.equal(node.id, 1);
+  assert.equal(node.className, 'java.game.Vehicle');
+  assert.equal(node.parentId, null);
+  assert.equal(node.typeId, 0);
+  assert.equal(node.params, null);
+  assert.equal(node.alias, 'Vehicle');
+  assert.deepEqual(node.position, { x: 0, y: 0, z: 0 });
   assert.ok(events.some(event => event.message.includes('GameType instance #1')));
 });
 

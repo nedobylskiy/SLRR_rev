@@ -92,6 +92,13 @@ test('a resource literal exposes its type ID to source constructors', async () =
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0x1b);
 });
 
+test('a resource literal assigned to an int retains its local resource ID', async () => {
+  const source = 'package demo; class Main { static int RESOURCEID = system:0x32r; int read() { return RESOURCEID; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0x32);
+});
+
 test('a missing native implementation is distinguished from a missing Java method', async () => {
   const source = 'package demo; class Base { native void setFlags(int flags); } class Child extends Base { void run() { setFlags(1); } }';
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['demo.Base', 'demo.Child'].includes(className) ? { path: 'Types.java', source } : null });
@@ -104,6 +111,19 @@ test('null can match a reference parameter in a registered native', async () => 
   const source = 'package demo; import demo.Host; class Main { int run() { return Host.read(null); } }';
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
   jvm.natives.register('demo.Host', 'read', ['String'], () => jv('int', 7));
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
+});
+
+test('a native reference parameter accepts an interpreted subclass instance', async () => {
+  const source = `package demo;
+class Base {}
+class Child extends Base {}
+class Host { static native int read(Base value); }
+class Main { int run() { return Host.read(new Child()); } }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  jvm.natives.register('demo.Host', 'read', ['Base'], () => jv('int', 7));
   await jvm.loadClass('demo.Main');
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
 });

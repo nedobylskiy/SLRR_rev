@@ -80,9 +80,6 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   });
   native(collector, 'push', ['Object']);
   native(collector, 'flush', []);
-  native('java.util.resource.ResourceRef', 'newNative', []);
-  native('java.util.resource.ResourceRef', 'set', ['int']);
-  native('java.util.resource.ResourceRef', 'set', ['ResourceRef']);
   native('java.util.resource.ResourceRef', 'precache', []);
   native('java.util.resource.ResourceRef', 'cache', []);
   const controller = 'java.io.Controller';
@@ -90,6 +87,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   native('java.game.Frontend', 'init', []);
   native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   native('java.sound.Sound', 'init', []);
+  jvm.natives.register('java.sound.Sound', 'enableDebugDump', ['ResourceRef'], () => jv('int', 0));
   native('java.io.Input', 'initControllers', ['Init', 'String'], args => {
     jvm.natives.setField(controller, 'controlFile', args[1]);
   });

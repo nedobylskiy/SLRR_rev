@@ -15,7 +15,7 @@ const files = await Promise.all([...names, ...systemNames].map(async path => {
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.util.resource.GameRef.setFlags(int)';
+const expected = 'Java native implementation missing: java.render.Viewport.create(int,float,float,float,float)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

@@ -302,7 +302,7 @@ export class SlrrJvm implements JavaHost {
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
         if (method) return this.invokeSource(entry, method, receiver, args);
       }
-      const native = this.natives.invoke(current, name, receiver, args);
+      const native = this.natives.invoke(current, name, receiver, args, (parameter, argument) => this.parameterScore(parameter, argument));
       if (native) return native;
     }
     for (const current of visited) {
