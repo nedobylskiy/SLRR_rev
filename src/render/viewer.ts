@@ -50,6 +50,10 @@ export class Viewer {
   private mapDebug?: MapDebugView;
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
   private observer: ResizeObserver;
+  getViewportSize(): { width: number; height: number } {
+    return { width: this.container.clientWidth || this.renderer.domElement.clientWidth || 1,
+      height: this.container.clientHeight || this.renderer.domElement.clientHeight || 1 };
+  }
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));

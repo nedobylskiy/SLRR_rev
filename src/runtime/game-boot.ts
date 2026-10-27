@@ -3,9 +3,11 @@ import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { MathNative } from './math-native';
+import { ViewportNative, type ViewportSize } from './viewport-native';
+import { CameraNative } from './camera-native';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; viewports: ViewportNative; cameras: CameraNative; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -35,7 +37,8 @@ function sourceDiagnostic(message: string, sources: Map<string, string>, assets:
 }
 
 /** Starts the game's original Java source. Every host capability is explicitly registered. */
-export async function bootGame(assets: Assets, report: (event: BootEvent) => void): Promise<BootResult> {
+export async function bootGame(assets: Assets, report: (event: BootEvent) => void,
+  viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 })): Promise<BootResult> {
   const sources = new Map<string, string>();
   const jvm = new SlrrJvm({
     resolveImport: async ({ className }) => {
@@ -72,6 +75,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   const gameTypes = new GameTypeNative(jvm, report);
+  const viewports = new ViewportNative(jvm, gameTypes, viewportSize);
+  const cameras = new CameraNative(jvm, gameTypes, viewports);
   new MathNative(jvm);
   const collector = 'java.lang.GarbageCollector';
   jvm.natives.register(collector, '<init>', [], () => {
@@ -104,11 +109,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.loadClass('java.game.Init');
     jvm.construct('java.game.Init', [jv('int', 0)]);
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes };
+    return { jvm, gameTypes, viewports, cameras };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, error };
+    return { jvm, gameTypes, viewports, cameras, error };
   }
 }

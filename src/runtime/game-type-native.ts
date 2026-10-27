@@ -34,9 +34,14 @@ export class GameTypeNative {
       node.typeId = source?.typeId ?? node.resourceId;
       return voidValue();
     });
-    jvm.natives.register(resourceRef, 'id', [], ({ receiver }) => jv('int', this.requireResource(receiver).resourceId));
+    jvm.natives.register(resourceRef, 'id', [], ({ receiver }) => {
+      if (receiver.value == null) return jv('int', 0);
+      const literal = receiver.value as { id?: number } | null;
+      if (literal && 'id' in literal && !('fields' in literal)) return jv('int', Number(literal.id) | 0);
+      return jv('int', this.requireResource(receiver).resourceId);
+    });
     jvm.natives.register(resourceRef, 'type', [], ({ receiver }) =>
-      jv('int', this.requireResource(receiver) instanceof GameObject ? 1 : 0));
+      jv('int', this.requireResource(receiver).resourceType));
     jvm.natives.register(resourceRef, 'getParentID', [], ({ receiver }) =>
       jv('int', this.requireResource(receiver).parentId ?? 0));
     jvm.natives.register(resourceRef, 'getParent', [], ({ receiver }) =>
@@ -206,6 +211,7 @@ export class GameTypeNative {
       params?.value == null ? null : String(params.value),
       alias?.value == null ? object.className.split('.').at(-1)! : String(alias.value));
     node.resourceId = node.id;
+    node.resourceType = 1;
     resource.setParent(null);
     node.setParent(parentNode);
     for (const child of [...resource.children]) child.setParent(node);

@@ -4,6 +4,8 @@ export class ResourceObject {
   parent: ResourceObject | null = null;
   /** The ID exposed by ResourceRef.id(); zero means an unbound handle. */
   resourceId = 0;
+  /** ResourceRef.type(); zero until a host resource has been created. */
+  resourceType = 0;
 
   constructor(readonly id: number, readonly className: string, public typeId = 0,
     public params: string | null = null, public alias = className.split('.').at(-1)!) {}

@@ -47,7 +47,8 @@ async function runGameBoot() {
   el('java-log').replaceChildren();
   el('java-run-state').textContent = 'Running Init.java';
   el<HTMLButtonElement>('java-retry').disabled = true;
-  const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); });
+  const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
+    () => viewer?.getViewportSize() ?? { width: 1, height: 1 });
   if (source !== assets || run !== sequence) return;
   el<HTMLButtonElement>('java-retry').disabled = false;
   el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
