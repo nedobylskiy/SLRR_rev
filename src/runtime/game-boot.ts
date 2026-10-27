@@ -278,9 +278,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   jvm.natives.register('java.render.GfxEngine', 'closeVideo', [], () => { video?.closeVideo(); return voidValue(); });
   jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', video?.isPlayingVideo() ?? 0));
   native('java.sound.Sound', 'init', []);
-  if (sound) jvm.natives.register('java.sound.Sound', 'changeMusicSet', ['int'], ({ args }) =>
-    sound.call('changeMusicSet', [...args]));
-  else native('java.sound.Sound', 'changeMusicSet', ['int']);
+  for (const [name, signature, resultType] of [
+    ['changeMusicSet', ['int'], 'void'], ['nextTrack', [], 'void'], ['prevTrack', [], 'void'],
+    ['firstTrack', [], 'void'], ['randomTrack', [], 'void'], ['stopMusic', [], 'void'],
+    ['playTrack', ['int'], 'void'], ['playTrack', ['String'], 'void'],
+    ['getTotalTracks', [], 'int'], ['getNowPlaying', [], 'int'],
+    ['setVolume', ['int', 'float'], 'void'], ['getVolume', ['int'], 'float'],
+  ] as const)
+    jvm.natives.register('java.sound.Sound', name, signature, ({ args }) =>
+      sound?.call(name, [...args]) ?? jv(resultType, resultType === 'void' ? undefined : 0));
   jvm.natives.register('java.sound.Sound', 'enableDebugDump', ['ResourceRef'], () => jv('int', 0));
   native('java.io.Input', 'initControllers', ['Init', 'String'], args => {
     jvm.natives.setField(controller, 'controlFile', args[1]);

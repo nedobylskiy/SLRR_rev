@@ -43,19 +43,27 @@ test('Init.java controls the OSD video through both GfxEngine.openVideo overload
   assert.equal(playing, false);
 });
 
-test('Init.java routes original Sound.changeMusicSet through the music player', async () => {
+test('Init.java routes original Sound music calls through the player', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', `package java.game; import java.sound.*;
-      class Init extends GameType { Init(int id) { Sound.changeMusicSet(Sound.MUSIC_SET_MENU); missingNext(); } }`],
+      class Init extends GameType { Init(int id) {
+        Sound.changeMusicSet(Sound.MUSIC_SET_MENU);
+        Sound.playTrack(1);
+        Sound.playTrack("Music\\Misc_Menu\\ending.mp3");
+        missingNext();
+      } }`],
     ['system/scripts/sound/src/Sound.java', `package java.sound; class Sound {
-      static final int MUSIC_SET_MENU = 3; static native void changeMusicSet(int set); }`],
+      static final int MUSIC_SET_MENU = 3; static native void changeMusicSet(int set);
+      static native void playTrack(int index); static native void playTrack(String path); }`],
   ]);
   const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
     async path => new TextEncoder().encode(sources.get(path)!));
   const selected: number[] = [];
-  const sound = new SoundJavaBridge({ changeMusicSet: (set: number) => selected.push(set) } as unknown as MusicEngine);
+  const sound = new SoundJavaBridge({ changeMusicSet: (set: number) => selected.push(set),
+    playTrack: (index: number) => selected.push(index + 10),
+    playPath: (path: string) => selected.push(path.includes('ending.mp3') ? 20 : -1) } as unknown as MusicEngine);
   const result = await bootGame(assets, () => {}, undefined, undefined, undefined, sound);
-  assert.deepEqual(selected, [1]);
+  assert.deepEqual(selected, [1, 11, 20]);
   assert.match(result.error?.message ?? '', /missingNext/);
   result.dispose();
 });

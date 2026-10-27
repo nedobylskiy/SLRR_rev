@@ -35,7 +35,7 @@ export class SoundJavaBridge {
       case 'randomTrack': this.music.randomTrack(); return nil();
       case 'stopMusic': this.music.stopMusic(); return nil();
       case 'getTotalTracks': return jv('int', this.music.snapshot().count);
-      case 'getNowPlaying': return jv('String', this.music.snapshot().track?.path ?? '');
+      case 'getNowPlaying': return jv('int', this.music.snapshot().index);
       case 'playTrack':
         if (typeof args[0]?.value === 'string') this.music.playPath(args[0].value);
         else this.music.playTrack(arg(0));

@@ -49,7 +49,8 @@ test('Java Sound calls reach the host and extended readback returns playing meta
   assert.deepEqual(events, ['set 1', 'next', 'path Music\\Main_Menu\\theme.mp3']);
   assert.deepEqual(bridge.call('getTrackTitle', []).value, 'A title');
   assert.deepEqual(bridge.call('getTrackPosition', []).value, 13.5);
-  assert.deepEqual(bridge.call('getNowPlaying', []).value, 'music/Main_Menu/a.mp3');
+  assert.deepEqual(bridge.call('getNowPlaying', []).value, 0);
+  assert.deepEqual(bridge.call('getTrackPath', []).value, 'music/Main_Menu/a.mp3');
   assert.equal(bridge.call('getTotalTracks', []).value, 1);
   assert.equal(bridge.constant('CHANNEL_MUSIC')?.value, 1);
   assert.throws(() => bridge.call('seekTrack', [jv('float', NaN)]), /numeric/);
