@@ -127,8 +127,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
     const asset = assets.byPath.get(path.toLowerCase());
     if (!asset || !path.toLowerCase().endsWith('.rpk')) return jv('int', 0);
-    // Large track packs remain unopened in the resource catalog until track streaming is implemented.
-    if (asset.size <= 2 * 1024 * 1024) resourceCatalog.addPack(path, await assets.pack(path));
+    // Track metadata packs define the children of system:0x3000; large geometry packs can wait.
+    if (asset.size <= 2 * 1024 * 1024 || /(?:^|\/)t_data\.rpk$/i.test(path))
+      resourceCatalog.addPack(path, await assets.pack(path));
     return jv('int', 1);
   });
   jvm.natives.register('java.lang.System', 'arraycopy', ['Object', 'int', 'Object', 'int', 'int'], ({ args }) => {
