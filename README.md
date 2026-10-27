@@ -19,6 +19,8 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). By default, resources are r
 C:\Program Files (x86)\Steam\steamapps\common\Street Legal Racing Redline
 ```
 
+After connecting to an installation, the app first loads and executes that installation's original `sl/Scripts/game/src/Init.java` through SLRR-JVM. The **Java Console** shows startup calls and the first missing method or native capability; **Restart Java** reruns the source after changes. Startup services are explicit temporary host adapters. In the tested build, execution currently reaches `GameLogic.createNativeInstance()` and stops there; the separate menu and driving prototype buttons remain developer tools while the Java game loop is implemented.
+
 Select the game installation with **Open game folder** if it is not at the default path. Use **Drive Test Track** to start a drive. The car starts in neutral: E selects first gear, Q reverse, and N neutral. W/S control throttle and reverse, A/D steer, Space brakes, Shift operates the clutch, I restarts a stalled engine, and R returns to the start. A manual transmission can stall when the clutch is released against a stationary driveline; restart it in neutral or with Shift held. The prototype currently has only automatic and manual transmission modes, without a separate automatic-clutch setting. Click the scene to give it keyboard focus; Esc minimizes the expanded driving view. Open **Tire model** for live Magic Formula B/C/D/E tuning of longitudinal and lateral grip, or switch to the previous tire response for comparison. Open **Engine tuning** to adjust idle and redline RPM using the original `Block.java` slider ranges. Both sets of tuning are saved in the browser; **Copy parameters** exports the current tire values as JSON.
 
 The **Music** panel plays tracks from the selected game's `music/` folders. The interpreted original `MainMenu.java` selects its music set through `Sound.changeMusicSet`; the driving prototype currently selects the driving set itself. The panel shows the current track, file path, playback time, and volume, and can seek or skip tracks. Browsers can block automatic playback until you click **Play**. See [music integration](docs/music.md) for supported Java calls and the extended metadata API.
@@ -48,6 +50,7 @@ You can also select the installation in the UI. Folder selection works in the st
 npm test
 npm run build
 npm run verify:game
+npm run verify:java-boot
 npm run verify:saves
 npm run verify:vm
 npm run verify:parts

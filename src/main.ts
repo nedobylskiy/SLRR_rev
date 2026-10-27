@@ -14,11 +14,12 @@ import { MusicEngine, MUSIC_SET, type MusicState } from './audio/music-engine';
 import { SoundJavaBridge } from './audio/sound-java';
 import { gameSoundVolume, setGameSoundVolume } from './audio/audio-settings';
 import { DEFAULT_TIRE_MODEL, type TireModelSettings } from './engine/tire-model';
+import { bootGame, type BootEvent } from './runtime/game-boot';
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Connecting…</span><button id="memory-lab">Memory stream</button><label class="button">Open game folder<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
 <main><aside><div class="eyebrow">ORIGINAL ASSETS</div><h1>Under the hood.</h1><p class="intro">SLRR assets in a new environment. No original EXE required.</p><div id="counts"></div><input id="search" type="search" placeholder="Search: Baiern, chassis, GameLogic…" aria-label="Search assets"><nav id="filters"><button data-kind="scx" class="active">Models</button><button data-kind="rpk">Packages</button><button data-kind="class">Scripts</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Cars</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
-<section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">WEBGL / RESOURCE LAB</span><div id="filename">Select an asset on the left</div></div><span class="badge" id="state">Idle</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">Left drag: rotate &nbsp; · &nbsp; Wheel: zoom &nbsp; · &nbsp; Right drag: pan</div><div class="detail"><div class="eyebrow">DIAGNOSTICS</div><div id="details">Loading game catalog…</div></div></section></main><footer><span>TYPE SCRIPT / WEBGL 2</span><span>Geometry and assets: original installation · Game logic is not running yet</span><span id="total"></span></footer>`;
+<section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">JAVA / ENTRY POINT</span><div id="filename">Waiting for Init.java</div></div><span class="badge" id="state">Idle</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">Left drag: rotate &nbsp; · &nbsp; Wheel: zoom &nbsp; · &nbsp; Right drag: pan</div><div class="detail"><div class="eyebrow">DIAGNOSTICS</div><div id="details">Loading game catalog…</div></div></section></main><footer><span>JAVA SOURCE / WEBGL 2</span><span>Original Init.java runs first · GameLogic is under implementation</span><span id="total"></span></footer>`;
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
@@ -28,6 +29,34 @@ let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined
 let beforeDrivingDetails = '';
 let disposeOsdMenu: (() => void) | undefined;
 let music: MusicEngine | undefined, disconnectMusic: (() => void) | undefined;
+const javaConsole = document.createElement('section');
+javaConsole.className = 'java-console';
+javaConsole.innerHTML = '<div class="java-console-heading"><strong>JAVA CONSOLE</strong><span id="java-run-state">Waiting for game files</span><button id="java-retry" type="button">Restart Java</button></div><div id="java-log" role="log" aria-live="polite"></div>';
+el('viewport').parentElement!.append(javaConsole);
+el<HTMLButtonElement>('java-retry').onclick = () => { void runGameBoot(); };
+function appendJavaEvent(event: BootEvent) {
+  const line = document.createElement('div'); line.className = `java-log-${event.level}`;
+  const time = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  line.textContent = `[${time}] ${event.level.toUpperCase()}  ${event.message}`;
+  el('java-log').append(line);
+  el('java-log').scrollTop = el('java-log').scrollHeight;
+}
+async function runGameBoot() {
+  if (!assets) return;
+  const source = assets, run = sequence;
+  el('java-log').replaceChildren();
+  el('java-run-state').textContent = 'Running Init.java';
+  el<HTMLButtonElement>('java-retry').disabled = true;
+  const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); });
+  if (source !== assets || run !== sequence) return;
+  el<HTMLButtonElement>('java-retry').disabled = false;
+  el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
+  status(result.error ? 'Java boot blocked' : 'Java boot ready', !!result.error);
+  if (result.error) {
+    el('filename').textContent = 'Init.java'; el('format').textContent = 'JAVA / ENTRY POINT';
+    el('details').textContent = result.error.message;
+  }
+}
 const menuButton = textElement('button', 'Main menu');
 el('memory-lab').before(menuButton);
 menuButton.onclick = () => openMainMenu();
@@ -368,10 +397,7 @@ async function connect() {
       if (!result.ok) throw new Error(await result.text());
       return new Uint8Array(await result.arrayBuffer());
     }), 'Local installation', true);
-    const example = files.find(f => /baiern_data\/meshes\/chassis\.scx$/i.test(f.path)) ?? files.find(f => /steeringwheel_4spoke_01\.scx$/i.test(f.path));
-    if (assets.byPath.has('frontend.rpk')) openMainMenu();
-    else if (assets.byPath.has('cars/racers/baiern.rpk')) await openWorld('cars/racers/Baiern.rpk', 6);
-    else if (example) await openAsset(example);
+    await runGameBoot();
   } catch (e) {
     el('connection').textContent = 'Select game folder';
     el('details').textContent = `Game catalog unavailable. Select an installed game with Open game folder. ${e}`;
@@ -512,8 +538,7 @@ el<HTMLInputElement>('folder').onchange = event => {
   const map = new Map(files.map(f => [f.webkitRelativePath.split('/').slice(1).join('/'), f]));
   localInstallation = false;
   attach(new Assets([...map].map(([path, f]) => ({ path, size: f.size })), async p => new Uint8Array(await map.get(p)!.arrayBuffer())), 'Selected folder', false);
-  if (assets.byPath.has('frontend.rpk')) openMainMenu();
-  else status('Catalog connected');
+  void runGameBoot();
 };
 void connect();
 el('memory-lab').onclick = async () => {

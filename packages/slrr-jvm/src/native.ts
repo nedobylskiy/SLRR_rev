@@ -11,6 +11,25 @@ export type NativeFunction = (call: NativeCall) => JavaValue;
 export class JavaNativeRegistry {
   private readonly entries = new Map<string, NativeFunction>();
   private readonly classes = new Set<string>();
+  private readonly fields = new Map<string, JavaValue>();
+
+  registerField(className: string, name: string, value: JavaValue): void {
+    const key = `${className}#${name}`;
+    if (this.fields.has(key)) throw new Error(`Native field already registered: ${key}`);
+    this.fields.set(key, value);
+    this.classes.add(className);
+  }
+
+  getField(className: string, name: string): JavaValue | undefined {
+    return this.fields.get(`${className}#${name}`);
+  }
+
+  setField(className: string, name: string, value: JavaValue): boolean {
+    const key = `${className}#${name}`;
+    if (!this.fields.has(key)) return false;
+    this.fields.set(key, value);
+    return true;
+  }
 
   register(className: string, method: string, parameters: readonly string[], implementation: NativeFunction): void {
     const key = this.key(className, method, parameters);

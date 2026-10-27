@@ -23,6 +23,7 @@
     "verify:parts": "tsx tools/verify-parts.ts",
     "verify:world": "tsx tools/verify-world.ts",
     "verify:gameplay": "tsx tools/verify-gameplay.ts",
+    "verify:java-boot": "tsx tools/verify-java-boot.ts",
     "verify:mounts": "tsx tools/verify-mounts.ts",
     "verify:hood": "tsx tools/verify-hood.ts",
     "verify:crash": "tsx tools/verify-crash.ts",

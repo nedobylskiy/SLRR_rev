@@ -227,6 +227,7 @@ export class SlrrJvm implements JavaHost {
   }
 
   get(receiver: JavaValue, name: string): JavaValue {
+    if (Array.isArray(receiver.value) && name === 'length') return jv('int', receiver.value.length);
     const object = this.object(receiver);
     if (object) {
       const field = object.fields.get(name);
@@ -239,7 +240,10 @@ export class SlrrJvm implements JavaHost {
       throw new Error(`Missing Java field ${object.className}.${name}`);
     }
     if (receiver.type === 'class') {
-      const entry = this.classes.get(this.resolveName(String(receiver.value)));
+      const className = this.resolveName(String(receiver.value));
+      const nativeField = this.natives.getField(className, name);
+      if (nativeField) return nativeField;
+      const entry = this.classes.get(className);
       for (const cls of entry ? this.lineage(entry) : []) {
         this.ensureInitialized(cls);
         const stored = this.staticFields.get(cls.name)?.get(name);
@@ -253,7 +257,9 @@ export class SlrrJvm implements JavaHost {
 
   set(receiver: JavaValue, name: string, value: JavaValue): void {
     if (receiver.type === 'class') {
-      const entry = this.classes.get(this.resolveName(String(receiver.value)));
+      const className = this.resolveName(String(receiver.value));
+      if (this.natives.setField(className, name, value)) return;
+      const entry = this.classes.get(className);
       for (const cls of entry ? this.lineage(entry) : []) {
         const field = cls.parsed.fields.find(candidate => candidate.isStatic && candidate.name === name);
         if (field) { this.staticFields.get(cls.name)?.set(name, coerce(field.type, value)); return; }
