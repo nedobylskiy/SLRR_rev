@@ -1,6 +1,7 @@
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
 import { Assets } from '../assets';
 import { GameTypeNative } from './game-type-native';
+import { MathNative } from './math-native';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; error?: Error };
@@ -29,6 +30,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   const gameTypes = new GameTypeNative(jvm, report);
+  new MathNative(jvm);
   const collector = 'java.lang.GarbageCollector';
   jvm.natives.register(collector, '<init>', [], () => {
     report({ level: 'native', message: 'Host stub: java.lang.GarbageCollector.<init>()' });

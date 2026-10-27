@@ -15,6 +15,7 @@
     "audit:map-physics": "tsx tools/audit-map-physics.ts",
     "audit:map-lighting": "tsx tools/audit-map-lighting.ts",
     "audit:lightmap-usage": "tsx tools/audit-lightmap-usage.ts",
+    "audit:java-math": "tsx tools/audit-java-math.ts",
     "verify:map-objects": "tsx tools/verify-map-objects.ts",
     "verify:game": "tsx tools/verify-game.ts",
     "verify:saves": "tsx tools/verify-saves.ts",
