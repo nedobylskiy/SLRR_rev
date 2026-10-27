@@ -13,6 +13,7 @@ import { ResourceCatalog } from './resource-catalog';
 import { packedResourceId } from './resource-ids';
 import { StringNative } from './string-native';
 import { SystemNative } from './system-native';
+import { ThreadNative } from './thread-native';
 import { PartNative } from './part-native';
 import { ChassisNative } from './chassis-native';
 import { DynoNative } from './dyno-native';
@@ -147,6 +148,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   new StringNative(jvm);
   new SystemNative(jvm, report);
+  new ThreadNative(jvm, message => report({ level: 'error', message }));
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']

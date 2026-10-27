@@ -344,6 +344,19 @@ test('a lowercase sibling class used by a static field is loaded from the same s
   assert.equal((await jvm.invokeAsync(jv('class', 'demo.Main'), 'run')).value, 23);
 });
 
+test('a source constructor accepts an object implementing its interface', async () => {
+  const source = `package demo;
+    interface Runnable { void run(); }
+    class Target implements Runnable { void run() {} }
+    class Thread { Runnable target; Thread(Runnable value) { target = value; } }
+    class Main { static Thread create() { return new Thread(new Target()); } }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'demo/Types.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  const thread = await jvm.invokeAsync(jv('class', 'demo.Main'), 'create');
+  assert.equal(jvm.isInstance(jvm.get(thread, 'target'), 'demo.Runnable'), true);
+});
+
 test('static field failures identify the declaring class and source line', async () => {
   const source = `package demo;
 class Main {

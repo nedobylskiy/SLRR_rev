@@ -53,6 +53,7 @@ function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
     for (const entry of stmt.cases ?? []) { expression(entry.value); for (const item of entry.items) statement(item); }
   };
   add(cls.parent, true);
+  for (const implemented of cls.interfaces) add(implemented, true);
   for (const member of cls.members) {
     if (member.kind === 'field') expression(member.initial);
     else if (selected.has(member.name)) {
@@ -477,7 +478,7 @@ export class SlrrJvm implements JavaHost {
     if (!object) return false;
     const wanted = this.resolveName(name);
     const entry = this.classes.get(object.className);
-    return entry ? this.lineage(entry).some(cls => cls.name === wanted) : object.className === wanted;
+    return entry ? this.lineage(entry).some(cls => cls.name === wanted || this.implementsInterface(cls, wanted)) : object.className === wanted;
   }
 
   private object(value: JavaValue): JavaObject | null {
@@ -542,10 +543,17 @@ export class SlrrJvm implements JavaHost {
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {
-      const distance = this.lineage(entry).findIndex(cls => cls.name === this.resolveName(parameter));
+      const wanted = this.resolveName(parameter), lineage = this.lineage(entry);
+      const distance = lineage.findIndex(cls => cls.name === wanted);
       if (distance >= 0) return distance;
+      const implementedAt = lineage.findIndex(cls => this.implementsInterface(cls, wanted));
+      if (implementedAt >= 0) return implementedAt + 1;
     }
     return Infinity;
+  }
+
+  private implementsInterface(entry: LoadedClass, wanted: string): boolean {
+    return entry.parsed.interfaces.some(name => entry.imports.get(name) === wanted || this.resolveName(name) === wanted);
   }
 
   private selectMethod(methods: SourceClass['methods'], args: JavaValue[], owner: string): SourceClass['methods'][number] | undefined {

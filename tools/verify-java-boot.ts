@@ -30,7 +30,7 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java constructor missing: java.lang.Thread(2)';
+const expected = 'Java native implementation missing: java.lang.GameType.addTimer(int,int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -43,6 +43,11 @@ if (!Array.isArray(colors) || colors[0] !== expectedColor) {
 }
 if (result.input.registeredHotkeys() < 5) {
   process.stderr.write('GameLogic did not register its global hotkeys\n');
+  process.exitCode = 1;
+}
+const timeRefresher = result.jvm.get(jv('class', 'java.game.GameLogic'), 'timeRefresher');
+if (!timeRefresher.value || Number((await result.jvm.invokeAsync(timeRefresher, 'isAlive')).value) !== 1) {
+  process.stderr.write('GameLogic did not start its Java time refresher thread\n');
   process.exitCode = 1;
 }
 const mounted = result.gameTypes.roots();

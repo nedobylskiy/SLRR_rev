@@ -9,7 +9,7 @@ export const nil = () => jv('Object', null);
 type Expr = { kind: string; line: number; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
 type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; updates?: Expr[]; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
 export interface SourceMethod { owner: string; name: string; parameters: { type: string; name: string }[]; result: string; isStatic: boolean; body: Stmt; line: number }
-export interface SourceClass { name: string; parent: string | null; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr; isStatic: boolean }[] }
+export interface SourceClass { name: string; parent: string | null; interfaces: string[]; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr; isStatic: boolean }[] }
 export interface JavaHost {
   global(name: string): JavaValue;
   get(receiver: JavaValue, name: string): JavaValue;
@@ -106,7 +106,7 @@ export function parseSourceClass(source: string, selected?: ReadonlySet<string>,
         parameters: member.params, body: adaptStmt(member.body, floatMode, resolveResourceId), line: member.token.line });
     }
   }
-  return { name: cls.name, parent: cls.parent ?? null, methods, constants, fields };
+  return { name: cls.name, parent: cls.parent ?? null, interfaces: cls.interfaces, methods, constants, fields };
 }
 
 class Scope {
