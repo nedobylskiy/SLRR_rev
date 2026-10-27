@@ -31,7 +31,6 @@ export function parsePartConfig(source: string): PartConfig {
     switch (command.toLowerCase()) {
       case 'slot':
         slot = { ...pose(), id: integer(6), attach: [], compatible: [] };
-        if (result.slots.some(s => s.id === slot!.id)) throw new Error(`CFG line ${line}: duplicate slot ${slot.id}`);
         result.slots.push(slot); break;
       case 'compatible':
       case 'attach':

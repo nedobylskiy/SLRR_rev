@@ -54,7 +54,9 @@ export class EngineWorld {
     for (const part of [parent, child]) if (part.world !== this || this.parts.get(part.id) !== part || this.disposed) throw new Error('Part outside live world');
     for (let p: EnginePart | undefined = parent; p; p = p.parent) if (p === child) throw new Error('Attachment cycle');
     if (child.parent || parent.children.has(parentSlot) || parent.ownSlot === parentSlot || child.children.has(ownSlot)) throw new Error('Occupied attachment');
-    const a = parent.definition.config.slots.find(s => s.id === parentSlot), b = child.definition.config.slots.find(s => s.id === ownSlot);
+    // Original CFGs can reuse an ID for a suspension marker and a later mount.
+    const mountSlot = (slots: CfgSlot[], id: number) => slots.find(s => s.id === id && (s.attach.length || s.compatible.length)) ?? slots.find(s => s.id === id);
+    const a = mountSlot(parent.definition.config.slots, parentSlot), b = mountSlot(child.definition.config.slots, ownSlot);
     if (!a || !b) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);

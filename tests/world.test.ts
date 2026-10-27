@@ -33,7 +33,15 @@ test('CFG preserves ordered stock, repeated attachments, physical data and unkno
     { resource: 1, pose: undefined },
     { resource: 2, pose: { position: [0, 1, 0], rotation: [0, 0, 0] } },
   ]);
-  for (const source of ['slot 0 0 0 0 0 0 1\nslot 0 0 0 0 0 0 1', 'attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
+  for (const source of ['attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
+});
+test('CFG retains reused slot IDs and installs on the attach-capable mount', () => {
+  const root = definition(1, 'slot 0 0 -1 0 0 0 501\nslot 0 0 2 0 0 0 501\nattach 0x02 1');
+  assert.deepEqual(root.config.slots.map(s => s.position), [[0, 0, -1], [0, 0, 2]]);
+  const world = new EngineWorld(), parent = world.create(root), child = world.create(definition(2, 'slot 0 0 0 0 0 0 1'));
+  world.install(parent, 501, child, 1);
+  assert.equal(new Vector3().setFromMatrixPosition(child.matrix()).z, 2);
+  world.dispose();
 });
 test('CFG retains linked suspension anchors and the slot bone position', () => {
   const chassis = parsePartConfig('slot 0.1 0 0 0 0 0 301\nslottype 201\nbonepos 0.2 0.4 0');
