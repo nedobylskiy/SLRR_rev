@@ -162,7 +162,8 @@ export class JavaSourceMachine {
     this.requireAsyncHost();
     if (this.depth === 0) this.remaining = this.budget;
     if (args.length !== method.parameters.length) throw new Error(`Java argument count: ${method.owner}.${method.name}`);
-    if (this.depth >= this.maxDepth) throw new Error('Java call depth exceeded');
+    // Suspended Java threads share this machine. Their frames remain pending across await,
+    // so this counter is not a call-stack depth and cannot enforce maxDepth here.
     this.depth++;
     const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
     try { const flow = await this.statementAsync(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }

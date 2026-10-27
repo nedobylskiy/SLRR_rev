@@ -38,7 +38,11 @@ const osd = {
   createHitTarget: element,
   createRectangle: () => { osdRectangles++; return element(); },
 } as unknown as OsdLayer;
-const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`),
+const runtimeErrors: string[] = [];
+const result = await bootGame(assets, event => {
+  if (event.level === 'error') runtimeErrors.push(event.message);
+  process.stdout.write(`${event.level}: ${event.message}\n`);
+},
   undefined, undefined, osd);
 if (process.argv.includes('--diagnose')) {
   result.dispose();
@@ -65,9 +69,27 @@ if (process.argv.includes('--credits-smoke') && !result.error) {
     await result.jvm.loadClass('java.game.CreditsDialog');
     const dialog = await result.jvm.constructAsync('java.game.CreditsDialog', []);
     await result.jvm.invokeAsync(dialog, 'show');
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    if (runtimeErrors.length) throw new Error(runtimeErrors.join('; '));
     process.stdout.write('CreditsDialog.show completed\n');
   } catch (error) {
     process.stderr.write(`CreditsDialog.show stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
+}
+if (process.argv.includes('--name-request-smoke') && !result.error) {
+  try {
+    await result.jvm.loadClass('java.render.osd.dialog.StringRequesterDialog');
+    const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
+    const controller = result.jvm.get(player, 'controller');
+    const dialog = await result.jvm.constructAsync('java.render.osd.dialog.StringRequesterDialog',
+      [controller, jv('int', 0), jv('String', 'Enter player name'), jv('String', '')]);
+    await result.jvm.invokeAsync(dialog, 'show');
+    process.stdout.write('StringRequesterDialog.show completed\n');
+  } catch (error) {
+    process.stderr.write(`StringRequesterDialog constructor stopped: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   }
   result.dispose();

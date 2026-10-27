@@ -276,7 +276,9 @@ export class SlrrJvm implements JavaHost {
     if (!className) throw new Error(`Java parent constructor missing: ${caller}`);
     const entry = this.classes.get(className);
     if (entry) {
-      const result = this.runConstructor(receiver, entry, args);
+      const { selected, skipped } = this.resolveSuperConstructor(entry, target, args);
+      const result = this.runConstructor(receiver, selected, args);
+      for (const skippedEntry of skipped.reverse()) this.initializeInstanceFields(skippedEntry, receiver);
       if (target === 'super') this.initializeInstanceFields(this.classes.get(caller)!, receiver);
       return result;
     }
@@ -298,7 +300,9 @@ export class SlrrJvm implements JavaHost {
     if (!className) throw new Error(`Java parent constructor missing: ${caller}`);
     const entry = this.classes.get(className);
     if (entry) {
-      const result = await this.runConstructorAsync(receiver, entry, args);
+      const { selected, skipped } = this.resolveSuperConstructor(entry, target, args);
+      const result = await this.runConstructorAsync(receiver, selected, args);
+      for (const skippedEntry of skipped.reverse()) await this.initializeInstanceFieldsAsync(skippedEntry, receiver);
       if (target === 'super') await this.initializeInstanceFieldsAsync(this.classes.get(caller)!, receiver);
       return result;
     }
@@ -312,6 +316,26 @@ export class SlrrJvm implements JavaHost {
       return jv('void', undefined);
     }
     throw new Error(`Native constructor missing: ${className}(${args.map(arg => arg.type).join(',')})`);
+  }
+
+  /** Some SLRR decompilations call a grandparent's constructor through super(...). */
+  private resolveSuperConstructor(entry: LoadedClass, target: 'super' | 'this', args: JavaValue[]):
+    { selected: LoadedClass; skipped: LoadedClass[] } {
+    if (target !== 'super' || !args.length) return { selected: entry, skipped: [] };
+    const constructors = entry.parsed.methods.filter(method => method.name === entry.parsed.name);
+    if (!constructors.length || this.selectMethod(constructors, args, entry.name))
+      return { selected: entry, skipped: [] };
+    const skipped: LoadedClass[] = [entry];
+    for (let current = entry; current.parsed.parent;) {
+      const parent = current.parsed.parent;
+      const ancestor = this.classes.get(current.imports.get(parent) ?? this.resolveName(parent));
+      if (!ancestor) break;
+      const candidates = ancestor.parsed.methods.filter(method => method.name === ancestor.parsed.name);
+      if (this.selectMethod(candidates, args, ancestor.name)) return { selected: ancestor, skipped };
+      skipped.push(ancestor);
+      current = ancestor;
+    }
+    return { selected: entry, skipped: [] };
   }
 
   invoke(receiver: JavaValue, method: string, args: JavaValue[] = []): JavaValue {
