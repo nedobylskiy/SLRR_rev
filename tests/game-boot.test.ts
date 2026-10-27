@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Assets } from '../src/assets';
 import { bootGame, type BootEvent } from '../src/runtime/game-boot';
+import { GameTypeNative } from '../src/runtime/game-type-native';
+import { SlrrJvm } from 'slrr-jvm';
 
 test('boot executes supplied Init.java and reports the next missing Java method', async () => {
   const path = 'sl/scripts/game/src/Init.java';
@@ -18,4 +20,17 @@ test('boot executes supplied Init.java and reports the next missing Java method'
   const second = await run('missingTwo');
   assert.match(second.result.error?.message ?? '', /missingTwo/);
   assert.ok(second.events.some(event => event.level === 'error'));
+});
+
+test('GameType inherited no-argument wrapper creates a node linked to the Java object', async () => {
+  const events: BootEvent[] = [];
+  const source = 'package java.game; class Vehicle extends GameType { Vehicle() { createNativeInstance(); } }';
+  const jvm = new SlrrJvm({
+    resolveImport: ({ className }) => className === 'java.game.Vehicle' ? { path: 'Vehicle.java', source } : null,
+  });
+  const host = new GameTypeNative(jvm, event => events.push(event));
+  await jvm.loadClass('java.game.Vehicle');
+  const vehicle = jvm.construct('java.game.Vehicle', []);
+  assert.deepEqual(host.get(vehicle), { id: 1, className: 'java.game.Vehicle', parentId: null, typeId: 0, params: null, alias: 'Vehicle' });
+  assert.ok(events.some(event => event.message.includes('GameType instance #1')));
 });

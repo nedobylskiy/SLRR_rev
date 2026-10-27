@@ -1,8 +1,9 @@
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
 import { Assets } from '../assets';
+import { GameTypeNative } from './game-type-native';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const sourceClasses = new Set(['java.game.Init', 'java.game.GameLogic']);
@@ -27,7 +28,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       return voidValue();
     });
   };
-  native('java.game.GameType', '<init>', []);
+  const gameTypes = new GameTypeNative(jvm, report);
   native('java.game.Frontend', 'init', []);
   native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   native('java.sound.Sound', 'init', []);
@@ -48,10 +49,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.loadClass('java.game.Init');
     jvm.construct('java.game.Init', [jv('int', 0)]);
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm };
+    return { jvm, gameTypes };
   } catch (reason) {
     const error = reason instanceof Error ? reason : new Error(String(reason));
     report({ level: 'error', message: error.message });
-    return { jvm, error };
+    return { jvm, gameTypes, error };
   }
 }

@@ -129,7 +129,7 @@ export class SlrrJvm implements JavaHost {
         const sibling = program.classes.find(cls => cls.name === simple);
         if (sibling && sibling.fullName !== className) { await this.loadClass(sibling.fullName, location.path); continue; }
         if (imports.has(simple) || sibling || simple === shortName || simple === 'String' || simple === 'Object') continue;
-        const candidates = [program.packageName, ...wildcards].filter(Boolean).map(prefix => `${prefix}.${simple}`);
+        const candidates = [program.packageName, 'java.lang', ...wildcards].filter(Boolean).map(prefix => `${prefix}.${simple}`);
         for (const candidate of candidates) {
           const resolved = await this.options.resolveImport({ className: candidate, importedBy: location.path });
           if (!resolved && !this.natives.hasClass(candidate)) continue;
@@ -286,15 +286,20 @@ export class SlrrJvm implements JavaHost {
     const object = this.object(receiver);
     const className = fromClass ? this.resolveName(fromClass) : object?.className ?? (receiver.type === 'class' ? this.resolveName(String(receiver.value)) : this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
     if (!className) throw new Error(`Java call target unavailable: ${receiver.type}.${name}`);
-    const entry = this.classes.get(className);
-    if (entry) this.ensureInitialized(entry);
-    for (const cls of entry ? this.lineage(entry) : []) {
-      const method = this.selectMethod(cls.parsed.methods.filter(method => method.name === name), args, cls.name);
-      if (method) return this.invokeSource(cls, method, receiver, args);
-      if (this.natives.has(cls.name, name, args.map(arg => arg.type))) return this.natives.invoke(cls.name, name, receiver, args)!;
+    const argumentTypes = args.map(arg => arg.type);
+    const visited = new Set<string>();
+    for (let current: string | null = className; current; current = this.classes.has(current) ? this.parent(current) : null) {
+      if (visited.has(current)) throw new Error(`Java inheritance cycle at ${current}`);
+      visited.add(current);
+      const entry = this.classes.get(current);
+      if (entry) {
+        this.ensureInitialized(entry);
+        const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
+        if (method) return this.invokeSource(entry, method, receiver, args);
+      }
+      if (this.natives.has(current, name, argumentTypes)) return this.natives.invoke(current, name, receiver, args)!;
     }
-    if (this.natives.has(className, name, args.map(arg => arg.type))) return this.natives.invoke(className, name, receiver, args)!;
-    throw new Error(`Java method/native missing: ${className}.${name}(${args.map(arg => arg.type).join(',')})`);
+    throw new Error(`Java method/native missing: ${className}.${name}(${argumentTypes.join(',')})`);
   }
 
   parent(name: string): string | null {
