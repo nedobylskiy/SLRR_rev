@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { ControllerNative } from '../src/runtime/controller-native';
-import { EVENT_HOTKEY, GameTypeNative } from '../src/runtime/game-type-native';
+import { EVENT_HOTKEY, EVENT_TIME, GameTypeNative } from '../src/runtime/game-type-native';
 import { InputNative } from '../src/runtime/input-native';
 
 const source = `package demo;
@@ -71,4 +71,23 @@ test('native event queue invokes the original Java hotkey handler after an input
   input.setPhysicalAxis(0, 30, 0);
   input.checkHotkeys(controller, jv('Osd', handler.value));
   assert.equal(jvm.get(handler, 'state').value, 0, 'release event reaches Java');
+});
+
+test('GameType timers deliver EVENT_TIME and can be cancelled', async () => {
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'demo.java', source } : null });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  await jvm.loadClass('demo.Handler');
+  const handler = jvm.construct('demo.Handler', []);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', handler, []);
+  jvm.natives.invoke('java.lang.GameType', 'setEventMask', handler, [jv('int', EVENT_TIME)]);
+  jvm.natives.invoke('java.lang.GameType', 'addTimer', handler, [jv('float', 0), jv('int', 42)]);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(jvm.get(handler, 'last').value, 42);
+  assert.equal(jvm.get(handler, 'calls').value, 1);
+  jvm.natives.invoke('java.lang.GameType', 'addTimer', handler, [jv('float', 0.02), jv('int', 99)]);
+  jvm.natives.invoke('java.lang.GameType', 'removeAllTimers', handler, []);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(jvm.get(handler, 'calls').value, 1);
+  gameTypes.dispose();
 });

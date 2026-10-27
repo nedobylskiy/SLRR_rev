@@ -7,6 +7,7 @@ import type { BootEvent } from '../src/runtime/game-boot';
 test('System clocks use seconds and simulation time follows time warp', async () => {
   const source = `package java.lang; class System {
     static native float currentTime(); static native float simTime();
+    static native void syncGameTime(float time);
     static native float timeWarp(float speed);
     static native int gc(); static native int compileAll(String path);
     static native int buildNumber();
@@ -14,7 +15,7 @@ test('System clocks use seconds and simulation time follows time warp', async ()
   const jvm = new SlrrJvm({ resolveImport: ({ className }) =>
     className === 'java.lang.System' ? { path: 'System.java', source } : null });
   let milliseconds = 1000;
-  new SystemNative(jvm, () => {}, () => milliseconds);
+  const native = new SystemNative(jvm, () => {}, () => milliseconds);
   await jvm.loadClass('java.lang.System');
   const system = jv('class', 'java.lang.System');
   milliseconds = 2500;
@@ -27,6 +28,8 @@ test('System clocks use seconds and simulation time follows time warp', async ()
   assert.equal(jvm.invoke(system, 'timeWarp', [jv('float', 2)]).value, 0);
   milliseconds = 4000;
   assert.equal(jvm.invoke(system, 'simTime').value, 2.5);
+  jvm.invoke(system, 'syncGameTime', [jv('float', 3600)]);
+  assert.equal(native.gameTime(), 3600);
   assert.equal(jvm.invoke(system, 'gc').value, 0);
   assert.equal(jvm.invoke(system, 'compileAll', [jv('String', 'scripts')]).value, 0);
   assert.equal(jvm.invoke(system, 'buildNumber').value, 940);

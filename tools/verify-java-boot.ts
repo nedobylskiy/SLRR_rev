@@ -30,7 +30,7 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.lang.GameType.addTimer(int,int)';
+const expected = 'Java method/native missing: java.game.LoadingScreen.hide()';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -108,3 +108,18 @@ if (process.argv.includes('--hotkey-smoke')) {
   try { result.input.poll(); process.stdout.write('Hotkey smoke: no Java callback\n'); }
   catch (error) { process.stdout.write(`Hotkey smoke: ${String(error)}\n`); }
 }
+if (process.argv.includes('--timer-smoke')) {
+  const gameLogic = jv('class', 'java.game.GameLogic');
+  const before = Number(result.jvm.get(gameLogic, 'time').value);
+  result.jvm.set(gameLogic, 'timeRefreshRate', jv('int', 1));
+  let heartbeats = 0;
+  const heartbeat = setInterval(() => { heartbeats++; }, 100);
+  await new Promise(resolve => setTimeout(resolve, 12_500));
+  clearInterval(heartbeat);
+  const after = Number(result.jvm.get(gameLogic, 'time').value);
+  if (after - before < 8 || heartbeats < 110) {
+    process.stderr.write(`Java timer did not advance while the host remained responsive: ${before} -> ${after}, ${heartbeats} heartbeats\n`);
+    process.exitCode = 1;
+  } else process.stdout.write(`Java timer smoke: ${before} -> ${after}, ${heartbeats} host heartbeats\n`);
+}
+result.dispose();

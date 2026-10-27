@@ -11,6 +11,7 @@ interface ThreadState {
 /** Cooperative Java threads share one JVM heap and yield at wait/sleep native calls. */
 export class ThreadNative {
   private readonly states = new WeakMap<object, ThreadState>();
+  private readonly live = new Set<ThreadState>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (message: string) => void,
     owner = 'java.lang.Thread') {
@@ -21,10 +22,11 @@ export class ThreadNative {
       if (state.alive || state.stopped) return nil();
       state.alive = true;
       queueMicrotask(() => {
+        if (state.stopped) { state.alive = false; return; }
         const target = this.jvm.get(receiver, 'target');
         void this.jvm.invokeAsync(target, 'run').catch(error => {
           if (!state.stopped) this.report(`Thread.run: ${error instanceof Error ? error.message : String(error)}`);
-        }).finally(() => { state.alive = false; state.pending = undefined; });
+        }).finally(() => { state.alive = false; state.pending = undefined; this.live.delete(state); });
       });
       return nil();
     });
@@ -33,6 +35,7 @@ export class ThreadNative {
       state.stopped = true;
       state.pending?.reject(new Error('Java thread stopped'));
       state.pending = undefined;
+      this.live.delete(state);
       return nil();
     });
     jvm.natives.register(owner, 'isAlive', [], ({ receiver }) => jv('int', Number(this.state(receiver).alive)));
@@ -61,6 +64,15 @@ export class ThreadNative {
     }));
   }
 
+  dispose(): void {
+    for (const state of this.live) {
+      state.stopped = true;
+      state.pending?.reject(new Error('Java thread stopped'));
+      state.pending = undefined;
+    }
+    this.live.clear();
+  }
+
   private state(receiver: JavaValue): ThreadState {
     const object = receiver.value;
     if (!object || typeof object !== 'object') throw new Error('Java Thread receiver unavailable');
@@ -68,6 +80,7 @@ export class ThreadNative {
     if (!state) {
       state = { alive: false, stopped: false, priority: 0, daemon: false };
       this.states.set(object, state);
+      this.live.add(state);
     }
     return state;
   }

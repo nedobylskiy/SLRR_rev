@@ -24,6 +24,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
 let disposeJavaInput: (() => void) | undefined;
+let disposeGameBoot: (() => void) | undefined;
 let localInstallation = false;
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
@@ -45,6 +46,7 @@ function appendJavaEvent(event: BootEvent) {
 async function runGameBoot() {
   if (!assets) return;
   disposeJavaInput?.(); disposeJavaInput = undefined;
+  disposeGameBoot?.(); disposeGameBoot = undefined;
   const source = assets, run = sequence;
   el('java-log').replaceChildren();
   el('java-run-state').textContent = 'Running Init.java';
@@ -52,7 +54,8 @@ async function runGameBoot() {
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
     () => viewer?.getViewportSize() ?? { width: 1, height: 1 },
     node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); });
-  if (source !== assets || run !== sequence) return;
+  if (source !== assets || run !== sequence) { result.dispose(); return; }
+  disposeGameBoot = () => result.dispose();
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const poll = window.setInterval(() => {
     try { result.input.poll(); }
@@ -421,6 +424,8 @@ async function connect() {
 }
 
 function attach(source: Assets, label: string, local = false) {
+  disposeJavaInput?.(); disposeJavaInput = undefined;
+  disposeGameBoot?.(); disposeGameBoot = undefined;
   stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); sequence++;
   driveButton.disabled = false;
   assets = source; localInstallation = local; el('connection').textContent = label;

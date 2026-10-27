@@ -10,6 +10,7 @@ const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
 const voidValue = () => jv('void', undefined);
 export const EVENT_HOTKEY = 0x100000;
+export const EVENT_TIME = 0x80;
 
 interface PendingScriptEvent {
   receiver: JavaValue;
@@ -28,6 +29,7 @@ export class GameTypeNative {
   private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
   private readonly pendingEvents: PendingScriptEvent[] = [];
+  private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void;
 
@@ -149,6 +151,7 @@ export class GameTypeNative {
     jvm.natives.register(resourceRef, 'destroy', [], ({ receiver }) => {
       const node = this.getResource(receiver);
       if (!node) return voidValue();
+      this.cancelTimers(this.object(receiver));
       node.setParent(null);
       for (const child of [...node.children]) child.setParent(null);
       this.objects.delete(node.id);
@@ -168,6 +171,29 @@ export class GameTypeNative {
     });
     jvm.natives.register(gameType, 'clearEventMask', ['int'], ({ receiver, args }) => {
       this.require(receiver).clearEventMask(Number(args[0].value) | 0); return voidValue();
+    });
+    jvm.natives.register(gameType, 'addTimer', ['float', 'int'], ({ receiver, args }) => {
+      const delay = Number(args[0].value);
+      if (!Number.isFinite(delay) || delay < 0) throw new Error(`Invalid Java timer delay: ${delay}`);
+      const object = this.object(receiver), timers = this.timers.get(object) ?? new Set();
+      this.timers.set(object, timers);
+      const handle = setTimeout(() => {
+        timers.delete(handle);
+        if (!this.get(receiver)) return;
+        try {
+          this.queueIntEvent(receiver, jv('GameRef', null), EVENT_TIME, Number(args[1].value));
+          this.dispatchQueuedEvents();
+        } catch (error) {
+          this.report({ level: 'error', message: `Java timer: ${error instanceof Error ? error.message : String(error)}` });
+        }
+        if (!timers.size) this.timers.delete(object);
+      }, delay * 1000);
+      timers.add(handle);
+      return voidValue();
+    });
+    jvm.natives.register(gameType, 'removeAllTimers', [], ({ receiver }) => {
+      this.cancelTimers(this.object(receiver));
+      return voidValue();
     });
 
     const gameRef = 'java.util.resource.GameRef';
@@ -319,6 +345,17 @@ export class GameTypeNative {
       }
       return count;
     } finally { this.dispatchingEvents = false; }
+  }
+
+  dispose(): void {
+    for (const object of this.timers.keys()) this.cancelTimers(object);
+    this.pendingEvents.length = 0;
+  }
+
+  private cancelTimers(object: JavaObject): void {
+    const timers = this.timers.get(object);
+    for (const handle of timers ?? []) clearTimeout(handle);
+    this.timers.delete(object);
   }
 
   private require(receiver: JavaValue): GameObject {

@@ -25,7 +25,7 @@ import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -148,7 +148,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   new StringNative(jvm);
   new SystemNative(jvm, report);
-  new ThreadNative(jvm, message => report({ level: 'error', message }));
+  const threads = new ThreadNative(jvm, message => report({ level: 'error', message }));
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
@@ -259,6 +259,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     jvm.natives.registerField('java.game.Frontend', name, jv('int', 0));
 
   const entry = `${sourceRoot}Init.java`;
+  const dispose = () => { gameTypes.dispose(); threads.dispose(); };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
     if (['src', 'decompiled'].some(folder => assets.byPath.has(`system/scripts/lang/${folder}/string.java`)))
@@ -267,11 +268,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, error };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, dispose, error };
   }
 }

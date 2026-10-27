@@ -5,6 +5,7 @@ import type { BootEvent } from './game-boot';
 export class SystemNative {
   private readonly startedAt: number;
   private simulationSeconds = 0;
+  private gameTimeSeconds = 0;
   private lastSample: number;
   private warp = 1;
 
@@ -15,6 +16,10 @@ export class SystemNative {
     const owner = 'java.lang.System';
     jvm.natives.register(owner, 'currentTime', [], () => jv('float', Math.fround((this.now() - this.startedAt) / 1000)));
     jvm.natives.register(owner, 'simTime', [], () => jv('float', Math.fround(this.sampleSimulation())));
+    jvm.natives.register(owner, 'syncGameTime', ['float'], ({ args }) => {
+      this.gameTimeSeconds = Number(args[0].value);
+      return jv('void', undefined);
+    });
     jvm.natives.register(owner, 'buildNumber', [], () => jv('int', 940));
     jvm.natives.register(owner, 'timeWarp', ['float'], ({ args }) => {
       this.sampleSimulation();
@@ -52,4 +57,6 @@ export class SystemNative {
     this.lastSample = now;
     return this.simulationSeconds;
   }
+
+  gameTime(): number { return this.gameTimeSeconds; }
 }
