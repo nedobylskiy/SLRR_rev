@@ -30,7 +30,7 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.game.parts.bodypart.Chassis.getMass()';
+const expected = 'Unknown Java name Bot';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -76,6 +76,14 @@ if (engine?.value) {
   const curve = dynodata.value == null ? undefined : result.dyno.curve(dynodata);
   if (!curve || curve.torque.length < 2 || !curve.torque.some(torque => torque > 0)) {
     process.stderr.write('Java DynoData did not produce a usable torque curve\n');
+    process.exitCode = 1;
+  }
+}
+if (whisper) {
+  const mass = Number(result.jvm.natives.invoke('java.game.parts.bodypart.Chassis', 'getMass',
+    result.gameTypes.reference(whisper), [])?.value);
+  if (!Number.isFinite(mass) || mass < 1200) {
+    process.stderr.write(`Installed Whisper mass is invalid: ${mass}\n`);
     process.exitCode = 1;
   }
 }

@@ -102,10 +102,12 @@ test('CFG slots connect parts through Java install commands and expose both side
   create(engine, root, 0xd003f);
   create(crank, root, 0xae1);
   create(flywheel, root, 0xac4);
-  parts.configure(car, parsePartConfig('slot 0 0 0 0 0 0 401\nattach 0x000D003F 19'));
-  parts.configure(engine, parsePartConfig('slot 0 0 0 0 0 0 19\nslot 0 0 0 0 0 0 8'));
-  parts.configure(crank, parsePartConfig('slot 0 0 0 0 0 0 7\nattach 0x0000003F 8\nslot 0 0 0 0 0 0 6'));
-  parts.configure(flywheel, parsePartConfig('slot 0 0 0 0 0 0 2\nattach 0x00000AE1 6'));
+  parts.configure(car, parsePartConfig('body 0 0 0 0 0 0 1000 box 1 1 1\nslot 0 0 0 0 0 0 401\nattach 0x000D003F 19'));
+  parts.configure(engine, parsePartConfig('body 0 0 0 0 0 0 50 box 1 1 1\nslot 0 0 0 0 0 0 19\nslot 0 0 0 0 0 0 8'));
+  parts.configure(crank, parsePartConfig('body 0 0 0 0 0 0 20 box 1 1 1\nslot 0 0 0 0 0 0 7\nattach 0x0000003F 8\nslot 0 0 0 0 0 0 6'));
+  parts.configure(flywheel, parsePartConfig('body 0 0 0 0 0 0 10 box 1 1 1\nslot 0 0 0 0 0 0 2\nattach 0x00000AE1 6'));
+  assert.equal(parts.partMass(car), 1000);
+  assert.equal(parts.assemblyMass(car), 1000);
   const id = (value: ReturnType<typeof ref>) => gameTypes.get(value)!.resourceId;
   const install = (child: ReturnType<typeof ref>, parent: ReturnType<typeof ref>) =>
     jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', child,
@@ -123,4 +125,7 @@ test('CFG slots connect parts through Java install commands and expose both side
   assert.equal(call(engine, 'partOnSlot', 8), crank.value);
   assert.equal(call(crank, 'partOnSlot', 6), flywheel.value);
   assert.equal(gameTypes.get(flywheel)?.parent, gameTypes.get(crank));
+  assert.equal(parts.partMass(engine), 50);
+  assert.equal(parts.assemblyMass(car), 1080);
+  assert.equal(jvm.natives.invoke('java.game.parts.bodypart.Chassis', 'getMass', car, [])?.value, 1080);
 });

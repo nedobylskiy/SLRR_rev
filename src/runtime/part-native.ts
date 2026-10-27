@@ -47,6 +47,10 @@ export class PartNative {
     });
     jvm.natives.register(owner, 'getCarRef', [], ({ receiver }) =>
       this.gameTypes.reference(this.carNode(receiver)));
+    jvm.natives.register(owner, 'getMass', [], ({ receiver }) =>
+      jv('float', Math.fround(this.partMass(receiver))));
+    jvm.natives.register('java.game.parts.bodypart.Chassis', 'getMass', [], ({ receiver }) =>
+      jv('float', Math.fround(this.assemblyMass(receiver))));
     jvm.natives.register(owner, 'getWheelID', [], ({ receiver }) => {
       const car = this.carNode(receiver);
       let node = this.gameTypes.getResource(receiver);
@@ -95,6 +99,25 @@ export class PartNative {
 
   configure(receiver: JavaValue, cfg: PartConfig | null): void {
     this.configs.set(receiver.value as JavaObject, cfg);
+  }
+
+  partMass(receiver: JavaValue): number {
+    return this.configs.get(receiver.value as JavaObject)?.bodies.reduce((total, body) => total + body.mass, 0) ?? 0;
+  }
+
+  assemblyMass(receiver: JavaValue): number {
+    const root = this.gameTypes.getResource(receiver);
+    if (!root) return 0;
+    const visited = new Set<ResourceObject>();
+    const visit = (node: ResourceObject): number => {
+      if (visited.has(node)) throw new Error('Part installation cycle in mass calculation');
+      visited.add(node);
+      const handle = this.gameTypes.reference(node);
+      const state = this.partSlots(handle);
+      return this.partMass(handle) + [...state.installed.values()].reduce((sum, installed) =>
+        sum + visit(installed.child), 0);
+    };
+    return visit(root);
   }
 
   private partSlots(receiver: JavaValue): PartSlots {
