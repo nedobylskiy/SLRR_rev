@@ -5,6 +5,7 @@ interface ThreadState {
   stopped: boolean;
   priority: number;
   daemon: boolean;
+  startTimer?: ReturnType<typeof setTimeout>;
   pending?: { resolve: (value: JavaValue) => void; reject: (error: Error) => void };
 }
 
@@ -23,18 +24,22 @@ export class ThreadNative {
       const state = this.state(receiver);
       if (state.alive || state.stopped) return nil();
       state.alive = true;
-      queueMicrotask(() => {
+      // Let the Java caller finish configuring the thread before its first run.
+      state.startTimer = setTimeout(() => {
+        state.startTimer = undefined;
         if (state.stopped) { state.alive = false; return; }
         const target = this.jvm.get(receiver, 'target');
         void this.jvm.invokeAsync(target, 'run').catch(error => {
           if (!state.stopped) this.report(`Thread.run: ${error instanceof Error ? error.message : String(error)}`);
         }).finally(() => { state.alive = false; state.pending = undefined; this.live.delete(state); });
-      });
+      }, 0);
       return nil();
     });
     jvm.natives.register(owner, 'stop', [], ({ receiver }) => {
       const state = this.state(receiver);
       state.stopped = true;
+      if (state.startTimer) clearTimeout(state.startTimer);
+      state.startTimer = undefined;
       state.pending?.reject(new Error('Java thread stopped'));
       state.pending = undefined;
       this.live.delete(state);
@@ -88,6 +93,8 @@ export class ThreadNative {
   dispose(): void {
     for (const state of this.live) {
       state.stopped = true;
+      if (state.startTimer) clearTimeout(state.startTimer);
+      state.startTimer = undefined;
       state.pending?.reject(new Error('Java thread stopped'));
       state.pending = undefined;
     }
