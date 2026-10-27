@@ -139,7 +139,6 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   new StringNative(jvm);
   new SystemNative(jvm, report);
-  new PartNative(jvm);
   const chassisNative = new ChassisNative(jvm);
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
@@ -186,6 +185,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
     });
+  new PartNative(jvm, gameTypes);
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
     const asset = assets.byPath.get(path.toLowerCase());

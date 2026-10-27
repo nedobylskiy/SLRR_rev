@@ -1,4 +1,6 @@
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
+import type { GameTypeNative } from './game-type-native';
+import type { ResourceObject } from './resource-object';
 
 /** Native condition values owned by each interpreted SLRR part. */
 export class PartNative {
@@ -6,7 +8,7 @@ export class PartNative {
   private readonly wear = new WeakMap<JavaObject, number>();
   private readonly texture = new WeakMap<JavaObject, number>();
 
-  constructor(jvm: SlrrJvm) {
+  constructor(jvm: SlrrJvm, gameTypes: GameTypeNative) {
     const owner = 'java.game.parts.Part';
     jvm.natives.register(owner, 'getWear', [], ({ receiver }) =>
       jv('float', this.wear.get(receiver.value as JavaObject) ?? 1));
@@ -33,6 +35,16 @@ export class PartNative {
       this.texture.set(receiver.value as JavaObject, id | 0);
       // The original native reports success even when no render object is bound yet.
       return jv('int', 1);
+    });
+    jvm.natives.register(owner, 'getCar', [], ({ receiver }) => {
+      for (let node: ResourceObject | null | undefined = gameTypes.get(receiver); node; node = node.parent) {
+        let className: string | null = node.className;
+        while (className) {
+          if (className === 'java.game.parts.bodypart.Chassis') return jv('int', node.resourceId);
+          className = jvm.parent(className);
+        }
+      }
+      return jv('int', 0);
     });
   }
 

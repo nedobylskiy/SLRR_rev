@@ -30,7 +30,8 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.game.parts.Part.getCar()';
+// Decompiled Vector.removeElementAt increments its count on removal, then indexes beyond the array.
+const expected = 'Vector.removeElementAt (source line 281): Invalid Java array index';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
