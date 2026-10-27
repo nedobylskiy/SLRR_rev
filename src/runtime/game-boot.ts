@@ -26,7 +26,7 @@ import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
 import { OsdRectangleNative } from './osd-rectangle-native';
-import { osdViewportPriority } from './osd-depth';
+import { osdViewport } from './osd-depth';
 import type { OsdLayer } from '../osd/osd-layer';
 import type { SoundJavaBridge } from '../audio/sound-java';
 import type { OsdVideo } from '../osd/osd-video';
@@ -160,10 +160,14 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const system = new SystemNative(jvm, report);
   const threads = new ThreadNative(jvm, message => report({ level: 'error', message }));
   let viewports!: ViewportNative;
-  const viewportPriority = (group: JavaValue) => osdViewportPriority(group, viewports);
-  const osdText = new OsdTextNative(jvm, osd, viewportPriority);
+  const viewportLayout = (group: JavaValue) => osdViewport(group, viewports);
+  const stageAspect = () => {
+    const { width, height } = viewportSize();
+    return height > 0 ? width / height : 16 / 9;
+  };
+  const osdText = new OsdTextNative(jvm, osd, viewportLayout);
   const osdButtons = new OsdButtonNative(jvm, osd,
-    error => report({ level: 'error', message: `OSD click: ${error.message}` }), viewportPriority);
+    error => report({ level: 'error', message: `OSD click: ${error.message}` }), viewportLayout, stageAspect);
   let osdRectangles: OsdRectangleNative | undefined;
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
@@ -219,7 +223,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       resourceCatalog.addPack(path, await assets.pack(path));
     }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node));
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
-    packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportPriority);
+    packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
   chassisNative = new ChassisNative(jvm, gameTypes);
   partNative = new PartNative(jvm, gameTypes);
   const dyno = new DynoNative(jvm);

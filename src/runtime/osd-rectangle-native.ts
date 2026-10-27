@@ -2,7 +2,7 @@ import type { JavaObject, JavaValue, ResourceIdentity } from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import type { GameTypeNative } from './game-type-native';
 import type { RenderObject } from './render-object';
-import { osdDepth } from './osd-depth';
+import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
 
 interface RectangleView { render: RenderObject; group: JavaObject; element: OsdElement }
 
@@ -13,7 +13,8 @@ export class OsdRectangleNative {
   constructor(private readonly resources: GameTypeNative,
     private readonly layer?: Pick<OsdLayer, 'createRectangle'>,
     private readonly resourceIdentity?: (id: number) => ResourceIdentity | null | undefined,
-    private readonly viewportPriority: (group: JavaValue) => number = () => 0) {}
+    private readonly viewportLayout: (group: JavaValue) => OsdViewport = () => FULL_OSD_VIEWPORT,
+    private readonly stageAspect: () => number = () => 16 / 9) {}
 
   sync(render: RenderObject): boolean {
     if (render.alias !== 'Rectangle' || render.parent?.className !== 'java.render.Group') return false;
@@ -36,20 +37,27 @@ export class OsdRectangleNative {
     const vpHeight = Number(osd.fields.get('vpHeight')?.value ?? 1);
     const scaleX = 1.469 * aspect * vpWidth;
     const scaleY = 1.469 * vpHeight;
+    const mode = this.positionMode(render, osd);
     const width = mesh.meshScale.x / (1.47 * aspect * vpWidth);
     const height = mesh.meshScale.y / (1.47 * vpHeight);
-    const normalizedPosition = this.normalizedPosition(render, osd);
-    const x = normalizedPosition ? render.position.x / aspect : render.position.x / scaleX;
+    const x = mode === 'normalized' ? render.position.x / aspect : render.position.x / scaleX;
     const y = -render.position.y / scaleY;
-    const depth = osdDepth(this.viewportPriority(groupRef), Math.round(render.position.z * 1000));
-    if (![x, y, width, height, depth].every(Number.isFinite)) return true;
+    const viewport = this.viewportLayout(groupRef);
+    const projected = projectOsdBounds(viewport, x, y, width, height);
+    // Style buttons use raw screen-space mesh dimensions, unlike Osd.createRectangle templates.
+    if (mode === 'style') {
+      projected.width = mesh.meshScale.x / (1.47 * this.stageAspect());
+      projected.height = mesh.meshScale.y / 1.47;
+    }
+    const depth = osdDepth(viewport.priority, Math.round(render.position.z * 1000));
+    if (![projected.x, projected.y, projected.width, projected.height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
     if (!view) {
-      const element = this.layer.createRectangle(x, y, width, height, depth,
+      const element = this.layer.createRectangle(projected.x, projected.y, projected.width, projected.height, depth,
         { pack: texture.pack.endsWith('.rpk') ? texture.pack : `${texture.pack}.rpk`, id: texture.id });
       view = { render, group, element };
       this.views.set(render, view);
-    } else view.element.setBounds(x, y, width, height, depth);
+    } else view.element.setBounds(projected.x, projected.y, projected.width, projected.height, depth);
     this.syncView(view);
     return true;
   }
@@ -73,19 +81,19 @@ export class OsdRectangleNative {
     else view.element.hide();
   }
 
-  private normalizedPosition(render: RenderObject, osd: JavaObject): boolean {
+  private positionMode(render: RenderObject, osd: JavaObject): 'normal' | 'normalized' | 'style' {
     const vector = this.object(osd.fields.get('rectangles'));
     const data = vector?.fields.get('elementData')?.value;
     const count = Number(vector?.fields.get('elementCount')?.value ?? 0);
-    if (!Array.isArray(data)) return false;
+    if (!Array.isArray(data)) return 'style';
     for (const value of data.slice(0, count) as JavaValue[]) {
       const rectangle = this.object(value);
       if (!rectangle) continue;
       const instance = rectangle.fields.get('ins');
       if (instance && this.resources.getRender(instance) === render)
-        return rectangle.fields.get('rev_pos')?.value != null;
+        return rectangle.fields.get('rev_pos')?.value != null ? 'normalized' : 'normal';
     }
-    return false;
+    return 'style';
   }
 
   private object(value: JavaValue | undefined): JavaObject | undefined {

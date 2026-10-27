@@ -53,3 +53,25 @@ test('the original fade font glyph is not rendered as a literal letter', () => {
   jvm.natives.invoke('java.render.Text', 'update', text, []);
   assert.equal(displayed, '');
 });
+
+test('only Osd.dark turns a fade glyph into a full-screen dimmer', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  jvm.natives.register('java.util.resource.ResourceRef', 'id', [], () => jv('int', 0x1a25));
+  const classes = new Set<string>();
+  const surface = { createText(): OsdElement {
+    return { node: { style: {}, classList: { add(name: string) { classes.add(name); } } } as unknown as HTMLElement,
+      setText() {}, setResource() {}, setBounds() {}, show() {}, hide() {} };
+  } };
+  new OsdTextNative(jvm, surface);
+  const text = jv('Text', { className: 'java.render.Text', fields: new Map() });
+  const osd = jv('Osd', { className: 'java.render.Osd', fields: new Map() });
+  const group = jv('Group', { className: 'java.render.Group', fields: new Map([['osd', osd]]) });
+  const font = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  jvm.natives.invoke('java.render.Text', 'create', text,
+    [jv('ResourceRef', group.value), font, jv('float', 0), jv('float', 0)]);
+  jvm.natives.invoke('java.render.Text', 'changeColor', text, [jv('int', -1)]);
+  assert.equal(classes.has('osd-fade-overlay'), false);
+  (osd.value as { fields: Map<string, unknown> }).fields.set('dark', text);
+  jvm.natives.invoke('java.render.Text', 'changeColor', text, [jv('int', 0x0f000000)]);
+  assert.equal(classes.has('osd-fade-overlay'), true);
+});

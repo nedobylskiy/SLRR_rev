@@ -1,6 +1,6 @@
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
-import { osdDepth } from './osd-depth';
+import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
 
 interface HitBox { group: JavaValue; width: number; height: number; label: string; element?: OsdElement }
 
@@ -20,7 +20,8 @@ export class OsdButtonNative {
   constructor(private readonly jvm: SlrrJvm,
     private readonly layer?: Pick<OsdLayer, 'createHitTarget'>,
     private readonly report: (error: Error) => void = () => {},
-    private readonly viewportPriority: (group: JavaValue) => number = () => 0) {
+    private readonly viewportLayout: (group: JavaValue) => OsdViewport = () => FULL_OSD_VIEWPORT,
+    private readonly stageAspect: () => number = () => 16 / 9) {
     const owner = 'java.util.resource.PhysicsRef';
     const nil = () => jv('void', undefined);
     jvm.natives.register(owner, 'createBox', ['ResourceRef', 'float', 'float', 'float', 'String'], ({ receiver, args }) => {
@@ -47,12 +48,15 @@ export class OsdButtonNative {
       const scaleY = 1.469 * viewportHeight;
       const x = Number(position.fields.get('x')?.value ?? 0) / scaleX;
       const y = -Number(position.fields.get('y')?.value ?? 0) / scaleY;
-      const width = box.width / scaleX, height = box.height / scaleY;
-      const depth = osdDepth(this.viewportPriority(box.group),
+      const viewport = this.viewportLayout(box.group);
+      const projected = projectOsdBounds(viewport, x, y);
+      const width = box.width / (1.469 * this.stageAspect());
+      const height = box.height / 1.469;
+      const depth = osdDepth(viewport.priority,
         osdHitDepth(Number(position.fields.get('z')?.value ?? 0), width, height));
-      if (box.element) box.element.setBounds(x, y, width, height, depth);
+      if (box.element) box.element.setBounds(projected.x, projected.y, width, height, depth);
       else {
-        box.element = this.layer?.createHitTarget(box.label, x, y, width, height, depth,
+        box.element = this.layer?.createHitTarget(box.label, projected.x, projected.y, width, height, depth,
           () => { void this.activate(receiver).catch(this.report); });
         if (box.element) { this.live.add(box.element); this.sync(); }
       }

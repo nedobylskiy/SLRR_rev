@@ -336,6 +336,7 @@ body:has(.osd-layer:not(.osd-layer-game)){overflow:hidden}
 .osd-hit-target{padding:0;border:0;background:transparent;opacity:0;pointer-events:auto;cursor:pointer}
 .osd-menu-icon:hover,.osd-menu-icon:focus-visible{transform:none;filter:brightness(1.08)}
 .osd-text{white-space:nowrap;color:#171717;font:600 clamp(12px,1.7vw,24px)/1.2 Arial,sans-serif;transform:translateY(-50%);pointer-events:none}
+.osd-fade-overlay{left:0!important;top:0!important;width:100%!important;height:100%!important;transform:none!important}
 .osd-align-center{transform:translate(-50%,-50%)}
 .osd-align-right{transform:translate(-100%,-50%)}
 .osd-menu-title{color:#986b6b;font-size:clamp(16px,1.8vw,30px);font-weight:500;letter-spacing:.075em}

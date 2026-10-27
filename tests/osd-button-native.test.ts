@@ -34,7 +34,7 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
     return { node, setText() {}, setResource() {}, setBounds(_x, _y, _width, _height, nextDepth) { depth = nextDepth; },
       show() { visible = true; }, hide() { visible = false; } };
   } };
-  const bridge = new OsdButtonNative(jvm, surface);
+  const bridge = new OsdButtonNative(jvm, surface, undefined, undefined, () => 4 / 3);
   const osd = object('java.render.Osd', {
     vpAspect: jv('float', 4 / 3), vpWidth: jv('float', 1), vpHeight: jv('float', 1), cam: jv('Camera', null),
   });
