@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { ChassisNative } from '../src/runtime/chassis-native';
+import { GameTypeNative } from '../src/runtime/game-type-native';
 import { parsePartConfig } from '../src/formats/cfg';
 import { ackermannSteerAngle } from '../src/engine/suspension-3d';
 
@@ -20,7 +21,7 @@ test('Chassis reads the CFG steering limit during its Java constructor and retai
     const source = sources.get(className);
     return source ? { path: `${className}.java`, source } : null;
   } });
-  const native = new ChassisNative(jvm);
+  const native = new ChassisNative(jvm, new GameTypeNative(jvm, () => {}));
   await jvm.loadClass('java.game.cars.Sample');
   native.prepare('java.game.cars.Sample', 0.65, 2.736);
   const car = jvm.construct('java.game.cars.Sample', [jv('int', 1)]);
@@ -45,4 +46,42 @@ test('CFG Ackermann length gives distinct inner and outer wheel angles', () => {
   assert.equal(ackermannSteerAngle(0.65, -0.709, 0), 0.65);
   assert.equal(ackermannSteerAngle(0.65, -0.709, cfg.ackermann, 0), 0);
   assert.equal(parsePartConfig('maxsteer 0.65').ackermann, undefined);
+});
+
+test('forceUpdate runs Java calculations before projecting chassis and nested installed parts', async () => {
+  const sources = new Map([
+    ['java.game.parts.Part', 'package java.game.parts; public class Part {}'],
+    ['java.game.parts.bodypart.Chassis', `package java.game.parts.bodypart;
+      import java.game.parts.Part;
+      public class Chassis extends Part {
+        int suspend_update = 0; int updates = 0; int gears = 5;
+        float C_drag = 0.3; float engine_rpm_idle = 800.0;
+        float[] ratio = new float[2];
+        public native void forceUpdate();
+        public void updatevariables() { updates = updates + 1; C_drag = 0.5; ratio[0] = 3.5; }
+      }`],
+  ]);
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => {
+    const source = sources.get(className);
+    return source ? { path: `${className}.java`, source } : null;
+  } });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  const native = new ChassisNative(jvm, gameTypes);
+  await jvm.loadClass('java.game.parts.bodypart.Chassis');
+  const car = jvm.construct('java.game.parts.bodypart.Chassis', []);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', car, []);
+  const part = jv('Part', { className: 'java.game.parts.Part', fields: new Map() });
+  const nested = jv('Part', { className: 'java.game.parts.Part', fields: new Map() });
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', part, [jv('GameRef', car.value)]);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', nested, [jv('GameRef', part.value)]);
+  await jvm.invokeAsync(car, 'forceUpdate');
+  assert.equal(jvm.get(car, 'updates').value, 1);
+  assert.equal(native.updateState(car)?.parameters.C_drag, 0.5);
+  assert.deepEqual(native.updateState(car)?.ratios, [3.5, 0]);
+  assert.deepEqual(native.updateState(car)?.descendantPartIds,
+    [gameTypes.get(part)?.resourceId, gameTypes.get(nested)?.resourceId]);
+  jvm.set(car, 'suspend_update', jv('int', 1));
+  await jvm.invokeAsync(car, 'forceUpdate');
+  assert.equal(jvm.get(car, 'updates').value, 1);
+  assert.equal(native.updateState(car)?.revision, 2);
 });
