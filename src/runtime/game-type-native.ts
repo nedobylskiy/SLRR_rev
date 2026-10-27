@@ -1,6 +1,7 @@
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import { GameObject, type OrientationState, type Vector3State } from './game-object';
 import { ResourceObject } from './resource-object';
+import { RenderObject } from './render-object';
 import type { BootEvent } from './game-boot';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
@@ -15,7 +16,8 @@ export class GameTypeNative {
   private nextId = 1;
   private nextClonedResourceId = 0x40000000;
 
-  constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void) {
+  constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
+    private readonly renderChanged?: (node: RenderObject) => void) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -162,6 +164,30 @@ export class GameTypeNative {
     return node instanceof GameObject ? node : undefined;
   }
   getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
+  getRender(receiver: JavaValue): RenderObject | undefined {
+    const node = this.getResource(receiver);
+    return node instanceof RenderObject ? node : undefined;
+  }
+  notifyRenderChanged(node: RenderObject): void { this.renderChanged?.(node); }
+  createRender(receiver: JavaValue, parent: JavaValue | null, type: JavaValue | null,
+    alias: string | null): RenderObject | undefined {
+    if (type?.value != null && parent?.value == null) return undefined;
+    const object = this.object(receiver);
+    const resource = this.allocate(receiver);
+    if (resource instanceof RenderObject) throw new Error(`RenderRef instance already exists: ${object.className}`);
+    const parentNode = parent?.value == null ? null : this.requireResource(parent);
+    const typeNode = type?.value == null ? null : this.requireResource(type);
+    const node = new RenderObject(resource.id, object.className, typeNode,
+      alias || '_renderinst');
+    resource.setParent(null);
+    node.setParent(parentNode);
+    for (const child of [...resource.children]) child.setParent(node);
+    this.nodes.set(object, node);
+    this.objects.set(node.id, node);
+    this.handles.set(node, receiver);
+    this.notifyRenderChanged(node);
+    return node;
+  }
   getById(id: number): ResourceObject | undefined { return this.objects.get(id); }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
 

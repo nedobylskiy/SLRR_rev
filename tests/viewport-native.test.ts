@@ -4,6 +4,7 @@ import { jv, SlrrJvm, type JavaValue } from 'slrr-jvm';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { ViewportNative } from '../src/runtime/viewport-native';
 import { CameraNative } from '../src/runtime/camera-native';
+import { RenderRefNative } from '../src/runtime/render-ref-native';
 
 const ref = (name: string): JavaValue => jv(name.split('.').at(-1)!, { className: name, fields: new Map() });
 const vector = (x: number, y: number, z: number): JavaValue => jv('Vector3', { className: 'java.lang.Vector3',
@@ -36,6 +37,7 @@ test('Camera.create links its render resource to the Java parent and viewport', 
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const resources = new GameTypeNative(jvm, () => {});
   const viewports = new ViewportNative(jvm, resources, () => ({ width: 800, height: 600 }));
+  new RenderRefNative(jvm, resources);
   const cameras = new CameraNative(jvm, resources, viewports);
   const parent = ref('java.game.MouseCursor'), viewport = ref('java.render.Viewport'), camera = ref('java.render.Camera');
   jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', parent, []);
@@ -48,5 +50,5 @@ test('Camera.create links its render resource to the Java parent and viewport', 
   assert.equal(cameras.get(camera)?.viewport.value, viewport.value);
   assert.equal(cameras.get(camera)?.halfAov, 16.7);
   jvm.natives.invoke('java.util.resource.RenderRef', 'setMatrix', camera, [vector(0, 0, 10), jv('Ypr', null)]);
-  assert.deepEqual(cameras.get(camera)?.position, { x: 0, y: 0, z: 10 });
+  assert.deepEqual(resources.getRender(camera)?.position, { x: 0, y: 0, z: 10 });
 });

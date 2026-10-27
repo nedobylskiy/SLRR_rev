@@ -24,6 +24,7 @@ import { MapObjectStream, type StreamPlacement } from './map-object-stream';
 import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
+import { RenderObject } from '../runtime/render-object';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -36,6 +37,8 @@ export class Viewer {
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
   private controls: OrbitControls;
   private model = new THREE.Group();
+  private javaRenderRoot = new THREE.Group();
+  private javaRenderNodes = new Map<number, THREE.Group>();
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
   private collisionMeshes = new Map<EnginePart, number[]>();
@@ -69,6 +72,7 @@ export class Viewer {
     this.driveGrid.visible = false; this.scene.add(this.driveGrid);
     this.ground.rotation.x = -Math.PI / 2; this.ground.position.y = -0.002; this.ground.visible = false; this.scene.add(this.ground);
     this.scene.add(this.model);
+    this.scene.add(this.javaRenderRoot);
     this.observer = new ResizeObserver(() => {
       const { clientWidth: w, clientHeight: h } = container;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
@@ -76,6 +80,7 @@ export class Viewer {
     this.renderer.setAnimationLoop(now => { this.frame?.(now); this.controls.update(); this.mapStream?.update(this.camera.position); this.renderer.render(this.scene, this.camera); });
   }
   clear() {
+    this.javaRenderRoot.clear(); this.javaRenderNodes.clear();
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
@@ -91,6 +96,24 @@ export class Viewer {
       materials.forEach(material => { material.map?.dispose(); material.dispose(); });
     });
     this.model.clear();
+  }
+  upsertJavaRenderObject(node: RenderObject): void {
+    let group = this.javaRenderNodes.get(node.id);
+    if (node.resourceType !== 3) {
+      group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
+      return;
+    }
+    if (!group) {
+      group = new THREE.Group();
+      this.javaRenderNodes.set(node.id, group);
+    }
+    const parent = node.parent instanceof RenderObject
+      ? this.javaRenderNodes.get(node.parent.id) ?? this.javaRenderRoot : this.javaRenderRoot;
+    if (group.parent !== parent) parent.add(group);
+    group.name = node.alias;
+    group.userData.resourceTypeId = node.typeId;
+    group.position.set(node.position.x, node.position.y, node.position.z);
+    group.rotation.set(node.orientation.p, node.orientation.y, node.orientation.r, 'YXZ');
   }
   setMapFog(settings: MapFogSettings) {
     if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
