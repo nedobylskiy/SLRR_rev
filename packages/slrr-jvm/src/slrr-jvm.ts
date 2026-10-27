@@ -168,12 +168,14 @@ export class SlrrJvm implements JavaHost {
   }
 
   private runConstructor(receiver: JavaValue, entry: LoadedClass, args: JavaValue[]): JavaValue {
-    const ctor = this.selectMethod(entry.parsed.methods.filter(method => method.name === entry.parsed.name), args, entry.name);
-    if (!ctor && args.length) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
+    const constructors = entry.parsed.methods.filter(method => method.name === entry.parsed.name);
+    const ctor = this.selectMethod(constructors, args, entry.name);
+    if (!ctor && args.length && constructors.length) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
+    if (!ctor && args.length && !entry.parsed.parent) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     const first = ctor?.body.kind === 'block' ? ctor.body.statements?.[0] : ctor?.body;
     const explicit = first?.kind === 'expr' && first.expr?.kind === 'call' && first.expr.left?.kind === 'name' && ['super', 'this'].includes(first.expr.left.text ?? '');
     if (!explicit) {
-      if (entry.parsed.parent) this.constructorCall(receiver, entry.name, 'super', []);
+      if (entry.parsed.parent) this.constructorCall(receiver, entry.name, 'super', ctor ? [] : args);
       this.initializeInstanceFields(entry, receiver);
     }
     return ctor ? this.invokeSource(entry, ctor, receiver, args) : jv('void', undefined);

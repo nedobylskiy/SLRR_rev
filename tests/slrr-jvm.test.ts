@@ -127,3 +127,21 @@ class Main { int run() { return Host.read(new Child()); } }`;
   await jvm.loadClass('demo.Main');
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
 });
+
+test('a class without constructors forwards constructor arguments to its parent', async () => {
+  const source = 'package demo; class Base { int value; Base(int n) { value = n; } } class Child extends Base { int extra = 4; }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  const child = jvm.construct('demo.Child', [jv('int', 27)]);
+  assert.equal(jvm.get(child, 'value').value, 27);
+  assert.equal(jvm.get(child, 'extra').value, 4);
+});
+
+test('the SLRR dialect permits an implicit no-argument constructor beside declared overloads', async () => {
+  const source = 'package demo; class Base { int marker = 3; } class Child extends Base { Child(int n) { marker = n; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  assert.equal(jvm.get(jvm.construct('demo.Child', []), 'marker').value, 3);
+});

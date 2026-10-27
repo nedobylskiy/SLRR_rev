@@ -15,7 +15,7 @@ const files = await Promise.all([...names, ...systemNames].map(async path => {
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java constructor missing: java.util.resource.GroundRef(1)';
+const expected = 'Java native implementation missing: java.lang.GameType.setEventMask(int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
