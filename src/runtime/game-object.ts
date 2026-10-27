@@ -1,6 +1,6 @@
 export interface Vector3State { x: number; y: number; z: number }
 export interface OrientationState { y: number; p: number; r: number }
-export interface QueuedGameEvent { sourceId: number | null; type: number; payload: string | null }
+export interface QueuedGameEvent { sourceId: number | null; type: number; payload: string | number | null }
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });

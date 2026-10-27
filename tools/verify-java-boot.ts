@@ -15,8 +15,18 @@ const files = await Promise.all([...names, ...systemNames].map(async path => {
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.io.Input.createHotkey';
+const expected = 'Java native implementation missing: java.io.FindFile.first(String,int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
+}
+if (result.input.registeredHotkeys() < 5) {
+  process.stderr.write('GameLogic did not register its global hotkeys\n');
+  process.exitCode = 1;
+}
+result.input.poll();
+if (process.argv.includes('--hotkey-smoke')) {
+  result.input.setPhysicalAxis(0, 88, 1);
+  try { result.input.poll(); process.stdout.write('Hotkey smoke: no Java callback\n'); }
+  catch (error) { process.stdout.write(`Hotkey smoke: ${String(error)}\n`); }
 }

@@ -7,6 +7,13 @@ import type { BootEvent } from './game-boot';
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
 const voidValue = () => jv('void', undefined);
+export const EVENT_HOTKEY = 0x100000;
+
+interface PendingScriptEvent {
+  receiver: JavaValue;
+  type: number;
+  arguments: JavaValue[];
+}
 
 /** Connects interpreted GameRef/GameType methods to one persistent host game object. */
 export class GameTypeNative {
@@ -15,6 +22,8 @@ export class GameTypeNative {
   private readonly handles = new WeakMap<ResourceObject, JavaValue>();
   private nextId = 1;
   private nextClonedResourceId = 0x40000000;
+  private readonly pendingEvents: PendingScriptEvent[] = [];
+  private dispatchingEvents = false;
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void) {
@@ -149,9 +158,8 @@ export class GameTypeNative {
         this.readVector(args[2]), this.readVector(args[3])); return voidValue();
     });
     jvm.natives.register(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], ({ receiver, args }) => {
-      const source = args[0].value == null ? null : this.getResource(args[0]);
-      this.require(receiver).queueEvent({ sourceId: source?.id ?? null, type: Number(args[1].value) | 0,
-        payload: args[2].value == null ? null : String(args[2].value) });
+      const type = Number(args[1].value) | 0;
+      this.queueStringEvent(receiver, args[0], type, args[2]);
       return voidValue();
     });
     jvm.natives.register(gameRef, 'setActiveCollision', [], ({ receiver }) => {
@@ -190,6 +198,45 @@ export class GameTypeNative {
   }
   getById(id: number): ResourceObject | undefined { return this.objects.get(id); }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
+
+  queueHotkey(receiver: JavaValue, hotkey: JavaValue): void {
+    const node = this.require(receiver);
+    node.queueEvent({ sourceId: null, type: EVENT_HOTKEY, payload: null });
+    this.pendingEvents.push({ receiver, type: EVENT_HOTKEY, arguments: [hotkey] });
+  }
+
+  queueIntEvent(receiver: JavaValue, source: JavaValue, type: number, value: number): void {
+    const node = this.require(receiver);
+    const sourceNode = source.value == null ? null : this.getResource(source);
+    node.queueEvent({ sourceId: sourceNode?.id ?? null, type, payload: value });
+    this.pendingEvents.push({ receiver, type, arguments: [source, jv('int', type), jv('int', value)] });
+  }
+
+  queueStringEvent(receiver: JavaValue, source: JavaValue, type: number, value: JavaValue): void {
+    const node = this.require(receiver);
+    const sourceNode = source.value == null ? null : this.getResource(source);
+    node.queueEvent({ sourceId: sourceNode?.id ?? null, type,
+      payload: value.value == null ? null : String(value.value) });
+    this.pendingEvents.push({ receiver, type, arguments: [source, jv('int', type), value] });
+  }
+
+  /** Dispatches subscribed events in FIFO order; handlers may enqueue more work. */
+  dispatchQueuedEvents(limit = 1000): number {
+    if (this.dispatchingEvents) return 0;
+    this.dispatchingEvents = true;
+    let count = 0;
+    try {
+      while (this.pendingEvents.length) {
+        if (count >= limit) throw new Error('Java event dispatch limit exceeded');
+        const event = this.pendingEvents.shift()!;
+        const node = this.get(event.receiver);
+        if (!node?.acceptsEvent(event.type)) continue;
+        this.jvm.invoke(event.receiver, 'handleEvent', event.arguments);
+        count++;
+      }
+      return count;
+    } finally { this.dispatchingEvents = false; }
+  }
 
   private require(receiver: JavaValue): GameObject {
     const node = this.get(receiver);

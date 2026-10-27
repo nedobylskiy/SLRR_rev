@@ -6,6 +6,7 @@ import { MathNative } from './math-native';
 import { ViewportNative, type ViewportSize } from './viewport-native';
 import { CameraNative } from './camera-native';
 import { ControllerNative } from './controller-native';
+import { InputNative } from './input-native';
 import { FileNative } from './file-native';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
@@ -13,7 +14,7 @@ import { RenderRefNative } from './render-ref-native';
 import type { RenderObject } from './render-object';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; files: VirtualFileSystem; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -91,7 +92,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const viewports = new ViewportNative(jvm, gameTypes, viewportSize);
   const renderRefs = new RenderRefNative(jvm, gameTypes);
   const cameras = new CameraNative(jvm, gameTypes, viewports);
-  new ControllerNative(jvm);
+  let input!: InputNative;
+  const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
+  input = new InputNative(jvm, controllers, gameTypes);
   new FileNative(jvm, files, gameTypes);
   new MathNative(jvm);
   const collector = 'java.lang.GarbageCollector';
@@ -126,12 +129,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   try {
     await jvm.loadClass('java.game.Init');
     jvm.construct('java.game.Init', [jv('int', 0)]);
+    gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, viewports, renderRefs, cameras, files };
+    return { jvm, gameTypes, viewports, renderRefs, cameras, input, files };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, viewports, renderRefs, cameras, files, error };
+    return { jvm, gameTypes, viewports, renderRefs, cameras, input, files, error };
   }
 }

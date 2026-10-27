@@ -23,6 +23,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
+let disposeJavaInput: (() => void) | undefined;
 let localInstallation = false;
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
@@ -43,6 +44,7 @@ function appendJavaEvent(event: BootEvent) {
 }
 async function runGameBoot() {
   if (!assets) return;
+  disposeJavaInput?.(); disposeJavaInput = undefined;
   const source = assets, run = sequence;
   el('java-log').replaceChildren();
   el('java-run-state').textContent = 'Running Init.java';
@@ -51,6 +53,15 @@ async function runGameBoot() {
     () => viewer?.getViewportSize() ?? { width: 1, height: 1 },
     node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); });
   if (source !== assets || run !== sequence) return;
+  const detachKeyboard = result.input.attachBrowserKeyboard(window);
+  const poll = window.setInterval(() => {
+    try { result.input.poll(); }
+    catch (reason) {
+      window.clearInterval(poll);
+      appendJavaEvent({ level: 'error', message: `Java input: ${reason instanceof Error ? reason.message : String(reason)}` });
+    }
+  }, 50);
+  disposeJavaInput = () => { detachKeyboard(); window.clearInterval(poll); };
   el<HTMLButtonElement>('java-retry').disabled = false;
   el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
   status(result.error ? 'Java boot blocked' : 'Java boot ready', !!result.error);
