@@ -185,7 +185,9 @@ export class SlrrJvm implements JavaHost {
 
   /** Execute a Java constructor, allowing native calls in its body to resolve asynchronously. */
   async constructAsync(name: string, args: JavaValue[]): Promise<JavaValue> {
-    const className = this.resolveName(name), entry = this.classes.get(className);
+    const className = this.resolveName(name);
+    if (!this.classes.has(className) && this.sourceLocations.has(className)) await this.loadClass(className);
+    const entry = this.classes.get(className);
     if (!entry) {
       const native = await this.natives.invokeAsync(className, '<init>', jv('class', className), args);
       if (native) return native;
@@ -626,7 +628,7 @@ export class SlrrJvm implements JavaHost {
     if (imported) return imported;
     const packageName = active?.name.includes('.') ? active.name.slice(0, active.name.lastIndexOf('.')) : '';
     const sibling = packageName ? `${packageName}.${name}` : name;
-    if (this.classes.has(sibling) || this.natives.hasClass(sibling)) return sibling;
+    if (this.classes.has(sibling) || this.natives.hasClass(sibling) || this.sourceLocations.has(sibling)) return sibling;
     return this.aliases.get(name) ?? name;
   }
 

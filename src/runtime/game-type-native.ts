@@ -373,6 +373,26 @@ export class GameTypeNative {
     } finally { this.dispatchingEvents = false; }
   }
 
+  /** Browser input handlers may wait for a modal dialog while later input keeps flowing. */
+  dispatchQueuedEventsCooperative(limit = 1000): number {
+    if (this.dispatchingEvents) return 0;
+    this.dispatchingEvents = true;
+    let count = 0;
+    try {
+      while (this.pendingEvents.length) {
+        if (count >= limit) throw new Error('Java event dispatch limit exceeded');
+        const event = this.pendingEvents.shift()!;
+        const node = this.get(event.receiver);
+        if (!node?.acceptsEvent(event.type)) continue;
+        void this.jvm.invokeAsync(event.receiver, 'handleEvent', event.arguments).catch(error => {
+          this.report({ level: 'error', message: `Java input: ${error instanceof Error ? error.message : String(error)}` });
+        });
+        count++;
+      }
+      return count;
+    } finally { this.dispatchingEvents = false; }
+  }
+
   dispose(): void {
     for (const object of this.timers.keys()) this.cancelTimers(object);
     this.pendingEvents.length = 0;

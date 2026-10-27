@@ -67,7 +67,7 @@ async function runGameBoot() {
   disposeGameBoot = () => result.dispose();
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const poll = window.setInterval(() => {
-    try { result.input.poll(); }
+    try { result.input.pollCooperative(); }
     catch (reason) {
       window.clearInterval(poll);
       appendJavaEvent({ level: 'error', message: `Java input: ${reason instanceof Error ? reason.message : String(reason)}` });

@@ -51,7 +51,7 @@ export class InputNative {
       return voidValue();
     });
     jvm.natives.register(owner, 'checkHotkeys', ['GameRef', 'Osd'], ({ args }) => {
-      this.checkHotkeys(args[0], args[1]);
+      this.checkHotkeys(args[0], args[1], true);
       return voidValue();
     });
   }
@@ -84,15 +84,23 @@ export class InputNative {
 
   /** Host frame-loop replacement for HotkeyWatcher until Java Thread is supported. */
   poll(): void {
+    this.pollEvents(false);
+  }
+
+  pollCooperative(): void {
+    this.pollEvents(true);
+  }
+
+  private pollEvents(cooperative: boolean): void {
     let controller = jv('Controller', null), focus = jv('Osd', null);
     const cursor = this.jvm.get(jv('class', 'java.io.Input'), 'cursor');
     if (cursor.value != null) controller = this.jvm.get(cursor, 'controller');
     const queue = this.jvm.get(jv('class', 'java.render.Frontend'), 'inputQueue');
     if (queue.value != null) focus = this.jvm.invoke(queue, 'lastElement');
-    this.checkHotkeys(controller, focus);
+    this.checkHotkeys(controller, focus, cooperative);
   }
 
-  checkHotkeys(controller: JavaValue, focus: JavaValue): void {
+  checkHotkeys(controller: JavaValue, focus: JavaValue, cooperative = false): void {
     let fired = false;
     for (const item of this.hotkeys) {
       if (item.owner.value != null && item.owner.value !== focus.value) continue;
@@ -108,7 +116,8 @@ export class InputNative {
       item.armed = true;
       item.down = down;
     }
-    this.events.dispatchQueuedEvents();
+    if (cooperative) this.events.dispatchQueuedEventsCooperative();
+    else this.events.dispatchQueuedEvents();
   }
 
   registeredHotkeys(): number { return this.hotkeys.length; }

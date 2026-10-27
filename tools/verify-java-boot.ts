@@ -112,6 +112,28 @@ if (process.argv.includes('--text-dialog-smoke') && !result.error) {
   result.dispose();
   process.exit(process.exitCode ?? 0);
 }
+if (process.argv.includes('--extras-enter-smoke') && !result.error) {
+  try {
+    await result.jvm.loadClass('java.game.Gates');
+    const gates = await result.jvm.constructAsync('java.game.Gates', []);
+    const command = result.jvm.invokeAsync(gates, 'osdCommand', [jv('int', 0xb002)]);
+    let commandError: unknown;
+    void command.catch(error => { commandError = error; });
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    if (commandError) throw commandError;
+    if (runtimeErrors.length) throw new Error(runtimeErrors.join('; '));
+    const dialog = result.gameTypes.roots().find(node => node.className === 'java.game.ExtrasDialog');
+    if (!dialog) throw new Error('Enter did not open ExtrasDialog');
+    await result.jvm.invokeAsync(result.gameTypes.reference(dialog), 'osdCommand', [jv('int', 0)]);
+    await command;
+    process.stdout.write('Gates Enter opened and closed ExtrasDialog\n');
+  } catch (error) {
+    process.stderr.write(`Gates Enter stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
+}
 if (osdRectangles < 10) {
   process.stderr.write(`Java OSD emitted only ${osdRectangles} visible rectangle resources\n`);
   process.exitCode = 1;

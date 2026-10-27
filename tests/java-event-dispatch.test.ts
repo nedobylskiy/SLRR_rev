@@ -91,3 +91,44 @@ test('GameType timers deliver EVENT_TIME and can be cancelled', async () => {
   assert.equal(jvm.get(handler, 'calls').value, 1);
   gameTypes.dispose();
 });
+
+test('cooperative input dispatch keeps delivering events while a Java dialog waits', async () => {
+  const dialogSource = `package demo;
+    class Pause { static native void waitForClick(); }
+    class Handler {
+      int started; int finished;
+      void handleEvent(Object source, int type, int value) {
+        started++;
+        Pause.waitForClick();
+        finished++;
+      }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Dialog.java', source: dialogSource } : null });
+  const pending: Array<() => void> = [];
+  jvm.natives.registerAsync('demo.Pause', 'waitForClick', [], () => new Promise(resolve => {
+    pending.push(() => resolve(jv('void', undefined)));
+  }));
+  const errors: string[] = [];
+  const gameTypes = new GameTypeNative(jvm, event => { if (event.level === 'error') errors.push(event.message); });
+  await jvm.loadClass('demo.Handler');
+  const handler = await jvm.constructAsync('demo.Handler', []);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', handler, []);
+  jvm.natives.invoke('java.lang.GameType', 'setEventMask', handler, [jv('int', EVENT_TIME)]);
+  gameTypes.queueIntEvent(handler, jv('GameRef', null), EVENT_TIME, 1);
+  assert.equal(gameTypes.dispatchQueuedEventsCooperative(), 1);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(jvm.get(handler, 'started').value, 1);
+  gameTypes.queueIntEvent(handler, jv('GameRef', null), EVENT_TIME, 2);
+  assert.equal(gameTypes.dispatchQueuedEventsCooperative(), 1);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(errors, []);
+  assert.equal(pending.length, 2);
+  assert.equal(jvm.get(handler, 'finished').value, 0);
+  for (const resume of pending) {
+    resume();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  assert.equal(jvm.get(handler, 'finished').value, 2);
+  assert.deepEqual(errors, []);
+});

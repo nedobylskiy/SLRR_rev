@@ -506,6 +506,18 @@ test('a source method outside the eager method set is parsed when called', async
   assert.equal(jvm.get(jvm.construct('demo.Main', []), 'value').value, 12);
 });
 
+test('a deferred source method can construct a sibling class from the same Java file', async () => {
+  const source = `package demo;
+    class Main { Main() {} int open() { Dialog dialog = new Dialog(); return dialog.value; } }
+    class Dialog { int value = 42; Dialog() {} }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Main.java', source } : null,
+    selectMethods: className => className === 'demo.Main' ? ['Main'] : undefined });
+  await jvm.loadClass('demo.Main');
+  const main = await jvm.constructAsync('demo.Main', []);
+  assert.equal((await jvm.invokeAsync(main, 'open')).value, 42);
+});
+
 test('a resource literal matches an integer constructor argument', async () => {
   const source = 'package demo; class Ref { int id; Ref(int value) { id = value; } } class Main { int read() { return new Ref(frontend:0xd7r).id; } }';
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
