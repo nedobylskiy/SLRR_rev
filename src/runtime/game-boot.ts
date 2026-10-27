@@ -18,7 +18,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       return assets.byPath.has(path.toLowerCase()) ? { path } : null;
     },
     readSource: async path => new TextDecoder().decode(await assets.read(path)),
-    selectMethods: className => className === 'java.game.Init' ? ['Init'] : className === 'java.game.GameLogic' ? ['GameLogic'] : [],
+    selectMethods: className => [className.split('.').at(-1)!],
   });
 
   const native = (owner: string, method: string, signature: string[], effect?: (args: readonly JavaValue[]) => void) => {

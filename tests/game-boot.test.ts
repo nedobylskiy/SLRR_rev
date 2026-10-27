@@ -46,3 +46,16 @@ test('GarbageCollector can be constructed and its temporary methods are explicit
   assert.ok(events.some(event => event.message.includes('GarbageCollector.push')));
   assert.ok(events.some(event => event.message.includes('GarbageCollector.flush')));
 });
+
+test('boot executes a sibling class constructor declared inside GameLogic.java', async () => {
+  const initPath = 'sl/scripts/game/src/Init.java';
+  const logicPath = 'sl/scripts/game/src/GameLogic.java';
+  const sources = new Map([
+    [initPath, 'package java.game; class Init extends GameType { Init(int id) { new GameLogic(); } }'],
+    [logicPath, 'package java.game; class GameLogic extends GameType { GameLogic() { createNativeInstance(); CareerGoal goal = new CareerGoal(1, "one"); missingNext(); } } class CareerGoal { int flag; CareerGoal(int f, String d) { flag = f; } }'],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })), async path => new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  assert.match(result.error?.message ?? '', /missingNext/);
+  assert.doesNotMatch(result.error?.message ?? '', /CareerGoal/);
+});
