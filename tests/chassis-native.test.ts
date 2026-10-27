@@ -85,3 +85,37 @@ test('forceUpdate runs Java calculations before projecting chassis and nested in
   assert.equal(jvm.get(car, 'updates').value, 1);
   assert.equal(native.updateState(car)?.revision, 2);
 });
+
+test('Chassis indexes four wheels and each WheelRef wrapper shares its wheel state', async () => {
+  const sources = new Map([
+    ['java.game.parts.WheelRef', `package java.game.parts; public class WheelRef {
+      public native void setDrive(float value); public native float getDrive();
+      public native void setInstantCenter(float hx, float hy, float hz, float lx, float ly, float lz);
+    }`],
+    ['java.game.parts.bodypart.Chassis', `package java.game.parts.bodypart;
+      import java.game.parts.WheelRef;
+      public class Chassis { int wheels = 4;
+        public native int getWheels(); public native WheelRef getWheel(int index);
+      }`],
+  ]);
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => {
+    const source = sources.get(className);
+    return source ? { path: `${className}.java`, source } : null;
+  } });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  const native = new ChassisNative(jvm, gameTypes);
+  await jvm.loadClass('java.game.parts.bodypart.Chassis');
+  const car = jvm.construct('java.game.parts.bodypart.Chassis', []);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', car, []);
+  assert.equal(jvm.invoke(car, 'getWheels').value, 4);
+  assert.equal(jvm.invoke(car, 'getWheel', [jv('int', -1)]).value, null);
+  assert.equal(jvm.invoke(car, 'getWheel', [jv('int', 4)]).value, null);
+  const first = jvm.invoke(car, 'getWheel', [jv('int', 1)]);
+  const again = jvm.invoke(car, 'getWheel', [jv('int', 1)]);
+  assert.notEqual(first.value, again.value);
+  jvm.invoke(first, 'setDrive', [jv('float', 0.7)]);
+  assert.equal(jvm.invoke(again, 'getDrive').value, Math.fround(0.7));
+  jvm.invoke(again, 'setInstantCenter', Array(6).fill(jv('float', 10000)));
+  assert.deepEqual(native.wheelState(car, 1)?.instantCenter, Array(6).fill(10000));
+  assert.equal(native.wheelState(car, 0), undefined);
+});

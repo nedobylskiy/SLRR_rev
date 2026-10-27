@@ -1,6 +1,7 @@
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
+import { createWheelRefState, registerWheelRefNatives, type WheelRefState } from './wheel-ref-native';
 
 const projectedFields = [
   'engine_inertia', 'engine_mass', 'engine_rpm_idle', 'maxRPM', 'RPM_limit',
@@ -23,9 +24,29 @@ export class ChassisNative {
   private readonly ackermann = new WeakMap<JavaObject, number>();
   private readonly updates = new WeakMap<JavaObject, ChassisUpdateState>();
   private readonly updating = new WeakSet<JavaObject>();
+  private readonly wheels = new WeakMap<JavaObject, WheelRefState[]>();
+  private readonly wheelHandles = new WeakMap<JavaObject, WheelRefState>();
 
   constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    registerWheelRefNatives(jvm.natives, 'java.game.parts.WheelRef', receiver => {
+      const state = this.wheelHandles.get(receiver.value as JavaObject);
+      if (!state) throw new Error('WheelRef is not bound to a chassis wheel');
+      return state;
+    });
+    jvm.natives.register(owner, 'getWheels', [], ({ receiver }) => jv('int', this.wheelCount(receiver)));
+    jvm.natives.register(owner, 'getWheel', ['int'], ({ receiver, args }) => {
+      const index = Number(args[0].value);
+      const count = this.wheelCount(receiver);
+      if (!Number.isInteger(index) || index < 0 || index >= count) return jv('WheelRef', null);
+      const object = receiver.value as JavaObject;
+      let states = this.wheels.get(object);
+      if (!states) { states = []; this.wheels.set(object, states); }
+      const state = states[index] ??= createWheelRefState();
+      const wheel: JavaObject = { className: 'java.game.parts.WheelRef', fields: new Map() };
+      this.wheelHandles.set(wheel, state);
+      return jv('WheelRef', wheel);
+    });
     jvm.natives.register(owner, 'getMaxSteer', [], ({ receiver }) =>
       jv('float', this.getMaxSteer(receiver)));
     jvm.natives.register(owner, 'setMaxSteer', ['float'], ({ receiver, args }) => {
@@ -83,6 +104,16 @@ export class ChassisNative {
 
   updateState(receiver: JavaValue): ChassisUpdateState | undefined {
     return this.updates.get(receiver.value as JavaObject);
+  }
+
+  wheelState(receiver: JavaValue, index: number): WheelRefState | undefined {
+    return this.wheels.get(receiver.value as JavaObject)?.[index];
+  }
+
+  private wheelCount(receiver: JavaValue): number {
+    if (!this.gameTypes.get(receiver)) return 0;
+    const count = Number((receiver.value as JavaObject).fields.get('wheels')?.value ?? 0);
+    return Number.isInteger(count) && count > 0 ? count : 0;
   }
 
   /** Called immediately before the resource's Java constructor executes. */
