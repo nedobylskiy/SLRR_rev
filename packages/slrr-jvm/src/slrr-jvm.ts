@@ -519,6 +519,7 @@ export class SlrrJvm implements JavaHost {
     if (argument.type === 'int' && parameter === 'float') return 1;
     if (argument.type === 'int' && parameter === 'double') return 2;
     if (argument.type === 'float' && parameter === 'double') return 1;
+    if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {

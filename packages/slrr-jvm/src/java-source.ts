@@ -3,7 +3,7 @@ import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
 import type { Expr as ParsedExpr, Stmt as ParsedStmt, FloatMode } from 'slrr-jvm-compiler';
 import { floatLiteralBits } from './float-literal.js';
 export interface ResourceIdentity { pack: string; id: number }
-export interface JavaValue { type: string; value: unknown; resource?: ResourceIdentity }
+export interface JavaValue { type: string; value: unknown; resource?: ResourceIdentity; numericLiteral?: boolean }
 export const jv = (type: string, value: unknown): JavaValue => ({ type, value });
 export const nil = () => jv('Object', null);
 type Expr = { kind: string; line: number; text?: string; value?: JavaValue; items?: Expr[]; left?: Expr; right?: Expr; extra?: Expr };
@@ -42,9 +42,9 @@ function sourceLiteral(text: string, floatMode: FloatMode): JavaValue {
     const bits = floatLiteralBits(text, floatMode);
     const buffer = new ArrayBuffer(4), view = new DataView(buffer);
     view.setUint32(0, bits, true);
-    return jv('float', view.getFloat32(0, true));
+    return { ...jv('float', view.getFloat32(0, true)), numericLiteral: true };
   }
-  return jv('int', Number(text) | 0);
+  return { ...jv('int', Number(text) | 0), numericLiteral: true };
 }
 
 function adaptExpr(expr: ParsedExpr, floatMode: FloatMode): Expr {
@@ -243,7 +243,9 @@ export class JavaSourceMachine {
         const v = ev(expr.left!);
         if (expr.text === '!') return jv('int', truth(v) ? 0 : 1);
         if (expr.text === '~') return jv('int', ~Number(v.value));
-        return coerce(v.type, jv(v.type, expr.text === '-' ? -Number(v.value) : Number(v.value)));
+        const result = coerce(v.type, jv(v.type, expr.text === '-' ? -Number(v.value) : Number(v.value)));
+        if (v.numericLiteral) result.numericLiteral = true;
+        return result;
       }
       case 'binary': {
         const a = ev(expr.left!);
@@ -333,7 +335,9 @@ export class JavaSourceMachine {
           const v = await ev(expr.left!);
           if (expr.text === '!') return jv('int', truth(v) ? 0 : 1);
           if (expr.text === '~') return jv('int', ~Number(v.value));
-          return coerce(v.type, jv(v.type, expr.text === '-' ? -Number(v.value) : Number(v.value)));
+          const result = coerce(v.type, jv(v.type, expr.text === '-' ? -Number(v.value) : Number(v.value)));
+          if (v.numericLiteral) result.numericLiteral = true;
+          return result;
         }
         case 'binary': {
           const a = await ev(expr.left!);

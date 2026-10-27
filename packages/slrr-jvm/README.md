@@ -79,6 +79,8 @@ Host-native objects can be created from Java `new` expressions by registering a 
 
 An SLRR resource literal assigned to an `int` retains its numeric ID in `value` and its pack identity in the optional `JavaValue.resource` field. Native callbacks can use both to distinguish equal local IDs from different RPK files. Arithmetic creates a new numeric value without this identity.
 
+SLRR source calls can pass a floating numeric literal to an `int` parameter. The interpreter accepts that narrowing conversion during overload selection and truncates toward zero. A `float` variable or computed expression does not gain this implicit conversion; an exact `float` overload still wins when available.
+
 ## Current limits
 
 - The shared parser accepts the 3,453 `.java` files currently visible in one Build 940 installation (the original `MainMenu.java` is temporarily renamed for a separate compiler runtime test). It yields 3,499 classes and 5,952 method bodies. Parsing does not imply every method can execute with the current host bindings.

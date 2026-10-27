@@ -161,3 +161,23 @@ test('a resource literal matches an integer constructor argument', async () => {
   await jvm.loadClass('demo.Main');
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0xd7);
 });
+
+test('numeric literals narrow to int while variables retain their declared type', async () => {
+  const source = `package demo;
+    class Counter { int value; Counter(int n) { value = n; } }
+    class Main {
+      int asConstructor() { return new Counter(0.5).value + new Counter(-2.9).value; }
+      int asMethod(int n) { return n; }
+      int choose(int n) { return 1; }
+      int choose(float n) { return 2; }
+      int direct() { return asMethod(8.0) + choose(8.0); }
+      int variable() { float n = 8.0; return new Counter(n).value; }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Numeric.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  const main = jvm.construct('demo.Main', []);
+  assert.equal(jvm.invoke(main, 'asConstructor').value, -2);
+  assert.equal(jvm.invoke(main, 'direct').value, 10);
+  assert.throws(() => jvm.invoke(main, 'variable'), /Java constructor missing: demo.Counter\(1\)/);
+});
