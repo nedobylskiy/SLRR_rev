@@ -21,17 +21,19 @@ export interface SlrrJvmOptions {
 }
 
 export interface JavaObject { className: string; fields: Map<string, JavaValue> }
-interface LoadedClass { name: string; path: string; source: string; sourceMethods: Set<string>; parsed: SourceClass; imports: Map<string, string>; nativeMethods: { name: string; parameters: string[] }[] }
+interface LoadedClass { name: string; path: string; source: string; sourceMethods: Set<string>; hintedMethods: Set<string>; parsed: SourceClass; imports: Map<string, string>; nativeMethods: { name: string; parameters: string[] }[] }
 
 function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
   const hints = new Set<string>();
-  const add = (name?: string): void => {
+  const add = (name?: string, allowLowerCase = false): void => {
     const simple = name?.replace(/\[\]$/g, '').split('.').at(-1);
-    if (simple && /^[A-Z][A-Za-z0-9_$]*$/.test(simple)) hints.add(simple);
+    if (simple && (allowLowerCase ? /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(simple)
+      && !['void', 'boolean', 'byte', 'short', 'int', 'long', 'float', 'double', 'char'].includes(simple)
+      : /^[A-Z][A-Za-z0-9_$]*$/.test(simple))) hints.add(simple);
   };
   const expression = (expr?: ParsedExpr): void => {
     if (!expr) return;
-    if (['new', 'newarray', 'cast'].includes(expr.kind)) add(expr.text);
+    if (['new', 'newarray', 'cast'].includes(expr.kind)) add(expr.text, true);
     if (expr.kind === 'instanceof') add(expr.right?.text);
     if (expr.kind === 'member') {
       let head: ParsedExpr = expr;
@@ -47,15 +49,15 @@ function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
     statement(stmt.body); statement(stmt.elseBody); statement(stmt.init);
     for (const item of stmt.items ?? []) statement(item);
     for (const update of stmt.update ?? []) expression(update);
-    for (const field of stmt.declarations ?? []) { add(field.type); expression(field.initial); }
+    for (const field of stmt.declarations ?? []) { add(field.type, true); expression(field.initial); }
     for (const entry of stmt.cases ?? []) { expression(entry.value); for (const item of entry.items) statement(item); }
   };
-  add(cls.parent);
+  add(cls.parent, true);
   for (const member of cls.members) {
     if (member.kind === 'field') expression(member.initial);
     else if (selected.has(member.name)) {
-      add(member.result);
-      for (const parameter of member.params) add(parameter.type);
+      add(member.result, true);
+      for (const parameter of member.params) add(parameter.type, true);
       statement(member.body);
     }
   }
@@ -120,7 +122,8 @@ export class SlrrJvm implements JavaHost {
     const nativeMethods = declaration.members.flatMap(member => member.kind === 'method' && member.flags.includes('native')
       ? [{ name: member.name, parameters: member.params.map(parameter => parameter.type) }] : []);
     const sourceMethods = new Set(declaration.members.flatMap(member => member.kind === 'method' && member.body ? [member.name] : []));
-    const entry: LoadedClass = { name: className, path: location.path, source, sourceMethods, parsed, imports, nativeMethods };
+    const hintedMethods = selected ?? new Set(sourceMethods);
+    const entry: LoadedClass = { name: className, path: location.path, source, sourceMethods, hintedMethods, parsed, imports, nativeMethods };
     this.classes.set(className, entry);
     this.aliases.set(shortName, className);
     try {
@@ -132,20 +135,7 @@ export class SlrrJvm implements JavaHost {
         imports.set(alias, dependency);
         await this.loadClass(dependency, location.path);
       }
-      const hints = sourceTypeHints(declaration, selected ?? new Set(declaration.members.filter(x => x.kind === 'method').map(x => x.name)));
-      for (const simple of hints) {
-        const sibling = program.classes.find(cls => cls.name === simple);
-        if (sibling && sibling.fullName !== className) { await this.loadClass(sibling.fullName, location.path); continue; }
-        if (imports.has(simple) || sibling || simple === shortName || simple === 'String' || simple === 'Object') continue;
-        const candidates = [program.packageName, 'java.lang', ...wildcards].filter(Boolean).map(prefix => `${prefix}.${simple}`);
-        for (const candidate of candidates) {
-          const resolved = await this.options.resolveImport({ className: candidate, importedBy: location.path });
-          if (!resolved && !this.natives.hasClass(candidate)) continue;
-          imports.set(simple, candidate);
-          await this.loadClass(candidate, location.path);
-          break;
-        }
-      }
+      await this.loadTypeHints(entry, declaration, hintedMethods, program, wildcards);
       if (parsed.parent) {
         const parent = imports.get(parsed.parent) ?? (program.packageName ? `${program.packageName}.${parsed.parent}` : parsed.parent);
         if (!this.classes.has(parent) && !this.natives.hasClass(parent)) await this.loadClass(parent, location.path);
@@ -155,6 +145,23 @@ export class SlrrJvm implements JavaHost {
       this.classes.delete(className);
       if (this.aliases.get(shortName) === className) this.aliases.delete(shortName);
       throw error;
+    }
+  }
+
+  private async loadTypeHints(entry: LoadedClass, declaration: ParsedClass, selected: Set<string>,
+    program: ReturnType<typeof parseSlrrSource>, wildcards: string[]): Promise<void> {
+    for (const simple of sourceTypeHints(declaration, selected)) {
+      const sibling = program.classes.find(cls => cls.name === simple);
+      if (sibling && sibling.fullName !== entry.name) { await this.loadClass(sibling.fullName, entry.path); continue; }
+      if (entry.imports.has(simple) || sibling || simple === declaration.name || simple === 'String' || simple === 'Object') continue;
+      const candidates = [program.packageName, 'java.lang', ...wildcards].filter(Boolean).map(prefix => `${prefix}.${simple}`);
+      for (const candidate of candidates) {
+        const resolved = await this.options.resolveImport({ className: candidate, importedBy: entry.path });
+        if (!resolved && !this.natives.hasClass(candidate)) continue;
+        entry.imports.set(simple, candidate);
+        await this.loadClass(candidate, entry.path);
+        break;
+      }
     }
   }
 
@@ -434,6 +441,13 @@ export class SlrrJvm implements JavaHost {
           const parsed = parseSourceClass(entry.source, new Set([name]), entry.name.split('.').at(-1), this.options.floatMode ?? 'B',
             resource => this.options.resolveResourceId?.(resource, entry.path));
           entry.parsed.methods.push(...parsed.methods.filter(method => method.name === name));
+        }
+        if (entry.sourceMethods.has(name) && !entry.hintedMethods.has(name)) {
+          const program = parseSlrrSource(entry.source);
+          const declaration = program.classes.find(cls => cls.fullName === entry.name)!;
+          await this.loadTypeHints(entry, declaration, new Set([name]), program,
+            program.imports.filter(imported => imported.endsWith('.*')).map(imported => imported.slice(0, -2)));
+          entry.hintedMethods.add(name);
         }
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
         if (method) return this.invokeSourceAsync(entry, method, receiver, args);

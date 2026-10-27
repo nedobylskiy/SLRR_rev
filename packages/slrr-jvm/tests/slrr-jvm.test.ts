@@ -316,6 +316,34 @@ test('a referenced class resolves from the current package without an import', a
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 17);
 });
 
+test('an async call resolves a same-package class referenced by a deferred method', async () => {
+  const sources = new Map([
+    ['demo/Main.java', 'package demo; class Main { Main() {} int run() { return Bot.VALUE; } }'],
+    ['demo/Bot.java', 'package demo; class Bot { static int VALUE = 17; }'],
+  ]);
+  const jvm = new SlrrJvm({
+    resolveImport: ({ className }) => {
+      const path = `${className.replaceAll('.', '/')}.java`;
+      return sources.has(path) ? { path, source: sources.get(path) } : null;
+    },
+    selectMethods: className => className === 'demo.Main' ? ['Main'] : undefined,
+  });
+  await jvm.loadClass('demo.Main');
+  const main = jvm.construct('demo.Main', []);
+  assert.equal((await jvm.invokeAsync(main, 'run')).value, 17);
+});
+
+test('a lowercase sibling class used by a static field is loaded from the same source', async () => {
+  const source = 'package demo; class Main { static database db = new database(); static int run() { return db.value; } } class database { int value = 23; }';
+  const jvm = new SlrrJvm({
+    resolveImport: ({ className }) => ['demo.Main', 'demo.database'].includes(className)
+      ? { path: 'demo/Main.java', source } : null,
+    selectMethods: className => className === 'demo.Main' ? ['Main'] : undefined,
+  });
+  await jvm.loadClass('demo.Main');
+  assert.equal((await jvm.invokeAsync(jv('class', 'demo.Main'), 'run')).value, 23);
+});
+
 test('static field failures identify the declaring class and source line', async () => {
   const source = `package demo;
 class Main {
