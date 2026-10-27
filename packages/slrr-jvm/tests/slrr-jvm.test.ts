@@ -73,6 +73,17 @@ test('async native failure retains Java source location', async () => {
     /Main\.run \(source line 3\): adapter offline/);
 });
 
+test('a reference array preserves its element type when passed to a native method', async () => {
+  const source = `package demo; import demo.Host;
+    class Main { int run() { ResourceRef[] refs = new ResourceRef[1]; refs[0] = new ResourceRef(7); return Host.read(refs[0]); } }
+    class ResourceRef { int id; ResourceRef(int value) { id = value; } }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' || className === 'demo.ResourceRef'
+    ? { path: 'Main.java', source } : null, selectMethods: () => ['Main', 'run', 'ResourceRef'] });
+  jvm.natives.register('demo.Host', 'read', ['ResourceRef'], ({ args }) => jv('int', Number(jvm.get(args[0], 'id').value)));
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
+});
+
 test('unresolved imports and unregistered native calls fail explicitly', async () => {
   const source = `package game; import game.Missing; class Main { int run() { return Missing.value(); } }`;
   const runtime = new SlrrJvm({

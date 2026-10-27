@@ -2,6 +2,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import { GameObject, type OrientationState, type Vector3State } from './game-object';
 import { ResourceObject } from './resource-object';
 import { RenderObject } from './render-object';
+import type { ResourceCatalog } from './resource-catalog';
 import type { BootEvent } from './game-boot';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
@@ -20,13 +21,15 @@ export class GameTypeNative {
   private readonly nodes = new WeakMap<JavaObject, ResourceObject>();
   private readonly objects = new Map<number, ResourceObject>();
   private readonly handles = new WeakMap<ResourceObject, JavaValue>();
+  private readonly catalogChildrenLoaded = new WeakSet<ResourceObject>();
   private nextId = 1;
   private nextClonedResourceId = 0x40000000;
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private dispatchingEvents = false;
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
-    private readonly renderChanged?: (node: RenderObject) => void) {
+    private readonly renderChanged?: (node: RenderObject) => void,
+    private readonly catalog?: ResourceCatalog) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -35,17 +38,21 @@ export class GameTypeNative {
       const node = this.allocate(receiver);
       node.resourceId = Number(args[0].value) | 0;
       node.typeId = node.resourceId;
+      node.resourcePack = null;
+      node.resourceScript = null;
       node.copiedFromResourceId = null;
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['ResourceRef'], ({ receiver, args }) => {
       const node = this.allocate(receiver);
-      const literal = args[0].value as { id?: number } | null;
+      const literal = args[0].value as { id?: number; pack?: string } | null;
       const source = literal && 'id' in literal && !('fields' in literal) ? null
         : args[0].value == null ? null : this.getResource(args[0]);
       node.resourceId = source?.resourceId ?? literal?.id ?? 0;
       node.typeId = source?.typeId ?? node.resourceId;
       node.resourceType = source?.resourceType ?? 0;
+      node.resourcePack = source?.resourcePack ?? (typeof literal?.pack === 'string' ? literal.pack : null);
+      node.resourceScript = source?.resourceScript ?? null;
       node.copiedFromResourceId = null;
       return voidValue();
     });
@@ -56,6 +63,8 @@ export class GameTypeNative {
       if (source === target) return voidValue();
       target.typeId = source.typeId;
       target.resourceType = source.resourceType;
+      target.resourcePack = source.resourcePack;
+      target.resourceScript = source.resourceScript;
       target.params = source.params;
       target.alias = source.alias;
       target.setParent(source.parent);
@@ -94,8 +103,11 @@ export class GameTypeNative {
       jv('int', this.requireResource(receiver).parentId ?? 0));
     jvm.natives.register(resourceRef, 'getParent', [], ({ receiver }) =>
       this.handle(this.requireResource(receiver).parent));
-    jvm.natives.register(resourceRef, 'getFirstChild', [], ({ receiver }) =>
-      this.handle(this.requireResource(receiver).children.values().next().value ?? null));
+    jvm.natives.register(resourceRef, 'getFirstChild', [], ({ receiver }) => {
+      const node = this.requireResource(receiver);
+      this.materializeCatalogChildren(node);
+      return this.handle(node.children.values().next().value ?? null);
+    });
     jvm.natives.register(resourceRef, 'getNextChild', [], ({ receiver }) => {
       const node = this.requireResource(receiver);
       if (!node.parent) return jv('ResourceRef', null);
@@ -123,6 +135,13 @@ export class GameTypeNative {
 
     const gameRef = 'java.util.resource.GameRef';
     jvm.natives.register(gameRef, 'create', ['GameRef', 'GameRef', 'String', 'String'], ({ receiver, args }) => {
+      this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
+      return receiver;
+    });
+    // Build 940 passes ResourceRef[] elements to the GameRef-typed native factory.
+    jvm.natives.register(gameRef, 'create', ['GameRef', 'ResourceRef', 'String', 'String'], ({ receiver, args }) => {
+      const script = this.getResource(args[1])?.resourceScript;
+      if (script) throw new Error(`Resource script instantiation missing: ${script}`);
       this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
       return receiver;
     });
@@ -263,6 +282,20 @@ export class GameTypeNative {
 
   private handle(node: ResourceObject | null): JavaValue {
     return node ? this.handles.get(node) ?? jv('ResourceRef', null) : jv('ResourceRef', null);
+  }
+
+  private materializeCatalogChildren(parent: ResourceObject): void {
+    if (!this.catalog || !parent.resourcePack || this.catalogChildrenLoaded.has(parent)) return;
+    this.catalogChildrenLoaded.add(parent);
+    for (const child of this.catalog.childrenOf(parent.resourcePack, parent.resourceId)) {
+      const receiver = this.jvm.construct('java.util.resource.ResourceRef',
+        [jv('ResourceRef', { pack: child.pack, id: child.id })]);
+      const node = this.requireResource(receiver);
+      node.resourceType = child.type;
+      node.resourceScript = child.script ?? null;
+      node.alias = child.alias;
+      node.setParent(parent);
+    }
   }
 
   private object(receiver: JavaValue): JavaObject {

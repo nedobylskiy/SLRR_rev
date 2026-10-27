@@ -4,6 +4,9 @@ export class ResourceObject {
   parent: ResourceObject | null = null;
   /** The ID exposed by ResourceRef.id(); zero means an unbound handle. */
   resourceId = 0;
+  /** Owning RPK for a type reference; absent for transient engine objects. */
+  resourcePack: string | null = null;
+  resourceScript: string | null = null;
   /** ResourceRef.type(); zero until a host resource has been created. */
   resourceType = 0;
   /** Source resource ID when this binding was duplicated as an independent resource. */

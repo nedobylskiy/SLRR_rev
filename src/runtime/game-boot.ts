@@ -9,6 +9,7 @@ import { ControllerNative } from './controller-native';
 import { InputNative } from './input-native';
 import { FileNative } from './file-native';
 import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
+import { ResourceCatalog } from './resource-catalog';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
@@ -90,7 +91,17 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       return voidValue();
     });
   };
-  const gameTypes = new GameTypeNative(jvm, report, renderChanged);
+  const resourceCatalog = new ResourceCatalog(assets.byPath.has('cars.rpk')
+    ? [['cars.rpk', await assets.pack('cars.rpk')] as const] : []);
+  const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog);
+  jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
+    const path = String(args[0].value ?? '').replaceAll('\\', '/');
+    const asset = assets.byPath.get(path.toLowerCase());
+    if (!asset || !path.toLowerCase().endsWith('.rpk')) return jv('int', 0);
+    // Vehicle libraries are needed to enumerate cars:0x1000r during GameLogic startup.
+    if (path.toLowerCase().startsWith('cars/')) resourceCatalog.addPack(path, await assets.pack(path));
+    return jv('int', 1);
+  });
   const viewports = new ViewportNative(jvm, gameTypes, viewportSize);
   const renderRefs = new RenderRefNative(jvm, gameTypes);
   const cameras = new CameraNative(jvm, gameTypes, viewports);

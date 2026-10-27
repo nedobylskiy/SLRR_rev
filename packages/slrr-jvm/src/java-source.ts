@@ -189,7 +189,8 @@ export class JavaSourceMachine {
       const array = this.expression(expr.left!, scope, self, method), index = Number(this.expression(expr.right!, scope, self, method).value);
       if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
       const values = array.value as unknown[];
-      return { get: () => jv('int', values[index]), set: (v: JavaValue) => { values[index] = v.value; } };
+      const elementType = array.type.endsWith('[]') ? array.type.slice(0, -2) : 'int';
+      return { get: () => jv(elementType, values[index]), set: (v: JavaValue) => { values[index] = v.value; } };
     }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }
@@ -268,7 +269,8 @@ export class JavaSourceMachine {
       const index = Number((await this.expressionAsync(expr.right!, scope, self, method)).value);
       if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
       const values = array.value as unknown[];
-      return { get: async () => jv('int', values[index]), set: v => { values[index] = v.value; } };
+      const elementType = array.type.endsWith('[]') ? array.type.slice(0, -2) : 'int';
+      return { get: async () => jv(elementType, values[index]), set: v => { values[index] = v.value; } };
     }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }
