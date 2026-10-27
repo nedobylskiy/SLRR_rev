@@ -13,6 +13,8 @@ import { ResourceCatalog } from './resource-catalog';
 import { StringNative } from './string-native';
 import { SystemNative } from './system-native';
 import { PartNative } from './part-native';
+import { ChassisNative } from './chassis-native';
+import { parsePartConfig } from '../formats/cfg';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative } from './render-ref-native';
@@ -123,11 +125,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   new StringNative(jvm);
   new SystemNative(jvm, report);
   new PartNative(jvm);
+  const chassisNative = new ChassisNative(jvm);
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
   const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog,
-    async (script, typeId) => {
+    async (script, typeId, pack) => {
       const compiled = normalizePath(script);
       const sourcePath = compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
       const source = assets.byPath.get(sourcePath);
@@ -154,6 +157,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       dynamicSources.set(className, { path: source.path, source: content });
       sources.set(normalizePath(source.path), content);
       await jvm.loadClass(className);
+      const cfgPath = pack && resourceCatalog.resolve(pack, typeId)?.cfgPath;
+      const cfg = cfgPath && assets.byPath.has(cfgPath)
+        ? parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath))) : null;
+      chassisNative.prepare(className, cfg?.maxSteer ?? 0.7, cfg?.ackermann ?? 2);
       const constructors = [...content.matchAll(new RegExp(`\\b${simpleName}\\s*\\(([^)]*)\\)`, 'g'))];
       const takesId = constructors.some(match => /^\s*int\s+\w+\s*$/.test(match[1]));
       return jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);

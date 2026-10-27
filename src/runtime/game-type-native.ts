@@ -30,7 +30,7 @@ export class GameTypeNative {
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
     private readonly catalog?: ResourceCatalog,
-    private readonly instantiateResourceScript?: (script: string, typeId: number) => Promise<JavaValue>,
+    private readonly instantiateResourceScript?: (script: string, typeId: number, pack: string | null) => Promise<JavaValue>,
     private readonly loadResourcePack?: (pack: string) => Promise<void>) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
@@ -154,7 +154,7 @@ export class GameTypeNative {
       }
       if (type?.resourceScript) {
         if (!this.instantiateResourceScript) throw new Error(`Resource script instantiation missing: ${type.resourceScript}`);
-        const scripted = await this.instantiateResourceScript(type.resourceScript, type.typeId);
+        const scripted = await this.instantiateResourceScript(type.resourceScript, type.typeId, type.resourcePack);
         this.create(scripted, args[0], type.typeId, args[2], args[3]);
         const node = this.require(scripted);
         node.resourcePack = type.resourcePack;

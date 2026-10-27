@@ -14,6 +14,13 @@ export interface TireContactState { contact: boolean; force: number; contactPoin
 export function tyreContactForces(normalLoad: number, alignment: number, slipSpeed: number, lateralSpeed: number) {
   return tireForces(normalLoad, alignment, slipSpeed, lateralSpeed, 0, 0, { ...DEFAULT_TIRE_MODEL, model: 'legacy' });
 }
+/** CFG maxsteer supplies the center angle and Ackermann length; wheel x selects inner/outer angle. */
+export function ackermannSteerAngle(centerAngle: number, wheelX: number, length: number, steerFactor = 1): number {
+  if (Math.abs(centerAngle) < 1e-7 || !steerFactor) return 0;
+  if (length === 0) return centerAngle * steerFactor;
+  const radius = length / Math.tan(centerAngle);
+  return (radius <= 0 ? -Math.atan2(length, -radius - wheelX) : Math.atan2(length, radius + wheelX)) * steerFactor;
+}
 export class TestTerrain implements Terrain {
   ramp = false;
   height(x: number, z: number) { return this.ramp && x > -1.8 && x < 1.8 && z < -4 && z > -8 ? (-z - 4) * 0.28 : 0; }
@@ -93,7 +100,8 @@ export class Suspension3D {
         const normal = terrainHit?.normal ?? this.terrain.normal(patch.x, patch.z, hard.y), speed = this.body.pointVelocity(hard).dot(normal);
         w.force = Math.max(0, Math.min(this.body.mass * 9.81 * 3, (w.rest - length) * k - damping * speed + Math.max(0, w.rest - w.bump - length) * k * 8));
         this.body.addForce(normal.clone().multiplyScalar(w.force), hard);
-        const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), this.steer * w.steering).transformDirection(alignment).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();
+        const wheelSteer = ackermannSteerAngle(this.steer, w.center.x, this.root.definition.config.ackermann ?? 2, w.steering);
+        const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), wheelSteer).transformDirection(alignment).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();
         const side = new Vector3().crossVectors(forward, normal).normalize(), velocity = this.body.pointVelocity(patch), longitudinal = velocity.dot(forward);
         w.contactPoint.set(patch.x, (terrainHit?.height ?? this.terrain.height(patch.x, patch.z, hard.y)) + 0.012, patch.z);
         w.contactNormal.copy(normal); w.forward.copy(forward); w.surface = terrainHit?.surface ?? 'road';
@@ -142,7 +150,8 @@ export class Suspension3D {
       const down = new Vector3(0, -1, 0).transformDirection(damaged), rotation = new Quaternion().setFromRotationMatrix(damaged);
       const offset = new Vector3().setFromMatrixPosition(w.frame).sub(w.center).applyQuaternion(rotation);
       const position = w.hardpoint.clone().addScaledVector(down, w.length).add(offset);
-      const carrier = damaged.clone().multiply(w.frame).setPosition(position).multiply(new Matrix4().makeRotationY(this.steer * w.steering));
+      const wheelSteer = ackermannSteerAngle(this.steer, w.center.x, this.root.definition.config.ackermann ?? 2, w.steering);
+      const carrier = damaged.clone().multiply(w.frame).setPosition(position).multiply(new Matrix4().makeRotationY(wheelSteer));
       w.part.local.copy(carrier).multiply(new Matrix4().makeRotationX(-w.spin * sign)).multiply(w.inverseOwn);
       const travel = carrier.multiply(w.frame.clone().invert());
       for (const moving of this.movingParts[index]) if (moving.part.parent === this.root) moving.part.local.copy(travel).multiply(moving.base);

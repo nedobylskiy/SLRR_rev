@@ -6,7 +6,7 @@ export interface CfgWheel extends CfgPose { radius?: number; parameters: number[
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose }[]; maxSteer?: number; links: number[][];
+  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -68,7 +68,14 @@ export function parsePartConfig(source: string): PartConfig {
       case 'spring': spring = [number(0), number(1), number(2)]; if (spring.some(v => v <= 0)) throw fail(); break;
       case 'wheel': result.wheels.push({ ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }); break;
       case 'steering': result.steering = pose(); break;
-      case 'maxsteer': result.maxSteer = number(0); if (result.maxSteer <= 0) throw fail(); break;
+      case 'maxsteer':
+        result.maxSteer = number(0);
+        if (result.maxSteer <= 0) throw fail();
+        if (args.length > 1) {
+          result.ackermann = number(1);
+          if (result.ackermann < 0) throw fail();
+        }
+        break;
       default: result.unknown.push({ line, command, args });
     }
   }

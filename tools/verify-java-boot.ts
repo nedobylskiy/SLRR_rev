@@ -12,7 +12,7 @@ const systemNames = (await readdir(join(root, 'system/scripts'), { recursive: tr
   .filter(name => (classOnly ? /\.class$/i : /\.(java|class)$/i).test(name))
   .map(name => `system/scripts/${name.replaceAll('\\', '/')}`);
 const carNames = ['cars.rpk', ...(await readdir(join(root, 'cars'), { recursive: true }))
-  .filter(name => /\.(rpk|java)$/i.test(name)).map(name => `cars/${name.replaceAll('\\', '/')}`)];
+  .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `cars/${name.replaceAll('\\', '/')}`)];
 const eventNames = (await readdir(join(root, 'sl/Scripts/game/CareerEvents'), { recursive: true }))
   .filter(name => /\.(rpk|java)$/i.test(name))
   .map(name => `sl/Scripts/game/CareerEvents/${name.replaceAll('\\', '/')}`);
@@ -29,7 +29,7 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.game.parts.bodypart.Chassis.getMaxSteer()';
+const expected = 'Java native implementation missing: java.game.parts.Part.setWear(float)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;

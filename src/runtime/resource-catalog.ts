@@ -1,7 +1,7 @@
 import { normalizePath } from '../assets';
 import { entryProperties, type RpkPack } from '../formats/rpk';
 
-export interface CatalogResource { pack: string; id: number; type: number; alias: string; script?: string }
+export interface CatalogResource { pack: string; id: number; type: number; alias: string; script?: string; cfgPath?: string }
 
 /** Resolves RPK super IDs, including links through another pack's dependency slot. */
 export class ResourceCatalog {
@@ -18,9 +18,11 @@ export class ResourceCatalog {
     if (this.loaded.has(path)) return;
     this.loaded.add(path);
     for (const entry of pack.entries) {
-      const script = entry.type === 8 ? entryProperties(entry).find(prop => prop.key === 'script')?.value : undefined;
+      const properties = entryProperties(entry);
+      const script = entry.type === 8 ? properties.find(prop => prop.key === 'script')?.value : undefined;
+      const cfgPath = /^(?:car|part)\s+(.+\.cfg)$/i.exec(properties.find(prop => prop.key === 'native')?.value ?? '')?.[1];
       const resource: CatalogResource = { pack: path, id: entry.typeId, type: entry.type, alias: entry.alias,
-        ...(script ? { script } : {}) };
+        ...(script ? { script } : {}), ...(cfgPath ? { cfgPath: normalizePath(cfgPath) } : {}) };
       this.resources.set(ResourceCatalog.key(path, entry.typeId), resource);
       if (!entry.superId) continue;
       const slot = entry.superId >>> 16;
