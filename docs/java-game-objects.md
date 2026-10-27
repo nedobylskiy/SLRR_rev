@@ -15,3 +15,5 @@ The final string argument of `GameRef.create(...)` or `GameType.createNativeInst
 This is the script-facing state layer. Rendering, physics integration, queued event dispatch, and resource-pack tree population still need host systems. Tree calls currently traverse objects created by the Java runtime; they do not yet read parent and child links from RPK resources. The implementation deliberately stops at the next missing native during `Init.java` startup so the console reports the exact method required next.
 
 `Viewport` now references the existing WebGL canvas. Its Java width, height, left, and top remain normalized fractions, as the original OSD code expects; `getAspect()` derives the ratio from the canvas's current pixel dimensions and the viewport region. `Camera.create()` records the Java camera resource and its link to that viewport. The renderer does not yet consume the Java camera state.
+
+`GameType.setEventMask()` and `clearEventMask()` maintain a separate event subscription bitmask. The mask is checked when dispatching an event to a Java handler; queuing an event does not itself remove or filter it. Script event dispatch is still pending.

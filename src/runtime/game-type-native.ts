@@ -66,6 +66,12 @@ export class GameTypeNative {
     jvm.natives.register(gameType, 'createNativeInstance', ['GameRef'], ({ receiver, args }) => this.create(receiver, args[0], 0, null, null));
     jvm.natives.register(gameType, 'createNativeInstance', ['GameRef', 'int', 'String', 'String'], ({ receiver, args }) =>
       this.create(receiver, args[0], Number(args[1].value), args[2], args[3]));
+    jvm.natives.register(gameType, 'setEventMask', ['int'], ({ receiver, args }) => {
+      this.require(receiver).setEventMask(Number(args[0].value) | 0); return voidValue();
+    });
+    jvm.natives.register(gameType, 'clearEventMask', ['int'], ({ receiver, args }) => {
+      this.require(receiver).clearEventMask(Number(args[0].value) | 0); return voidValue();
+    });
 
     const gameRef = 'java.util.resource.GameRef';
     jvm.natives.register(gameRef, 'create', ['GameRef', 'GameRef', 'String', 'String'], ({ receiver, args }) => {

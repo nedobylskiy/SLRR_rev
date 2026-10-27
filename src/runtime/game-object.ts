@@ -8,6 +8,7 @@ const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
 /** Host counterpart of one GameRef/GameType instance. Simulation systems may bind to this state later. */
 export class GameObject extends ResourceObject {
   readonly events: QueuedGameEvent[] = [];
+  eventMask = 0;
   flags = 0;
   worldTreeRoot = false;
   collisionActivationQueued = false;
@@ -45,6 +46,12 @@ export class GameObject extends ResourceObject {
   }
 
   queueEvent(event: QueuedGameEvent): void { this.events.push(event); }
+
+  setEventMask(mask: number): void { this.eventMask |= mask; }
+
+  clearEventMask(mask: number): void { this.eventMask &= ~mask; }
+
+  acceptsEvent(type: number): boolean { return (this.eventMask & type) !== 0; }
 
   requestActiveCollision(): void {
     if (this.collisionActivationQueued) return;

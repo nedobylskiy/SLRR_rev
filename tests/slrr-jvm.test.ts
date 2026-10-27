@@ -145,3 +145,19 @@ test('the SLRR dialect permits an implicit no-argument constructor beside declar
   await jvm.loadClass('demo.Child');
   assert.equal(jvm.get(jvm.construct('demo.Child', []), 'marker').value, 3);
 });
+
+test('a source method outside the eager method set is parsed when called', async () => {
+  const source = 'package demo; class Main { int value; Main() { update(12); } void update(int n) { value = n; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main'
+    ? { path: 'Main.java', source } : null, selectMethods: () => ['Main'] });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.get(jvm.construct('demo.Main', []), 'value').value, 12);
+});
+
+test('a resource literal matches an integer constructor argument', async () => {
+  const source = 'package demo; class Ref { int id; Ref(int value) { id = value; } } class Main { int read() { return new Ref(frontend:0xd7r).id; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0xd7);
+});

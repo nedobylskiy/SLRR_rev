@@ -10,7 +10,7 @@ export interface SlrrJvmOptions {
   resolveImport(request: ImportRequest): SourceLocation | null | Promise<SourceLocation | null>;
   /** Optional when resolveImport always supplies source. No filesystem is built into the package. */
   readSource?(path: string): string | Promise<string>;
-  /** Optional execution filter. Omit to make every source method available. */
+  /** Optional eager parsing filter. Other source methods are parsed when first called. */
   selectMethods?(className: string): Iterable<string> | undefined;
   /** Float literal conversion observed in a particular SLRR build; B is the Build 940 default. */
   floatMode?: FloatMode;
@@ -19,7 +19,7 @@ export interface SlrrJvmOptions {
 }
 
 export interface JavaObject { className: string; fields: Map<string, JavaValue> }
-interface LoadedClass { name: string; path: string; parsed: SourceClass; imports: Map<string, string>; nativeMethods: { name: string; parameters: string[] }[] }
+interface LoadedClass { name: string; path: string; source: string; sourceMethods: Set<string>; parsed: SourceClass; imports: Map<string, string>; nativeMethods: { name: string; parameters: string[] }[] }
 
 function sourceTypeHints(cls: ParsedClass, selected: Set<string>): Set<string> {
   const hints = new Set<string>();
@@ -115,7 +115,8 @@ export class SlrrJvm implements JavaHost {
     const imports = new Map<string, string>();
     const nativeMethods = declaration.members.flatMap(member => member.kind === 'method' && member.flags.includes('native')
       ? [{ name: member.name, parameters: member.params.map(parameter => parameter.type) }] : []);
-    const entry: LoadedClass = { name: className, path: location.path, parsed, imports, nativeMethods };
+    const sourceMethods = new Set(declaration.members.flatMap(member => member.kind === 'method' && member.body ? [member.name] : []));
+    const entry: LoadedClass = { name: className, path: location.path, source, sourceMethods, parsed, imports, nativeMethods };
     this.classes.set(className, entry);
     this.aliases.set(shortName, className);
     try {
@@ -301,6 +302,10 @@ export class SlrrJvm implements JavaHost {
       const entry = this.classes.get(current);
       if (entry) {
         this.ensureInitialized(entry);
+        if (entry.sourceMethods.has(name) && !entry.parsed.methods.some(method => method.name === name)) {
+          const parsed = parseSourceClass(entry.source, new Set([name]), entry.name.split('.').at(-1), this.options.floatMode ?? 'B');
+          entry.parsed.methods.push(...parsed.methods.filter(method => method.name === name));
+        }
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
         if (method) return this.invokeSource(entry, method, receiver, args);
       }
@@ -358,6 +363,8 @@ export class SlrrJvm implements JavaHost {
 
   private parameterScore(parameter: string, argument: JavaValue): number {
     if (argument.value === null) return ['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long'].includes(parameter) ? Infinity : 5;
+    if (parameter === 'int' && argument.type === 'ResourceRef' && typeof argument.value === 'object'
+      && 'id' in argument.value && !('fields' in argument.value)) return 1;
     if (parameter === argument.type || this.resolveName(parameter) === this.resolveName(argument.type)) return 0;
     if (argument.type === 'int' && parameter === 'float') return 1;
     if (argument.type === 'int' && parameter === 'double') return 2;

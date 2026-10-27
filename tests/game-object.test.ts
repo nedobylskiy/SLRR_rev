@@ -31,6 +31,13 @@ test('game objects form a guarded tree and retain flags, pose, velocity, and que
   assert.deepEqual(car.velocity, { x: 0, y: 0, z: 0 });
   car.queueEvent({ sourceId: 1, type: 16, payload: 'start' });
   assert.deepEqual(car.events, [{ sourceId: 1, type: 16, payload: 'start' }]);
+  car.setEventMask(0x80);
+  car.setEventMask(0x10000);
+  assert.equal(car.acceptsEvent(0x80), true);
+  car.clearEventMask(0x80);
+  assert.equal(car.acceptsEvent(0x80), false);
+  assert.equal(car.acceptsEvent(0x10000), true);
+  assert.equal(car.events.length, 1);
   car.requestActiveCollision(); car.requestActiveCollision();
   assert.equal(car.collisionActivationQueued, true);
   assert.ok(car.flags & 0x10000000);
@@ -68,6 +75,11 @@ test('GameRef native calls update the same object created by GameType', () => {
   assert.deepEqual(host.get(child)?.events, [{ sourceId: 1, type: 16, payload: 'start' }]);
   native('java.util.resource.GameRef', 'setActiveCollision', child);
   assert.equal(host.get(child)?.collisionActivationQueued, true);
+  native('java.lang.GameType', 'setEventMask', child, [jv('int', 0x10000)]);
+  native('java.lang.GameType', 'setEventMask', child, [jv('int', 0x80)]);
+  assert.equal(host.get(child)?.eventMask, 0x10080);
+  native('java.lang.GameType', 'clearEventMask', child, [jv('int', 0x80)]);
+  assert.equal(host.get(child)?.eventMask, 0x10000);
 });
 
 test('GameRef.create uses its last string argument as the tree alias', () => {
