@@ -59,7 +59,13 @@ test('GameRef native calls update the same object created by GameType', () => {
   native('java.lang.GameType', 'createNativeInstance', root);
   native('java.lang.GameType', 'createNativeInstance', child,
     [jv('GameRef', root.value), jv('int', 42), jv('String', '1,2,3'), jv('String', 'player car')]);
-  assert.equal(host.get(child)?.parentId, host.get(root)?.id);
+  assert.equal(host.get(child)?.parentId, host.get(root)?.resourceId);
+  const byId = ref('java.util.resource.GameRef');
+  native('java.util.resource.ResourceRef', 'set', byId, [jv('int', host.get(child)!.resourceId)]);
+  assert.equal(host.getResource(byId), host.get(child));
+  const copied = ref('java.util.resource.GameRef');
+  native('java.util.resource.ResourceRef', 'set', copied, [jv('ResourceRef', byId.value)]);
+  assert.equal(host.getResource(copied), host.get(child));
   assert.equal(host.getById(2)?.alias, 'player car');
   assert.equal(host.roots().length, 1);
   native('java.util.resource.GameRef', 'setFlags', child, [jv('int', 0x10)]);

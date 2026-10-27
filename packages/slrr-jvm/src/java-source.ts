@@ -141,6 +141,7 @@ class JavaSourceLocationError extends Error {
 
 export class JavaSourceMachine {
   private remaining = 0; private depth = 0; private singleIteration = false;
+  private readonly arrayResourceOrigins = new WeakMap<unknown[], Map<number, Pick<JavaValue, 'resource' | 'resourceId'>>>();
   constructor(readonly host: JavaHost, readonly budget = 1_000_000, readonly maxDepth = 128) {}
   invoke(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): JavaValue {
     if (this.depth === 0) this.remaining = this.budget;
@@ -204,6 +205,18 @@ export class JavaSourceMachine {
     }
   }
   private step() { if (--this.remaining < 0) throw new Error('Java execution budget exceeded'); }
+  private arrayElement(values: unknown[], index: number, type: string): JavaValue {
+    return { ...jv(type, values[index]), ...this.arrayResourceOrigins.get(values)?.get(index) };
+  }
+  private setArrayElement(values: unknown[], index: number, type: string, value: JavaValue): void {
+    const coerced = coerce(type, value);
+    values[index] = coerced.value;
+    let origins = this.arrayResourceOrigins.get(values);
+    if (coerced.resource) {
+      if (!origins) { origins = new Map(); this.arrayResourceOrigins.set(values, origins); }
+      origins.set(index, { resource: coerced.resource, resourceId: coerced.resourceId });
+    } else origins?.delete(index);
+  }
   private reference(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod) {
     if (expr.kind === 'name') {
       const owner = scope.owner(expr.text!);
@@ -216,7 +229,8 @@ export class JavaSourceMachine {
       if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
       const values = array.value as unknown[];
       const elementType = array.type.endsWith('[]') ? array.type.slice(0, -2) : 'int';
-      return { get: () => jv(elementType, values[index]), set: (v: JavaValue) => { values[index] = coerce(elementType, v).value; } };
+      return { get: () => this.arrayElement(values, index, elementType),
+        set: (v: JavaValue) => this.setArrayElement(values, index, elementType, v) };
     }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }
@@ -298,7 +312,8 @@ export class JavaSourceMachine {
       if (!Array.isArray(array.value) || !Number.isInteger(index) || index < 0 || index >= array.value.length) throw new Error('Invalid Java array index');
       const values = array.value as unknown[];
       const elementType = array.type.endsWith('[]') ? array.type.slice(0, -2) : 'int';
-      return { get: async () => jv(elementType, values[index]), set: v => { values[index] = coerce(elementType, v).value; } };
+      return { get: async () => this.arrayElement(values, index, elementType),
+        set: v => this.setArrayElement(values, index, elementType, v) };
     }
     throw new Error(`Unsupported Java assignment target ${expr.kind}`);
   }

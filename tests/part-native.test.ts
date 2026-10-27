@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { PartNative } from '../src/runtime/part-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
+import { parsePartConfig } from '../src/formats/cfg';
 
 test('Java part wear belongs to each instance while tear remains pristine', async () => {
   const source = `package java.game.parts; class Part {
@@ -70,4 +71,56 @@ test('Part.getCar resolves the installed chassis across nested parts and returns
   assert.equal(getCar(loose), 0);
   gameTypes.get(part)?.setParent(gameTypes.getResource(inventory) ?? null);
   assert.equal(getCar(nested), 0);
+});
+
+test('CFG slots connect parts through Java install commands and expose both sides to scripts', async () => {
+  const sources = new Map([
+    ['java.game.parts.Part', `package java.game.parts; public class Part {
+      public native int getSlots(); public native int getSlotID(int index);
+      public native Part partOnSlot(int slot); public native int slotIDOnSlot(int slot);
+    }`],
+    ['java.game.parts.bodypart.Chassis', 'package java.game.parts.bodypart; import java.game.parts.Part; public class Chassis extends Part {}'],
+  ]);
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => {
+    const source = sources.get(className);
+    return source ? { path: `${className}.java`, source } : null;
+  } });
+  await jvm.loadClass('java.game.parts.bodypart.Chassis');
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  const parts = new PartNative(jvm, gameTypes);
+  const ref = (className: string) => jv(className, { className, fields: new Map() });
+  const root = ref('java.game.Inventory');
+  const car = ref('java.game.parts.bodypart.Chassis');
+  const engine = ref('java.game.parts.Part');
+  const crank = ref('java.game.parts.Part');
+  const flywheel = ref('java.game.parts.Part');
+  const create = (receiver: ReturnType<typeof ref>, parent: ReturnType<typeof ref> | null, type: number) =>
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', receiver,
+      [jv('GameRef', parent?.value ?? null), jv('int', type), jv('String', null), jv('String', null)]);
+  create(root, null, 0);
+  create(car, root, 0x158);
+  create(engine, root, 0xd003f);
+  create(crank, root, 0xae1);
+  create(flywheel, root, 0xac4);
+  parts.configure(car, parsePartConfig('slot 0 0 0 0 0 0 401\nattach 0x000D003F 19'));
+  parts.configure(engine, parsePartConfig('slot 0 0 0 0 0 0 19\nslot 0 0 0 0 0 0 8'));
+  parts.configure(crank, parsePartConfig('slot 0 0 0 0 0 0 7\nattach 0x0000003F 8\nslot 0 0 0 0 0 0 6'));
+  parts.configure(flywheel, parsePartConfig('slot 0 0 0 0 0 0 2\nattach 0x00000AE1 6'));
+  const id = (value: ReturnType<typeof ref>) => gameTypes.get(value)!.resourceId;
+  const install = (child: ReturnType<typeof ref>, parent: ReturnType<typeof ref>) =>
+    jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', child,
+      [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)} 0 ${id(parent)} 0`)]);
+  install(engine, car);
+  install(crank, engine);
+  install(flywheel, engine);
+  const call = (target: ReturnType<typeof ref>, method: string, arg: number) =>
+    jvm.natives.invoke('java.game.parts.Part', method, target, [jv('int', arg)])?.value;
+  assert.equal(call(car, 'getSlotID', 0), 401);
+  assert.equal(call(car, 'partOnSlot', 401), engine.value);
+  assert.equal(call(engine, 'getSlotID', -1), 19);
+  assert.equal(call(engine, 'partOnSlot', 19), car.value);
+  assert.equal(call(engine, 'slotIDOnSlot', 19), 401);
+  assert.equal(call(engine, 'partOnSlot', 8), crank.value);
+  assert.equal(call(crank, 'partOnSlot', 6), flywheel.value);
+  assert.equal(gameTypes.get(flywheel)?.parent, gameTypes.get(crank));
 });

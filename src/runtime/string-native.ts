@@ -21,6 +21,18 @@ function tokens(input: string, delimiters: string): string[] {
 /** Native operations on primitive strings; Java-defined methods such as chop still run from String.java. */
 export class StringNative {
   constructor(jvm: SlrrJvm) {
+    jvm.natives.register('java.lang.Float', 'toString', ['float', 'String'], ({ args }) => {
+      const number = Number(args[0].value);
+      const format = String(args[1].value ?? '%f');
+      if (!Number.isFinite(number)) throw new Error('Invalid formatted float');
+      return jv('String', format.replace(/%%|%(\d+)?(?:\.(\d+))?f/g, token => {
+        if (token === '%%') return '%';
+        const [, widthText, precisionText] = /^%(\d+)?(?:\.(\d+))?f$/.exec(token)!;
+        const precision = Math.min(Number(precisionText ?? 6), 20);
+        const formatted = number.toFixed(precision);
+        return formatted.padStart(Number(widthText ?? 0), ' ');
+      }));
+    });
     const owner = 'java.lang.String';
     jvm.natives.register(owner, 'length', [], ({ receiver }) => jv('int', value(receiver).length));
     jvm.natives.register(owner, 'append', ['int'], ({ receiver, args }) => {

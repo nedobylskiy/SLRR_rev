@@ -4,6 +4,7 @@ import { ResourceObject } from './resource-object';
 import { RenderObject } from './render-object';
 import type { ResourceCatalog } from './resource-catalog';
 import type { BootEvent } from './game-boot';
+import type { ResourceIdentity } from 'slrr-jvm';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
@@ -20,27 +21,40 @@ interface PendingScriptEvent {
 export class GameTypeNative {
   private readonly nodes = new WeakMap<JavaObject, ResourceObject>();
   private readonly objects = new Map<number, ResourceObject>();
+  private readonly liveByResourceId = new Map<number, GameObject>();
   private readonly handles = new WeakMap<ResourceObject, JavaValue>();
   private readonly catalogChildrenLoaded = new WeakSet<ResourceObject>();
   private nextId = 1;
+  private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private dispatchingEvents = false;
+  private commandHandler?: (receiver: JavaValue, command: string) => void;
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
     private readonly catalog?: ResourceCatalog,
     private readonly instantiateResourceScript?: (script: string, typeId: number, pack: string | null) => Promise<JavaValue>,
-    private readonly loadResourcePack?: (pack: string) => Promise<void>) {
+    private readonly loadResourcePack?: (pack: string) => Promise<void>,
+    private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['int'], ({ receiver, args }) => {
+      const id = Number(args[0].value) | 0;
+      const origin = args[0].resource ?? this.resolvePackedResource?.(id);
+      const live = this.liveByResourceId.get(id);
+      if (!origin && live instanceof GameObject) {
+        const object = this.object(receiver);
+        const prior = this.nodes.get(object);
+        if (prior && prior !== live) this.objects.delete(prior.id);
+        this.nodes.set(object, live);
+        return voidValue();
+      }
       const node = this.allocate(receiver);
-      const origin = args[0].resource;
       const resource = origin && this.catalog?.resolve(origin.pack, origin.id);
-      node.resourceId = Number(args[0].value) | 0;
+      node.resourceId = id;
       node.typeId = node.resourceId;
       node.resourceType = resource?.type ?? 0;
       node.resourcePack = resource?.pack ?? (origin?.pack ?? null);
@@ -50,10 +64,17 @@ export class GameTypeNative {
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['ResourceRef'], ({ receiver, args }) => {
-      const node = this.allocate(receiver);
       const literal = args[0].value as { id?: number; pack?: string } | null;
       const source = literal && 'id' in literal && !('fields' in literal) ? null
         : args[0].value == null ? null : this.getResource(args[0]);
+      if (source instanceof GameObject) {
+        const object = this.object(receiver);
+        const prior = this.nodes.get(object);
+        if (prior && prior !== source) this.objects.delete(prior.id);
+        this.nodes.set(object, source);
+        return voidValue();
+      }
+      const node = this.allocate(receiver);
       node.resourceId = source?.resourceId ?? literal?.id ?? 0;
       node.typeId = source?.typeId ?? node.resourceId;
       node.resourceType = source?.resourceType ?? 0;
@@ -125,6 +146,16 @@ export class GameTypeNative {
         if (node instanceof GameObject && node.worldTreeRoot) return this.handle(node);
       return jv('ResourceRef', null);
     });
+    jvm.natives.register(resourceRef, 'destroy', [], ({ receiver }) => {
+      const node = this.getResource(receiver);
+      if (!node) return voidValue();
+      node.setParent(null);
+      for (const child of [...node.children]) child.setParent(null);
+      this.objects.delete(node.id);
+      if (node instanceof GameObject) this.liveByResourceId.delete(node.resourceId);
+      this.nodes.delete(this.object(receiver));
+      return voidValue();
+    });
 
     const gameType = 'java.lang.GameType';
     jvm.natives.register(gameType, '<init>', [], () => voidValue());
@@ -159,6 +190,7 @@ export class GameTypeNative {
         const node = this.require(scripted);
         node.resourcePack = type.resourcePack;
         node.resourceScript = type.resourceScript;
+        this.nodes.set(this.object(receiver), node);
         return scripted;
       }
       this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
@@ -202,6 +234,8 @@ export class GameTypeNative {
     });
     jvm.natives.register(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], ({ receiver, args }) => {
       const type = Number(args[1].value) | 0;
+      if (type === 16 && typeof args[2].value === 'string')
+        this.commandHandler?.(receiver, args[2].value);
       this.queueStringEvent(receiver, args[0], type, args[2]);
       return voidValue();
     });
@@ -239,7 +273,13 @@ export class GameTypeNative {
     this.notifyRenderChanged(node);
     return node;
   }
-  getById(id: number): ResourceObject | undefined { return this.objects.get(id); }
+  getById(id: number): ResourceObject | undefined {
+    return this.liveByResourceId.get(id) ?? this.objects.get(id);
+  }
+  reference(node: ResourceObject | null): JavaValue { return this.handle(node); }
+  setCommandHandler(handler: (receiver: JavaValue, command: string) => void): void {
+    this.commandHandler = handler;
+  }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
 
   queueHotkey(receiver: JavaValue, hotkey: JavaValue): void {
@@ -390,13 +430,14 @@ export class GameTypeNative {
     const node = new GameObject(resource.id, object.className, typeId,
       params?.value == null ? null : String(params.value),
       alias?.value == null ? object.className.split('.').at(-1)! : String(alias.value));
-    node.resourceId = node.id;
+    node.resourceId = this.nextGameResourceId++;
     node.resourceType = 1;
     resource.setParent(null);
     node.setParent(parentNode);
     for (const child of [...resource.children]) child.setParent(node);
     this.nodes.set(object, node);
     this.objects.set(node.id, node);
+    this.liveByResourceId.set(node.resourceId, node);
     this.handles.set(node, receiver);
     this.report({ level: 'native', message: `GameType instance #${node.id}: ${node.className} (parent ${node.parentId ?? 'root'}, type ${node.typeId})` });
     return voidValue();

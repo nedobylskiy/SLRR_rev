@@ -17,6 +17,12 @@ export interface ChassisUpdateState {
   descendantPartIds: readonly number[];
 }
 
+export interface ScriptSfxItem {
+  resourceId: number; pack: string | null; pitch: number;
+  minRpm: number; maxRpm: number; minVolume: number; maxVolume: number;
+}
+interface ScriptSfxTable { items: ScriptSfxItem[] }
+
 /** Steering limits owned by each interpreted Chassis instance. */
 export class ChassisNative {
   private readonly initialByClass = new Map<string, { maxSteer: number; ackermann: number }>();
@@ -26,9 +32,49 @@ export class ChassisNative {
   private readonly updating = new WeakSet<JavaObject>();
   private readonly wheels = new WeakMap<JavaObject, WheelRefState[]>();
   private readonly wheelHandles = new WeakMap<JavaObject, WheelRefState>();
+  private readonly sfxTables = new WeakMap<JavaObject, Map<number, JavaValue>>();
+  private readonly sfxTableStates = new WeakMap<JavaObject, ScriptSfxTable>();
+  private readonly exhaustMinVolume = new WeakMap<JavaObject, number>();
 
   constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    jvm.natives.register(owner, 'getSfxTable', ['int'], ({ receiver, args }) => {
+      const id = Number(args[0].value);
+      if (!Number.isInteger(id) || id < 0) return jv('SfxTable', null);
+      const object = receiver.value as JavaObject;
+      let tables = this.sfxTables.get(object);
+      if (!tables) { tables = new Map(); this.sfxTables.set(object, tables); }
+      let table = tables.get(id);
+      if (!table) {
+        const handle: JavaObject = { className: 'java.game.parts.SfxTable', fields: new Map() };
+        table = jv('SfxTable', handle);
+        this.sfxTableStates.set(handle, { items: [] });
+        tables.set(id, table);
+      }
+      return table;
+    });
+    jvm.natives.register(owner, 'setSfxExhaustMinVol', ['float'], ({ receiver, args }) => {
+      this.exhaustMinVolume.set(receiver.value as JavaObject, Number(args[0].value));
+      return jv('void', undefined);
+    });
+    const sfx = 'java.game.parts.SfxTable';
+    jvm.natives.register(sfx, 'getItems', [], ({ receiver }) =>
+      jv('int', this.sfxTable(receiver).items.length));
+    jvm.natives.register(sfx, 'clear', [], ({ receiver }) => {
+      this.sfxTable(receiver).items.length = 0;
+      return jv('void', undefined);
+    });
+    jvm.natives.register(sfx, 'addItem', ['ResourceRef', 'float', 'float', 'float', 'float', 'float'],
+      ({ receiver, args }) => {
+        const resource = this.gameTypes.getResource(args[0]);
+        this.sfxTable(receiver).items.push({
+          resourceId: resource?.resourceId ?? Number(args[0].resourceId ?? 0),
+          pack: resource?.resourcePack ?? args[0].resource?.pack ?? null,
+          pitch: Number(args[1].value), minRpm: Number(args[2].value), maxRpm: Number(args[3].value),
+          minVolume: Number(args[4].value), maxVolume: Number(args[5].value),
+        });
+        return jv('void', undefined);
+      });
     registerWheelRefNatives(jvm.natives, 'java.game.parts.WheelRef', receiver => {
       const state = this.wheelHandles.get(receiver.value as JavaObject);
       if (!state) throw new Error('WheelRef is not bound to a chassis wheel');
@@ -104,6 +150,21 @@ export class ChassisNative {
 
   updateState(receiver: JavaValue): ChassisUpdateState | undefined {
     return this.updates.get(receiver.value as JavaObject);
+  }
+
+  scriptSfx(receiver: JavaValue, id: number): readonly ScriptSfxItem[] {
+    const table = this.sfxTables.get(receiver.value as JavaObject)?.get(id);
+    return table ? [...this.sfxTable(table).items] : [];
+  }
+
+  scriptExhaustMinVolume(receiver: JavaValue): number {
+    return this.exhaustMinVolume.get(receiver.value as JavaObject) ?? 0;
+  }
+
+  private sfxTable(receiver: JavaValue): ScriptSfxTable {
+    const state = this.sfxTableStates.get(receiver.value as JavaObject);
+    if (!state) throw new Error('SfxTable is not bound to a chassis');
+    return state;
   }
 
   wheelState(receiver: JavaValue, index: number): WheelRefState | undefined {

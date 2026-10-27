@@ -24,13 +24,13 @@ const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { 
   .filter(name => /\.(rpk|java)$/i.test(name))
   .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
 const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
-  .filter(name => /\.(rpk|java)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
+  .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
 const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, 'system.rpk', 'frontend.rpk'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 const result = await bootGame(assets, event => process.stdout.write(`${event.level}: ${event.message}\n`));
-const expected = 'Java native implementation missing: java.game.parts.Part.partOnSlot(int)';
+const expected = 'Java native implementation missing: java.game.parts.DynoData.calcDyno(int)';
 if (!result.error?.message.includes(expected)) {
   process.stderr.write(`Expected current implementation boundary: ${expected}\n`);
   process.exitCode = 1;
@@ -60,6 +60,17 @@ if (trackData.length < 5 || new Set(trackData.map(node => node.className)).size 
 const nodes = mounted.flatMap(function visit(node: (typeof mounted)[number]): typeof mounted {
   return [node, ...[...node.children].flatMap(visit)];
 });
+const whisper = nodes.find(node => node.className === 'java.game.cars.Whisper_Q1000XL');
+const engine = whisper && result.jvm.natives.invoke('java.game.parts.Part', 'partOnSlot',
+  result.gameTypes.reference(whisper), [jv('int', 401)]);
+if (!engine?.value || !/LP_V12_engine_block_racing/.test(result.gameTypes.getResource(engine)?.className ?? '')) {
+  process.stderr.write('Java stock installation did not attach the racing V12 to CFG slot 401\n');
+  process.exitCode = 1;
+}
+if (whisper && result.chassis.scriptSfx(result.gameTypes.reference(whisper), 0).length === 0) {
+  process.stderr.write('Java engine script did not populate its native SfxTable\n');
+  process.exitCode = 1;
+}
 if (!nodes.some(node => /[\\/]seat_Torino\.class$/i.test(node.resourceScript ?? '')
   && node.className === 'java.game.parts.interior.seat_Torino')) {
   process.stderr.write('Prize part did not resolve to its Java class\n');

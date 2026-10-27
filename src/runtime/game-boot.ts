@@ -1,4 +1,4 @@
-import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
+import { SlrrJvm, jv, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets, normalizePath } from '../assets';
 import { GameTypeNative } from './game-type-native';
@@ -71,6 +71,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const frontendPack = assets.byPath.has('frontend.rpk') ? await assets.pack('frontend.rpk') : null;
   const partsPack = assets.byPath.has('parts.rpk') ? await assets.pack('parts.rpk') : null;
   const sourcePacks = new Map<string, RpkPack>();
+  const packedResources = new Map<number, ResourceIdentity | null>();
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
     if (path.endsWith('.java')) {
@@ -88,7 +89,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const owner = sourcePacks.get(sourcePath)
         ?? (sourcePath.startsWith(sourceRoot) ? frontendPack : null)
         ?? (sourcePath.startsWith('parts/scripts/') ? partsPack : null);
-      return owner ? packedResourceId(owner, resource) : undefined;
+      const packed = owner ? packedResourceId(owner, resource) : undefined;
+      if (packed !== undefined) {
+        const prior = packedResources.get(packed);
+        if (prior && (prior.pack !== resource.pack || prior.id !== resource.id)) packedResources.set(packed, null);
+        else if (!packedResources.has(packed)) packedResources.set(packed, resource);
+      }
+      return packed;
     },
     resolveImport: async ({ className }) => {
       const dynamicSource = dynamicSources.get(className);
@@ -140,14 +147,17 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   new StringNative(jvm);
   new SystemNative(jvm, report);
   let chassisNative!: ChassisNative;
+  let partNative!: PartNative;
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
   const gameTypes = new GameTypeNative(jvm, report, renderChanged, resourceCatalog,
     async (script, typeId, pack) => {
       const compiled = normalizePath(script);
-      const sourcePath = compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java');
-      const source = assets.byPath.get(sourcePath);
+      const sourcePath = compiled.endsWith('.class')
+        ? compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java')
+        : javaSourcesByName.get(`${compiled.split('.').at(-1)}.java`)?.[0] ?? compiled;
+      const source = assets.byPath.get(normalizePath(sourcePath));
       if (!source) throw new Error(`Resource Java source missing: ${sourcePath}`);
       let content = new TextDecoder().decode(await assets.read(source.path));
       const packageName = /\bpackage\s+([\w.]+)\s*;/.exec(content)?.[1];
@@ -179,14 +189,18 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       chassisNative.prepare(className, cfg?.maxSteer ?? 0.7, cfg?.ackermann ?? 2);
       const constructors = [...content.matchAll(new RegExp(`\\b${simpleName}\\s*\\(([^)]*)\\)`, 'g'))];
       const takesId = constructors.some(match => /^\s*int\s+\w+\s*$/.test(match[1]));
-      return jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);
+      const instance = await jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);
+      partNative.configure(instance, cfg);
+      return instance;
     }, async pack => {
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    });
+    }, id => packedResources.get(id) ?? undefined);
   chassisNative = new ChassisNative(jvm, gameTypes);
-  new PartNative(jvm, gameTypes);
+  partNative = new PartNative(jvm, gameTypes);
+  jvm.natives.register('java.game.parts.DynoData', 'newNative', [], () => voidValue());
+  jvm.natives.register('java.game.parts.DynoData', 'deleteNative', [], () => voidValue());
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
     const asset = assets.byPath.get(path.toLowerCase());

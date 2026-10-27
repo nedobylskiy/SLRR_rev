@@ -539,7 +539,13 @@ export class SlrrJvm implements JavaHost {
       method,
       score: method.parameters.reduce((total, parameter, i) => total + this.parameterScore(parameter.type, args[i]), 0),
     })).filter(candidate => Number.isFinite(candidate.score)).sort((a, b) => a.score - b.score);
-    if (ranked.length > 1 && ranked[0].score === ranked[1].score) throw new Error(`Ambiguous Java source overload: ${owner}.${ranked[0].method.name}`);
+    if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
+      const tied = ranked.filter(candidate => candidate.score === ranked[0].score);
+      const signature = (method: SourceClass['methods'][number]) => method.parameters.map(parameter => parameter.type).join(',');
+      if (tied.every(candidate => signature(candidate.method) === signature(tied[0].method)))
+        return tied.at(-1)?.method;
+      throw new Error(`Ambiguous Java source overload: ${owner}.${ranked[0].method.name}`);
+    }
     return ranked[0]?.method;
   }
 
