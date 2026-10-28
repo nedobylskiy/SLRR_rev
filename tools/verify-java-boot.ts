@@ -28,7 +28,8 @@ const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { 
 const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
   .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
 const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames,
-  'system.rpk', 'frontend.rpk', 'frontend/textures/interface/icons/event_list/gamemode_freeride.png'].map(async path => {
+  'system.rpk', 'frontend.rpk', 'frontend/textures/interface/icons/event_list/gamemode_freeride.png',
+  'frontend/sounds/mnuselect.wav'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
@@ -60,6 +61,24 @@ if (process.argv.includes('--diagnose')) {
 if (result.error) {
   process.stderr.write(`Java boot stopped: ${result.error.message}\n`);
   process.exitCode = 1;
+}
+if (process.argv.includes('--sfx-smoke') && !result.error) {
+  try {
+    const { entry } = await assets.resource('frontend.rpk', 0x7a);
+    const source = entryProperties(entry).find(prop => prop.key === 'sourcefile')?.value;
+    if (!source || !(await assets.read(source)).length) throw new Error('Menu selection sound resource is missing');
+    await result.jvm.loadClass('java.util.resource.SfxRef');
+    const resourceId = result.jvm.get(jv('class', 'java.render.Frontend'), 'SFX_MENU_SELECT');
+    const ref = await result.jvm.constructAsync('java.util.resource.SfxRef', [resourceId]);
+    const handle = await result.jvm.invokeAsync(ref, 'play');
+    if (handle.type !== 'int' || Number(handle.value) <= 0) throw new Error('SfxRef.play returned no voice handle');
+    process.stdout.write('Original menu sound resource and SfxRef.play verified\n');
+  } catch (error) {
+    process.stderr.write(`Menu sound stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
 }
 if (process.argv.includes('--event-list-smoke') && !result.error) {
   try {

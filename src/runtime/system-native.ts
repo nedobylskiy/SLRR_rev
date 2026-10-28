@@ -10,6 +10,7 @@ export class SystemNative {
   private warp = 1;
   private loadPriority = 0;
   private loading = false;
+  private distanceMeasure = 1000;
 
   constructor(jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly now: () => number = () => performance.now(),
@@ -24,6 +25,12 @@ export class SystemNative {
     jvm.natives.register(owner, 'simTime', [], () => jv('float', Math.fround(this.sampleSimulation())));
     jvm.natives.register(owner, 'syncGameTime', ['float'], ({ args }) => {
       this.gameTimeSeconds = Number(args[0].value);
+      return jv('void', undefined);
+    });
+    jvm.natives.register(owner, 'setMeasure', ['float'], ({ args }) => {
+      const value = Number(args[0].value);
+      if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid distance measure');
+      this.distanceMeasure = value;
       return jv('void', undefined);
     });
     jvm.natives.register(owner, 'buildNumber', [], () => jv('int', 940));
@@ -79,5 +86,6 @@ export class SystemNative {
   }
 
   gameTime(): number { return this.gameTimeSeconds; }
+  measure(): number { return this.distanceMeasure; }
   beginLoading(): void { this.loading = true; }
 }

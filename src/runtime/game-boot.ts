@@ -26,6 +26,8 @@ import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
 import { OsdRectangleNative } from './osd-rectangle-native';
+import { SfxRefNative } from './sfx-ref-native';
+import { SOUND_CHANNEL } from '../audio/music-engine';
 import { osdViewport } from './osd-depth';
 import type { OsdLayer } from '../osd/osd-layer';
 import type { SoundJavaBridge } from '../audio/sound-java';
@@ -222,6 +224,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
     }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node));
+  const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
+    () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
+    error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
     packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
   chassisNative = new ChassisNative(jvm, gameTypes);
@@ -338,12 +343,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       jvm.get(jv('class', 'java.render.Frontend'), 'inputQueue'));
     for (const name of ['largeFont', 'mediumFont', 'smallFont', 'largeFont_strong', 'smallFont_strong',
       'largeFont_russian', 'largeFont_scale', 'smallFont_scale', 'largeFont_strong_scale',
-      'smallFont_strong_scale', 'largeFont_russian_scale', 'defLoadingPic', 'fadeRes', 'fadeRes_HD', 'pointers'])
+      'smallFont_strong_scale', 'largeFont_russian_scale', 'defLoadingPic', 'fadeRes', 'fadeRes_HD', 'pointers',
+      'SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
       jvm.natives.registerField('java.game.Frontend', name,
         jvm.get(jv('class', 'java.render.Frontend'), name));
   }
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
-  for (const name of ['SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
+  if (!realLoadingScreen) for (const name of ['SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
     jvm.natives.registerField('java.game.Frontend', name, jv('int', 0));
 
   const entry = `${sourceRoot}Init.java`;
@@ -352,7 +358,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    sfxRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
