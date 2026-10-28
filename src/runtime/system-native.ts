@@ -33,6 +33,12 @@ export class SystemNative {
       this.distanceMeasure = value;
       return jv('void', undefined);
     });
+    // MOCK: The original engine reapplies Config's system/graphics/FFB options here.
+    // Those host settings are not all implemented yet; the Java method returns void.
+    jvm.natives.register(owner, 'getConfigOptions', [], () => {
+      this.report({ level: 'native', message: 'Host stub: java.lang.System.getConfigOptions()' });
+      return jv('void', undefined);
+    });
     jvm.natives.register(owner, 'buildNumber', [], () => jv('int', 940));
     // SLRR reports kilobytes; scripts compare this with thresholds such as 900 * 1024.
     jvm.natives.register(owner, 'memUsage', [], () => {

@@ -9,6 +9,7 @@ Native methods marked `MOCK:` in the runtime let original Java scripts continue 
 | `GroundRef.delTraffic()` | Allows map cleanup to continue. | Remove spawned traffic. |
 | `GroundRef.setPedestrianDensityN(float)` | Accepts the requested density. | Change pedestrian spawning. |
 | `ResourceRef.unload()` | Allows map cleanup to continue. | Unload resources that are no longer in use. |
+| `System.getConfigOptions()` | Returns from the original void call after the Java options dialog saves, discards, or changes force feedback settings. | Apply all `Config` system, graphics, and force feedback values to the host engine. |
 
 These two mocks currently allow `Navigator.regenerateRoute()` to proceed. The route line will remain invisible until dynamic line rendering is implemented.
 

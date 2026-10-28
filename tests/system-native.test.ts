@@ -9,6 +9,7 @@ test('System clocks use seconds and simulation time follows time warp', async ()
     static native float currentTime(); static native float simTime();
     static native void syncGameTime(float time);
     static native void setMeasure(float value);
+    static native void getConfigOptions();
     static native float timeWarp(float speed);
     static native int gc(); static native int compileAll(String path);
     static native int buildNumber();
@@ -35,6 +36,7 @@ test('System clocks use seconds and simulation time follows time warp', async ()
   assert.equal(native.measure(), 1600);
   jvm.invoke(system, 'setMeasure', [jv('int', 1000)]);
   assert.equal(native.measure(), 1000);
+  assert.equal(jvm.invoke(system, 'getConfigOptions').type, 'void');
   assert.equal(jvm.invoke(system, 'gc').value, 0);
   assert.equal(jvm.invoke(system, 'compileAll', [jv('String', 'scripts')]).value, 0);
   assert.equal(jvm.invoke(system, 'buildNumber').value, 940);
