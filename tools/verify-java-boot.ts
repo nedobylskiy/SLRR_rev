@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Assets } from '../src/assets';
+import { entryProperties } from '../src/formats/rpk';
 import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
 import { packedResourceId } from '../src/runtime/resource-ids';
@@ -26,7 +27,8 @@ const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { 
   .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
 const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
   .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
-const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, 'system.rpk', 'frontend.rpk'].map(async path => {
+const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames,
+  'system.rpk', 'frontend.rpk', 'frontend/textures/interface/icons/event_list/gamemode_freeride.png'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
@@ -92,6 +94,18 @@ if (process.argv.includes('--event-list-screen-smoke') && !result.error) {
     };
     const first = inspect();
     await new Promise(resolve => setTimeout(resolve, 180));
+    const event = result.jvm.get(generator, 'cEvent');
+    const gamemode = result.jvm.get(event, 'careerGM');
+    const shieldIcon = result.jvm.get(gamemode, 'shieldIcon');
+    const shield = result.gameTypes.getResource(shieldIcon);
+    if (!shield?.resourcePack) throw new Error('Freeride mode icon has no resource pack');
+    const iconEntry = await assets.resource(shield.resourcePack, shield.resourceId);
+    const iconSource = entryProperties(iconEntry.entry).find(prop => prop.key === 'sourcefile')?.value;
+    if (!iconSource || !(await assets.read(iconSource)).length)
+      throw new Error('Freeride mode icon image could not be loaded');
+    if (!rectangleViews.some(v => !v.removed && typeof v.resource === 'object' && v.resource
+      && 'id' in v.resource && Number(v.resource.id) === shield.resourceId))
+      throw new Error('Freeride mode icon did not reach the OSD layer');
     const lowerFrame = rectangleViews.find(v => !v.removed && typeof v.resource === 'object' && v.resource
       && 'id' in v.resource && Number(v.resource.id) === 0xc0a0);
     if (!lowerFrame || Math.abs(lowerFrame.bounds[2] - 2) > 0.001 || lowerFrame.bounds[4] % 1_000_000 !== 2)

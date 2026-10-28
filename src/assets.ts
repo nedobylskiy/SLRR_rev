@@ -11,6 +11,12 @@ export function normalizePath(path: string) {
   return parts.join('/').toLowerCase();
 }
 
+/** Accept both filesystem paths and Java resource namespaces for RPK files. */
+export function normalizeResourcePackPath(pack: string) {
+  const name = pack.replace(/\.rpk$/i, '');
+  return normalizePath(`${/[\\/]/.test(name) ? name : name.replaceAll('.', '/')}.rpk`);
+}
+
 /** Browser-side virtual filesystem: source files are read lazily. */
 export class Assets {
   readonly byPath = new Map<string, Asset>();
@@ -24,12 +30,13 @@ export class Assets {
     return this.reader(asset.path);
   }
   async pack(path: string) {
-    const key = normalizePath(path);
-    if (!this.packs.has(key)) this.packs.set(key, this.read(path).then(parseRpk));
+    const key = normalizeResourcePackPath(path);
+    if (!this.packs.has(key)) this.packs.set(key, this.read(key).then(parseRpk));
     return this.packs.get(key)!;
   }
   /** Resolve a RID's namespace without requiring a concrete resource (CFG may name abstract compatibility types). */
   async resourceLocation(packPath: string, id: number): Promise<{ packPath: string; id: number }> {
+    packPath = normalizeResourcePackPath(packPath);
     const pack = await this.pack(packPath), slot = id >>> 16;
     if (slot) {
       const dep = pack.dependencies.find(d => d.id >>> 16 === slot);

@@ -1,4 +1,4 @@
-import { normalizePath } from '../assets';
+import { normalizePath, normalizeResourcePackPath } from '../assets';
 import { entryProperties, type RpkPack } from '../formats/rpk';
 
 export interface CatalogResource { pack: string; id: number; type: number; alias: string; script?: string; cfgPath?: string }
@@ -14,7 +14,7 @@ export class ResourceCatalog {
   }
 
   addPack(rawPath: string, pack: RpkPack): void {
-    const path = normalizePath(rawPath);
+    const path = normalizeResourcePackPath(rawPath);
     if (this.loaded.has(path)) return;
     this.loaded.add(path);
     for (const entry of pack.entries) {
@@ -44,7 +44,6 @@ export class ResourceCatalog {
   }
 
   private static key(pack: string, id: number): string {
-    const path = normalizePath(pack.endsWith('.rpk') ? pack : pack.replaceAll('.', '/'));
-    return `${path.endsWith('.rpk') ? path : `${path}.rpk`}:${id & 0xffff}`;
+    return `${normalizeResourcePackPath(pack)}:${id & 0xffff}`;
   }
 }
