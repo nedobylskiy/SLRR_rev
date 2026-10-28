@@ -21,7 +21,7 @@ import { parsePartConfig } from '../formats/cfg';
 import type { RpkPack } from '../formats/rpk';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
-import { RenderRefNative } from './render-ref-native';
+import { RenderRefNative, type RenderLightSettings } from './render-ref-native';
 import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
@@ -71,7 +71,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   renderChanged?: (node: RenderObject) => void,
   osd?: Pick<OsdLayer, 'createText' | 'createHitTarget' | 'createRectangle'>,
   sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>,
-  setMapFog?: (settings: MapFogSettings) => void): Promise<BootResult> {
+  setMapFog?: (settings: MapFogSettings) => void,
+  setSceneLight?: (settings: RenderLightSettings) => void): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -276,7 +277,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   });
   viewports = new ViewportNative(jvm, gameTypes, viewportSize);
   const renderRefs = new RenderRefNative(jvm, gameTypes,
-    (receiver, position) => osdText.setRenderMatrix(receiver, position));
+    (receiver, position) => osdText.setRenderMatrix(receiver, position), setSceneLight);
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));

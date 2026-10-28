@@ -56,6 +56,18 @@ test('RenderRef.setType changes the instance type without moving it', () => {
   assert.equal(resources.getRender(instance)?.parent, resources.getResource(parent));
 });
 
+test('RenderRef.setLight forwards all three source colors from a light resource', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {});
+  const colors: { diffuse: number; ambient: number; specular: number }[] = [];
+  new RenderRefNative(jvm, resources, undefined, settings => colors.push(settings));
+  const sun = ref('java.util.resource.RenderRef');
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', sun, []);
+  assert.equal(jvm.natives.invoke('java.util.resource.RenderRef', 'setLight', sun,
+    [jv('int', 0x00d8d4b0), jv('int', 0x00375070), jv('int', 0x00d8d4b0)])?.type, 'void');
+  assert.deepEqual(colors, [{ diffuse: 0xd8d4b0, ambient: 0x375070, specular: 0xd8d4b0 }]);
+});
+
 test('mock SkidMark line is a releasable resource without a visual instance', () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const resources = new GameTypeNative(jvm, () => {});

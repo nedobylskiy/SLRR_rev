@@ -78,6 +78,21 @@ test('GroundRef.setFog forwards the original color and distances to the map rend
   result.dispose();
 });
 
+test('RenderRef.setLight reaches the scene light bridge during Java boot', async () => {
+  const source = 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }';
+  const assets = new Assets([{ path: 'sl/scripts/game/src/Init.java', size: source.length }],
+    async () => new TextEncoder().encode(source));
+  const light: { diffuse: number; ambient: number; specular: number }[] = [];
+  const result = await bootGame(assets, () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, settings => light.push(settings));
+  const sun = jv('RenderRef', { className: 'java.util.resource.RenderRef', fields: new Map() });
+  result.jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', sun, []);
+  result.jvm.natives.invoke('java.util.resource.RenderRef', 'setLight', sun,
+    [jv('int', 0xd8d4b0), jv('int', 0x375070), jv('int', 0xd8d4b0)]);
+  assert.deepEqual(light, [{ diffuse: 0xd8d4b0, ambient: 0x375070, specular: 0xd8d4b0 }]);
+  result.dispose();
+});
+
 test('inherited Object.toString gives Java thread owners stable names', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }'],

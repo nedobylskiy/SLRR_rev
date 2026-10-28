@@ -25,6 +25,7 @@ import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
 import { RenderObject } from '../runtime/render-object';
+import type { RenderLightSettings } from '../runtime/render-ref-native';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -52,6 +53,8 @@ export class Viewer {
   private mapStream?: MapObjectStream;
   private mapDebug?: MapDebugView;
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
+  private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
+  private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
   private observer: ResizeObserver;
   getViewportSize(): { width: number; height: number } {
     return { width: this.container.clientWidth || this.renderer.domElement.clientWidth || 1,
@@ -66,8 +69,8 @@ export class Viewer {
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-    this.scene.add(new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5));
-    const light = new THREE.DirectionalLight(0xffddb8, 3); light.position.set(3, 5, 4); this.scene.add(light);
+    this.scene.add(this.ambientLight);
+    this.sunLight.position.set(3, 5, 4); this.scene.add(this.sunLight);
     this.scene.add(this.grid);
     this.driveGrid.visible = false; this.scene.add(this.driveGrid);
     this.ground.rotation.x = -Math.PI / 2; this.ground.position.y = -0.002; this.ground.visible = false; this.scene.add(this.ground);
@@ -122,6 +125,15 @@ export class Viewer {
       this.scene.fog.color.setHex(settings.color); this.scene.fog.near = settings.near; this.scene.fog.far = settings.far;
       this.scene.background = new THREE.Color(settings.color); this.mapStream?.setRange(settings.far + 100);
     }
+  }
+  setSceneLight(settings: RenderLightSettings) {
+    for (const color of [settings.diffuse, settings.ambient, settings.specular])
+      if (!Number.isInteger(color) || color < 0 || color > 0xffffff) throw new Error('Invalid scene light color');
+    this.sunLight.color.setHex(settings.diffuse);
+    this.ambientLight.color.setHex(settings.ambient);
+    this.ambientLight.groundColor.setHex(settings.ambient);
+    // Three.js standard materials have no per-light specular color; retain it for future material work.
+    this.sunLight.userData.specularColor = settings.specular;
   }
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   dispose() {

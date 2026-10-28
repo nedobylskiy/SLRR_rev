@@ -63,7 +63,8 @@ async function runGameBoot() {
     () => gameOsd.getViewportSize(),
     node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); },
     gameOsd, music ? new SoundJavaBridge(music) : undefined, undefined, gameVideo,
-    settings => { if (source === assets && run === sequence) viewer?.setMapFog(settings); });
+    settings => { if (source === assets && run === sequence) viewer?.setMapFog(settings); },
+    settings => { if (source === assets && run === sequence) viewer?.setSceneLight(settings); });
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   disposeGameBoot = () => result.dispose();
   const detachKeyboard = result.input.attachBrowserKeyboard(window);

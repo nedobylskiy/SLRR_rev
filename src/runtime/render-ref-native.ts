@@ -2,13 +2,16 @@ import { jv, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { OrientationState, Vector3State } from './game-object';
 
+export interface RenderLightSettings { diffuse: number; ambient: number; specular: number }
+
 const origin = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroRotation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
 
 /** Java RenderRef methods over visual instances in the host resource tree. */
 export class RenderRefNative {
   constructor(jvm: SlrrJvm, private readonly resources: GameTypeNative,
-    private readonly setTextMatrix?: (receiver: JavaValue, position: Vector3State) => boolean) {
+    private readonly setTextMatrix?: (receiver: JavaValue, position: Vector3State) => boolean,
+    private readonly setSceneLight?: (settings: RenderLightSettings) => void) {
     const owner = 'java.util.resource.RenderRef';
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'create', ['ResourceRef', 'RenderRef', 'String'], ({ receiver, args }) => {
@@ -35,6 +38,13 @@ export class RenderRefNative {
       render.renderType = type ?? null;
       render.typeId = type?.resourceId ?? 0;
       this.resources.notifyRenderChanged(render);
+      return voidValue();
+    });
+    jvm.natives.register(owner, 'setLight', ['int', 'int', 'int'], ({ receiver, args }) => {
+      if (!this.resources.getResource(receiver)) throw new Error('RenderRef.setLight has no resource');
+      this.setSceneLight?.({ diffuse: Number(args[0].value) & 0xffffff,
+        ambient: Number(args[1].value) & 0xffffff,
+        specular: Number(args[2].value) & 0xffffff });
       return voidValue();
     });
     // MOCK: Dynamic SkidMark lines are tracked as resources but have no visible geometry yet.
