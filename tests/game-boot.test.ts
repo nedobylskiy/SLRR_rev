@@ -62,6 +62,21 @@ test('browser display mode is reported to Java but cannot be changed by Java', a
   result.dispose();
 });
 
+test('inherited Object.toString gives Java thread owners stable names', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }'],
+    ['system/scripts/lang/decompiled/Object.java', 'package java.lang; class Object { native String toString(); }'],
+  ]);
+  const assets = new Assets([...sources].map(([path, source]) => ({ path, size: source.length })),
+    async path => new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets, () => {});
+  const owner = jv('Object', { className: 'java.lang.Object', fields: new Map() });
+  const first = result.jvm.invoke(owner, 'toString').value;
+  assert.match(String(first), /^java\.lang\.Object@[0-9a-f]+$/);
+  assert.equal(result.jvm.invoke(owner, 'toString').value, first);
+  result.dispose();
+});
+
 test('Init.java routes original Sound music calls through the player', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', `package java.game; import java.sound.*;

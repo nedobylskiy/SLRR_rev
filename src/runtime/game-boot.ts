@@ -159,6 +159,17 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     });
   };
   new StringNative(jvm);
+  const objectNames = new WeakMap<object, number>();
+  let nextObjectName = 1;
+  jvm.natives.register('java.lang.Object', 'toString', [], ({ receiver }) => {
+    const value = receiver.value;
+    const className = value && typeof value === 'object' && 'className' in value
+      ? String(value.className) : receiver.type;
+    if (!value || typeof value !== 'object') return jv('String', className);
+    let identity = objectNames.get(value);
+    if (identity === undefined) { identity = nextObjectName++; objectNames.set(value, identity); }
+    return jv('String', `${className}@${identity.toString(16)}`);
+  });
   const system = new SystemNative(jvm, report);
   const threads = new ThreadNative(jvm, message => report({ level: 'error', message }));
   let viewports!: ViewportNative;
