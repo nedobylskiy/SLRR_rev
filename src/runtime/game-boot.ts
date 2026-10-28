@@ -18,7 +18,7 @@ import { PartNative } from './part-native';
 import { ChassisNative } from './chassis-native';
 import { DynoNative } from './dyno-native';
 import { parsePartConfig } from '../formats/cfg';
-import type { RpkPack } from '../formats/rpk';
+import { entryProperties, type RpkPack } from '../formats/rpk';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative, type RenderLightSettings } from './render-ref-native';
@@ -28,6 +28,7 @@ import { OsdButtonNative } from './osd-button-native';
 import { OsdRectangleNative } from './osd-rectangle-native';
 import { SfxRefNative } from './sfx-ref-native';
 import type { MapFogSettings } from '../render/viewer';
+import type { EnvironmentMapSource } from '../render/environment-map';
 import { SOUND_CHANNEL } from '../audio/music-engine';
 import { osdViewport } from './osd-depth';
 import type { OsdLayer } from '../osd/osd-layer';
@@ -72,7 +73,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   osd?: Pick<OsdLayer, 'createText' | 'createHitTarget' | 'createRectangle'>,
   sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>,
   setMapFog?: (settings: MapFogSettings) => void,
-  setSceneLight?: (settings: RenderLightSettings) => void): Promise<BootResult> {
+  setSceneLight?: (settings: RenderLightSettings) => void,
+  setGlobalEnvmap?: (source: EnvironmentMapSource | null) => Promise<void> | void): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -316,6 +318,20 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   jvm.natives.register('java.render.GfxEngine', 'currDisplayMode', [], () => jv('int', 0));
   jvm.natives.register('java.render.GfxEngine', 'displayModeName', ['int'], () => jv('String', displayMode()));
   jvm.natives.register('java.render.GfxEngine', 'changeVideoMode', ['int', 'int', 'int'], () => voidValue());
+  jvm.natives.registerAsync('java.render.GfxEngine', 'setGlobalEnvmap', ['ResourceRef'], async ({ args }) => {
+    if (args[0].value == null) { await setGlobalEnvmap?.(null); return voidValue(); }
+    const resource = gameTypes.getResource(args[0]);
+    if (!resource) throw new Error('GfxEngine.setGlobalEnvmap has no resource handle');
+    if (!resource.resourceId) { await setGlobalEnvmap?.(null); return voidValue(); }
+    if (!resource.resourcePack) throw new Error('GfxEngine.setGlobalEnvmap has no texture pack');
+    // The Java handle exposes the owner's packed dependency slot; resourcePack already names the target RPK.
+    const { entry } = await assets.resource(resource.resourcePack, resource.resourceId & 0xffff);
+    if (entry.type !== 7) throw new Error(`GfxEngine.setGlobalEnvmap expected a texture, got type ${entry.type}`);
+    const path = entryProperties(entry).find(property => property.key === 'sourcefile')?.value;
+    if (!path) throw new Error('GfxEngine.setGlobalEnvmap texture has no sourcefile');
+    await setGlobalEnvmap?.({ path, bytes: await assets.read(path) });
+    return voidValue();
+  });
   for (const signature of [['String', 'int', 'int'], ['String', 'int', 'int', 'int']])
     jvm.natives.register('java.render.GfxEngine', 'openVideo', signature, ({ args }) =>
       jv('int', video?.openVideo(String(args[0].value), Number(args[1].value) !== 0) ?? 1));

@@ -93,6 +93,40 @@ test('RenderRef.setLight reaches the scene light bridge during Java boot', async
   result.dispose();
 });
 
+test('GfxEngine.setGlobalEnvmap resolves a Java texture resource to its source image', async () => {
+  const source = 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }';
+  const texturePath = 'maps/skydome/envmaps/Cloudy_day01_envmap.dds';
+  const pixels = Uint8Array.of(0x44, 0x44, 0x53, 0x20);
+  const assets = new Assets([
+    { path: 'sl/scripts/game/src/Init.java', size: source.length },
+    { path: texturePath, size: pixels.length },
+  ], async path => path === texturePath ? pixels : new TextEncoder().encode(source));
+  assets.resource = async (pack, id) => {
+    assert.equal(pack, 'maps.skydome');
+    assert.equal(id, 0x29);
+    return { packPath: 'maps/skydome.rpk', entry: { type: 7,
+      data: new TextEncoder().encode(`sourcefile ${texturePath}`) } as Awaited<ReturnType<Assets['resource']>>['entry'] };
+  };
+  const selected: ({ path: string; bytes: Uint8Array } | null)[] = [];
+  const result = await bootGame(assets, () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, texture => { selected.push(texture); });
+  const envmap = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  result.jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', envmap, []);
+  result.jvm.natives.invoke('java.util.resource.ResourceRef', 'set', envmap,
+    [jv('ResourceRef', { pack: 'maps.skydome', id: 0x29 })]);
+  const gfx = jv('class', 'java.render.GfxEngine');
+  assert.equal((await result.jvm.natives.invokeAsync('java.render.GfxEngine', 'setGlobalEnvmap', gfx,
+    [envmap]))?.type, 'void');
+  assert.deepEqual(selected, [{ path: texturePath, bytes: pixels }]);
+  await result.jvm.natives.invokeAsync('java.render.GfxEngine', 'setGlobalEnvmap', gfx, [jv('ResourceRef', null)]);
+  assert.equal(selected.at(-1), null);
+  const empty = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  result.jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', empty, []);
+  await result.jvm.natives.invokeAsync('java.render.GfxEngine', 'setGlobalEnvmap', gfx, [empty]);
+  assert.equal(selected.at(-1), null);
+  result.dispose();
+});
+
 test('inherited Object.toString gives Java thread owners stable names', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }'],

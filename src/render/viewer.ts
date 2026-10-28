@@ -26,6 +26,7 @@ import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
 import { RenderObject } from '../runtime/render-object';
 import type { RenderLightSettings } from '../runtime/render-ref-native';
+import type { EnvironmentMapSource } from './environment-map';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -53,6 +54,8 @@ export class Viewer {
   private mapStream?: MapObjectStream;
   private mapDebug?: MapDebugView;
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
+  private environmentTexture?: THREE.Texture;
+  private environmentRevision = 0;
   private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
   private observer: ResizeObserver;
@@ -135,8 +138,32 @@ export class Viewer {
     // Three.js standard materials have no per-light specular color; retain it for future material work.
     this.sunLight.userData.specularColor = settings.specular;
   }
+  async setGlobalEnvmap(source: EnvironmentMapSource | null): Promise<void> {
+    const revision = ++this.environmentRevision;
+    if (!source) {
+      this.scene.environment = null;
+      this.environmentTexture?.dispose(); this.environmentTexture = undefined;
+      return;
+    }
+    const texture = await this.texture(source.bytes, source.path);
+    if (revision !== this.environmentRevision) { texture.dispose(); return; }
+    texture.colorSpace = THREE.SRGBColorSpace;
+    // Original skydome envmaps are 2D panoramas (DDS caps have no cubemap faces).
+    // Equirectangular lookup is the closest supported Three.js projection here.
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+    const previous = this.environmentTexture;
+    this.environmentTexture = texture;
+    this.scene.environment = texture;
+    previous?.dispose();
+  }
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   dispose() {
+    this.environmentRevision++;
+    this.scene.environment = null;
+    this.environmentTexture?.dispose(); this.environmentTexture = undefined;
     this.renderer.setAnimationLoop(null); this.observer.disconnect(); this.controls.dispose(); this.clear();
     this.scene.traverse(object => {
       if (object instanceof THREE.GridHelper) { object.geometry.dispose(); const materials = Array.isArray(object.material) ? object.material : [object.material]; materials.forEach(m => m.dispose()); }
