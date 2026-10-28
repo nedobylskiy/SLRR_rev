@@ -2,7 +2,8 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
 
-interface HitBox { group: JavaValue; width: number; height: number; label: string; element?: OsdElement }
+interface HitBox { group: JavaValue; width: number; height: number; label: string;
+  position?: { x: number; y: number; z: number }; element?: OsdElement }
 
 /** At equal Java depth, a small control wins over a broad dialog shield or ghost area. */
 export function osdHitDepth(z: number, width: number, height: number): number {
@@ -39,6 +40,11 @@ export class OsdButtonNative {
       const physics = this.requireObject(receiver), box = this.boxes.get(physics);
       if (!box) throw new Error('PhysicsRef.setMatrix requires an OSD hit box');
       const position = this.requireObject(args[0]);
+      box.position = {
+        x: Number(position.fields.get('x')?.value ?? 0),
+        y: Number(position.fields.get('y')?.value ?? 0),
+        z: Number(position.fields.get('z')?.value ?? 0),
+      };
       const osd = this.object(box.group)?.fields.get('osd');
       const osdFields = this.object(osd)?.fields;
       const aspect = Number(osdFields?.get('vpAspect')?.value ?? 1);
@@ -63,6 +69,12 @@ export class OsdButtonNative {
         if (box.element) { this.live.add(box.element); this.sync(); }
       }
       return nil();
+    });
+    jvm.natives.register(owner, 'getPos', [], ({ receiver }) => {
+      const position = this.boxes.get(this.requireObject(receiver))?.position;
+      if (!position) throw new Error('PhysicsRef.getPos requires a positioned OSD hit box');
+      return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(Object.entries(position)
+        .map(([axis, value]) => [axis, jv('float', value)])) });
     });
   }
 

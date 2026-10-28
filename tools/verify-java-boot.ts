@@ -125,11 +125,13 @@ if (process.argv.includes('--event-list-screen-smoke') && !result.error) {
   result.dispose();
   process.exit(process.exitCode ?? 0);
 }
-if (process.argv.includes('--options-smoke') && !result.error) {
+if ((process.argv.includes('--options-smoke') || process.argv.includes('--options-show-smoke')) && !result.error) {
   try {
     await result.jvm.loadClass('java.game.OptionsDialog');
-    await result.jvm.constructAsync('java.game.OptionsDialog', [jv('int', 0)]);
-    process.stdout.write('OptionsDialog constructor completed\n');
+    const dialog = await result.jvm.constructAsync('java.game.OptionsDialog', [jv('int', 0)]);
+    if (process.argv.includes('--options-show-smoke')) await result.jvm.invokeAsync(dialog, 'show');
+    process.stdout.write(process.argv.includes('--options-show-smoke')
+      ? 'OptionsDialog.show completed\n' : 'OptionsDialog constructor completed\n');
   } catch (error) {
     process.stderr.write(`OptionsDialog constructor stopped: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

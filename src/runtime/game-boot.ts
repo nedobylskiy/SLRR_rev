@@ -274,11 +274,24 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   if (!realLoadingScreen) native('java.game.LoadingScreen', 'show', ['ResourceRef', 'int']);
   jvm.natives.register('java.render.GfxEngine', 'forceRendering', [], () => voidValue());
   native('java.render.GfxEngine', 'flush', []);
+  // Browser viewport dimensions are authoritative; Java may list the current
+  // mode for its options UI, but cannot change the browser's display mode.
+  const displayMode = () => {
+    const size = viewportSize();
+    return `${Math.max(1, Math.round(size.width))} ${Math.max(1, Math.round(size.height))} 32 1`;
+  };
+  jvm.natives.register('java.render.GfxEngine', 'numDisplayModes', [], () => jv('int', 1));
+  jvm.natives.register('java.render.GfxEngine', 'currDisplayMode', [], () => jv('int', 0));
+  jvm.natives.register('java.render.GfxEngine', 'displayModeName', ['int'], () => jv('String', displayMode()));
+  jvm.natives.register('java.render.GfxEngine', 'changeVideoMode', ['int', 'int', 'int'], () => voidValue());
   for (const signature of [['String', 'int', 'int'], ['String', 'int', 'int', 'int']])
     jvm.natives.register('java.render.GfxEngine', 'openVideo', signature, ({ args }) =>
       jv('int', video?.openVideo(String(args[0].value), Number(args[1].value) !== 0) ?? 1));
   jvm.natives.register('java.render.GfxEngine', 'closeVideo', [], () => { video?.closeVideo(); return voidValue(); });
   jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', video?.isPlayingVideo() ?? 0));
+  // Navigator.java owns route data and camera setup. Its engine update is
+  // deferred until the navigator viewport can render a map in the browser.
+  jvm.natives.register('java.game.Navigator', 'updateNavigator', ['GameRef', 'int'], () => voidValue());
   native('java.sound.Sound', 'init', []);
   for (const [name, signature, resultType] of [
     ['changeMusicSet', ['int'], 'void'], ['nextTrack', [], 'void'], ['prevTrack', [], 'void'],

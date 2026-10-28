@@ -586,6 +586,8 @@ export class SlrrJvm implements JavaHost {
       && 'id' in argument.value && !('fields' in argument.value)) return 1;
     if (parameter === argument.type || this.resolveName(parameter) === this.resolveName(argument.type)) return 0;
     if (argument.type === 'int' && parameter === 'float') return 1;
+    if ((parameter === 'String' || parameter === 'java.lang.String')
+      && argument.type === 'Object' && typeof argument.value === 'string') return 1;
     if (argument.type === 'int' && parameter === 'double') return 2;
     if (argument.type === 'float' && parameter === 'double') return 1;
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;

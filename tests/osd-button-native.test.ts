@@ -63,6 +63,10 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   (position.value as { fields: Map<string, JavaValue> }).fields.set('z', jv('float', 3));
   jvm.natives.invoke('java.util.resource.PhysicsRef', 'setMatrix', physics, [position, nil]);
   assert.equal(depth, osdHitDepth(3, bounds[2], bounds[3]), 'a moved arrow hotspot must rise above the shield');
+  const hotSpot = jvm.natives.invoke('java.util.resource.PhysicsRef', 'getPos', physics, [])!;
+  assert.equal(jvm.get(hotSpot, 'z').value, 3);
+  (position.value as { fields: Map<string, JavaValue> }).fields.set('z', jv('float', 4));
+  assert.equal(jvm.get(hotSpot, 'z').value, 3, 'getPos returns a snapshot of the current hit box position');
   assert.ok(clickFromHtml);
   assert.ok(hoverFromHtml && leaveFromHtml);
   assert.ok(Math.abs(bounds[2] - 2) < 0.01);

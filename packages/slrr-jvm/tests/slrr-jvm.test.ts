@@ -200,6 +200,15 @@ test('source overloads choose the closest argument types', async () => {
   assert.equal(jvm.invoke(jvm.construct('Overloads', []), 'run').value, 33);
 });
 
+test('a String returned through Object still matches a String parameter', async () => {
+  const source = 'class Label { String text; void changeText(String value) { text = value; } }';
+  const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'Label.java', source }) });
+  await jvm.loadClass('Label');
+  const label = jvm.construct('Label', []);
+  jvm.invoke(label, 'changeText', [jv('Object', '1600x900')]);
+  assert.equal(jvm.get(label, 'text').value, '1600x900');
+});
+
 test('static fields initialize once and remain shared between instances', async () => {
   const source = `class Counter {
     static int count = 2;

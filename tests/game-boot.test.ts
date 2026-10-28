@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Assets } from '../src/assets';
 import { bootGame, type BootEvent } from '../src/runtime/game-boot';
 import { GameTypeNative } from '../src/runtime/game-type-native';
-import { SlrrJvm } from 'slrr-jvm';
+import { SlrrJvm, jv } from 'slrr-jvm';
 import { SoundJavaBridge } from '../src/audio/sound-java';
 import type { MusicEngine } from '../src/audio/music-engine';
 
@@ -41,6 +41,25 @@ test('Init.java controls the OSD video through both GfxEngine.openVideo overload
   assert.match(result.error?.message ?? '', /missingNext/);
   result.dispose();
   assert.equal(playing, false);
+});
+
+test('browser display mode is reported to Java but cannot be changed by Java', async () => {
+  const source = 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }';
+  const assets = new Assets([{ path: 'sl/scripts/game/src/Init.java', size: source.length }],
+    async () => new TextEncoder().encode(source));
+  const result = await bootGame(assets, () => {}, () => ({ width: 1600, height: 900 }));
+  const gfx = 'java.render.GfxEngine';
+  assert.equal(result.jvm.natives.invoke(gfx, 'numDisplayModes', jv('class', gfx), [])?.value, 1);
+  assert.equal(result.jvm.natives.invoke(gfx, 'currDisplayMode', jv('class', gfx), [])?.value, 0);
+  assert.equal(result.jvm.natives.invoke(gfx, 'displayModeName', jv('class', gfx), [jv('int', 0)])?.value,
+    '1600 900 32 1');
+  assert.equal(result.jvm.natives.invoke(gfx, 'changeVideoMode', jv('class', gfx),
+    [jv('int', 1920), jv('int', 1080), jv('int', 32)])?.type, 'void');
+  assert.equal(result.jvm.natives.invoke(gfx, 'displayModeName', jv('class', gfx), [jv('int', 0)])?.value,
+    '1600 900 32 1');
+  assert.equal(result.jvm.natives.invoke('java.game.Navigator', 'updateNavigator', jv('Navigator', {}),
+    [jv('GameRef', null), jv('int', 1)])?.type, 'void');
+  result.dispose();
 });
 
 test('Init.java routes original Sound music calls through the player', async () => {
