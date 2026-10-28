@@ -37,6 +37,18 @@ export class RenderRefNative {
       this.resources.notifyRenderChanged(render);
       return voidValue();
     });
+    // MOCK: Dynamic SkidMark lines are tracked as resources but have no visible geometry yet.
+    // This lets Navigator construct and release its route without blocking Track.enter.
+    jvm.natives.register(owner, 'lineCreate', ['ResourceRef', 'ResourceRef'], ({ receiver, args }) => {
+      const line = this.resources.getResource(receiver);
+      const parent = args[0].value == null ? null : this.resources.getResource(args[0]);
+      if (!line || (args[0].value != null && !parent))
+        throw new Error('RenderRef.lineCreate has no resource or parent');
+      line.setParent(parent ?? null);
+      return jv('int', 1);
+    });
+    // MOCK: Route/skid points are intentionally discarded until dynamic line rendering is implemented.
+    jvm.natives.register(owner, 'lineAdd', ['Vector3', 'Vector3', 'int', 'float'], () => voidValue());
   }
 
   private vector(jvm: SlrrJvm, value: JavaValue): Vector3State {

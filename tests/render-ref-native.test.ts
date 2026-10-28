@@ -55,3 +55,22 @@ test('RenderRef.setType changes the instance type without moving it', () => {
   assert.equal(resources.getRender(instance)?.alias, '_renderinst');
   assert.equal(resources.getRender(instance)?.parent, resources.getResource(parent));
 });
+
+test('mock SkidMark line is a releasable resource without a visual instance', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {});
+  new RenderRefNative(jvm, resources);
+  const parent = ref('java.util.resource.GameRef');
+  const line = ref('java.render.SkidMark');
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', parent, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', line, []);
+  const result = jvm.natives.invoke('java.util.resource.RenderRef', 'lineCreate', line,
+    [jv('ResourceRef', parent.value), jv('ResourceRef', null)]);
+  assert.equal(result?.value, 1);
+  assert.equal(resources.getResource(line)?.parent, resources.getResource(parent));
+  assert.equal(resources.getRender(line), undefined);
+  jvm.natives.invoke('java.util.resource.RenderRef', 'lineAdd', line,
+    [vector(1, 2, 3), vector(0, 1, 0), jv('int', 0xffffffff), jv('float', 1)]);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy', line, []);
+  assert.equal(resources.getResource(line), undefined);
+});
