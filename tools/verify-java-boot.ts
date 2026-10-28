@@ -31,12 +31,19 @@ const files = await Promise.all([...names, ...systemNames, ...carNames, ...event
 }));
 const assets = new Assets(files, async path => new Uint8Array(await readFile(join(root, path))));
 let osdRectangles = 0;
+const rectangleViews: { resource: unknown; bounds: number[]; removed: boolean }[] = [];
 const element = () => ({ node: { style: {}, classList: { add() {}, remove() {} }, remove() {} },
   setText() {}, setResource() {}, setBounds() {}, show() {}, hide() {} });
 const osd = {
   createText: element,
   createHitTarget: element,
-  createRectangle: () => { osdRectangles++; return element(); },
+  createRectangle: (x: number, y: number, w: number, h: number, depth: number, resource: unknown) => {
+    osdRectangles++;
+    const view = { resource, bounds: [x, y, w, h, depth], removed: false };
+    rectangleViews.push(view);
+    return { ...element(), node: { ...element().node, remove() { view.removed = true; } },
+      setBounds(a: number, b: number, c: number, d: number, e: number) { view.bounds = [a, b, c, d, e]; } };
+  },
 } as unknown as OsdLayer;
 const runtimeErrors: string[] = [];
 const result = await bootGame(assets, event => {
@@ -63,6 +70,42 @@ if (process.argv.includes('--event-list-smoke') && !result.error) {
     process.stdout.write('First freeride event initialized\n');
   } catch (error) {
     process.stderr.write(`Freeride event init stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
+}
+if (process.argv.includes('--event-list-screen-smoke') && !result.error) {
+  try {
+    await result.jvm.loadClass('java.game.EventList');
+    const section = await result.jvm.constructAsync('java.game.EventList', [jv('int', 4)]);
+    await result.jvm.invokeAsync(section, 'enter', [jv('GameState', null)]);
+    const generator = result.jvm.get(section, 'eGen');
+    const inspect = () => {
+      const event = result.jvm.get(generator, 'cEvent');
+      const picture = result.jvm.get(generator, 'trackPic');
+      const texture = result.jvm.get(event, 'e_bck');
+      const instance = result.jvm.get(picture, 'ins');
+      const render = result.gameTypes.getRender(instance);
+      return { texture: result.gameTypes.getResource(texture),
+        texId: Number(result.jvm.get(result.jvm.get(picture, 'rt'), 'texID').value), render: render?.id };
+    };
+    const first = inspect();
+    await new Promise(resolve => setTimeout(resolve, 180));
+    const lowerFrame = rectangleViews.find(v => !v.removed && typeof v.resource === 'object' && v.resource
+      && 'id' in v.resource && Number(v.resource.id) === 0xc0a0);
+    if (!lowerFrame || Math.abs(lowerFrame.bounds[2] - 2) > 0.001 || lowerFrame.bounds[4] % 1_000_000 !== 2)
+      throw new Error(`Event lower frame has incorrect bounds or depth: ${JSON.stringify(lowerFrame?.bounds)}`);
+    await result.jvm.invokeAsync(generator, 'nextEvent');
+    const second = inspect();
+    if (first.texture?.resourcePack === second.texture?.resourcePack || first.texId === second.texId || first.render === second.render)
+      throw new Error('Next event did not replace the track image from its own resource pack');
+    if (!rectangleViews.some(v => !v.removed && typeof v.resource === 'object' && v.resource
+      && 'pack' in v.resource && String(v.resource.pack) === second.texture?.resourcePack))
+      throw new Error('Next track image did not reach the OSD layer');
+    process.stdout.write('Event list frame and next-track image verified\n');
+  } catch (error) {
+    process.stderr.write(`Event screen stopped: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   }
   result.dispose();

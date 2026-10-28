@@ -67,7 +67,7 @@ test('normalized Rectangle positions and resource pack survive the OSD bridge', 
     ['ins', jv('RenderRef', {})], ['rev_pos', jv('Vector3', {})],
   ]) };
   const vector = { className: 'java.util.Vector', fields: new Map<string, JavaValue>([
-    ['elementData', jv('Object[]', [jv('Rectangle', rectangle)])], ['elementCount', jv('int', 1)],
+    ['elementData', jv('Object[]', [rectangle])], ['elementCount', jv('int', 1)],
   ]) };
   const osd = { className: 'java.render.Osd', fields: new Map<string, JavaValue>([
     ['vpAspect', jv('float', 16 / 9)], ['vpWidth', jv('float', 1)], ['vpHeight', jv('float', 1)],

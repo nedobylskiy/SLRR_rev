@@ -28,6 +28,7 @@ export class GameTypeNative {
   private nextId = 1;
   private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
+  private readonly trackPackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
   private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
@@ -65,6 +66,8 @@ export class GameTypeNative {
       node.resourceScript = resource?.script ?? null;
       node.alias = resource?.alias ?? node.alias;
       node.copiedFromResourceId = null;
+      const qualifiedTypeId = origin && this.trackTypeId(origin);
+      if (qualifiedTypeId !== undefined) this.jvm.set(receiver, 'typeID', jv('int', qualifiedTypeId));
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['ResourceRef'], ({ receiver, args }) => {
@@ -472,6 +475,21 @@ export class GameTypeNative {
     const raw = value.value;
     if (typeof raw === 'object' && 'id' in raw && !('fields' in raw)) return Number(raw.id) | 0;
     return this.requireResource(value).resourceId;
+  }
+
+  private trackTypeId(identity: ResourceIdentity): number | undefined {
+    if (!/(?:^|[./\\])t_data(?:\.rpk)?$/i.test(identity.pack)) return undefined;
+    const path = identity.pack.toLowerCase().endsWith('.rpk') ? identity.pack : `${identity.pack.replaceAll('.', '/')}.rpk`;
+    const pack = path.replaceAll('\\', '/').toLowerCase();
+    let slot = this.trackPackSlots.get(pack);
+    if (slot === undefined) {
+      slot = this.trackPackSlots.size;
+      if (slot >= 0x1000) throw new Error('Track resource pack ID space exhausted');
+      this.trackPackSlots.set(pack, slot);
+    }
+    // Every t_data RPK reuses local texture IDs (often 0x101). Java compares
+    // ResourceRef.typeID, so distinct packs need distinct host-side values.
+    return (0x60000000 + (slot << 16) + (identity.id & 0xffff)) | 0;
   }
 
   private readNumber(value: JavaValue, field: string): number {

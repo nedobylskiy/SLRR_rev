@@ -44,6 +44,12 @@ export class OsdRectangleNative {
     const y = -render.position.y / scaleY;
     const viewport = this.viewportLayout(groupRef);
     const projected = projectOsdBounds(viewport, x, y, width, height);
+    // The original event list uses this 1366px frame as a full-width lower panel.
+    // Keep its Java vertical placement while spanning the active viewport.
+    if (mode === 'normalized' && texture.id === 0xc0a0 && /(?:^|[\\/])frontend(?:\.rpk)?$/i.test(texture.pack)) {
+      projected.x = viewport.left * 2 + viewport.width - 1;
+      projected.width = viewport.width * 2;
+    }
     // Style buttons use raw screen-space mesh dimensions, unlike Osd.createRectangle templates.
     // Dialog.createBG uses Osd.createRectangle, but its Vector may not yet be
     // populated when the native RenderRef callback first reaches this bridge.
@@ -92,7 +98,7 @@ export class OsdRectangleNative {
     const data = vector?.fields.get('elementData')?.value;
     const count = Number(vector?.fields.get('elementCount')?.value ?? 0);
     if (!Array.isArray(data)) return 'style';
-    for (const value of data.slice(0, count) as JavaValue[]) {
+    for (const value of data.slice(0, count) as (JavaValue | JavaObject)[]) {
       const rectangle = this.object(value);
       if (!rectangle) continue;
       const instance = rectangle.fields.get('ins');
@@ -102,8 +108,8 @@ export class OsdRectangleNative {
     return 'style';
   }
 
-  private object(value: JavaValue | undefined): JavaObject | undefined {
-    const object = value?.value;
+  private object(value: JavaValue | JavaObject | undefined): JavaObject | undefined {
+    const object = value && 'fields' in value ? value : value?.value;
     return object && typeof object === 'object' && 'fields' in object && object.fields instanceof Map
       ? object as JavaObject : undefined;
   }

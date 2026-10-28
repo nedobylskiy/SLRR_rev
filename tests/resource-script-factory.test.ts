@@ -44,12 +44,14 @@ test('GameRef.create resolves a pack-qualified int and runs its scripted class',
       assert.equal(requested, 'multibot.maps.Norisring.t_data');
       catalog.addPack('multibot/maps/Norisring/t_data.rpk', pack);
     });
-  const mapEntry = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  const mapEntry = jv('ResourceRef', { className: 'java.util.resource.ResourceRef',
+    fields: new Map([['typeID', jv('int', 0x102)]]) });
   const id = { ...jv('int', 0x102), resource: { pack: 'multibot.maps.Norisring.t_data', id: 0x102 } };
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', mapEntry, [id]);
   const fromMapStack = jvm.natives.invoke('java.util.resource.ResourceRef', 'id', mapEntry, [])!;
   assert.deepEqual(fromMapStack.resource, id.resource);
-  const type = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+  const type = jv('GameRef', { className: 'java.util.resource.GameRef',
+    fields: new Map([['typeID', jv('int', 0x102)]]) });
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', type, [fromMapStack]);
   assert.equal(resources.getResource(type)?.resourceScript, null);
   const factory = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
@@ -58,4 +60,19 @@ test('GameRef.create resolves a pack-qualified int and runs its scripted class',
   assert.equal(created?.type, 'Scripted');
   assert.equal(jvm.invoke(created!, 'init').value, 0x102);
   assert.equal(resources.get(created!)?.resourcePack, 'multibot/maps/norisring/t_data.rpk');
+});
+
+test('map texture type IDs remain distinct across t_data packs', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  new GameTypeNative(jvm, () => {});
+  const makeTexture = (pack: string) => {
+    const ref = jv('ResourceRef', { className: 'java.util.resource.ResourceRef',
+      fields: new Map([['typeID', jv('int', 0x101)]]) });
+    jvm.natives.invoke('java.util.resource.ResourceRef', 'set', ref,
+      [{ ...jv('int', 0x101), resource: { pack, id: 0x101 } }]);
+    return Number(jvm.get(ref, 'typeID').value);
+  };
+  const first = makeTexture('multibot/maps/aring/t_data.rpk');
+  assert.equal(makeTexture('multibot/maps/aring/t_data.rpk'), first);
+  assert.notEqual(makeTexture('multibot/maps/gateway/t_data.rpk'), first);
 });
