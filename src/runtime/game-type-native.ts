@@ -47,11 +47,11 @@ export class GameTypeNative {
       this.allocate(receiver); return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['int'], ({ receiver, args }) => {
+      const object = this.object(receiver);
       const id = Number(args[0].value) | 0;
       const origin = args[0].resource ?? this.resolvePackedResource?.(id);
       const live = this.liveByResourceId.get(id);
       if (!origin && live instanceof GameObject) {
-        const object = this.object(receiver);
         const prior = this.nodes.get(object);
         if (prior && prior !== live) this.objects.delete(prior.id);
         this.nodes.set(object, live);
@@ -68,6 +68,23 @@ export class GameTypeNative {
       node.copiedFromResourceId = null;
       const qualifiedTypeId = origin && this.trackTypeId(origin);
       if (qualifiedTypeId !== undefined) this.jvm.set(receiver, 'typeID', jv('int', qualifiedTypeId));
+      // GroundRef(int) is the active map handle. Unlike a generic GameRef(int)
+      // resource template, it must accept GameRef commands and queued events.
+      if (object.className === 'java.util.resource.GroundRef') {
+        const ground = new GameObject(node.id, object.className, node.typeId, node.params,
+          node.alias || 'ground');
+        ground.resourceId = node.resourceId;
+        ground.resourceType = node.resourceType;
+        ground.resourcePack = node.resourcePack;
+        ground.resourceScript = node.resourceScript;
+        ground.setParent(node.parent);
+        for (const child of [...node.children]) child.setParent(ground);
+        node.setParent(null);
+        this.nodes.set(object, ground);
+        this.objects.set(ground.id, ground);
+        this.liveByResourceId.set(ground.resourceId, ground);
+        this.handles.set(ground, receiver);
+      }
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['ResourceRef'], ({ receiver, args }) => {

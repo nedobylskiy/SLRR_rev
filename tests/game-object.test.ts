@@ -88,6 +88,23 @@ test('GameRef native calls update the same object created by GameType', () => {
   assert.equal(host.get(child)?.eventMask, 0x10000);
 });
 
+test('GroundRef(int) binds the map resource to a game object for Track commands', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const host = new GameTypeNative(jvm, () => {});
+  const ground = ref('java.util.resource.GroundRef');
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', ground, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', ground, [jv('int', 0x1234)]);
+  assert.equal(host.get(ground)?.resourceId, 0x1234);
+  assert.equal(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', ground, [])?.value, 0x1234);
+  jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', ground,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', 'obs_rem 42')]);
+  assert.deepEqual(host.get(ground)?.events, [{ sourceId: null, type: 16, payload: 'obs_rem 42' }]);
+  const generic = ref('java.util.resource.GameRef');
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', generic, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', generic, [jv('int', 0x5678)]);
+  assert.equal(host.get(generic), undefined);
+});
+
 test('GameRef.create uses its last string argument as the tree alias', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const host = new GameTypeNative(jvm, () => {});

@@ -282,6 +282,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   native(collector, 'flush', []);
   native('java.util.resource.ResourceRef', 'precache', []);
   native('java.util.resource.ResourceRef', 'cache', []);
+  // MOCK: Track.exit cleanup for map systems not yet hosted by the engine.
+  native('java.util.resource.GroundRef', 'delTraffic', []);
+  native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
+  native('java.util.resource.ResourceRef', 'unload', []);
   const controller = 'java.io.Controller';
   jvm.natives.registerField(controller, 'controlFile', jv('String', ''));
   native('java.game.Frontend', 'init', []);
