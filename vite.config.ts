@@ -87,6 +87,9 @@ function gameAssets(): Plugin {
 }
 export default defineConfig({
   plugins: [gameAssets()],
-  resolve: { alias: [{ find: /^slrr-jvm-compiler$/, replacement: path.resolve('src/runtime/jvm-compiler-browser.ts') }] },
+  resolve: { alias: [
+    { find: /^slrr-jvm$/, replacement: path.resolve('packages/slrr-jvm/src/index.ts') },
+    { find: /^slrr-jvm-compiler$/, replacement: path.resolve('src/runtime/jvm-compiler-browser.ts') },
+  ] },
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
 });
