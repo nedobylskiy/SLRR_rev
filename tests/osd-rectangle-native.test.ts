@@ -89,6 +89,6 @@ test('normalized Rectangle positions and resource pack survive the OSD bridge', 
   const bridge = new OsdRectangleNative(resources, layer, id => id === 0x1a
     ? { pack: 'frontend', id: 0x1a } : undefined);
   bridge.sync(render);
-  assert.ok(bounds.every((value, index) => Math.abs(value - [0.475 / (16 / 9), -0.2 / 1.469, 0.15, 0.26, 2000][index]) < 0.001));
+  assert.ok(bounds.every((value, index) => Math.abs(value - [0.475 / (16 / 9), -0.2 / 1.469, 0.15, 0.26, 2][index]) < 0.001));
   assert.deepEqual(texture, { pack: 'system.rpk', id: 0x1a });
 });

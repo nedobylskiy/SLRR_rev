@@ -53,7 +53,9 @@ export class OsdRectangleNative {
       projected.width = mesh.meshScale.x / (1.47 * this.stageAspect());
       projected.height = mesh.meshScale.y / 1.47;
     }
-    const depth = osdDepth(viewport.priority, Math.round(render.position.z * 1000));
+    // The normalized overload divides Z by 0.001 before RenderRef.setMatrix;
+    // the ordinary overload retains its metre-scale Z value.
+    const depth = osdDepth(viewport.priority, Math.round(render.position.z * (mode === 'normalized' ? 1 : 1000)));
     if (![projected.x, projected.y, projected.width, projected.height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
     if (!view) {
