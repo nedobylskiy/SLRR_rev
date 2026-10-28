@@ -52,6 +52,22 @@ if (result.error) {
   process.stderr.write(`Java boot stopped: ${result.error.message}\n`);
   process.exitCode = 1;
 }
+if (process.argv.includes('--event-list-smoke') && !result.error) {
+  try {
+    const events = result.jvm.get(jv('class', 'java.game.GameLogic'), 'freerideEvents').value;
+    if (!Array.isArray(events) || !events.length) throw new Error('Freeride events unavailable');
+    const event = jv('CareerEvent', events[0]);
+    const trackId = result.jvm.get(event, 'track_data_id');
+    if (!trackId.resource) throw new Error('Freeride track ID lost its resource pack');
+    await result.jvm.invokeAsync(event, 'init');
+    process.stdout.write('First freeride event initialized\n');
+  } catch (error) {
+    process.stderr.write(`Freeride event init stopped: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
+}
 if (process.argv.includes('--options-smoke') && !result.error) {
   try {
     await result.jvm.loadClass('java.game.OptionsDialog');

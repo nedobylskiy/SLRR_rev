@@ -130,9 +130,17 @@ export class GameTypeNative {
       });
     jvm.natives.register(resourceRef, 'id', [], ({ receiver }) => {
       if (receiver.value == null) return jv('int', 0);
-      const literal = receiver.value as { id?: number } | null;
-      if (literal && 'id' in literal && !('fields' in literal)) return jv('int', Number(literal.id) | 0);
-      return jv('int', this.requireResource(receiver).resourceId);
+      const literal = receiver.value as { id?: number; pack?: string } | null;
+      if (literal && 'id' in literal && !('fields' in literal)) {
+        const value = jv('int', Number(literal.id) | 0);
+        if (literal.pack) value.resource = { pack: literal.pack, id: Number(literal.id) | 0 };
+        return value;
+      }
+      const node = this.requireResource(receiver), value = jv('int', node.resourceId);
+      // Java stores mapStack[j].id() in an int. Keep its pack so a later
+      // new GameRef(id) can resolve the right track script.
+      if (node.resourcePack && !(node instanceof GameObject)) value.resource = { pack: node.resourcePack, id: node.typeId };
+      return value;
     });
     jvm.natives.register(resourceRef, 'type', [], ({ receiver }) =>
       jv('int', this.requireResource(receiver).resourceType));

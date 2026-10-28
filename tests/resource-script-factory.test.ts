@@ -44,9 +44,13 @@ test('GameRef.create resolves a pack-qualified int and runs its scripted class',
       assert.equal(requested, 'multibot.maps.Norisring.t_data');
       catalog.addPack('multibot/maps/Norisring/t_data.rpk', pack);
     });
-  const type = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+  const mapEntry = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
   const id = { ...jv('int', 0x102), resource: { pack: 'multibot.maps.Norisring.t_data', id: 0x102 } };
-  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', type, [id]);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', mapEntry, [id]);
+  const fromMapStack = jvm.natives.invoke('java.util.resource.ResourceRef', 'id', mapEntry, [])!;
+  assert.deepEqual(fromMapStack.resource, id.resource);
+  const type = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', type, [fromMapStack]);
   assert.equal(resources.getResource(type)?.resourceScript, null);
   const factory = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
   const created = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'create', factory,
