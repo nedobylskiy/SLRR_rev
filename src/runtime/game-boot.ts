@@ -27,6 +27,7 @@ import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
 import { OsdRectangleNative } from './osd-rectangle-native';
 import { SfxRefNative } from './sfx-ref-native';
+import type { MapFogSettings } from '../render/viewer';
 import { SOUND_CHANNEL } from '../audio/music-engine';
 import { osdViewport } from './osd-depth';
 import type { OsdLayer } from '../osd/osd-layer';
@@ -69,7 +70,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   viewportSize: () => ViewportSize = () => ({ width: 1, height: 1 }),
   renderChanged?: (node: RenderObject) => void,
   osd?: Pick<OsdLayer, 'createText' | 'createHitTarget' | 'createRectangle'>,
-  sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>): Promise<BootResult> {
+  sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>,
+  setMapFog?: (settings: MapFogSettings) => void): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -235,6 +237,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
     }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node));
+  jvm.natives.register('java.util.resource.GroundRef', 'setFog', ['int', 'float', 'float'], ({ receiver, args }) => {
+    if (!gameTypes.get(receiver)) throw new Error('GroundRef.setFog has no map game object');
+    const color = Number(args[0].value) & 0xffffff;
+    const near = Number(args[1].value), far = Number(args[2].value);
+    if (!Number.isFinite(near) || !Number.isFinite(far) || near < 0 || far <= near)
+      throw new Error(`Invalid GroundRef fog range: ${near}..${far}`);
+    setMapFog?.({ color, near, far });
+    return voidValue();
+  });
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));

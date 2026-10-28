@@ -62,6 +62,22 @@ test('browser display mode is reported to Java but cannot be changed by Java', a
   result.dispose();
 });
 
+test('GroundRef.setFog forwards the original color and distances to the map renderer', async () => {
+  const source = 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }';
+  const assets = new Assets([{ path: 'sl/scripts/game/src/Init.java', size: source.length }],
+    async () => new TextEncoder().encode(source));
+  const fog: { color: number; near: number; far: number }[] = [];
+  const result = await bootGame(assets, () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, settings => fog.push(settings));
+  const ground = jv('GroundRef', { className: 'java.util.resource.GroundRef', fields: new Map() });
+  result.jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', ground, []);
+  result.jvm.natives.invoke('java.util.resource.ResourceRef', 'set', ground, [jv('int', 7)]);
+  assert.equal(result.jvm.natives.invoke('java.util.resource.GroundRef', 'setFog', ground,
+    [jv('int', 0x0007121e), jv('float', 20), jv('float', 150)])?.type, 'void');
+  assert.deepEqual(fog, [{ color: 0x07121e, near: 20, far: 150 }]);
+  result.dispose();
+});
+
 test('inherited Object.toString gives Java thread owners stable names', async () => {
   const sources = new Map([
     ['sl/scripts/game/src/Init.java', 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }'],
