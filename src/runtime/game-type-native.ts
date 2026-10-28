@@ -185,6 +185,8 @@ export class GameTypeNative {
       return jv('ResourceRef', null);
     });
     jvm.natives.register(resourceRef, 'destroy', [], ({ receiver }) => {
+      // A failed Track.enter may leave player.render null before Track.exit runs.
+      if (receiver.value == null) return voidValue();
       const node = this.getResource(receiver);
       if (!node) return voidValue();
       if (node instanceof RenderObject) this.renderRemoved?.(node);

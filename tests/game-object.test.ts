@@ -105,6 +105,15 @@ test('GroundRef(int) binds the map resource to a game object for Track commands'
   assert.equal(host.get(generic), undefined);
 });
 
+test('destroy tolerates an uninitialized render reference after a partial Track.enter', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  new GameTypeNative(jvm, () => {});
+  assert.equal(jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy',
+    jv('RenderRef', null), [])?.type, 'void');
+  assert.throws(() => jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy',
+    jv('RenderRef', { id: 1 }), []), /not a Java object/);
+});
+
 test('GameRef.create uses its last string argument as the tree alias', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const host = new GameTypeNative(jvm, () => {});
