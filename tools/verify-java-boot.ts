@@ -87,6 +87,7 @@ if (process.argv.includes('--diagnose')) {
     const chassis = car?.value == null ? null : result.jvm.get(car, 'chassis');
     const chassisNode = chassis?.value == null ? null : result.gameTypes.getResource(chassis);
     process.stdout.write(`scene car: ${car?.type ?? '-'} chassis=${chassisNode?.resourcePack ?? '-'}:${chassisNode?.typeId ?? '-'}\n`);
+    if (chassisNode) process.stdout.write(`scene car owner: ${chassisNode.parent?.className ?? '-'} id=${chassisNode.parent?.resourceId ?? '-'} live=${result.gameTypes.getById(chassisNode.parent?.resourceId ?? 0)?.className ?? '-'}\n`);
     const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
     const start = state.value == null ? null : result.jvm.get(state, 'posStart');
     const startNode = start?.value == null ? null : { x: result.jvm.get(start, 'x').value, y: result.jvm.get(start, 'y').value, z: result.jvm.get(start, 'z').value };
@@ -113,6 +114,19 @@ if (process.argv.includes('--diagnose')) {
           selection.body.filter(part => part.pack === 'parts/interior.rpk' && part.id === 73).length !== 2)
         throw new Error('SuperDuty Extra 750 lost its two parts/interior:0x49 seat resources');
       const built = await new PartFactory(assets).stock(selected.chassis, { mechanical: true, javaSelection: selection });
+      const verifyInstalled = (expected: NonNullable<typeof selection.installed>, parent: typeof built.root): number => {
+        if (parent.children.size !== expected.length)
+          throw new Error(`Java part tree differs at ${parent.definition.alias}: expected ${expected.length} children, got ${parent.children.size}`);
+        return expected.reduce((count, node) => {
+          const installed = parent.children.get(node.parentSlot);
+          if (!installed || installed.ownSlot !== node.ownSlot ||
+              installed.definition.key.pack !== node.key.pack || installed.definition.key.id !== node.key.id)
+            throw new Error(`Java part tree differs at ${parent.definition.alias} slot ${node.parentSlot}`);
+          return count + 1 + verifyInstalled(node.children, installed);
+        }, 0);
+      };
+      const treeCount = verifyInstalled(selection.installed ?? [], built.root);
+      if (treeCount + 1 !== built.world.parts.size) throw new Error('Java part tree contains extra host parts');
       process.stdout.write(`assembly built: ${built.world.parts.size} parts, ${selection.mechanical.length} selected hardware, ${selection.tyres.length} selected tyres, ${built.warnings.length} warnings\n`);
       const installedTyres = [...built.world.parts.values()].filter(part => selection.tyres.some(ref =>
         ref?.pack === part.definition.key.pack && ref.id === part.definition.key.id));

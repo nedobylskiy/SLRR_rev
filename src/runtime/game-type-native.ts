@@ -45,7 +45,7 @@ export class GameTypeNative {
   private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
   private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
   private dispatchingEvents = false;
-  private commandHandler?: (receiver: JavaValue, command: string) => void;
+  private commandHandler?: (receiver: JavaValue, command: string) => void | Promise<void>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
 
@@ -55,7 +55,8 @@ export class GameTypeNative {
     private readonly instantiateResourceScript?: (script: string, typeId: number, pack: string | null) => Promise<JavaValue>,
     private readonly loadResourcePack?: (pack: string) => Promise<void>,
     private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined,
-    private readonly renderRemoved?: (node: RenderObject) => void) {
+    private readonly renderRemoved?: (node: RenderObject) => void,
+    private readonly configureUnscriptedResource?: (receiver: JavaValue, cfgPath: string) => Promise<void>) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -65,7 +66,9 @@ export class GameTypeNative {
       const id = Number(args[0].value) | 0;
       const origin = args[0].resource ?? this.resolvePackedResource?.(id);
       const live = this.liveByResourceId.get(id);
-      if (!origin && live instanceof GameObject) {
+      // getInfo(GII_OWNER) yields a plain instance ID. It can numerically overlap
+      // a loaded packed resource, so only an explicit resource literal outranks it.
+      if (!args[0].resource && live instanceof GameObject) {
         const prior = this.nodes.get(object);
         if (prior && prior !== live) this.objects.delete(prior.id);
         this.nodes.set(object, live);
@@ -325,6 +328,13 @@ export class GameTypeNative {
         return scripted;
       }
       this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
+      if (type?.resourcePack) {
+        const node = this.requireResource(receiver);
+        node.resourcePack = type.resourcePack;
+        node.resourceScript = type.resourceScript;
+        const cfgPath = this.catalog?.resolve(type.resourcePack, type.typeId)?.cfgPath;
+        if (cfgPath) await this.configureUnscriptedResource?.(receiver, cfgPath);
+      }
       return receiver;
     };
     jvm.natives.registerAsync(gameRef, 'create', ['GameRef', 'GameRef', 'String', 'String'],
@@ -379,7 +389,7 @@ export class GameTypeNative {
       this.require(receiver).setState(this.readVector(args[0]), this.readOrientation(args[1]),
         this.readVector(args[2]), this.readVector(args[3])); return voidValue();
     });
-    jvm.natives.register(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], ({ receiver, args }) => {
+    jvm.natives.registerAsync(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], async ({ receiver, args }) => {
       const type = Number(args[1].value) | 0;
       if (type === 16 && typeof args[2].value === 'string') {
         const node = this.getResource(receiver);
@@ -388,7 +398,7 @@ export class GameTypeNative {
           commands.set(args[2].value.trim().split(/\s+/, 1)[0], args[2].value);
           this.lastCommands.set(node, commands);
         }
-        this.commandHandler?.(receiver, args[2].value);
+        await this.commandHandler?.(receiver, args[2].value);
       }
       this.queueStringEvent(receiver, args[0], type, args[2]);
       return voidValue();
@@ -435,7 +445,7 @@ export class GameTypeNative {
     return undefined;
   }
   reference(node: ResourceObject | null): JavaValue { return this.handle(node); }
-  setCommandHandler(handler: (receiver: JavaValue, command: string) => void): void {
+  setCommandHandler(handler: (receiver: JavaValue, command: string) => void | Promise<void>): void {
     this.commandHandler = handler;
   }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }

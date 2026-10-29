@@ -10,6 +10,17 @@ interface PartSlots {
   disabled: Set<number>;
   parentSlot: number;
   ownSlot: number;
+  positions: Map<number, { position?: [number, number, number]; rotation?: [number, number, number] }>;
+}
+
+export interface NativeInstalledPart {
+  node: ResourceObject;
+  parentSlot: number;
+  ownSlot: number;
+  positions: ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }>;
+  renderType?: number;
+  wear: number;
+  children: NativeInstalledPart[];
 }
 
 /** Native condition values owned by each interpreted SLRR part. */
@@ -17,10 +28,13 @@ export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
   private readonly texture = new WeakMap<JavaObject, number>();
+  private readonly renderType = new WeakMap<JavaObject, number>();
   private readonly slots = new WeakMap<ResourceObject, PartSlots>();
   private readonly configs = new WeakMap<JavaObject, PartConfig | null>();
 
-  constructor(private readonly jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
+  constructor(private readonly jvm: SlrrJvm, private readonly gameTypes: GameTypeNative,
+    private readonly compatibleSlots?: (parent: ResourceObject, parentSlot: CfgSlot,
+      child: ResourceObject, childSlot: CfgSlot) => Promise<boolean>) {
     const owner = 'java.game.parts.Part';
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
     jvm.natives.register(owner, 'getSlots', [], ({ receiver }) =>
@@ -66,6 +80,17 @@ export class PartNative {
       else state.disabled.delete(id);
       return jv('void', undefined);
     });
+    jvm.natives.register(owner, 'setSlotPos', ['int', 'Vector3', 'Ypr'], ({ receiver, args }) => {
+      const state = this.partSlots(receiver), id = Number(args[0].value) | 0;
+      const read = (value: JavaValue, names: [string, string, string]) => value.value == null ? undefined
+        : names.map(name => Number(this.jvm.get(value, name).value)) as [number, number, number];
+      const position = read(args[1], ['x', 'y', 'z']);
+      const rotation = read(args[2], ['y', 'p', 'r']);
+      if ([...(position ?? []), ...(rotation ?? [])].some(value => !Number.isFinite(value)))
+        throw new Error('Invalid part slot position');
+      state.positions.set(id, { position, rotation });
+      return jv('void', undefined);
+    });
     // Some stock part resources have no script binding and GameRef.create returns a
     // GameRef. Keep their condition on the same resource while Java assembles the car.
     for (const conditionOwner of [owner, 'java.util.resource.GameRef']) {
@@ -97,6 +122,12 @@ export class PartNative {
       // The original native reports success even when no render object is bound yet.
       return jv('int', 1);
     });
+    jvm.natives.register(owner, 'setRenderType', ['int'], ({ receiver, args }) => {
+      const id = Number(args[0].value);
+      if (!Number.isInteger(id)) throw new Error('Invalid part render type');
+      this.renderType.set(receiver.value as JavaObject, id);
+      return jv('int', 1);
+    });
     jvm.natives.register(owner, 'getCar', [], ({ receiver }) => {
       return jv('int', this.carNode(receiver)?.resourceId ?? 0);
     });
@@ -104,6 +135,32 @@ export class PartNative {
 
   configure(receiver: JavaValue, cfg: PartConfig | null): void {
     this.configs.set(receiver.value as JavaObject, cfg);
+    const node = this.gameTypes.getResource(receiver);
+    const state = node && this.slots.get(node);
+    if (state) state.slots = cfg?.slots ?? [];
+  }
+
+  slotOverrides(receiver: JavaValue): ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }> {
+    return this.partSlots(receiver).positions;
+  }
+
+  installedTree(receiver: JavaValue): NativeInstalledPart[] {
+    const root = this.gameTypes.getResource(receiver);
+    if (!root) throw new Error('Java chassis has no native resource');
+    const visited = new Set<ResourceObject>([root]);
+    const children = (parent: ResourceObject): NativeInstalledPart[] => {
+      const state = this.partSlots(this.gameTypes.reference(parent));
+      return [...state.installed].map(([parentSlot, { child, mate }]) => {
+        if (visited.has(child) || child.parent !== parent) throw new Error('Invalid Java installed part tree');
+        visited.add(child);
+        const handle = this.gameTypes.reference(child), object = handle.value as JavaObject;
+        const childState = this.partSlots(handle);
+        return { node: child, parentSlot, ownSlot: mate, positions: childState.positions,
+          renderType: this.renderType.get(object), wear: this.wear.get(object) ?? 1,
+          children: children(child) };
+      });
+    };
+    return children(root);
   }
 
   partMass(receiver: JavaValue): number {
@@ -131,7 +188,7 @@ export class PartNative {
     let state = this.slots.get(node);
     if (!state) {
       state = { slots: this.configs.get(receiver.value as JavaObject)?.slots ?? [],
-        installed: new Map(), disabled: new Set(), parentSlot: 0, ownSlot: 0 };
+        installed: new Map(), disabled: new Set(), parentSlot: 0, ownSlot: 0, positions: new Map() };
       this.slots.set(node, state);
     }
     return state;
@@ -145,7 +202,7 @@ export class PartNative {
     return null;
   }
 
-  private command(receiver: JavaValue, command: string): void {
+  private async command(receiver: JavaValue, command: string): Promise<void> {
     const words = command.trim().split(/\s+/);
     if (words[0] !== 'install') return;
     if (words.length !== 6 || words.slice(1).some(word => !/^\d+$/.test(word)))
@@ -179,7 +236,10 @@ export class PartNative {
             ref.slot === own.id && (ref.resource & 0xffff) === (child.typeId & 0xffff));
           const childAccepts = [...own.attach, ...own.compatible].some(ref =>
             ref.slot === slot.id && (ref.resource & 0xffff) === (candidate.typeId & 0xffff));
-          if (!parentAccepts && !childAccepts) continue;
+          const compatible = this.compatibleSlots
+            ? await this.compatibleSlots(candidate, slot, child, own)
+            : parentAccepts || childAccepts;
+          if (!compatible) continue;
           child.setParent(candidate);
           parentState.installed.set(slot.id, { child, mate: own.id });
           childState.parentSlot = slot.id;

@@ -35,6 +35,7 @@ export class ChassisNative {
   private readonly sfxTables = new WeakMap<JavaObject, Map<number, JavaValue>>();
   private readonly sfxTableStates = new WeakMap<JavaObject, ScriptSfxTable>();
   private readonly exhaustMinVolume = new WeakMap<JavaObject, number>();
+  private readonly steerWheel = new WeakMap<JavaObject, [number, number]>();
 
   constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
     const owner = 'java.game.parts.bodypart.Chassis';
@@ -105,6 +106,12 @@ export class ChassisNative {
       const value = Number(args[0].value);
       if (!Number.isFinite(value) || value < 0) throw new Error('Invalid chassis Ackermann length');
       this.ackermann.set(receiver.value as JavaObject, value);
+      return jv('void', undefined);
+    });
+    jvm.natives.register(owner, 'setSteerWheel', ['float', 'float'], ({ receiver, args }) => {
+      const values = args.map(arg => Number(arg.value)) as [number, number];
+      if (values.some(value => !Number.isFinite(value))) throw new Error('Invalid steering wheel motion');
+      this.steerWheel.set(receiver.value as JavaObject, values);
       return jv('void', undefined);
     });
     // Run the original Java recalculation, then expose its fields for the future wheel/part physics fold.

@@ -93,3 +93,34 @@ test('factory retries out-of-order stock, honors nested stock and resolves depen
   configs.set('5.cfg', 'slot bad');
   await assert.rejects(() => new PartFactory(assets).stock({ pack: 'test.rpk', id: 1 }), /CFG line/);
 });
+
+test('Java installed tree replaces CFG stock expansion, including nested parts and slot poses', async () => {
+  const configs = new Map([
+    ['1.cfg', 'slot 0 0 0 0 0 0 5\nstockpart 0x03'],
+    ['2.cfg', 'slot 0 0 0 0 0 0 6\nslot 0 0 0 0 0 0 7\nstockpart 0x04'],
+    ['3.cfg', 'slot 0 0 0 0 0 0 8'],
+    ['4.cfg', 'slot 0 0 0 0 0 0 9'],
+    ['5.cfg', 'slot 0 0 0 0 0 0 10'],
+  ]);
+  const encoder = new TextEncoder();
+  const assets = new Assets([...configs].map(([path]) => ({ path, size: 0 })), async path => encoder.encode(configs.get(path)!));
+  const pack: RpkPack = { version: 512, dependencies: [], warnings: [], entries: [...configs.keys()].map((_, i) =>
+    ({ typeId: i + 1, superId: 0, type: 8, flags: 0, compatibility: 1, offset: 0, size: 0,
+      alias: String(i + 1), data: encoder.encode(`native part ${i + 1}.cfg`) })) };
+  assets.pack = async () => pack;
+  const key = (id: number) => ({ pack: 'test.rpk', id });
+  const built = await new PartFactory(assets).stock(key(1), { javaSelection: {
+    body: [key(3)], mechanical: [key(4)], tyres: [], wheelRefs: [],
+    rootPositions: new Map([[5, { position: [2, 0, 0] as [number, number, number] }]]),
+    installed: [{ key: key(2), parentSlot: 5, ownSlot: 6, positions: new Map(), wear: 0.8,
+      children: [{ key: key(5), parentSlot: 7, ownSlot: 10, positions: new Map(), wear: 1, children: [] }] }],
+  } });
+  assert.equal(built.world.parts.size, 3);
+  const child = built.root.children.get(5)!;
+  assert.equal(child.definition.key.id, 2);
+  assert.equal(child.condition, 0.8);
+  assert.equal(new Vector3().setFromMatrixPosition(child.matrix()).x, 2);
+  assert.equal(child.children.get(7)?.definition.key.id, 5);
+  assert.equal(built.warnings.length, 0);
+  built.world.dispose();
+});

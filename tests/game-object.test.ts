@@ -47,7 +47,7 @@ test('game objects form a guarded tree and retain flags, pose, velocity, and que
   assert.equal(car.consumeCollisionActivation(), false);
 });
 
-test('GameRef native calls update the same object created by GameType', () => {
+test('GameRef native calls update the same object created by GameType', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const host = new GameTypeNative(jvm, () => {});
   const root = ref('java.game.Scene'), child = ref('java.game.Vehicle');
@@ -80,7 +80,7 @@ test('GameRef native calls update the same object created by GameType', () => {
   const out = vector(0, 0, 0);
   assert.equal(native('java.util.resource.GameRef', 'getPos', child, [out]).value, out.value);
   assert.equal(jvm.get(out, 'y').value, 2);
-  native('java.util.resource.GameRef', 'queueEvent', child, [jv('ResourceRef', root.value), jv('int', 16), jv('String', 'start')]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', child, [jv('ResourceRef', root.value), jv('int', 16), jv('String', 'start')]);
   assert.deepEqual(host.get(child)?.events, [{ sourceId: 1, type: 16, payload: 'start' }]);
   native('java.util.resource.GameRef', 'setActiveCollision', child);
   assert.equal(host.get(child)?.collisionActivationQueued, true);
@@ -91,7 +91,7 @@ test('GameRef native calls update the same object created by GameType', () => {
   assert.equal(host.get(child)?.eventMask, 0x10000);
 });
 
-test('GroundRef(int) binds the map resource to a game object for Track commands', () => {
+test('GroundRef(int) binds the map resource to a game object for Track commands', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const host = new GameTypeNative(jvm, () => {});
   const ground = ref('java.util.resource.GroundRef');
@@ -99,13 +99,25 @@ test('GroundRef(int) binds the map resource to a game object for Track commands'
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', ground, [jv('int', 0x1234)]);
   assert.equal(host.get(ground)?.resourceId, 0x1234);
   assert.equal(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', ground, [])?.value, 0x1234);
-  jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', ground,
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', ground,
     [jv('ResourceRef', null), jv('int', 16), jv('String', 'obs_rem 42')]);
   assert.deepEqual(host.get(ground)?.events, [{ sourceId: null, type: 16, payload: 'obs_rem 42' }]);
   const generic = ref('java.util.resource.GameRef');
   jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', generic, []);
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', generic, [jv('int', 0x5678)]);
   assert.equal(host.get(generic), undefined);
+});
+
+test('GameRef(int) resolves a live owner even when its ID overlaps a packed resource', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const host = new GameTypeNative(jvm, () => {}, undefined, undefined, undefined, undefined,
+    id => id === 0x20000000 ? { pack: 'fake.rpk', id: 1 } : undefined);
+  const parent = ref('java.game.Scene'), owner = ref('java.util.resource.GameRef');
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', parent, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', owner, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', owner,
+    [jv('int', host.getResource(parent)!.resourceId)]);
+  assert.equal(host.getResource(owner), host.getResource(parent));
 });
 
 test('destroy tolerates an uninitialized render reference after a partial Track.enter', () => {

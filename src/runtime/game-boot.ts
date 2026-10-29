@@ -13,6 +13,7 @@ import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
 import { packedResourceId } from './resource-ids';
 import { StringNative } from './string-native';
+import { PartFactory } from '../engine/world';
 import { repairDecompiledSource } from './source-repairs';
 import { SystemNative } from './system-native';
 import { ThreadNative } from './thread-native';
@@ -38,7 +39,7 @@ import type { SoundJavaBridge } from '../audio/sound-java';
 import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -257,7 +258,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node));
+    }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node),
+    async (receiver, cfgPath) => {
+      const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
+      partNative.configure(receiver, cfg);
+    });
   jvm.natives.register('java.util.resource.GroundRef', 'setFog', ['int', 'float', 'float'], ({ receiver, args }) => {
     if (!gameTypes.get(receiver)) throw new Error('GroundRef.setFog has no map game object');
     const color = Number(args[0].value) & 0xffffff;
@@ -273,7 +278,16 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
     packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
   chassisNative = new ChassisNative(jvm, gameTypes);
-  partNative = new PartNative(jvm, gameTypes);
+  const partFactory = new PartFactory(assets);
+  partNative = new PartNative(jvm, gameTypes, async (parent, parentSlot, child, childSlot) => {
+    const key = (node: typeof parent) => {
+      const identity = resolveResourceIdentity(node.typeId);
+      return identity ? { pack: normalizeResourcePackPath(identity.pack), id: identity.id }
+        : node.resourcePack ? { pack: normalizeResourcePackPath(node.resourcePack), id: node.typeId } : null;
+    };
+    const parentKey = key(parent), childKey = key(child);
+    return !!parentKey && !!childKey && await partFactory.compatibleSlots(parentKey, parentSlot, childKey, childSlot);
+  });
   const dyno = new DynoNative(jvm);
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
@@ -475,11 +489,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
+    return { jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
+    return { jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }

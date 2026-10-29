@@ -118,11 +118,11 @@ test('CFG slots connect parts through Java install commands and expose both side
   assert.equal(parts.assemblyMass(car), 1000);
   const id = (value: ReturnType<typeof ref>) => gameTypes.get(value)!.resourceId;
   const install = (child: ReturnType<typeof ref>, parent: ReturnType<typeof ref>) =>
-    jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', child,
+    jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', child,
       [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)} 0 ${id(parent)} 0`)]);
-  install(engine, car);
-  install(crank, engine);
-  install(flywheel, engine);
+  await install(engine, car);
+  await install(crank, engine);
+  await install(flywheel, engine);
   const call = (target: ReturnType<typeof ref>, method: string, arg: number) =>
     jvm.natives.invoke('java.game.parts.Part', method, target, [jv('int', arg)])?.value;
   assert.equal(call(car, 'getSlotID', 0), 401);

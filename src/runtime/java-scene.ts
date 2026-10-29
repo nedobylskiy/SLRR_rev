@@ -1,7 +1,7 @@
 import { jv, type JavaValue } from 'slrr-jvm';
 import { normalizeResourcePackPath } from '../assets';
 import type { Assets } from '../assets';
-import type { JavaStockSelection, ResourceKey } from '../engine/world';
+import type { JavaInstalledPart, JavaStockSelection, ResourceKey } from '../engine/world';
 import type { BootResult } from './game-boot';
 import type { DrivingInput } from '../engine/driving-demo';
 
@@ -55,22 +55,31 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
     return field.value.map(value => Number(typeof value === 'object' && value && 'value' in value ? value.value : value))
       .filter(value => Number.isSafeInteger(value) && value > 0);
   };
-  const resolve = async (id: number): Promise<ResourceKey> => {
+  const resolve = async (id: number, pack = chassisPack): Promise<ResourceKey> => {
     const identity = result.resolveResourceIdentity(id);
     if (identity) return { pack: normalizeResourcePackPath(identity.pack), id: identity.id };
-    const { packPath, id: localId } = await assets.resourceLocation(chassisPack, id);
+    const { packPath, id: localId } = await assets.resourceLocation(pack, id);
     return { pack: packPath, id: localId };
   };
+  const project = async (native: ReturnType<typeof result.parts.installedTree>[number]): Promise<JavaInstalledPart> => ({
+    key: await resolve(native.node.typeId, native.node.resourcePack ?? chassisPack),
+    parentSlot: native.parentSlot, ownSlot: native.ownSlot,
+    positions: native.positions,
+    render: native.renderType ? await resolve(native.renderType, native.node.resourcePack ?? chassisPack) : undefined,
+    wear: native.wear,
+    children: await Promise.all(native.children.map(project)),
+  });
+  const installed = await Promise.all(result.parts.installedTree(chassis).map(project));
   const bodyLists = ['E', 'FL', 'FR', 'RL', 'RR', 'F', 'Rr', 'L', 'R', 'T'];
   const mechanicalLists = ['suspensions', 'shocks', 'springs', 'brakes', 'sways', 'wheels', 'others'];
-  const body = await Promise.all(bodyLists.flatMap(name => values(`parts_list_${name}`)).map(resolve));
-  const mechanical = await Promise.all(mechanicalLists.flatMap(name => values(`parts_list_RGear_${name}`)).map(resolve));
+  const body = await Promise.all(bodyLists.flatMap(name => values(`parts_list_${name}`)).map(id => resolve(id)));
+  const mechanical = await Promise.all(mechanicalLists.flatMap(name => values(`parts_list_RGear_${name}`)).map(id => resolve(id)));
   const tyreIds = values('parts_list_RGear_tyres');
-  const tyres = await Promise.all(tyreIds.map(resolve));
+  const tyres = await Promise.all(tyreIds.map(id => resolve(id)));
   if (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4)
     throw new Error('Executed Java chassis did not select four wheels and four suspensions');
   const wheelRefs = Array.from({ length: 4 }, (_, index) => result.chassis.wheelState(chassis, index));
-  return { body, mechanical, tyres, wheelRefs };
+  return { body, mechanical, tyres, wheelRefs, installed, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */

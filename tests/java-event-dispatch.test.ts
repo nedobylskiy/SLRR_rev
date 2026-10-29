@@ -109,11 +109,11 @@ test('native event queue invokes the original Java hotkey handler after an input
   input.setPhysicalAxis(0, 17, 0);
   input.checkHotkeys(controller, jv('Osd', null));
   assert.equal(jvm.get(handler, 'calls').value, 1, 'press-only registration ignores release');
-  jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', handler,
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', handler,
     [jv('ResourceRef', null), jv('int', 16), jv('String', 'command')]);
   assert.equal(gameTypes.dispatchQueuedEvents(), 0, 'event mask rejects unsubscribed events');
   jvm.natives.invoke('java.lang.GameType', 'setEventMask', handler, [jv('int', 16)]);
-  jvm.natives.invoke('java.util.resource.GameRef', 'queueEvent', handler,
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', handler,
     [jv('ResourceRef', null), jv('int', 16), jv('String', 'command')]);
   assert.equal(gameTypes.dispatchQueuedEvents(), 1);
   assert.equal(jvm.get(handler, 'last').value, 16);
