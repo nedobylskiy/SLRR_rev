@@ -91,6 +91,19 @@ test('async native failure retains Java source location', async () => {
     /Main\.run \(source line 3\): adapter offline/);
 });
 
+test('async native failure with an empty message still reports its exception type', async () => {
+  const source = `package demo; import demo.Remote;
+    class Main { int run() {
+      return Remote.fail();
+    } }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main'
+    ? { path: 'Main.java', source } : null, selectMethods: () => ['run'] });
+  jvm.natives.registerAsync('demo.Remote', 'fail', [], async () => { throw new DOMException('', 'EncodingError'); });
+  await jvm.loadClass('demo.Main');
+  await assert.rejects(jvm.invokeAsync(await jvm.constructAsync('demo.Main', []), 'run'),
+    /Main\.run \(source line 3\): EncodingError/);
+});
+
 test('a reference array preserves its element type when passed to a native method', async () => {
   const source = `package demo; import demo.Host;
     class Main { int run() { ResourceRef[] refs = new ResourceRef[1]; refs[0] = new ResourceRef(7); return Host.read(refs[0]); } }

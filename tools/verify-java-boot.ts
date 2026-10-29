@@ -27,7 +27,9 @@ const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { 
   .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
 const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
   .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
-const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames,
+const skyNames = ['maps/skydome.rpk', ...(await readdir(join(root, 'maps/skydome'), { recursive: true }))
+  .map(name => `maps/skydome/${name.replaceAll('\\', '/')}`)];
+const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, ...skyNames,
   'system.rpk', 'frontend.rpk', 'frontend/textures/interface/icons/event_list/gamemode_freeride.png',
   'frontend/sounds/mnuselect.wav'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
@@ -53,7 +55,11 @@ const result = await bootGame(assets, event => {
   if (event.level === 'error') runtimeErrors.push(event.message);
   process.stdout.write(`${event.level}: ${event.message}\n`);
 },
-  undefined, undefined, osd);
+  undefined, undefined, osd, undefined, undefined, undefined, undefined, undefined, undefined,
+  flare => {
+    if (!flare.bytes.length) throw new Error(`Flare asset is empty: ${flare.path}`);
+    process.stdout.write(`flare: ${flare.path} (${flare.bytes.length} bytes)\n`);
+  });
 if (process.argv.includes('--diagnose')) {
   result.dispose();
   process.exit(result.error ? 1 : 0);

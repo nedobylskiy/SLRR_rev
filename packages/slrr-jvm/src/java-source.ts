@@ -139,6 +139,12 @@ class JavaSourceLocationError extends Error {
   constructor(readonly line: number, message: string) { super(message); }
 }
 
+function describeThrown(error: unknown): string {
+  if (error instanceof Error) return error.message || error.name || 'Unnamed error';
+  const description = String(error);
+  return description || 'Empty thrown value';
+}
+
 export class JavaSourceMachine {
   private remaining = 0; private depth = 0; private singleIteration = false;
   private readonly arrayResourceOrigins = new WeakMap<unknown[], Map<number, Pick<JavaValue, 'resource' | 'resourceId'>>>();
@@ -150,7 +156,7 @@ export class JavaSourceMachine {
     this.depth++;
     const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
     try { const flow = this.statement(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
-    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${e instanceof Error ? e.message : e}`); }
+    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${describeThrown(e)}`, { cause: e }); }
     finally { this.depth--; }
   }
   invokeTick(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): JavaValue {
@@ -167,7 +173,7 @@ export class JavaSourceMachine {
     this.depth++;
     const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
     try { const flow = await this.statementAsync(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
-    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${e instanceof Error ? e.message : e}`); }
+    catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${describeThrown(e)}`, { cause: e }); }
     finally { this.depth--; }
   }
   async initializeFieldsAsync(cls: SourceClass, receiver: JavaValue, staticOnly = false): Promise<void> {
@@ -182,7 +188,7 @@ export class JavaSourceMachine {
         this.host.set(receiver, field.name, coerce(field.type, value));
       } catch (error) {
         const line = error instanceof JavaSourceLocationError ? error.line : field.expr?.line ?? 0;
-        throw new Error(`${cls.name}.<fields> (source line ${line}): ${error instanceof Error ? error.message : error}`);
+        throw new Error(`${cls.name}.<fields> (source line ${line}): ${describeThrown(error)}`, { cause: error });
       }
     }
   }
@@ -201,7 +207,7 @@ export class JavaSourceMachine {
         this.host.set(receiver, field.name, coerce(field.type, value));
       } catch (error) {
         const line = error instanceof JavaSourceLocationError ? error.line : field.expr?.line ?? 0;
-        throw new Error(`${cls.name}.<fields> (source line ${line}): ${error instanceof Error ? error.message : error}`);
+        throw new Error(`${cls.name}.<fields> (source line ${line}): ${describeThrown(error)}`, { cause: error });
       }
     }
   }
@@ -294,7 +300,7 @@ export class JavaSourceMachine {
     }
     } catch (error) {
       if (error instanceof JavaSourceLocationError) throw error;
-      throw new JavaSourceLocationError(expr.line, error instanceof Error ? error.message : String(error));
+      throw new JavaSourceLocationError(expr.line, describeThrown(error));
     }
   }
   private async referenceAsync(expr: Expr, scope: Scope, self: JavaValue, method: SourceMethod): Promise<{ get: () => Promise<JavaValue>; set: (value: JavaValue) => void }> {
@@ -387,7 +393,7 @@ export class JavaSourceMachine {
       }
     } catch (error) {
       if (error instanceof JavaSourceLocationError) throw error;
-      throw new JavaSourceLocationError(expr.line, error instanceof Error ? error.message : String(error));
+      throw new JavaSourceLocationError(expr.line, describeThrown(error));
     }
   }
   private binary(op: string, a: JavaValue, b: JavaValue): JavaValue {

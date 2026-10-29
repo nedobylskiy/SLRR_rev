@@ -152,6 +152,8 @@ export class Viewer {
   }
   async setSceneFlare(source: RenderFlareSource): Promise<void> {
     const revision = ++this.sunFlareRevision;
+    let phase = 'PTX header';
+    try {
     const bytes = source.bytes;
     if (!source.path.toLowerCase().endsWith('.ptx') || bytes.length < 40)
       throw new Error(`Unsupported flare texture: ${source.path}`);
@@ -160,12 +162,14 @@ export class Viewer {
     const colorSize = header.getUint32(20, true), alphaSize = header.getUint32(24, true);
     if (!colorSize || !alphaSize || 36 + colorSize + alphaSize > bytes.length)
       throw new Error(`Invalid flare PTX: ${source.path}`);
+    phase = 'JPEG decode';
     const loadJpeg = (part: Uint8Array) => createImageBitmap(new Blob([Uint8Array.from(part)], { type: 'image/jpeg' }));
     const [color, alpha] = await Promise.all([
       loadJpeg(bytes.subarray(36, 36 + colorSize)),
       loadJpeg(bytes.subarray(36 + colorSize, 36 + colorSize + alphaSize)),
     ]);
     if (revision !== this.sunFlareRevision) { color.close(); alpha.close(); return; }
+    phase = 'alpha compositing';
     // The upper-left 128x128 tile is the game's sun glow; the remaining tiles are smaller ghosts.
     const size = Math.min(128, color.width, color.height, alpha.width, alpha.height);
     const canvas = document.createElement('canvas'); canvas.width = size; canvas.height = size;
@@ -176,6 +180,7 @@ export class Viewer {
     const mask = context.getImageData(0, 0, size, size);
     for (let i = 0; i < pixels.data.length; i += 4) pixels.data[i + 3] = mask.data[i];
     context.putImageData(pixels, 0, 0); color.close(); alpha.close();
+    phase = 'lens flare setup';
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
     if (source.sunDirection) this.sunLight.position.set(source.sunDirection.x, source.sunDirection.y, source.sunDirection.z);
     const tint = new THREE.Color((source.color >>> 8) & 0xffffff);
@@ -188,6 +193,10 @@ export class Viewer {
         (i + 1) / (ghosts + 1), tint.clone().multiplyScalar(0.35)));
     this.sunFlare?.removeFromParent(); this.sunFlareTexture?.dispose();
     this.sunFlare = flare; this.sunFlareTexture = texture; this.scene.add(flare);
+    } catch (reason) {
+      const description = reason instanceof Error ? reason.message || reason.name : String(reason);
+      throw new Error(`Scene flare ${phase} failed (${source.path}): ${description || 'unknown error'}`, { cause: reason });
+    }
   }
   async setGlobalEnvmap(source: EnvironmentMapSource | null): Promise<void> {
     const revision = ++this.environmentRevision;

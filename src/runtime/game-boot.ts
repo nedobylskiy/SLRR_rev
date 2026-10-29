@@ -444,7 +444,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
-    const error = new Error(sourceDiagnostic(original.message, sources, assets), { cause: original });
+    const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
     return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, dispose, error };
   }
