@@ -13,6 +13,7 @@ import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
 import { packedResourceId } from './resource-ids';
 import { StringNative } from './string-native';
+import { repairDecompiledSource } from './source-repairs';
 import { SystemNative } from './system-native';
 import { ThreadNative } from './thread-native';
 import { PartNative } from './part-native';
@@ -166,7 +167,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       return { path, source: result.source };
     },
     readSource: async path => {
-      const source = new TextDecoder().decode(await assets.read(path));
+      const source = repairDecompiledSource(path, new TextDecoder().decode(await assets.read(path)));
       sources.set(path.toLowerCase(), source);
       return source;
     },

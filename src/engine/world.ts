@@ -198,6 +198,9 @@ export class PartFactory {
             }
           }
         }
+        if (options.javaSelection) for (const ref of tyreRefs) {
+          if (ref) pending.push(await this.definition(ref));
+        }
         for (const ref of options.javaSelection?.mechanical ?? await source.entries(root.definition, env, true)) {
           const definition = await this.definition(ref), mechanics = await source.profile(definition); pending.push({ ...definition, mechanics });
         }

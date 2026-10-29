@@ -70,6 +70,11 @@ const result = await bootGame(assets, event => {
     process.stdout.write(`flare: ${flare.path} (${flare.bytes.length} bytes)\n`);
   });
 if (process.argv.includes('--diagnose')) {
+  if (process.argv.includes('--timer-check')) {
+    const formatted = result.jvm.call(jv('class', 'java.lang.String'), 'timeToString', [jv('float', 1.23456), jv('int', 2)]);
+    process.stdout.write(`timer format: ${formatted.value}\n`);
+    if (formatted.value !== '0:01.235') throw new Error('Decompiled system timer produced an invalid elapsed-time string');
+  }
   if (process.argv.includes('--scene-debug')) {
     const roots = result.gameTypes.roots();
     const nodes = roots.flatMap(function visit(node: (typeof roots)[number]): typeof roots {
@@ -109,6 +114,11 @@ if (process.argv.includes('--diagnose')) {
         throw new Error('SuperDuty Extra 750 lost its two parts/interior:0x49 seat resources');
       const built = await new PartFactory(assets).stock(selected.chassis, { mechanical: true, javaSelection: selection });
       process.stdout.write(`assembly built: ${built.world.parts.size} parts, ${selection.mechanical.length} selected hardware, ${selection.tyres.length} selected tyres, ${built.warnings.length} warnings\n`);
+      const installedTyres = [...built.world.parts.values()].filter(part => selection.tyres.some(ref =>
+        ref?.pack === part.definition.key.pack && ref.id === part.definition.key.id));
+      process.stdout.write(`assembly tyres: ${installedTyres.map(part => `${part.definition.key.pack}:${part.definition.key.id}@${part.parent?.definition.key.id ?? '-'} model=${part.definition.model?.path ?? '-'}`).join(', ')}\n`);
+      if (installedTyres.length !== 4 || installedTyres.some(part => !part.parent || !part.definition.model))
+        throw new Error('Java-selected tyres were not installed on all four wheels');
       const kinds = [...built.world.parts.values()].reduce<Record<string, number>>((result, part) => {
         const kind = part.definition.mechanics?.kind;
         if (kind) result[kind] = (result[kind] ?? 0) + 1;
