@@ -385,7 +385,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraDistance?(): number; instruments?(speedKmh: number, rpm: number, gear: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -459,10 +459,36 @@ export class Viewer {
       if (event.code === 'KeyR' && !event.repeat) { if (crash) crash.reset(); else demo.reset(); tireEffects?.reset(); keys.clear(); }
     };
     const up = (event: KeyboardEvent) => { keys.delete(event.code); };
-    const release = () => { keys.clear(); last = undefined; };
+    let mousePointer: number | undefined, mouseX = 0, mouseY = 0, orbitYaw = 0, orbitPitch = 0;
+    const releaseMouse = () => {
+      if (mousePointer === undefined) return;
+      const pointer = mousePointer; mousePointer = undefined;
+      java?.mouseButton?.(false);
+      if (canvas.hasPointerCapture(pointer)) canvas.releasePointerCapture(pointer);
+    };
+    const pointerDown = (event: PointerEvent) => {
+      if (!java || event.button !== 2) return;
+      event.preventDefault();
+      releaseMouse();
+      mousePointer = event.pointerId; mouseX = event.clientX; mouseY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+      java.mouseButton?.(true);
+    };
+    const pointerMove = (event: PointerEvent) => {
+      if (mousePointer !== event.pointerId) return;
+      if (!(event.buttons & 2)) { releaseMouse(); return; }
+      java?.mouseMotion?.(event.clientX - mouseX, event.clientY - mouseY);
+      mouseX = event.clientX; mouseY = event.clientY;
+    };
+    const pointerUp = (event: PointerEvent) => { if (mousePointer === event.pointerId) releaseMouse(); };
+    const contextMenu = (event: MouseEvent) => { if (java) event.preventDefault(); };
+    const release = () => { keys.clear(); last = undefined; releaseMouse(); };
     const visibility = () => { release(); vehicleAudio?.suspend(document.hidden); };
     const focus = () => { vehicleAudio?.activate(); canvas.focus({ preventScroll: true }); };
     canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Vehicle controls'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
+    canvas.addEventListener('pointerdown', pointerDown); canvas.addEventListener('pointermove', pointerMove);
+    canvas.addEventListener('pointerup', pointerUp); canvas.addEventListener('pointercancel', pointerUp);
+    canvas.addEventListener('lostpointercapture', pointerUp); canvas.addEventListener('contextmenu', contextMenu);
     window.addEventListener('keyup', up); window.addEventListener('blur', release); document.addEventListener('visibilitychange', visibility);
     this.ground.visible = !track; this.grid.visible = false; this.driveGrid.visible = !track;
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(softParts);
@@ -488,6 +514,17 @@ export class Viewer {
           : mode === 4 ? new THREE.Vector3(0, 3, -11)
           : mode === 3 ? new THREE.Vector3(0, 3.5, 12)
           : new THREE.Vector3(0, 2.5, distance);
+        const look = java.cameraLook?.();
+        if (look && mode !== 5) {
+          orbitYaw += look.x * 0.3;
+          orbitPitch = THREE.MathUtils.clamp(orbitPitch - look.y * 0.3, -1.1, 1.1);
+          const relative = offset.sub(new THREE.Vector3(0, 1.1, 0));
+          const radius = relative.length();
+          const elevation = THREE.MathUtils.clamp(Math.atan2(relative.y, Math.hypot(relative.x, relative.z)) + orbitPitch, -1.35, 1.35);
+          const azimuth = Math.atan2(relative.x, relative.z) + orbitYaw;
+          relative.set(radius * Math.cos(elevation) * Math.sin(azimuth), radius * Math.sin(elevation), radius * Math.cos(elevation) * Math.cos(azimuth));
+          offset.add(new THREE.Vector3(0, 1.1, 0));
+        }
         offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
         const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
         const desired = demo.position.clone().add(offset);
@@ -515,7 +552,11 @@ export class Viewer {
     const stop = () => {
       if (stopped) return; stopped = true;
       this.frame = undefined; this.stopDriving = undefined;
+      releaseMouse();
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);
+      canvas.removeEventListener('pointerdown', pointerDown); canvas.removeEventListener('pointermove', pointerMove);
+      canvas.removeEventListener('pointerup', pointerUp); canvas.removeEventListener('pointercancel', pointerUp);
+      canvas.removeEventListener('lostpointercapture', pointerUp); canvas.removeEventListener('contextmenu', contextMenu);
       window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visibility);
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
       if (java) this.controls.enabled = true;

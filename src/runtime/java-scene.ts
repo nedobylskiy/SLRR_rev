@@ -83,8 +83,9 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */
-export function javaDrivingControls(result: BootResult): { sample(): DrivingInput; cameraMode(): number; cameraDistance(): number } {
-  const { jvm, controllers, gameTypes } = result;
+export function javaDrivingControls(result: BootResult): { sample(): DrivingInput; cameraMode(): number; cameraDistance(): number;
+  mouseButton(pressed: boolean): void; mouseMotion(dx: number, dy: number): void; cameraLook(): { x: number; y: number } } {
+  const { jvm, controllers, gameTypes, input } = result;
   const activeState = () => jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
   const controller = () => {
     const player = jvm.get(jv('class', 'java.game.GameLogic'), 'player');
@@ -112,6 +113,19 @@ export function javaDrivingControls(result: BootResult): { sample(): DrivingInpu
       const values = command?.split(/\s+/).slice(1).map(Number) ?? [];
       return values.length === 2 && values.every(Number.isFinite)
         ? Math.max(values[0], Math.min(values[1], 7)) : 7;
+    },
+    mouseButton(pressed) { input.setPhysicalAxis(1, 4, pressed ? 1 : 0); },
+    mouseMotion(dx, dy) {
+      input.setPhysicalAxis(1, 0, Math.max(-1, Math.min(1, input.physicalAxis(1, 0) + dx * 0.01)));
+      input.setPhysicalAxis(1, 1, Math.max(-1, Math.min(1, input.physicalAxis(1, 1) + dy * 0.01)));
+    },
+    cameraLook() {
+      const current = controller();
+      const x = current?.value == null ? 0 : controllers.read(current, 7);
+      const y = current?.value == null ? 0 : controllers.read(current, 8);
+      input.setPhysicalAxis(1, 0, 0);
+      input.setPhysicalAxis(1, 1, 0);
+      return { x, y };
     },
   };
 }

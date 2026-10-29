@@ -157,7 +157,7 @@ async function runGameBoot() {
                 } });
             disposeJavaScene = () => { stopAnimation(); session(); gauges?.dispose(); built?.world.dispose(); };
             driveHud.hidden = true;
-            el('scene-help').textContent = 'Controls follow the game ControlSet · Camera follows Track.java';
+            el('scene-help').textContent = 'Controls follow the game ControlSet · Right drag: rotate camera';
           } catch (reason) {
             gauges?.dispose();
             appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
