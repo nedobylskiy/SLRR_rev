@@ -1,8 +1,13 @@
 import { jv, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { OrientationState, Vector3State } from './game-object';
+import type { ResourceObject } from './resource-object';
 
 export interface RenderLightSettings { diffuse: number; ambient: number; specular: number }
+export interface RenderFlareSettings { color: number; minSize: number; maxSize: number; flareCount: number; rayCount: number }
+export interface RenderFlareSource extends RenderFlareSettings {
+  path: string; bytes: Uint8Array; sunDirection?: { x: number; y: number; z: number };
+}
 
 const origin = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroRotation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
@@ -11,7 +16,9 @@ const zeroRotation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
 export class RenderRefNative {
   constructor(jvm: SlrrJvm, private readonly resources: GameTypeNative,
     private readonly setTextMatrix?: (receiver: JavaValue, position: Vector3State) => boolean,
-    private readonly setSceneLight?: (settings: RenderLightSettings) => void) {
+    private readonly setSceneLight?: (settings: RenderLightSettings) => void,
+    private readonly setSceneFlare?: (texture: ResourceObject, light: ResourceObject,
+      settings: RenderFlareSettings) => Promise<void> | void) {
     const owner = 'java.util.resource.RenderRef';
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'create', ['ResourceRef', 'RenderRef', 'String'], ({ receiver, args }) => {
@@ -45,6 +52,16 @@ export class RenderRefNative {
       this.setSceneLight?.({ diffuse: Number(args[0].value) & 0xffffff,
         ambient: Number(args[1].value) & 0xffffff,
         specular: Number(args[2].value) & 0xffffff });
+      return voidValue();
+    });
+    jvm.natives.registerAsync(owner, 'setFlare', ['ResourceRef', 'int', 'float', 'float', 'int', 'int'], async ({ receiver, args }) => {
+      const light = this.resources.getResource(receiver);
+      if (!light) throw new Error('RenderRef.setFlare has no resource');
+      const texture = this.resources.getResource(args[0]);
+      if (!texture) throw new Error('RenderRef.setFlare has no texture resource');
+      await this.setSceneFlare?.(texture, light, { color: Number(args[1].value) >>> 0,
+        minSize: Number(args[2].value), maxSize: Number(args[3].value),
+        flareCount: Number(args[4].value), rayCount: Number(args[5].value) });
       return voidValue();
     });
     // MOCK: Dynamic SkidMark lines are tracked as resources but have no visible geometry yet.

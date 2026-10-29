@@ -68,6 +68,21 @@ test('RenderRef.setLight forwards all three source colors from a light resource'
   assert.deepEqual(colors, [{ diffuse: 0xd8d4b0, ambient: 0x375070, specular: 0xd8d4b0 }]);
 });
 
+test('RenderRef.setFlare forwards the original texture and settings', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {});
+  const received: { textureId: number; count: number; rays: number }[] = [];
+  new RenderRefNative(jvm, resources, undefined, undefined, (texture, _light, settings) => {
+    received.push({ textureId: texture.resourceId, count: settings.flareCount, rays: settings.rayCount });
+  });
+  const sun = ref('java.util.resource.RenderRef'), texture = ref('java.util.resource.ResourceRef');
+  for (const item of [sun, texture]) jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', item, []);
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', texture, [jv('int', 0x100)]);
+  await jvm.natives.invokeAsync('java.util.resource.RenderRef', 'setFlare', sun,
+    [texture, jv('int', 0xe4e4e4ff), jv('float', 1), jv('float', 10), jv('int', 15), jv('int', 8)]);
+  assert.deepEqual(received, [{ textureId: 0x100, count: 15, rays: 8 }]);
+});
+
 test('mock SkidMark line is a releasable resource without a visual instance', () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const resources = new GameTypeNative(jvm, () => {});

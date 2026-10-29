@@ -3,6 +3,7 @@ import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets, normalizePath } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { MathNative } from './math-native';
+import { VectorNative } from './vector-native';
 import { ViewportNative, type ViewportSize } from './viewport-native';
 import { CameraNative } from './camera-native';
 import { ControllerNative } from './controller-native';
@@ -21,7 +22,7 @@ import { parsePartConfig } from '../formats/cfg';
 import { entryProperties, type RpkPack } from '../formats/rpk';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
-import { RenderRefNative, type RenderLightSettings } from './render-ref-native';
+import { RenderRefNative, type RenderLightSettings, type RenderFlareSource } from './render-ref-native';
 import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
@@ -74,7 +75,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   sound?: SoundJavaBridge, keyValue: KeyValue = browserKeyValue(), video?: Pick<OsdVideo, 'openVideo' | 'closeVideo' | 'isPlayingVideo' | 'dispose'>,
   setMapFog?: (settings: MapFogSettings) => void,
   setSceneLight?: (settings: RenderLightSettings) => void,
-  setGlobalEnvmap?: (source: EnvironmentMapSource | null) => Promise<void> | void): Promise<BootResult> {
+  setGlobalEnvmap?: (source: EnvironmentMapSource | null) => Promise<void> | void,
+  setSceneFlare?: (source: RenderFlareSource) => Promise<void> | void): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -279,7 +281,22 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   });
   viewports = new ViewportNative(jvm, gameTypes, viewportSize);
   const renderRefs = new RenderRefNative(jvm, gameTypes,
-    (receiver, position) => osdText.setRenderMatrix(receiver, position), setSceneLight);
+    (receiver, position) => osdText.setRenderMatrix(receiver, position), setSceneLight,
+    async (texture, light, settings) => {
+      if (!setSceneFlare) return;
+      if (!texture.resourcePack) throw new Error('RenderRef.setFlare texture has no pack');
+      const { entry } = await assets.resource(texture.resourcePack, texture.resourceId & 0xffff);
+      if (entry.type !== 7) throw new Error(`RenderRef.setFlare expected texture, got type ${entry.type}`);
+      const path = entryProperties(entry).find(property => property.key === 'sourcefile')?.value;
+      if (!path) throw new Error('RenderRef.setFlare texture has no sourcefile');
+      const lightId = (light.copiedFromResourceId ?? light.resourceId) & 0xffff;
+      const lightEntry = light.resourcePack ? (await assets.resource(light.resourcePack, lightId)).entry : null;
+      const directionText = lightEntry && entryProperties(lightEntry).find(property => property.key === 'direction')?.value;
+      const direction = directionText?.split(/\s+/).map(Number);
+      const sunDirection = direction?.length === 3 && direction.every(Number.isFinite)
+        ? { x: -direction[0], y: -direction[1], z: -direction[2] } : undefined;
+      await setSceneFlare?.({ ...settings, path, bytes: await assets.read(path), sunDirection });
+    });
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
@@ -287,6 +304,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   new FileNative(jvm, files, gameTypes);
   new FindFileNative(jvm, files, new AssetCatalogAdapter(assets));
   new MathNative(jvm);
+  new VectorNative(jvm);
   const collector = 'java.lang.GarbageCollector';
   jvm.natives.register(collector, '<init>', [], () => {
     report({ level: 'native', message: 'Host stub: java.lang.GarbageCollector.<init>()' });

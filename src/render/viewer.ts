@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
+import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel } from '../formats/scx';
 import type { Assets } from '../assets';
 import { parseScx, scxDiffuseUsesAlpha } from '../formats/scx';
@@ -25,7 +26,7 @@ import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
 import { RenderObject } from '../runtime/render-object';
-import type { RenderLightSettings } from '../runtime/render-ref-native';
+import type { RenderLightSettings, RenderFlareSource } from '../runtime/render-ref-native';
 import type { EnvironmentMapSource } from './environment-map';
 
 export interface MapFogSettings { color: number; near: number; far: number }
@@ -58,6 +59,9 @@ export class Viewer {
   private environmentRevision = 0;
   private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
+  private sunFlare?: Lensflare;
+  private sunFlareTexture?: THREE.Texture;
+  private sunFlareRevision = 0;
   private observer: ResizeObserver;
   getViewportSize(): { width: number; height: number } {
     return { width: this.container.clientWidth || this.renderer.domElement.clientWidth || 1,
@@ -83,9 +87,17 @@ export class Viewer {
       const { clientWidth: w, clientHeight: h } = container;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
-    this.renderer.setAnimationLoop(now => { this.frame?.(now); this.controls.update(); this.mapStream?.update(this.camera.position); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop(now => {
+      this.frame?.(now); this.controls.update(); this.mapStream?.update(this.camera.position);
+      if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
+        .addScaledVector(this.sunLight.position.clone().normalize(), 500);
+      this.renderer.render(this.scene, this.camera);
+    });
   }
   clear() {
+    this.sunFlareRevision++;
+    this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
+    this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
     this.javaRenderRoot.clear(); this.javaRenderNodes.clear();
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapStream?.dispose(); this.mapStream = undefined;
@@ -137,6 +149,45 @@ export class Viewer {
     this.ambientLight.groundColor.setHex(settings.ambient);
     // Three.js standard materials have no per-light specular color; retain it for future material work.
     this.sunLight.userData.specularColor = settings.specular;
+  }
+  async setSceneFlare(source: RenderFlareSource): Promise<void> {
+    const revision = ++this.sunFlareRevision;
+    const bytes = source.bytes;
+    if (!source.path.toLowerCase().endsWith('.ptx') || bytes.length < 40)
+      throw new Error(`Unsupported flare texture: ${source.path}`);
+    // SL2 PTX stores a color JPEG and a separate grayscale alpha JPEG after its 36-byte header.
+    const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const colorSize = header.getUint32(20, true), alphaSize = header.getUint32(24, true);
+    if (!colorSize || !alphaSize || 36 + colorSize + alphaSize > bytes.length)
+      throw new Error(`Invalid flare PTX: ${source.path}`);
+    const loadJpeg = (part: Uint8Array) => createImageBitmap(new Blob([Uint8Array.from(part)], { type: 'image/jpeg' }));
+    const [color, alpha] = await Promise.all([
+      loadJpeg(bytes.subarray(36, 36 + colorSize)),
+      loadJpeg(bytes.subarray(36 + colorSize, 36 + colorSize + alphaSize)),
+    ]);
+    if (revision !== this.sunFlareRevision) { color.close(); alpha.close(); return; }
+    // The upper-left 128x128 tile is the game's sun glow; the remaining tiles are smaller ghosts.
+    const size = Math.min(128, color.width, color.height, alpha.width, alpha.height);
+    const canvas = document.createElement('canvas'); canvas.width = size; canvas.height = size;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) { color.close(); alpha.close(); throw new Error('Flare canvas unavailable'); }
+    context.drawImage(color, 0, 0); const pixels = context.getImageData(0, 0, size, size);
+    context.clearRect(0, 0, size, size); context.drawImage(alpha, 0, 0);
+    const mask = context.getImageData(0, 0, size, size);
+    for (let i = 0; i < pixels.data.length; i += 4) pixels.data[i + 3] = mask.data[i];
+    context.putImageData(pixels, 0, 0); color.close(); alpha.close();
+    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+    if (source.sunDirection) this.sunLight.position.set(source.sunDirection.x, source.sunDirection.y, source.sunDirection.z);
+    const tint = new THREE.Color((source.color >>> 8) & 0xffffff);
+    const flare = new Lensflare();
+    const glowSize = Math.max(48 + source.minSize * 16, Math.min(384, 96 + source.maxSize * 16));
+    flare.addElement(new LensflareElement(texture, glowSize, 0, tint));
+    const ghosts = Math.min(5, Math.max(0, Math.floor(source.flareCount / 3)), Math.max(0, source.rayCount));
+    for (let i = 0; i < ghosts; i++)
+      flare.addElement(new LensflareElement(texture, Math.max(24, glowSize * (0.15 + i * 0.07)),
+        (i + 1) / (ghosts + 1), tint.clone().multiplyScalar(0.35)));
+    this.sunFlare?.removeFromParent(); this.sunFlareTexture?.dispose();
+    this.sunFlare = flare; this.sunFlareTexture = texture; this.scene.add(flare);
   }
   async setGlobalEnvmap(source: EnvironmentMapSource | null): Promise<void> {
     const revision = ++this.environmentRevision;
