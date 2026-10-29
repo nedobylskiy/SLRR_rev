@@ -41,6 +41,7 @@ export class GameTypeNative {
   private readonly trackPackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly notifications = new Map<JavaObject, Notification[]>();
+  private readonly triggerContacts = new Map<ResourceObject, boolean>();
   private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
   private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
   private dispatchingEvents = false;
@@ -447,6 +448,39 @@ export class GameTypeNative {
   }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
 
+  /** Feed native vehicle motion to Java trigger subscriptions created by track scripts. */
+  updateTriggerContacts(vehicle: JavaValue): void {
+    const car = this.get(vehicle);
+    if (!car) return;
+    const watched = new Set<ResourceObject>();
+    for (const subscriptions of this.notifications.values())
+      for (const subscription of subscriptions)
+        if (subscription.type & (32 | 64)) watched.add(subscription.watched);
+    for (const trigger of watched) {
+      const parts = trigger.params?.split(',').map(part => part.trim()) ?? [];
+      const shape = parts[6];
+      const coordinates = parts.slice(0, 3).map(Number);
+      if (!coordinates.every(Number.isFinite) || (shape !== 'sphere' && shape !== 'box')) continue;
+      const [x, y, z] = coordinates;
+      const dx = car.position.x - x, dy = car.position.y - y, dz = car.position.z - z;
+      let inside = false;
+      if (shape === 'sphere') {
+        const radius = Number(parts[7]);
+        inside = Number.isFinite(radius) && dx * dx + dy * dy + dz * dz <= radius * radius;
+      } else {
+        const extents = parts.slice(7, 10).map(Number);
+        inside = extents.length === 3 && extents.every(Number.isFinite)
+          && Math.abs(dx) <= extents[0] && Math.abs(dy) <= extents[1] && Math.abs(dz) <= extents[2];
+      }
+      const previous = this.triggerContacts.get(trigger) ?? false;
+      if (inside === previous) continue;
+      this.triggerContacts.set(trigger, inside);
+      const handle = this.handles.get(trigger);
+      if (handle) this.queueStringEvent(handle, vehicle, inside ? 32 : 64, jv('String', String(car.resourceId)));
+    }
+    if (this.pendingEvents.length) this.dispatchQueuedEventsCooperative();
+  }
+
   queueHotkey(receiver: JavaValue, hotkey: JavaValue): void {
     const node = this.require(receiver);
     node.queueEvent({ sourceId: null, type: EVENT_HOTKEY, payload: null });
@@ -536,6 +570,7 @@ export class GameTypeNative {
     for (const object of this.timers.keys()) this.cancelTimers(object);
     this.pendingEvents.length = 0;
     this.notifications.clear();
+    this.triggerContacts.clear();
   }
 
   private cancelTimers(object: JavaObject): void {

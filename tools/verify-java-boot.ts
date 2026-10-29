@@ -4,7 +4,8 @@ import { Assets } from '../src/assets';
 import { entryProperties } from '../src/formats/rpk';
 import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
-import { activeJavaTrack, javaDrivingControls } from '../src/runtime/java-scene';
+import { activeJavaTrack, javaDrivingControls, javaStockSelection } from '../src/runtime/java-scene';
+import { PartFactory } from '../src/engine/world';
 import { packedResourceId } from '../src/runtime/resource-ids';
 import type { OsdLayer } from '../src/osd/osd-layer';
 
@@ -16,7 +17,7 @@ const systemNames = (await readdir(join(root, 'system/scripts'), { recursive: tr
   .filter(name => (classOnly ? /\.class$/i : /\.(java|class)$/i).test(name))
   .map(name => `system/scripts/${name.replaceAll('\\', '/')}`);
 const carNames = ['cars.rpk', ...(await readdir(join(root, 'cars'), { recursive: true }))
-  .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `cars/${name.replaceAll('\\', '/')}`)];
+  .filter(name => /\.(rpk|java|cfg|scx)$/i.test(name)).map(name => `cars/${name.replaceAll('\\', '/')}`)];
 const eventNames = (await readdir(join(root, 'sl/Scripts/game/CareerEvents'), { recursive: true }))
   .filter(name => /\.(rpk|java)$/i.test(name))
   .map(name => `sl/Scripts/game/CareerEvents/${name.replaceAll('\\', '/')}`);
@@ -27,7 +28,7 @@ const gamemodeNames = (await readdir(join(root, 'sl/Scripts/game/Gamemodes'), { 
   .filter(name => /\.(rpk|java)$/i.test(name))
   .map(name => `sl/Scripts/game/Gamemodes/${name.replaceAll('\\', '/')}`);
 const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursive: true }))
-  .filter(name => /\.(rpk|java|cfg)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
+  .filter(name => /\.(rpk|java|cfg|scx)$/i.test(name)).map(name => `parts/${name.replaceAll('\\', '/')}`)];
 const skyNames = ['maps/skydome.rpk', ...(await readdir(join(root, 'maps/skydome'), { recursive: true }))
   .map(name => `maps/skydome/${name.replaceAll('\\', '/')}`)];
 const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, ...skyNames,
@@ -79,6 +80,39 @@ if (process.argv.includes('--diagnose')) {
     const startNode = start?.value == null ? null : { x: result.jvm.get(start, 'x').value, y: result.jvm.get(start, 'y').value, z: result.jvm.get(start, 'z').value };
     process.stdout.write(`scene start: ${state.type} ${JSON.stringify(startNode)}\n`);
     process.stdout.write(`scene selection: ${JSON.stringify(activeJavaTrack(result))}\n`);
+    if (process.argv.includes('--trigger-debug') && car?.value != null && state.value != null) {
+      const triggers = nodes.filter(node => /,sphere,|,box,/.test(node.params ?? ''));
+      process.stdout.write(`scene triggers: ${triggers.length}, first=${triggers[0]?.params ?? '-'}\n`);
+      const first = triggers[0], nativeCar = result.gameTypes.get(car);
+      if (first && nativeCar) {
+        const [x, y, z] = first.params!.split(',').map(Number);
+        nativeCar.position = { x, y, z };
+        result.gameTypes.updateTriggerContacts(car);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        process.stdout.write(`scene active trigger: ${result.jvm.get(state, 'activeTrigger').value}\n`);
+      }
+    }
+    if (process.argv.includes('--assembly-build')) {
+      const selected = activeJavaTrack(result);
+      if (!selected?.chassis) throw new Error('Java did not select a chassis');
+      const selection = await javaStockSelection(result, assets, selected.chassis.pack);
+      const built = await new PartFactory(assets).stock(selected.chassis, { mechanical: true, javaSelection: selection });
+      process.stdout.write(`assembly built: ${built.world.parts.size} parts, ${selection.mechanical.length} selected hardware, ${selection.tyres.length} selected tyres, ${built.warnings.length} warnings\n`);
+      process.stdout.write(`assembly wheels: ${[...built.root.children].filter(([slot]) => slot >= 101 && slot <= 104).map(([slot, part]) => `${slot}:${part.definition.key.pack}:${part.definition.key.id}`).join(', ')}\n`);
+      process.stdout.write(`assembly suspension: ${[...built.root.children].filter(([_, part]) => part.definition.mechanics?.kind === 'suspension').map(([slot, part]) => `${slot}:${part.definition.key.pack}:${part.definition.key.id}`).join(', ')}\n`);
+      built.world.dispose();
+    }
+    if (process.argv.includes('--assembly-debug') && chassisNode) {
+      for (const name of ['parts_list_RGear_suspensions', 'parts_list_RGear_wheels', 'parts_list_RGear_tyres', 'stock_parts_list_RGear_suspensions', 'stock_parts_list_RGear_wheels', 'attachedParts']) {
+        try { const value = result.jvm.get(chassis!, name); process.stdout.write(`assembly field ${name}: ${JSON.stringify(value).slice(0, 550)}\n`); }
+        catch (error) { process.stdout.write(`assembly field ${name}: ${String(error)}\n`); }
+      }
+      const visit = (node: typeof chassisNode, depth = 0): void => {
+        process.stdout.write(`assembly ${' '.repeat(depth * 2)}${node.className} ${node.resourcePack ?? '-'}:${node.typeId} name=${node.alias} children=${node.children.size}\n`);
+        if (depth < 8) for (const child of node.children) visit(child, depth + 1);
+      };
+      visit(chassisNode);
+    }
   }
   result.dispose();
   process.exit(result.error ? 1 : 0);

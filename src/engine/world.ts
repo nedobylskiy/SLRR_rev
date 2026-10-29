@@ -13,6 +13,13 @@ import type { WheelRefState } from '../runtime/wheel-ref-native';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
+/** Resolved values of the chassis part arrays after its Java addStockParts ran. */
+export interface JavaStockSelection {
+  body: ResourceKey[];
+  mechanical: ResourceKey[];
+  tyres: (ResourceKey | undefined)[];
+  wheelRefs: (WheelRefState | undefined)[];
+}
 export interface PartDefinition {
   key: ResourceKey; alias: string; script?: string; cfgPath: string; config: PartConfig;
   model?: { path: string; textures: string[] };
@@ -154,7 +161,7 @@ export class PartFactory {
     }
   }
   /** Read ordered stockpart declarations; unresolved compatibility is reported, never guessed. */
-  async stock(key: ResourceKey, options: { mechanical?: boolean } = {}) {
+  async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection } = {}) {
     const world = new EngineWorld(), warnings: string[] = [];
     try {
       const root = world.create(await this.definition(key));
@@ -167,9 +174,12 @@ export class PartFactory {
           pending.push(await this.definition({ pack: parent.key.pack, id }));
         }
       };
-      await enqueue(root.definition);
+      if (options.javaSelection) {
+        for (const ref of options.javaSelection.body) pending.push(await this.definition(ref));
+      } else await enqueue(root.definition);
       if (options.mechanical) {
-        const tyreRefs = await source.tyreEntries(root.definition, env);
+        const tyreRefs = options.javaSelection?.tyres ?? await source.tyreEntries(root.definition, env);
+        if (options.javaSelection) world.wheelRefs = [...options.javaSelection.wheelRefs];
         if (tyreRefs.length) {
           const basePath = [...this.assets.byPath.keys()].find(path => path.endsWith('/reciprocatingrgearpart/src/tyre.java'));
           if (!basePath) warnings.push('Original Tyre.java source missing; stock tyre parameters unavailable');
@@ -177,6 +187,7 @@ export class PartFactory {
             const baseSource = new TextDecoder('windows-1252').decode(await this.assets.read(basePath));
             for (const [index, ref] of tyreRefs.entries()) {
               if (!ref) continue;
+              if (world.wheelRefs[index]) continue;
               try {
                 const definition = await this.definition(ref), tyreSource = await source.source(definition);
                 world.wheelRefs[index] = executeTyreSource(baseSource, tyreSource, index);
@@ -184,7 +195,7 @@ export class PartFactory {
             }
           }
         }
-        for (const ref of await source.entries(root.definition, env, true)) {
+        for (const ref of options.javaSelection?.mechanical ?? await source.entries(root.definition, env, true)) {
           const definition = await this.definition(ref), mechanics = await source.profile(definition); pending.push({ ...definition, mechanics });
         }
         if (pending.filter(d => d.mechanics?.kind === 'suspension').length > root.definition.config.wheels.length) throw new Error('Source stock suspension count exceeds CFG wheels');

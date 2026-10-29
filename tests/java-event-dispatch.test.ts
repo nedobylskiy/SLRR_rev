@@ -44,6 +44,44 @@ test('GameType notifications route watched trigger events to a named Java handle
   gameTypes.dispose();
 });
 
+test('vehicle motion enters and leaves a Java-created spherical trigger once per crossing', async () => {
+  const notificationSource = `package demo; class Listener {
+    int calls; int last; String text;
+    Listener() {}
+    void onTrigger(Object source, int event, String value) { calls++; last = event; text = value; }
+  }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Listener'
+    ? { path: 'listener.java', source: notificationSource } : null });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  await jvm.loadClass('demo.Listener');
+  const listener = jvm.construct('demo.Listener', []);
+  const trigger = jv('GameRef', { className: 'demo.Trigger', fields: new Map() });
+  const car = jv('GameRef', { className: 'demo.Vehicle', fields: new Map() });
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', listener, []);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', trigger,
+    [jv('GameRef', null), jv('int', 1), jv('String', '0,0,0,0,0,0,sphere,5'), jv('String', 'zone')]);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', car, []);
+  jvm.natives.invoke('java.lang.GameType', 'setEventMask', listener, [jv('int', 96)]);
+  for (const type of [32, 64]) jvm.natives.invoke('java.lang.GameType', 'addNotification', listener,
+    [trigger, jv('int', type), jv('int', 0), jv('Object', null), jv('String', 'onTrigger')]);
+  const node = gameTypes.get(car)!;
+  node.position = { x: 10, y: 0, z: 0 };
+  gameTypes.updateTriggerContacts(car);
+  node.position.x = 3;
+  gameTypes.updateTriggerContacts(car);
+  gameTypes.updateTriggerContacts(car);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(jvm.get(listener, 'calls').value, 1);
+  assert.equal(jvm.get(listener, 'last').value, 32);
+  assert.equal(jvm.get(listener, 'text').value, String(node.resourceId));
+  node.position.x = 10;
+  gameTypes.updateTriggerContacts(car);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(jvm.get(listener, 'calls').value, 2);
+  assert.equal(jvm.get(listener, 'last').value, 64);
+  gameTypes.dispose();
+});
+
 test('native event queue invokes the original Java hotkey handler after an input edge', async () => {
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
     ? { path: 'demo.java', source } : null });

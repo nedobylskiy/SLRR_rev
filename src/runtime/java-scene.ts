@@ -1,5 +1,7 @@
 import { jv, type JavaValue } from 'slrr-jvm';
 import { normalizeResourcePackPath } from '../assets';
+import type { Assets } from '../assets';
+import type { JavaStockSelection, ResourceKey } from '../engine/world';
 import type { BootResult } from './game-boot';
 import type { DrivingInput } from '../engine/driving-demo';
 
@@ -34,6 +36,36 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
   const start = position?.value != null && [x, y, z, yaw].every(Number.isFinite)
     ? { x, y, z, yaw } : undefined;
   return { mapPack, chassis: chassisKey, start };
+}
+
+/** Read the lists selected by the executed chassis Java, including kit branches. */
+export async function javaStockSelection(result: BootResult, assets: Assets, chassisPack: string): Promise<JavaStockSelection> {
+  const { jvm } = result;
+  const player = jvm.get(jv('class', 'java.game.GameLogic'), 'player');
+  const car = jvm.get(player, 'car');
+  const chassis = jvm.get(car, 'chassis');
+  if (chassis.value == null) throw new Error('Java vehicle has no chassis');
+  const values = (name: string): number[] => {
+    const field = jvm.get(chassis, name);
+    if (field.value == null) return [];
+    if (!Array.isArray(field.value)) throw new Error(`Java ${name} is not an array`);
+    return field.value.map(value => Number(typeof value === 'object' && value && 'value' in value ? value.value : value))
+      .filter(value => Number.isSafeInteger(value) && value > 0);
+  };
+  const resolve = async (id: number): Promise<ResourceKey> => {
+    const { packPath, id: localId } = await assets.resourceLocation(chassisPack, id);
+    return { pack: packPath, id: localId };
+  };
+  const bodyLists = ['E', 'FL', 'FR', 'RL', 'RR', 'F', 'Rr', 'L', 'R', 'T'];
+  const mechanicalLists = ['suspensions', 'shocks', 'springs', 'brakes', 'sways', 'wheels', 'others'];
+  const body = await Promise.all(bodyLists.flatMap(name => values(`parts_list_${name}`)).map(resolve));
+  const mechanical = await Promise.all(mechanicalLists.flatMap(name => values(`parts_list_RGear_${name}`)).map(resolve));
+  const tyreIds = values('parts_list_RGear_tyres');
+  const tyres = await Promise.all(tyreIds.map(resolve));
+  if (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4)
+    throw new Error('Executed Java chassis did not select four wheels and four suspensions');
+  const wheelRefs = Array.from({ length: 4 }, (_, index) => result.chassis.wheelState(chassis, index));
+  return { body, mechanical, tyres, wheelRefs };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */

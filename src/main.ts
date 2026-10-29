@@ -1,6 +1,6 @@
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
-import { activeJavaTrack, javaDrivingControls } from './runtime/java-scene';
+import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
 import { parseRpk, entryProperties } from './formats/rpk';
@@ -122,7 +122,8 @@ async function runGameBoot() {
         status('Loading Java track…');
         if (selected.chassis && source.byPath.has(selected.chassis.pack)) {
           try {
-            built = await new PartFactory(source).stock(selected.chassis, { mechanical: true });
+            const selection = await javaStockSelection(result, source, selected.chassis.pack);
+            built = await new PartFactory(source).stock(selected.chassis, { mechanical: true, javaSelection: selection });
             if (source !== assets || run !== sequence) { stopAnimation(); built.world.dispose(); return; }
             await viewer.showWorld(built.world, source, true);
           } catch (reason) {
@@ -148,9 +149,12 @@ async function runGameBoot() {
             const session = viewer.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
               { ...javaControls, instruments: (speed, rpm, gear) => gauges?.update(speed, rpm, gear),
-                motion: (position, yaw, velocity) => javaVehicle?.setState(
-                  { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
-                  { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 }) });
+                motion: (position, yaw, velocity) => {
+                  javaVehicle?.setState(
+                    { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
+                    { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
+                  result.gameTypes.updateTriggerContacts(car);
+                } });
             disposeJavaScene = () => { stopAnimation(); session(); gauges?.dispose(); built?.world.dispose(); };
             driveHud.hidden = true;
             el('scene-help').textContent = 'Controls follow the game ControlSet · Camera follows Track.java';
