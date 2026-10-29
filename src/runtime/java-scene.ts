@@ -27,8 +27,11 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
   const car = field(player, 'car');
   const chassis = field(car, 'chassis');
   const chassisNode = chassis?.value == null ? null : gameTypes.getResource(chassis);
-  const chassisKey = chassisNode?.resourcePack && chassisNode.typeId > 0
-    ? { pack: normalizeResourcePackPath(chassisNode.resourcePack), id: chassisNode.typeId } : undefined;
+  const chassisIdentity = chassisNode ? result.resolveResourceIdentity(chassisNode.typeId) : undefined;
+  const chassisKey = chassisIdentity
+    ? { pack: normalizeResourcePackPath(chassisIdentity.pack), id: chassisIdentity.id }
+    : chassisNode?.resourcePack && chassisNode.typeId > 0
+      ? { pack: normalizeResourcePackPath(chassisNode.resourcePack), id: chassisNode.typeId } : undefined;
   const position = field(state, 'posStart');
   const orientation = field(state, 'oriStart');
   const x = Number(field(position, 'x')?.value), y = Number(field(position, 'y')?.value);
@@ -53,6 +56,8 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
       .filter(value => Number.isSafeInteger(value) && value > 0);
   };
   const resolve = async (id: number): Promise<ResourceKey> => {
+    const identity = result.resolveResourceIdentity(id);
+    if (identity) return { pack: normalizeResourcePackPath(identity.pack), id: identity.id };
     const { packPath, id: localId } = await assets.resourceLocation(chassisPack, id);
     return { pack: packPath, id: localId };
   };

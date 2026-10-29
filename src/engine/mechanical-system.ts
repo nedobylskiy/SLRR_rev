@@ -64,7 +64,7 @@ export class MechanicalSystem {
     this.head = find(p => !!p.definition.mechanics?.values.intake_valve_diam);
     this.transmission = find(p => !!p.definition.mechanics?.values.gears);
     this.clutch = find(p => /clutch/i.test(p.definition.script ?? ''));
-    this.fuel = find(p => /fuel_rail/i.test(p.definition.script ?? ''));
+    this.fuel = find(p => /fuel_rail|carburetor/i.test(p.definition.script ?? ''));
     const bore = this.block?.definition.mechanics?.values.bore ?? 0, stroke = this.crank?.definition.mechanics?.values.stroke ?? 0, cylinders = this.block?.definition.mechanics?.values.cylinders ?? 0;
     this.displacement = Math.PI / 4 * (bore / 1000) ** 2 * stroke / 1000 * cylinders;
     this.drive = this.transmission?.definition.mechanics?.drive ?? 'DT_RWD';

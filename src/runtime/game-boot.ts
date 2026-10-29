@@ -1,6 +1,6 @@
 import { SlrrJvm, jv, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
-import { Assets, normalizePath } from '../assets';
+import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { MathNative } from './math-native';
 import { VectorNative } from './vector-native';
@@ -37,7 +37,7 @@ import type { SoundJavaBridge } from '../audio/sound-java';
 import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -92,6 +92,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const partsPack = assets.byPath.has('parts.rpk') ? await assets.pack('parts.rpk') : null;
   const sourcePacks = new Map<string, RpkPack>();
   const packedResources = new Map<number, ResourceIdentity | null>();
+  const unlistedResourceSlots = new Map<string, number>();
+  let nextUnlistedSlot = 0x7000;
+  const resolveResourceIdentity = (id: number) => packedResources.get(id) ?? undefined;
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
     if (path.endsWith('.java')) {
@@ -110,7 +113,19 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const owner = sourcePacks.get(sourcePath)
         ?? (sourcePath.startsWith(sourceRoot) ? frontendPack : null)
         ?? (sourcePath.startsWith('parts/scripts/') ? partsPack : null);
-      const packed = owner ? packedResourceId(owner, resource) : undefined;
+      let packed = owner ? packedResourceId(owner, resource) : undefined;
+      if (packed === undefined && Number.isInteger(resource.id) && resource.id >= 0 && resource.id <= 0xffff) {
+        const pack = normalizeResourcePackPath(resource.pack);
+        if (assets.byPath.has(pack)) {
+          let slot = unlistedResourceSlots.get(pack);
+          if (slot === undefined) {
+            if (nextUnlistedSlot > 0x7fff) throw new Error('Unlisted resource slot range exhausted');
+            slot = nextUnlistedSlot++;
+            unlistedResourceSlots.set(pack, slot);
+          }
+          packed = (slot << 16) | resource.id;
+        }
+      }
       if (packed !== undefined) {
         const prior = packedResources.get(packed);
         if (prior && (prior.pack !== resource.pack || prior.id !== resource.id)) packedResources.set(packed, null);
@@ -459,11 +474,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, dispose };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, dispose, error };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }

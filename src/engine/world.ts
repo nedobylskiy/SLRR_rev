@@ -175,7 +175,10 @@ export class PartFactory {
         }
       };
       if (options.javaSelection) {
-        for (const ref of options.javaSelection.body) pending.push(await this.definition(ref));
+        for (const ref of options.javaSelection.body) {
+          const definition = await this.definition(ref);
+          pending.push(options.mechanical ? { ...definition, mechanics: await source.profile(definition) } : definition);
+        }
       } else await enqueue(root.definition);
       if (options.mechanical) {
         const tyreRefs = options.javaSelection?.tyres ?? await source.tyreEntries(root.definition, env);

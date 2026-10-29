@@ -6,6 +6,7 @@ import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from '../src/runtime/java-scene';
 import { PartFactory } from '../src/engine/world';
+import { MechanicalSystem } from '../src/engine/mechanical-system';
 import { packedResourceId } from '../src/runtime/resource-ids';
 import type { OsdLayer } from '../src/osd/osd-layer';
 
@@ -32,7 +33,7 @@ const partNames = ['parts.rpk', ...(await readdir(join(root, 'parts'), { recursi
 const skyNames = ['maps/skydome.rpk', ...(await readdir(join(root, 'maps/skydome'), { recursive: true }))
   .map(name => `maps/skydome/${name.replaceAll('\\', '/')}`)];
 const files = await Promise.all([...names, ...systemNames, ...carNames, ...eventNames, ...trackNames, ...gamemodeNames, ...partNames, ...skyNames,
-  'system.rpk', 'frontend.rpk', 'frontend/textures/interface/icons/event_list/gamemode_freeride.png',
+  'system.rpk', 'frontend.rpk', 'particles.rpk', 'frontend/textures/interface/icons/event_list/gamemode_freeride.png',
   'frontend/sounds/mnuselect.wav'].map(async path => {
   return { path, size: (await stat(join(root, path))).size };
 }));
@@ -98,12 +99,28 @@ if (process.argv.includes('--diagnose')) {
       const selection = await javaStockSelection(result, assets, selected.chassis.pack);
       const built = await new PartFactory(assets).stock(selected.chassis, { mechanical: true, javaSelection: selection });
       process.stdout.write(`assembly built: ${built.world.parts.size} parts, ${selection.mechanical.length} selected hardware, ${selection.tyres.length} selected tyres, ${built.warnings.length} warnings\n`);
+      const kinds = [...built.world.parts.values()].reduce<Record<string, number>>((result, part) => {
+        const kind = part.definition.mechanics?.kind;
+        if (kind) result[kind] = (result[kind] ?? 0) + 1;
+        return result;
+      }, {});
+      process.stdout.write(`assembly mechanical kinds: ${JSON.stringify(kinds)}\n`);
+      const drivetrain = new MechanicalSystem(built.root);
+      drivetrain.reset();
+      drivetrain.advance(1 / 60, { throttle: 0, gearUp: true }, [0, 0, 0, 0]);
+      let driven = drivetrain.advance(1 / 60, { throttle: 1 }, [0, 0, 0, 0]);
+      for (let tick = 0; tick < 30; tick++) driven = drivetrain.advance(1 / 60, { throttle: 1 }, [0, 0, 0, 0]);
+      process.stdout.write(`assembly drivetrain: ${JSON.stringify({ block: !!drivetrain.block, crank: !!drivetrain.crank,
+        head: !!drivetrain.head, transmission: !!drivetrain.transmission, clutch: !!drivetrain.clutch,
+        fuel: !!drivetrain.fuel, power: drivetrain.power, gear: drivetrain.gear, torque: driven.torque })}\n`);
+      if (drivetrain.gear !== 1 || drivetrain.power <= 0 || !driven.torque.some(value => Math.abs(value) > 1))
+        throw new Error('Java-selected car cannot shift into first gear and drive its wheels');
       process.stdout.write(`assembly wheels: ${[...built.root.children].filter(([slot]) => slot >= 101 && slot <= 104).map(([slot, part]) => `${slot}:${part.definition.key.pack}:${part.definition.key.id}`).join(', ')}\n`);
       process.stdout.write(`assembly suspension: ${[...built.root.children].filter(([_, part]) => part.definition.mechanics?.kind === 'suspension').map(([slot, part]) => `${slot}:${part.definition.key.pack}:${part.definition.key.id}`).join(', ')}\n`);
       built.world.dispose();
     }
     if (process.argv.includes('--assembly-debug') && chassisNode) {
-      for (const name of ['parts_list_RGear_suspensions', 'parts_list_RGear_wheels', 'parts_list_RGear_tyres', 'stock_parts_list_RGear_suspensions', 'stock_parts_list_RGear_wheels', 'attachedParts']) {
+      for (const name of ['parts_list_E', 'parts_list_L', 'parts_list_RGear_suspensions', 'parts_list_RGear_wheels', 'parts_list_RGear_tyres', 'stock_parts_list_RGear_suspensions', 'stock_parts_list_RGear_wheels', 'attachedParts']) {
         try { const value = result.jvm.get(chassis!, name); process.stdout.write(`assembly field ${name}: ${JSON.stringify(value).slice(0, 550)}\n`); }
         catch (error) { process.stdout.write(`assembly field ${name}: ${String(error)}\n`); }
       }
