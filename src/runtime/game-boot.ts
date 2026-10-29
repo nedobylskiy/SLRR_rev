@@ -37,7 +37,7 @@ import type { SoundJavaBridge } from '../audio/sound-java';
 import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
+export type BootResult = { jvm: SlrrJvm; gameTypes: GameTypeNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -311,6 +311,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
+  gameTypes.setAxisReader((receiver, axis) => controllers.read(receiver, axis));
+  jvm.natives.register('java.game.Vehicle', 'getSpeedSquare', [], ({ receiver }) => {
+    const velocity = gameTypes.get(receiver)?.velocity;
+    return jv('float', velocity ? velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2 : 0);
+  });
   new FileNative(jvm, files, gameTypes);
   new FindFileNative(jvm, files, new AssetCatalogAdapter(assets));
   new MathNative(jvm);
@@ -327,6 +332,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   // MOCK: Track.exit cleanup for map systems not yet hosted by the engine.
   native('java.util.resource.GroundRef', 'delTraffic', []);
   native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
+  // MOCK: Water-plane rendering is pending; Track.animate still needs its water bounds calls.
+  jvm.natives.register('java.util.resource.GroundRef', 'setWater', ['Vector3', 'Vector3', 'float', 'float'], voidValue);
+  jvm.natives.register('java.util.resource.GroundRef', 'addWaterLimit', ['Vector3', 'Vector3'], voidValue);
   native('java.util.resource.ResourceRef', 'unload', []);
   const controller = 'java.io.Controller';
   jvm.natives.registerField(controller, 'controlFile', jv('String', ''));
@@ -451,11 +459,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, dispose };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, input, files, dispose, error };
+    return { jvm, gameTypes, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, dispose, error };
   }
 }

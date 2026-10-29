@@ -10,6 +10,7 @@ import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { loadPartCollision } from '../engine/part-collision';
 import { DrivingDemo } from '../engine/driving-demo';
+import type { DrivingInput } from '../engine/driving-demo';
 import { HoodLab } from './hood-lab';
 import type { PartDefinition } from '../engine/world';
 import { CarCrashDemo } from '../engine/car-crash-demo';
@@ -384,7 +385,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraDistance?(): number; instruments?(speedKmh: number, rpm: number, gear: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -452,6 +453,7 @@ export class Viewer {
     telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nChassis ${Math.round(root.condition * 100)}% · supports ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash.suspension.mechanics?.support(i) ?? 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nEngine ${crash.suspension.mechanics.running ? `${Math.round(crash.suspension.mechanics.power * 100)}%` : 'STALLED · I to restart'} · ${Math.round(crash.suspension.mechanics.rpm)} rpm · gear ${crash.suspension.mechanics.gear < 0 ? 'R' : crash.suspension.mechanics.gear || 'N'} (${crash.suspension.mechanics.manual ? 'manual' : 'automatic'}) · boost ${crash.suspension.mechanics.boost.toFixed(2)} bar · slip ${Math.round(Math.max(...crash.suspension.wheels.map(w => Math.abs(w.slip))) * 100)}%` : ''}\n${Math.round(1000 / frameMs)} fps · active deformation: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${track && this.mapStream ? ` · nearby objects: ${this.mapStream.active}/${this.mapStream.total}` : ''}${backlogTicks ? ` · lag ${Math.round(backlogTicks / 240 * 1000)} ms` : ''}` : ''));
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyN', 'KeyI', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
+      if (java) return;
       if (!relevant.has(event.code)) return;
       event.preventDefault(); vehicleAudio?.activate(); keys.add(event.code);
       if (event.code === 'KeyR' && !event.repeat) { if (crash) crash.reset(); else demo.reset(); tireEffects?.reset(); keys.clear(); }
@@ -467,6 +469,7 @@ export class Viewer {
     const followed = demo.position.clone();
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
     this.camera.position.copy(this.controls.target).add(withCrash ? new THREE.Vector3(7, 4, -3) : new THREE.Vector3(5, 3, 7)); this.controls.update();
+    if (java) this.controls.enabled = false;
     const pressed = (...codes: string[]) => codes.some(code => keys.has(code)) ? 1 : 0;
     this.frame = now => {
       if (document.hidden) { last = undefined; return; }
@@ -474,11 +477,35 @@ export class Viewer {
       const elapsed = last === undefined ? 0 : Math.max(0, (now - last) / 1000);
       const seconds = paused ? 0 : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
-      const input = { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
+      const input = java ? java.sample() : { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
       if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
       this.syncWorld(softParts);
-      const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta); followed.copy(demo.position);
+      if (java) {
+        const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
+          ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
+        const distance = java.cameraDistance?.() ?? 7;
+        const offset = mode === 5 ? new THREE.Vector3(0, 1.35, -0.25)
+          : mode === 4 ? new THREE.Vector3(0, 3, -11)
+          : mode === 3 ? new THREE.Vector3(0, 3.5, 12)
+          : new THREE.Vector3(0, 2.5, distance);
+        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+        const desired = demo.position.clone().add(offset);
+        const blend = last === undefined ? 1 : 1 - Math.exp(-seconds * (mode === 1 ? 5 : 9));
+        this.camera.position.lerp(desired, blend);
+        this.controls.target.lerp(target, blend);
+        this.camera.lookAt(this.controls.target);
+      } else {
+        const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta);
+      }
+      followed.copy(demo.position);
+      if (java) java.motion?.(demo.position, crash instanceof Vehicle3D
+        ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw,
+      crash ? crash.velocity() : new THREE.Vector3());
       vehicleAudio?.update(this.camera, input.throttle, paused);
+      if (java) java.instruments?.(Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6),
+        crash instanceof Vehicle3D ? crash.suspension.mechanics?.rpm ?? 0 : 0,
+        crash instanceof Vehicle3D ? crash.suspension.mechanics?.gear ?? 0 : 0);
       if (now - lastHud > 100) {
         const intact = crash?.panel.mounts.filter(m => !m.broken).length;
         const up = crash instanceof Vehicle3D ? new THREE.Vector3(0, 1, 0).applyQuaternion(crash.body.orientation).y : 1;
@@ -491,6 +518,7 @@ export class Viewer {
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);
       window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visibility);
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
+      if (java) this.controls.enabled = true;
       panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
       if (ramp) { ramp.removeFromParent(); ramp.geometry.dispose(); (ramp.material as THREE.Material).dispose(); }

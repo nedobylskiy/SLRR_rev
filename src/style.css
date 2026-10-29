@@ -253,6 +253,15 @@ nav button.active{
   width:100%;
   height:100%
 }
+#viewport canvas.java-gauges{
+  position:absolute;
+  z-index:5;
+  left:16px;
+  bottom:12px;
+  width:min(300px,28vw);
+  height:auto;
+  pointer-events:none;
+}
 .viewport-expand-button,.viewport-window-button{
   position:absolute;
   top:12px;

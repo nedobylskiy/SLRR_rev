@@ -4,7 +4,7 @@ import { Assets } from '../src/assets';
 import { entryProperties } from '../src/formats/rpk';
 import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
-import { activeJavaTrack } from '../src/runtime/java-scene';
+import { activeJavaTrack, javaDrivingControls } from '../src/runtime/java-scene';
 import { packedResourceId } from '../src/runtime/resource-ids';
 import type { OsdLayer } from '../src/osd/osd-layer';
 
@@ -86,6 +86,28 @@ if (process.argv.includes('--diagnose')) {
 if (result.error) {
   process.stderr.write(`Java boot stopped: ${result.error.message}\n`);
   process.exitCode = 1;
+}
+if (process.argv.includes('--animate-smoke') && !result.error) {
+  try {
+    const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+    process.stdout.write(`animate callback: ${result.gameTypes.hasCallback(state, 28)}\n`);
+    const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
+    const controller = result.jvm.get(player, 'controller');
+    process.stdout.write(`driver bindings: ${result.controllers.bindings(controller).length}; sample: ${JSON.stringify(javaDrivingControls(result).sample())}\n`);
+    result.input.setKeyboardCode('ArrowUp', true);
+    result.input.setKeyboardCode('ArrowLeft', true);
+    const pressed = javaDrivingControls(result).sample();
+    if (pressed.throttle <= 0 || pressed.steer <= 0) throw new Error(`Java driver bindings did not respond: ${JSON.stringify(pressed)}`);
+    result.input.setKeyboardCode('ArrowUp', false);
+    result.input.setKeyboardCode('ArrowLeft', false);
+    await result.jvm.invokeAsync(state, 'animate');
+    process.stdout.write('Track.animate completed\n');
+  } catch (reason) {
+    process.stderr.write(`Track.animate failed: ${reason instanceof Error ? reason.message : String(reason)}\n`);
+    process.exitCode = 1;
+  }
+  result.dispose();
+  process.exit(process.exitCode ?? 0);
 }
 if (process.argv.includes('--sfx-smoke') && !result.error) {
   try {

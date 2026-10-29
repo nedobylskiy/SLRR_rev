@@ -72,7 +72,11 @@ export class InputNative {
   }
 
   attachBrowserKeyboard(target: Window): () => void {
-    const down = (event: KeyboardEvent) => this.setKeyboardCode(event.code, true);
+    const down = (event: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'CANVAS'
+        && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
+      this.setKeyboardCode(event.code, true);
+    };
     const up = (event: KeyboardEvent) => this.setKeyboardCode(event.code, false);
     const blur = () => { for (const key of this.axes.keys()) if (key.startsWith('0:')) this.axes.set(key, 0); };
     target.addEventListener('keydown', down);

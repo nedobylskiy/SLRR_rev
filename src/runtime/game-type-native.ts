@@ -45,6 +45,8 @@ export class GameTypeNative {
   private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void;
+  private axisReader?: (receiver: JavaValue, axis: number) => number;
+  private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
@@ -331,18 +333,20 @@ export class GameTypeNative {
       ({ receiver, args }) => createFromResource(receiver, args));
     jvm.natives.register(gameRef, 'create_native', ['GameRef', 'GameRef', 'String', 'String'], ({ receiver, args }) =>
       this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]));
-    const getInfo = (receiver: JavaValue, query: number): JavaValue => {
+    const getInfo = (receiver: JavaValue, query: number, index = 0): JavaValue => {
       const node = this.require(receiver);
       switch (query) {
         case 0: return jv('int', 0); // GII_NULL
         case 5: return jv('int', node.resourceId); // GII_ID
         case 6: return jv('int', node.typeId); // GII_TYPE
+        case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
         case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
+        case 25: return jv('int', Math.round(this.axisReader?.(receiver, index) ?? 0)); // GII_AXIS
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
     };
     jvm.natives.register(gameRef, 'getInfo', ['int', 'int'], ({ receiver, args }) =>
-      getInfo(receiver, Number(args[0].value) | 0));
+      getInfo(receiver, Number(args[0].value) | 0, Number(args[1].value) | 0));
     jvm.natives.register(gameRef, 'getInfo', ['int', 'String'], ({ receiver, args }) =>
       getInfo(receiver, Number(args[0].value) | 0));
     jvm.natives.register(gameRef, 'getFlags', [], ({ receiver }) => jv('int', this.require(receiver).flags));
@@ -376,8 +380,15 @@ export class GameTypeNative {
     });
     jvm.natives.register(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], ({ receiver, args }) => {
       const type = Number(args[1].value) | 0;
-      if (type === 16 && typeof args[2].value === 'string')
+      if (type === 16 && typeof args[2].value === 'string') {
+        const node = this.getResource(receiver);
+        if (node) {
+          const commands = this.lastCommands.get(node) ?? new Map<string, string>();
+          commands.set(args[2].value.trim().split(/\s+/, 1)[0], args[2].value);
+          this.lastCommands.set(node, commands);
+        }
         this.commandHandler?.(receiver, args[2].value);
+      }
       this.queueStringEvent(receiver, args[0], type, args[2]);
       return voidValue();
     });
@@ -425,6 +436,14 @@ export class GameTypeNative {
   reference(node: ResourceObject | null): JavaValue { return this.handle(node); }
   setCommandHandler(handler: (receiver: JavaValue, command: string) => void): void {
     this.commandHandler = handler;
+  }
+  setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
+  hasCallback(receiver: JavaValue, callback: number): boolean {
+    return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
+  }
+  lastCommand(receiver: JavaValue, name: string): string | undefined {
+    const node = receiver.value == null ? null : this.getResource(receiver);
+    return node ? this.lastCommands.get(node)?.get(name) : undefined;
   }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
 

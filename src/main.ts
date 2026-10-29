@@ -1,6 +1,8 @@
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
-import { activeJavaTrack } from './runtime/java-scene';
+import { activeJavaTrack, javaDrivingControls } from './runtime/java-scene';
+import { JavaGauges } from './osd/java-gauges';
+import { jv } from 'slrr-jvm';
 import { parseRpk, entryProperties } from './formats/rpk';
 import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
@@ -94,13 +96,34 @@ async function runGameBoot() {
   } else if (viewer) {
     const selected = activeJavaTrack(result);
     if (selected && source.byPath.has(selected.mapPack)) {
+      const javaControls = javaDrivingControls(result);
+      let animating = false, animateFailed = false;
+      const animationTimer = window.setInterval(() => {
+        if (animating || animateFailed) return;
+        const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+        if (state.value == null || !result.gameTypes.hasCallback(state, 28)) return;
+        animating = true;
+        void result.jvm.invokeAsync(state, 'animate').catch(reason => {
+          animateFailed = true;
+          appendJavaEvent({ level: 'error', message: `Java animate: ${reason instanceof Error ? reason.message : String(reason)}` });
+        }).finally(() => { animating = false; });
+      }, 50);
+      const unlockMusic = () => { if (music?.snapshot().blocked) void music.resume(); };
+      window.addEventListener('pointerdown', unlockMusic);
+      window.addEventListener('keydown', unlockMusic);
+      const stopAnimation = () => {
+        window.clearInterval(animationTimer);
+        window.removeEventListener('pointerdown', unlockMusic);
+        window.removeEventListener('keydown', unlockMusic);
+      };
+      disposeJavaScene = stopAnimation;
       let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
       try {
         status('Loading Java track…');
         if (selected.chassis && source.byPath.has(selected.chassis.pack)) {
           try {
             built = await new PartFactory(source).stock(selected.chassis, { mechanical: true });
-            if (source !== assets || run !== sequence) { built.world.dispose(); return; }
+            if (source !== assets || run !== sequence) { stopAnimation(); built.world.dispose(); return; }
             await viewer.showWorld(built.world, source, true);
           } catch (reason) {
             built?.world.dispose(); built = undefined;
@@ -110,29 +133,40 @@ async function runGameBoot() {
         const map = await viewer.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
         }, true);
-        if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
+        if (source !== assets || run !== sequence) { stopAnimation(); built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         if (built) {
+          const gauges = selected.chassis ? new JavaGauges(source, selected.chassis.pack) : null;
+          if (gauges) el('viewport').append(gauges.element);
           const point = selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);
           const start = new Vector3(point.x, Number.isFinite(ground) ? Math.max(point.y, ground + 0.15) : point.y, point.z);
           try {
-            const session = viewer.drive(built.root, text => { driveHud.textContent = text; }, true,
-              { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music);
-            disposeJavaScene = () => { session(); built?.world.dispose(); };
-            driveHud.hidden = false; driveHud.classList.add('crash-hud');
-            el('scene-help').textContent = 'W/S throttle · A/D steer · Space brake · E/Q gears · N neutral · I restart engine · R reset';
+            const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
+            const car = result.jvm.get(player, 'car');
+            const javaVehicle = result.gameTypes.get(car);
+            const session = viewer.drive(built.root, () => {}, true,
+              { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
+              { ...javaControls, instruments: (speed, rpm, gear) => gauges?.update(speed, rpm, gear),
+                motion: (position, yaw, velocity) => javaVehicle?.setState(
+                  { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
+                  { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 }) });
+            disposeJavaScene = () => { stopAnimation(); session(); gauges?.dispose(); built?.world.dispose(); };
+            driveHud.hidden = true;
+            el('scene-help').textContent = 'Controls follow the game ControlSet · Camera follows Track.java';
           } catch (reason) {
+            gauges?.dispose();
             appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
-            disposeJavaScene = () => built?.world.dispose();
+            disposeJavaScene = () => { stopAnimation(); built?.world.dispose(); };
           }
-        } else disposeJavaScene = () => built?.world.dispose();
+        } else disposeJavaScene = () => { stopAnimation(); built?.world.dispose(); };
         el('filename').textContent = selected.mapPack;
         el('format').textContent = 'JAVA / TRACK';
         el('details').textContent = `${map.loaded} map models · ${map.objects} placed objects · Java selected ${selected.chassis?.pack ?? 'no car'}`;
         status('Java track loaded');
       } catch (reason) {
+        stopAnimation();
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
         status('Java scene unavailable', true);
