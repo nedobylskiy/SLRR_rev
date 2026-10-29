@@ -259,6 +259,24 @@ test('super constructor executes source parent and can dispatch to a native pare
   assert.equal(seen, 9);
 });
 
+test('loaded source class can use a registered native constructor absent from parsed methods', async () => {
+  const source = `package demo; class Rotation {
+    int angle;
+    Rotation() { angle = 1; }
+    public native Rotation(Vector3 vector);
+  }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) =>
+    className === 'demo.Rotation' ? { path: 'Rotation.java', source } : null });
+  jvm.natives.register('demo.Rotation', '<init>', ['Vector3'], ({ receiver }) => {
+    jvm.set(receiver, 'angle', jv('int', 42));
+    return jv('void', undefined);
+  });
+  await jvm.loadClass('demo.Rotation');
+  const vector = jv('Vector3', { className: 'demo.Vector3', fields: new Map() });
+  assert.equal(jvm.get(jvm.construct('demo.Rotation', [vector]), 'angle').value, 42);
+  assert.equal(jvm.get(await jvm.constructAsync('demo.Rotation', [vector]), 'angle').value, 42);
+});
+
 test('child field initializers run after the parent constructor', async () => {
   const source = `package demo;
     class Base { int x = 1; Base() { x = 2; } }

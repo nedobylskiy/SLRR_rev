@@ -93,6 +93,11 @@ export class JavaNativeRegistry {
     return this.entries.has(this.key(className, method, parameters));
   }
 
+  canInvoke(className: string, method: string, args: readonly JavaValue[],
+    score?: (parameter: string, argument: JavaValue) => number): boolean {
+    return this.find(className, method, args, score) !== undefined;
+  }
+
   private key(className: string, method: string, parameters: readonly string[]): string {
     if (!className || !method || parameters.some(type => !type)) throw new Error('Invalid native signature');
     return `${className}#${method}(${parameters.join(',')})`;

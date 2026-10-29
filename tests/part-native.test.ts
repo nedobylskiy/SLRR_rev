@@ -34,6 +34,14 @@ test('Java part wear belongs to each instance while tear remains pristine', asyn
   assert.equal(jvm.invoke(newPart, 'getTexture').value, 0);
 });
 
+test('an unscripted stock part created as GameRef retains its wear', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  new PartNative(jvm, new GameTypeNative(jvm, () => {}));
+  const part = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'setWear', part, [jv('float', 0.37)]);
+  assert.equal(jvm.natives.invoke('java.util.resource.GameRef', 'getWear', part, [])?.value, Math.fround(0.37));
+});
+
 test('Part.getCar resolves the installed chassis across nested parts and returns zero for loose parts', async () => {
   const sources = new Map([
     ['java.game.parts.Part', 'package java.game.parts; public class Part { public native int getCar(); }'],

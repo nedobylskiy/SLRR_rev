@@ -284,18 +284,28 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     (receiver, position) => osdText.setRenderMatrix(receiver, position), setSceneLight,
     async (texture, light, settings) => {
       if (!setSceneFlare) return;
-      if (!texture.resourcePack) throw new Error('RenderRef.setFlare texture has no pack');
-      const { entry } = await assets.resource(texture.resourcePack, texture.resourceId & 0xffff);
-      if (entry.type !== 7) throw new Error(`RenderRef.setFlare expected texture, got type ${entry.type}`);
-      const path = entryProperties(entry).find(property => property.key === 'sourcefile')?.value;
-      if (!path) throw new Error('RenderRef.setFlare texture has no sourcefile');
-      const lightId = (light.copiedFromResourceId ?? light.resourceId) & 0xffff;
-      const lightEntry = light.resourcePack ? (await assets.resource(light.resourcePack, lightId)).entry : null;
-      const directionText = lightEntry && entryProperties(lightEntry).find(property => property.key === 'direction')?.value;
-      const direction = directionText?.split(/\s+/).map(Number);
-      const sunDirection = direction?.length === 3 && direction.every(Number.isFinite)
-        ? { x: -direction[0], y: -direction[1], z: -direction[2] } : undefined;
-      await setSceneFlare?.({ ...settings, path, bytes: await assets.read(path), sunDirection });
+      let phase = 'resolve texture resource';
+      try {
+        if (!texture.resourcePack) throw new Error('RenderRef.setFlare texture has no pack');
+        const { entry } = await assets.resource(texture.resourcePack, texture.resourceId & 0xffff);
+        if (entry.type !== 7) throw new Error(`RenderRef.setFlare expected texture, got type ${entry.type}`);
+        const path = entryProperties(entry).find(property => property.key === 'sourcefile')?.value;
+        if (!path) throw new Error('RenderRef.setFlare texture has no sourcefile');
+        phase = 'resolve light direction';
+        const lightId = (light.copiedFromResourceId ?? light.resourceId) & 0xffff;
+        const lightEntry = light.resourcePack ? (await assets.resource(light.resourcePack, lightId)).entry : null;
+        const directionText = lightEntry && entryProperties(lightEntry).find(property => property.key === 'direction')?.value;
+        const direction = directionText?.split(/\s+/).map(Number);
+        const sunDirection = direction?.length === 3 && direction.every(Number.isFinite)
+          ? { x: -direction[0], y: -direction[1], z: -direction[2] } : undefined;
+        phase = `read texture ${path}`;
+        const bytes = await assets.read(path);
+        phase = `render texture ${path}`;
+        await setSceneFlare({ ...settings, path, bytes, sunDirection });
+      } catch (reason) {
+        const detail = reason instanceof Error ? reason.message || reason.name : String(reason);
+        throw new Error(`RenderRef.setFlare ${phase}: ${detail || 'unknown error'}`, { cause: reason });
+      }
     });
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   let input!: InputNative;

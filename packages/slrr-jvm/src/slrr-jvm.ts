@@ -203,6 +203,13 @@ export class SlrrJvm implements JavaHost {
   private async runConstructorAsync(receiver: JavaValue, entry: LoadedClass, args: JavaValue[]): Promise<JavaValue> {
     const constructors = entry.parsed.methods.filter(method => method.name === entry.parsed.name);
     const ctor = this.selectMethod(constructors, args, entry.name);
+    if (!ctor && this.natives.canInvoke(entry.name, '<init>', args,
+      (parameter, argument) => this.parameterScore(parameter, argument))) {
+      if (entry.parsed.parent) await this.constructorCallAsync(receiver, entry.name, 'super', []);
+      await this.initializeInstanceFieldsAsync(entry, receiver);
+      return (await this.natives.invokeAsync(entry.name, '<init>', receiver, args,
+        (parameter, argument) => this.parameterScore(parameter, argument)))!;
+    }
     if (!ctor && args.length && constructors.length) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     if (!ctor && args.length && !entry.parsed.parent) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     const first = ctor?.body.kind === 'block' ? ctor.body.statements?.[0] : ctor?.body;
@@ -230,6 +237,13 @@ export class SlrrJvm implements JavaHost {
   private runConstructor(receiver: JavaValue, entry: LoadedClass, args: JavaValue[]): JavaValue {
     const constructors = entry.parsed.methods.filter(method => method.name === entry.parsed.name);
     const ctor = this.selectMethod(constructors, args, entry.name);
+    if (!ctor && this.natives.canInvoke(entry.name, '<init>', args,
+      (parameter, argument) => this.parameterScore(parameter, argument))) {
+      if (entry.parsed.parent) this.constructorCall(receiver, entry.name, 'super', []);
+      this.initializeInstanceFields(entry, receiver);
+      return this.natives.invoke(entry.name, '<init>', receiver, args,
+        (parameter, argument) => this.parameterScore(parameter, argument))!;
+    }
     if (!ctor && args.length && constructors.length) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     if (!ctor && args.length && !entry.parsed.parent) throw new Error(`Java constructor missing: ${entry.name}(${args.length})`);
     const first = ctor?.body.kind === 'block' ? ctor.body.statements?.[0] : ctor?.body;
