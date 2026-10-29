@@ -7,7 +7,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './tools/game-files';
 
 const audioTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav' };
-const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', ...Object.keys(audioTypes)]);
+const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.ptx', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', ...Object.keys(audioTypes)]);
 function gameAssets(): Plugin {
   let index: Promise<{ path: string; size: number }[]> | undefined;
   const videos = new Map<string, Promise<Buffer>>();
@@ -60,7 +60,10 @@ function gameAssets(): Plugin {
             res.setHeader('Content-Type', 'video/webm'); res.setHeader('Content-Length', video.length); res.end(video);
           } else if (url.pathname === '/file') {
             const f = await safeGamePath(url.searchParams.get('path') ?? '');
-            if (!allowed.has(path.extname(f).toLowerCase()) && !relativeGamePath(f).toLowerCase().startsWith('save/')) { res.statusCode = 403; res.end(); return; }
+            if (!allowed.has(path.extname(f).toLowerCase()) && !relativeGamePath(f).toLowerCase().startsWith('save/')) {
+              res.statusCode = 403; res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+              res.end(`Unsupported game asset type: ${path.extname(f)}`); return;
+            }
             const info = await stat(f), audioType = audioTypes[path.extname(f).toLowerCase()];
             if (audioType) {
               const range = req.headers.range;

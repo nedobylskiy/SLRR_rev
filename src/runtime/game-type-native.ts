@@ -331,6 +331,20 @@ export class GameTypeNative {
       ({ receiver, args }) => createFromResource(receiver, args));
     jvm.natives.register(gameRef, 'create_native', ['GameRef', 'GameRef', 'String', 'String'], ({ receiver, args }) =>
       this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]));
+    const getInfo = (receiver: JavaValue, query: number): JavaValue => {
+      const node = this.require(receiver);
+      switch (query) {
+        case 0: return jv('int', 0); // GII_NULL
+        case 5: return jv('int', node.resourceId); // GII_ID
+        case 6: return jv('int', node.typeId); // GII_TYPE
+        case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
+        default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
+      }
+    };
+    jvm.natives.register(gameRef, 'getInfo', ['int', 'int'], ({ receiver, args }) =>
+      getInfo(receiver, Number(args[0].value) | 0));
+    jvm.natives.register(gameRef, 'getInfo', ['int', 'String'], ({ receiver, args }) =>
+      getInfo(receiver, Number(args[0].value) | 0));
     jvm.natives.register(gameRef, 'getFlags', [], ({ receiver }) => jv('int', this.require(receiver).flags));
     jvm.natives.register(gameRef, 'setFlags', ['int'], ({ receiver, args }) => {
       this.require(receiver).setFlags(Number(args[0].value) | 0); return voidValue();
