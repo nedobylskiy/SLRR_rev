@@ -111,13 +111,26 @@ export class OsdLayer {
     };
   }
 
-  private imageUrl(resource: OsdResource) {
+  imageUrl(resource: OsdResource) {
     const key = `${resource.pack.toLowerCase()}:${resource.id}`;
     let cached = this.images.get(key);
     if (!cached) {
       cached = (async () => {
-        const { entry } = await this.assets.resource(resource.pack, resource.id);
-        const source = entryProperties(entry).find(property => property.key === 'sourcefile')?.value;
+        let current = resource;
+        let source: string | undefined;
+        const visited = new Set<string>();
+        for (let depth = 0; depth < 8; depth++) {
+          const identity = `${current.pack}:${current.id}`;
+          if (visited.has(identity)) break;
+          visited.add(identity);
+          const { packPath, entry } = await this.assets.resource(current.pack, current.id);
+          const properties = entryProperties(entry);
+          source = properties.find(property => property.key === 'sourcefile')?.value;
+          if (source) break;
+          const texture = properties.find(property => property.key === 'texture');
+          if (!texture || !/^0x[0-9a-f]+$/i.test(texture.value)) break;
+          current = { pack: packPath, id: Number.parseInt(texture.value.slice(2), 16) };
+        }
         if (!source) throw new Error(`OSD resource ${key} has no sourcefile`);
         const bytes = await this.assets.read(source);
         const url = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: /\.png$/i.test(source) ? 'image/png' : 'image/jpeg' }));
@@ -135,6 +148,11 @@ export class OsdLayer {
     const image = document.createElement('img'); image.alt = ''; node.append(image);
     const handle = this.handle(node, image); handle.setResource(resource);
     return handle;
+  }
+
+  /** Host-side native widgets use the same OSD stage and lifetime as Java-created gadgets. */
+  createNativeElement(node: HTMLElement, x: number, y: number, width: number, height: number, depth: number) {
+    return this.handle(this.place(node, x, y, width, height, depth));
   }
 
   createText(value: string, align: OsdAlign, x: number, y: number, depth = 2) {

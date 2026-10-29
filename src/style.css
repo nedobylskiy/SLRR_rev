@@ -253,15 +253,13 @@ nav button.active{
   width:100%;
   height:100%
 }
-#viewport canvas.java-gauges{
-  position:absolute;
-  z-index:5;
-  left:16px;
-  bottom:12px;
-  width:min(300px,28vw);
-  height:auto;
-  pointer-events:none;
-}
+.java-gauges{pointer-events:none}
+.java-gauge-atlas{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
+.java-gauge-pin{position:absolute;width:5.49%;height:24.1%;transform-origin:50% 94%;object-fit:fill}
+.java-gauge-readout{position:absolute;transform:translate(-50%,-50%);font-family:Arial,sans-serif;font-weight:700;color:#10251b;line-height:1;white-space:nowrap;font-size:clamp(10px,1.5vw,28px)}
+.java-gauge-speed{font-size:clamp(11px,1.8vw,32px)}
+.java-gauge-gear{font-size:clamp(10px,1.4vw,25px)}
+.java-gauge-mileage{font-size:clamp(9px,1.2vw,21px)}
 .viewport-expand-button,.viewport-window-button{
   position:absolute;
   top:12px;

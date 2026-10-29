@@ -1,52 +1,95 @@
-import type { Assets } from '../assets';
+import type { PartConfig } from '../formats/cfg';
+import type { OsdLayer, OsdResource } from './osd-layer';
 
-/** Draws the stock gauge atlas selected by the Java car's resource pack. */
+type GaugeDirective = { resource: OsdResource; args: string[] };
+
+/** Render native vehicle CFG osd_* directives inside the same layer as Java gadgets. */
 export class JavaGauges {
-  readonly element = document.createElement('canvas');
-  private context: CanvasRenderingContext2D;
-  private atlas: ImageBitmap | null = null;
-  private pin: ImageBitmap | null = null;
+  private readonly root = document.createElement('div');
+  private readonly speedPin = document.createElement('img');
+  private readonly rpmPin = document.createElement('img');
+  private readonly speedText = document.createElement('span');
+  private readonly gearText = document.createElement('span');
+  private readonly mileageText = document.createElement('span');
+  private readonly pinSpeed: string[];
+  private readonly pinRpm: string[];
   private disposed = false;
+  private travelledKm = 0;
+  private lastUpdate = 0;
 
-  constructor(private readonly assets: Assets, pack: string) {
-    this.element.className = 'java-gauges';
-    this.element.width = 824; this.element.height = 824;
-    this.element.setAttribute('aria-label', 'Vehicle speedometer and tachometer');
-    const context = this.element.getContext('2d');
-    if (!context) throw new Error('Canvas 2D unavailable for vehicle gauges');
-    this.context = context;
-    void this.load(pack);
+  constructor(osd: OsdLayer, pack: string, config: PartConfig) {
+    const directives = new Map<string, GaugeDirective>();
+    for (const item of config.unknown) {
+      const match = /^0x([0-9a-f]+)r?$/i.exec(item.args[0] ?? '');
+      if (item.command.toLowerCase().startsWith('osd_') && match)
+        directives.set(item.command.toLowerCase(), { resource: { pack, id: Number.parseInt(match[1], 16) }, args: item.args });
+    }
+    this.pinSpeed = directives.get('osd_spdpin')?.args ?? [];
+    this.pinRpm = directives.get('osd_rpmpin')?.args ?? [];
+    this.root.className = 'java-gauges';
+    this.root.setAttribute('role', 'img');
+    this.root.setAttribute('aria-label', 'Vehicle instruments');
+    const gaugePosition = directives.get('osd_gauge')?.args ?? [];
+    // CFG gauge meshes use a horizontal -2..2 and vertical up-positive -1..1
+    // screen space; the DOM OSD stage uses -1..1 with Y pointing down.
+    const gaugeX = Number(gaugePosition[1]), gaugeY = Number(gaugePosition[2]);
+    osd.createNativeElement(this.root, Number.isFinite(gaugeX) ? gaugeX / 2 : 0.68,
+      Number.isFinite(gaugeY) ? -gaugeY : 0.55, 0.64, 0.90, 20);
+    const atlas = document.createElement('img');
+    atlas.className = 'java-gauge-atlas'; atlas.alt = '';
+    this.root.append(atlas);
+    this.placePin(this.speedPin, 572, 345);
+    this.placePin(this.rpmPin, 204, 637);
+    this.placeReadout(this.speedText, 'speed', 572, 558);
+    this.placeReadout(this.gearText, 'gear', 204, 792);
+    this.placeReadout(this.mileageText, 'mileage', 572, 686);
+    void this.load(osd, directives, atlas);
+    this.update(0, 0, 0);
   }
 
-  private async load(pack: string) {
-    const family = pack.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.rpk$/i, '') ?? '';
-    const prefix = `cars/textures/gauges/${family}/${family}`.toLowerCase();
-    const find = (suffix: string) => this.assets.byPath.get(`${prefix}${suffix}`)?.path;
-    const atlasPath = find('_gauge.png'), pinPath = find('_pin.png');
-    if (!atlasPath || !pinPath) return;
-    const decode = async (path: string) => createImageBitmap(new Blob([new Uint8Array(await this.assets.read(path))], { type: 'image/png' }));
+  private placePin(pin: HTMLImageElement, x: number, y: number) {
+    pin.alt = ''; pin.className = 'java-gauge-pin';
+    pin.style.left = `${(x - 22.5) / 820 * 100}%`;
+    pin.style.top = `${(y - 188) / 830 * 100}%`;
+    this.root.append(pin);
+  }
+
+  private placeReadout(node: HTMLSpanElement, kind: string, x: number, y: number) {
+    node.className = `java-gauge-readout java-gauge-${kind}`;
+    node.style.left = `${x / 820 * 100}%`;
+    node.style.top = `${y / 830 * 100}%`;
+    this.root.append(node);
+  }
+
+  private async load(osd: OsdLayer, directives: Map<string, GaugeDirective>, atlas: HTMLImageElement) {
+    const load = async (name: string, image: HTMLImageElement) => {
+      const directive = directives.get(name);
+      if (!directive) return;
+      const url = await osd.imageUrl(directive.resource);
+      if (!this.disposed) image.src = url;
+    };
     try {
-      const [atlas, pin] = await Promise.all([decode(atlasPath), decode(pinPath)]);
-      if (this.disposed) { atlas.close(); pin.close(); return; }
-      this.atlas = atlas; this.pin = pin; this.update(0, 0, 0);
-    } catch { /* A missing modded atlas leaves the host readout available. */ }
+      await Promise.all([load('osd_gauge', atlas), load('osd_spdpin', this.speedPin), load('osd_rpmpin', this.rpmPin)]);
+    } catch (error) {
+      this.root.dataset.gaugeError = error instanceof Error ? error.message : String(error);
+    }
   }
 
   update(speedKmh: number, rpm: number, gear: number) {
-    const ctx = this.context;
-    ctx.clearRect(0, 0, 824, 824);
-    if (!this.atlas || !this.pin) return;
-    ctx.drawImage(this.atlas, 0, 0, 824, 824);
-    const needle = (x: number, y: number, fraction: number) => {
-      ctx.save(); ctx.translate(x, y); ctx.rotate((-135 + 270 * Math.max(0, Math.min(1, fraction))) * Math.PI / 180);
-      ctx.drawImage(this.pin!, -this.pin!.width / 2, -this.pin!.height + 8); ctx.restore();
+    const now = performance.now();
+    if (this.lastUpdate) this.travelledKm += Math.max(0, speedKmh) * Math.min(100, now - this.lastUpdate) / 3_600_000;
+    this.lastUpdate = now;
+    const angle = (args: string[], value: number, fallbackRate: number, fallbackBase: number) => {
+      const base = Number(args[4]), rate = Number(args[5]);
+      return `${-(Number.isFinite(base) ? base : fallbackBase) - (Number.isFinite(rate) ? rate : fallbackRate) * value}rad`;
     };
-    needle(572, 345, speedKmh / 240);
-    needle(204, 637, rpm / 9000);
-    ctx.fillStyle = '#10251b'; ctx.textAlign = 'center'; ctx.font = 'bold 38px Arial';
-    ctx.fillText(String(Math.max(0, Math.round(speedKmh))), 570, 558);
-    ctx.font = 'bold 31px Arial'; ctx.fillText(gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear), 205, 792);
+    this.speedPin.style.transform = `rotate(${angle(this.pinSpeed, speedKmh, -0.021, 2.625)})`;
+    this.rpmPin.style.transform = `rotate(${angle(this.pinRpm, rpm, -0.000575, 2.6)})`;
+    this.speedText.textContent = String(Math.max(0, Math.round(speedKmh))).padStart(3, '0');
+    this.gearText.textContent = gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear);
+    this.mileageText.textContent = String(Math.floor(this.travelledKm)).padStart(7, '0');
+    this.root.setAttribute('aria-label', `${Math.round(speedKmh)} km/h, ${Math.round(rpm)} rpm, gear ${this.gearText.textContent}`);
   }
 
-  dispose() { this.disposed = true; this.atlas?.close(); this.pin?.close(); this.element.remove(); }
+  dispose() { this.disposed = true; this.root.remove(); }
 }

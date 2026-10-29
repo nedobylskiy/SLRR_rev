@@ -136,8 +136,7 @@ async function runGameBoot() {
         if (source !== assets || run !== sequence) { stopAnimation(); built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         if (built) {
-          const gauges = selected.chassis ? new JavaGauges(source, selected.chassis.pack) : null;
-          if (gauges) el('viewport').append(gauges.element);
+          const gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
           const point = selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);
