@@ -33,8 +33,10 @@ export class JavaGauges {
     // CFG gauge meshes use a horizontal -2..2 and vertical up-positive -1..1
     // screen space; the DOM OSD stage uses -1..1 with Y pointing down.
     const gaugeX = Number(gaugePosition[1]), gaugeY = Number(gaugePosition[2]);
+    const gaugeHeight = 0.90;
+    const gaugeWidth = gaugeHeight * (820 / 830) / (16 / 9);
     osd.createNativeElement(this.root, Number.isFinite(gaugeX) ? gaugeX / 2 : 0.68,
-      Number.isFinite(gaugeY) ? -gaugeY : 0.55, 0.64, 0.90, 20);
+      Number.isFinite(gaugeY) ? -gaugeY : 0.55, gaugeWidth, gaugeHeight, 20);
     const atlas = document.createElement('img');
     atlas.className = 'java-gauge-atlas'; atlas.alt = '';
     this.root.append(atlas);
