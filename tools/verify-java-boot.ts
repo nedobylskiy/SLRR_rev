@@ -11,6 +11,12 @@ import { packedResourceId } from '../src/runtime/resource-ids';
 import type { OsdLayer } from '../src/osd/osd-layer';
 
 const root = process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? 'C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline';
+const seedArg = process.argv.find(arg => arg.startsWith('--seed='));
+if (seedArg) {
+  const seed = Number(seedArg.slice('--seed='.length));
+  if (!Number.isSafeInteger(seed)) throw new Error(`Invalid --seed value: ${seedArg}`);
+  Date.now = () => seed;
+}
 const classOnly = process.argv.includes('--class-only');
 const names = (await readdir(join(root, 'sl/Scripts/game/src')))
   .filter(name => name.toLowerCase().endsWith('.java')).map(name => `sl/Scripts/game/src/${name}`);
@@ -97,6 +103,10 @@ if (process.argv.includes('--diagnose')) {
       const selected = activeJavaTrack(result);
       if (!selected?.chassis) throw new Error('Java did not select a chassis');
       const selection = await javaStockSelection(result, assets, selected.chassis.pack);
+      process.stdout.write(`assembly selected body: ${selection.body.map(part => `${part.pack}:${part.id}`).join(', ')}\n`);
+      if (selected.chassis.pack === 'cars/racers/superduty.rpk' && selected.chassis.id === 274 &&
+          selection.body.filter(part => part.pack === 'parts/interior.rpk' && part.id === 73).length !== 2)
+        throw new Error('SuperDuty Extra 750 lost its two parts/interior:0x49 seat resources');
       const built = await new PartFactory(assets).stock(selected.chassis, { mechanical: true, javaSelection: selection });
       process.stdout.write(`assembly built: ${built.world.parts.size} parts, ${selection.mechanical.length} selected hardware, ${selection.tyres.length} selected tyres, ${built.warnings.length} warnings\n`);
       const kinds = [...built.world.parts.values()].reduce<Record<string, number>>((result, part) => {
