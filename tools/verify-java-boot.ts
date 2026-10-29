@@ -4,6 +4,7 @@ import { Assets } from '../src/assets';
 import { entryProperties } from '../src/formats/rpk';
 import { jv } from 'slrr-jvm';
 import { bootGame } from '../src/runtime/game-boot';
+import { activeJavaTrack } from '../src/runtime/java-scene';
 import { packedResourceId } from '../src/runtime/resource-ids';
 import type { OsdLayer } from '../src/osd/osd-layer';
 
@@ -61,6 +62,24 @@ const result = await bootGame(assets, event => {
     process.stdout.write(`flare: ${flare.path} (${flare.bytes.length} bytes)\n`);
   });
 if (process.argv.includes('--diagnose')) {
+  if (process.argv.includes('--scene-debug')) {
+    const roots = result.gameTypes.roots();
+    const nodes = roots.flatMap(function visit(node: (typeof roots)[number]): typeof roots {
+      return [node, ...[...node.children].flatMap(visit)];
+    });
+    for (const node of nodes.filter(node => /GroundRef|Vehicle|TestTrack/.test(node.className)))
+      process.stdout.write(`scene: ${node.className} ${node.resourcePack ?? '-'} ${node.resourceId} parent=${node.parentId ?? '-'}\n`);
+    const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
+    const car = player.value == null ? null : result.jvm.get(player, 'car');
+    const chassis = car?.value == null ? null : result.jvm.get(car, 'chassis');
+    const chassisNode = chassis?.value == null ? null : result.gameTypes.getResource(chassis);
+    process.stdout.write(`scene car: ${car?.type ?? '-'} chassis=${chassisNode?.resourcePack ?? '-'}:${chassisNode?.typeId ?? '-'}\n`);
+    const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+    const start = state.value == null ? null : result.jvm.get(state, 'posStart');
+    const startNode = start?.value == null ? null : { x: result.jvm.get(start, 'x').value, y: result.jvm.get(start, 'y').value, z: result.jvm.get(start, 'z').value };
+    process.stdout.write(`scene start: ${state.type} ${JSON.stringify(startNode)}\n`);
+    process.stdout.write(`scene selection: ${JSON.stringify(activeJavaTrack(result))}\n`);
+  }
   result.dispose();
   process.exit(result.error ? 1 : 0);
 }

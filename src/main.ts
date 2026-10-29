@@ -1,5 +1,6 @@
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
+import { activeJavaTrack } from './runtime/java-scene';
 import { parseRpk, entryProperties } from './formats/rpk';
 import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
@@ -28,6 +29,7 @@ let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disp
 let disposeJavaInput: (() => void) | undefined;
 let disposeGameBoot: (() => void) | undefined;
 let disposeGameOsd: (() => void) | undefined;
+let disposeJavaScene: (() => void) | undefined;
 let localInstallation = false;
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
@@ -48,9 +50,12 @@ function appendJavaEvent(event: BootEvent) {
 }
 async function runGameBoot() {
   if (!assets) return;
+  disposeJavaScene?.(); disposeJavaScene = undefined;
+  driveHud.hidden = true; driveHud.classList.remove('crash-hud');
   disposeJavaInput?.(); disposeJavaInput = undefined;
   disposeGameBoot?.(); disposeGameBoot = undefined;
   disposeGameOsd?.(); disposeGameOsd = undefined;
+  viewer?.clear();
   const source = assets, run = sequence;
   const gameOsd = new OsdLayer(el('viewport'), source);
   gameOsd.root.classList.add('osd-layer-game');
@@ -86,6 +91,53 @@ async function runGameBoot() {
     el('filename').textContent = location ? `${location[1]}:${location[2]}` : 'Init.java';
     el('format').textContent = 'JAVA / ERROR';
     el('details').textContent = result.error.message;
+  } else if (viewer) {
+    const selected = activeJavaTrack(result);
+    if (selected && source.byPath.has(selected.mapPack)) {
+      let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
+      try {
+        status('Loading Java track…');
+        if (selected.chassis && source.byPath.has(selected.chassis.pack)) {
+          try {
+            built = await new PartFactory(source).stock(selected.chassis, { mechanical: true });
+            if (source !== assets || run !== sequence) { built.world.dispose(); return; }
+            await viewer.showWorld(built.world, source, true);
+          } catch (reason) {
+            built?.world.dispose(); built = undefined;
+            appendJavaEvent({ level: 'error', message: `Java car rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
+          }
+        }
+        const map = await viewer.showMap(selected.mapPack, source, (done, total) => {
+          if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
+        }, true);
+        if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
+        if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
+        if (built) {
+          const point = selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
+            ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
+          const ground = map.terrain.height(point.x, point.z);
+          const start = new Vector3(point.x, Number.isFinite(ground) ? Math.max(point.y, ground + 0.15) : point.y, point.z);
+          try {
+            const session = viewer.drive(built.root, text => { driveHud.textContent = text; }, true,
+              { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music);
+            disposeJavaScene = () => { session(); built?.world.dispose(); };
+            driveHud.hidden = false; driveHud.classList.add('crash-hud');
+            el('scene-help').textContent = 'W/S throttle · A/D steer · Space brake · E/Q gears · N neutral · I restart engine · R reset';
+          } catch (reason) {
+            appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
+            disposeJavaScene = () => built?.world.dispose();
+          }
+        } else disposeJavaScene = () => built?.world.dispose();
+        el('filename').textContent = selected.mapPack;
+        el('format').textContent = 'JAVA / TRACK';
+        el('details').textContent = `${map.loaded} map models · ${map.objects} placed objects · Java selected ${selected.chassis?.pack ?? 'no car'}`;
+        status('Java track loaded');
+      } catch (reason) {
+        built?.world.dispose();
+        appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
+        status('Java scene unavailable', true);
+      }
+    }
   }
 }
 const menuButton = textElement('button', 'Main menu');
@@ -308,6 +360,7 @@ mapButton.onclick = async () => {
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
 };
 function stopDrive() {
+  disposeJavaScene?.(); disposeJavaScene = undefined;
   const wasTrackDriving = trackDriving;
   disposeOsdMenu?.(); disposeOsdMenu = undefined;
   trackDriving = false; setViewportExpanded(false);
@@ -440,6 +493,7 @@ async function connect() {
 }
 
 function attach(source: Assets, label: string, local = false) {
+  disposeJavaScene?.(); disposeJavaScene = undefined;
   disposeJavaInput?.(); disposeJavaInput = undefined;
   disposeGameBoot?.(); disposeGameBoot = undefined;
   disposeGameOsd?.(); disposeGameOsd = undefined;

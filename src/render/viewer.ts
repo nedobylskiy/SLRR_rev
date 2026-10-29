@@ -237,8 +237,9 @@ export class Viewer {
     if (generation === this.generation) this.fit();
     return warnings;
   }
-  async showWorld(world: EngineWorld, assets: Assets): Promise<string[]> {
-    this.clear(); const generation = this.generation, warnings: string[] = [];
+  async showWorld(world: EngineWorld, assets: Assets, keepScene = false): Promise<string[]> {
+    if (!keepScene) this.clear();
+    const generation = this.generation, warnings: string[] = [];
     for (const part of world.parts.values()) {
       const model = part.definition.model;
       if (!model) continue;
@@ -261,7 +262,7 @@ export class Viewer {
         if (generation !== this.generation) return warnings;
       }
     }
-    if (generation === this.generation) this.fit();
+    if (generation === this.generation && !keepScene) this.fit();
     return warnings;
   }
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
@@ -399,7 +400,9 @@ export class Viewer {
       });
     };
     if (withCrash) {
-      const hood = [...root.world.parts.values()].find(p => p.parent === root && /\/hood\.cfg$/i.test(p.definition.cfgPath));
+      const hood = [...root.world.parts.values()].find(p => p.parent === root
+        && (/(?:^|[\\/])hood(?:\.cfg|[_-])/i.test(p.definition.cfgPath)
+          || /(?:^|[_-])hood(?:$|[_-])/i.test(p.definition.alias)));
       if (!hood) throw new Error('Installed hood required for crash demo');
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
