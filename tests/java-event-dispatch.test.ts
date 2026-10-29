@@ -15,6 +15,35 @@ class Handler {
   void handleEvent(Object ref, int type, int value) { calls++; last = value; }
 }`;
 
+test('GameType notifications route watched trigger events to a named Java handler', async () => {
+  const notificationSource = `package demo; class Listener {
+    int calls; int last; String text;
+    Listener() {}
+    void onTrigger(Object source, int event, String value) { calls++; last = event; text = value; }
+  }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Listener'
+    ? { path: 'listener.java', source: notificationSource } : null });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  await jvm.loadClass('demo.Listener');
+  const listener = jvm.construct('demo.Listener', []);
+  const trigger = jv('GameRef', { className: 'demo.Trigger', fields: new Map() });
+  for (const object of [listener, trigger])
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', object, []);
+  jvm.natives.invoke('java.lang.GameType', 'setEventMask', listener, [jv('int', 32)]);
+  const args = [trigger, jv('int', 32), jv('int', 0), jv('Object', null), jv('String', 'onTrigger')];
+  jvm.natives.invoke('java.lang.GameType', 'addNotification', listener, args);
+  gameTypes.queueStringEvent(trigger, jv('GameRef', null), 32, jv('String', 'entered'));
+  assert.equal(gameTypes.dispatchQueuedEvents(), 1);
+  assert.equal(jvm.get(listener, 'calls').value, 1);
+  assert.equal(jvm.get(listener, 'last').value, 32);
+  assert.equal(jvm.get(listener, 'text').value, 'entered');
+  jvm.natives.invoke('java.lang.GameType', 'remNotification', listener, [trigger, jv('int', 32)]);
+  gameTypes.queueStringEvent(trigger, jv('GameRef', null), 32, jv('String', 'left'));
+  assert.equal(gameTypes.dispatchQueuedEvents(), 0);
+  assert.equal(jvm.get(listener, 'calls').value, 1);
+  gameTypes.dispose();
+});
+
 test('native event queue invokes the original Java hotkey handler after an input edge', async () => {
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
     ? { path: 'demo.java', source } : null });

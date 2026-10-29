@@ -16,6 +16,16 @@ interface PendingScriptEvent {
   receiver: JavaValue;
   type: number;
   arguments: JavaValue[];
+  method?: string;
+}
+
+interface Notification {
+  handler: JavaValue;
+  watched: ResourceObject;
+  type: number;
+  alias: number;
+  message: JavaValue;
+  method?: string;
 }
 
 /** Connects interpreted GameRef/GameType methods to one persistent host game object. */
@@ -30,6 +40,7 @@ export class GameTypeNative {
   private nextClonedResourceId = 0x40000000;
   private readonly trackPackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
+  private readonly notifications = new Map<JavaObject, Notification[]>();
   private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
   private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
   private dispatchingEvents = false;
@@ -189,6 +200,12 @@ export class GameTypeNative {
       if (receiver.value == null) return voidValue();
       const node = this.getResource(receiver);
       if (!node) return voidValue();
+      this.notifications.delete(this.object(receiver));
+      for (const [handler, subscriptions] of this.notifications) {
+        const remaining = subscriptions.filter(subscription => subscription.watched !== node);
+        if (remaining.length) this.notifications.set(handler, remaining);
+        else this.notifications.delete(handler);
+      }
       if (node instanceof RenderObject) this.renderRemoved?.(node);
       this.cancelTimers(this.object(receiver));
       node.setParent(null);
@@ -210,6 +227,39 @@ export class GameTypeNative {
     });
     jvm.natives.register(gameType, 'clearEventMask', ['int'], ({ receiver, args }) => {
       this.require(receiver).clearEventMask(Number(args[0].value) | 0); return voidValue();
+    });
+    const addNotification = (receiver: JavaValue, args: readonly JavaValue[]) => {
+      this.require(receiver);
+      if (args[0].value == null) return voidValue();
+      const watched = this.requireResource(args[0]);
+      const type = Number(args[1].value) | 0;
+      const alias = Number(args[2].value) | 0;
+      const method = args[4]?.value == null ? undefined : String(args[4].value);
+      const key = this.object(receiver);
+      const subscriptions = this.notifications.get(key) ?? [];
+      const prior = subscriptions.findIndex(subscription => subscription.watched === watched && subscription.type === type);
+      if (prior >= 0) subscriptions.splice(prior, 1);
+      subscriptions.unshift({ handler: receiver, watched, type, alias, message: args[3], method });
+      this.notifications.set(key, subscriptions);
+      return voidValue();
+    };
+    // The interpreter currently gives a null String argument the runtime type Object.
+    for (const messageType of ['String', 'Object']) {
+      jvm.natives.register(gameType, 'addNotification', ['GameRef', 'int', 'int', messageType],
+        ({ receiver, args }) => addNotification(receiver, args));
+      jvm.natives.register(gameType, 'addNotification', ['GameRef', 'int', 'int', messageType, 'String'],
+        ({ receiver, args }) => addNotification(receiver, args));
+    }
+    jvm.natives.register(gameType, 'remNotification', ['GameRef', 'int'], ({ receiver, args }) => {
+      if (args[0].value == null) return voidValue();
+      const watched = this.getResource(args[0]);
+      const key = this.object(receiver), subscriptions = this.notifications.get(key);
+      if (!watched || !subscriptions) return voidValue();
+      const type = Number(args[1].value) | 0;
+      const index = subscriptions.findIndex(subscription => subscription.watched === watched && subscription.type === type);
+      if (index >= 0) subscriptions.splice(index, 1);
+      if (!subscriptions.length) this.notifications.delete(key);
+      return voidValue();
     });
     jvm.natives.register(gameType, 'registerCallback', ['int'], ({ receiver, args }) => {
       const object = this.object(receiver), callbacks = this.callbacks.get(object) ?? new Set<number>();
@@ -375,6 +425,7 @@ export class GameTypeNative {
     const sourceNode = source.value == null ? null : this.getResource(source);
     node.queueEvent({ sourceId: sourceNode?.id ?? null, type, payload: value });
     this.pendingEvents.push({ receiver, type, arguments: [source, jv('int', type), jv('int', value)] });
+    this.queueNotifications(receiver, type, jv('int', value));
   }
 
   queueStringEvent(receiver: JavaValue, source: JavaValue, type: number, value: JavaValue): void {
@@ -383,6 +434,31 @@ export class GameTypeNative {
     node.queueEvent({ sourceId: sourceNode?.id ?? null, type,
       payload: value.value == null ? null : String(value.value) });
     this.pendingEvents.push({ receiver, type, arguments: [source, jv('int', type), value] });
+    this.queueNotifications(receiver, type, value);
+  }
+
+  private queueNotifications(emitter: JavaValue, type: number, payload: JavaValue): void {
+    const watched = this.getResource(emitter);
+    if (!watched) return;
+    for (const [key, subscriptions] of this.notifications) {
+      for (const subscription of [...subscriptions]) {
+        if (subscription.watched !== watched || !(subscription.type & type)) continue;
+        const forwarded = (subscription.alias & 0x0fffffff) || type;
+        const customMessage = (subscription.alias & 0x10000000) !== 0;
+        const value = customMessage ? subscription.message : payload;
+        const handler = this.get(subscription.handler);
+        if (!handler) continue;
+        handler.queueEvent({ sourceId: watched.id, type: forwarded,
+          payload: value.value == null ? null : typeof value.value === 'number' ? value.value : String(value.value) });
+        this.pendingEvents.push({ receiver: subscription.handler, type: forwarded,
+          arguments: [this.handle(watched), jv('int', forwarded), value], method: subscription.method });
+        if (subscription.type & 0x80000000) {
+          const index = subscriptions.indexOf(subscription);
+          if (index >= 0) subscriptions.splice(index, 1);
+        }
+      }
+      if (!subscriptions.length) this.notifications.delete(key);
+    }
   }
 
   /** Dispatches subscribed events in FIFO order; handlers may enqueue more work. */
@@ -396,7 +472,7 @@ export class GameTypeNative {
         const event = this.pendingEvents.shift()!;
         const node = this.get(event.receiver);
         if (!node?.acceptsEvent(event.type)) continue;
-        this.jvm.invoke(event.receiver, 'handleEvent', event.arguments);
+        this.jvm.invoke(event.receiver, event.method ?? 'handleEvent', event.arguments);
         count++;
       }
       return count;
@@ -414,7 +490,7 @@ export class GameTypeNative {
         const event = this.pendingEvents.shift()!;
         const node = this.get(event.receiver);
         if (!node?.acceptsEvent(event.type)) continue;
-        void this.jvm.invokeAsync(event.receiver, 'handleEvent', event.arguments).catch(error => {
+        void this.jvm.invokeAsync(event.receiver, event.method ?? 'handleEvent', event.arguments).catch(error => {
           this.report({ level: 'error', message: `Java input: ${error instanceof Error ? error.message : String(error)}` });
         });
         count++;
@@ -426,6 +502,7 @@ export class GameTypeNative {
   dispose(): void {
     for (const object of this.timers.keys()) this.cancelTimers(object);
     this.pendingEvents.length = 0;
+    this.notifications.clear();
   }
 
   private cancelTimers(object: JavaObject): void {
