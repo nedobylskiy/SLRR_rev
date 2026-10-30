@@ -163,6 +163,14 @@ export class Viewer {
     group.rotation.set(node.orientation.p, node.orientation.y, node.orientation.r, 'YXZ');
     const modelGroup = this.javaRenderModels.get(node.id)!;
     modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
+    // Navigator tiles and car markers belong to the OSD map, not the 3D world.
+    const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
+    if (isNavigatorOverlay) {
+      group.visible = false;
+      modelGroup.clear();
+      return;
+    }
+    group.visible = true;
     // Scene.java names map sky shells "egbolt-*". The original renderer keeps these
     // shells around the camera; leaving one at map origin makes it look like a hill.
     const isSkyDome = /^egbolt[-_]/i.test(node.alias);

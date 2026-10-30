@@ -426,7 +426,9 @@ export class GameTypeNative {
     return node instanceof RenderObject ? node : undefined;
   }
   resolveRenderResource(type: ResourceObject, preferSourceResource = false): { pack: string; id: number } | null {
-    const sourceId = preferSourceResource ? (type.copiedFromResourceId ?? type.resourceId) : type.resourceId;
+    // RenderRef duplicates keep the source type in typeId. The internal
+    // resourceId is an engine handle and can numerically look like a real RPK ID.
+    const sourceId = preferSourceResource ? type.typeId : type.resourceId;
     return this.resolvePackedResource?.(sourceId)
       ?? (type.resourcePack ? { pack: type.resourcePack, id: sourceId & 0xffff } : null);
   }
