@@ -182,7 +182,9 @@ export class Viewer {
 
     // A render instance is just a transform until its RPK resource is resolved and its SCX is loaded.
     const identity = node.renderResource;
-    const overrides = node.renderType;
+    // Navigator tiles are per-instance clones whose textures are replaced by the Java script.
+    // Keep this interpretation scoped to those aliases; other RenderRefs retain existing semantics.
+    const overrides = node.alias === 'navigator_segment' ? node.renderType : null;
     const overrideKey = overrides ? [...overrides.resourceReplacements]
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';

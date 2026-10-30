@@ -92,8 +92,8 @@ export class Assets {
     if (!overrides) return undefined;
     const normalizedPack = normalizeResourcePackPath(packPath);
     for (const [sourceId, targetId] of overrides.replacements) {
-      const sourcePack = overrides.sourcePacks.get(sourceId);
-      if (!sourcePack || normalizeResourcePackPath(sourcePack) !== normalizedPack || (sourceId & 0xffff) !== localId) continue;
+      const sourcePack = overrides.sourcePacks.get(sourceId) ?? normalizedPack;
+      if (normalizeResourcePackPath(sourcePack) !== normalizedPack || (sourceId & 0xffff) !== localId) continue;
       const targetPack = overrides.replacementPacks.get(sourceId) ?? sourcePack;
       return { pack: targetPack, id: targetId & 0xffff };
     }

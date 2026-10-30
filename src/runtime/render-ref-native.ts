@@ -44,7 +44,7 @@ export class RenderRefNative {
       const type = args[0].value == null ? null : this.resources.getResource(args[0]);
       render.renderType = type ?? null;
       render.typeId = type?.resourceId ?? 0;
-      render.renderResource = type ? this.resources.resolveRenderResource(type) : null;
+      render.renderResource = type ? this.resources.resolveRenderResource(type, render.alias === 'navigator_segment') : null;
       this.resources.notifyRenderChanged(render);
       return voidValue();
     });

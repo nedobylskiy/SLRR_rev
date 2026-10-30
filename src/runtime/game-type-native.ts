@@ -149,7 +149,7 @@ export class GameTypeNative {
       const cloned = [5, 7, 13, 14].includes(source.resourceType)
         || source.resourceType === 0;
       target.resourceId = cloned ? this.nextClonedResourceId++ : source.resourceId;
-      target.copiedFromResourceId = cloned ? (source.copiedFromResourceId ?? source.resourceId) : null;
+      target.copiedFromResourceId = cloned ? source.resourceId : null;
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'scaleMesh', ['float', 'float', 'float'], ({ receiver, args }) => {
@@ -162,15 +162,9 @@ export class GameTypeNative {
     jvm.natives.register('java.util.resource.RenderRef', 'changeResource', ['ResourceRef', 'ResourceRef'],
       ({ receiver, args }) => {
         const node = this.requireResource(receiver);
-        const source = this.getResource(args[0]);
-        const target = this.getResource(args[1]);
-        const before = source?.copiedFromResourceId ?? this.resourceId(args[0]);
-        const after = target?.copiedFromResourceId ?? this.resourceId(args[1]);
-        node.resourceReplacements.set(before, after);
-        const sourcePack = source?.resourcePack;
-        if (sourcePack) node.resourceReplacementSourcePacks.set(before, sourcePack);
-        else node.resourceReplacementSourcePacks.delete(before);
-        const pack = target?.resourcePack;
+        const before = this.resourceId(args[0]);
+        node.resourceReplacements.set(before, this.resourceId(args[1]));
+        const pack = this.getResource(args[1])?.resourcePack;
         if (pack) node.resourceReplacementPacks.set(before, pack);
         else node.resourceReplacementPacks.delete(before);
         return voidValue();
@@ -431,8 +425,8 @@ export class GameTypeNative {
     const node = this.getResource(receiver);
     return node instanceof RenderObject ? node : undefined;
   }
-  resolveRenderResource(type: ResourceObject): { pack: string; id: number } | null {
-    const sourceId = type.copiedFromResourceId ?? type.resourceId;
+  resolveRenderResource(type: ResourceObject, preferSourceResource = false): { pack: string; id: number } | null {
+    const sourceId = preferSourceResource ? (type.copiedFromResourceId ?? type.resourceId) : type.resourceId;
     return this.resolvePackedResource?.(sourceId)
       ?? (type.resourcePack ? { pack: type.resourcePack, id: sourceId & 0xffff } : null);
   }
@@ -447,7 +441,7 @@ export class GameTypeNative {
     const typeNode = type?.value == null ? null : this.requireResource(type);
     const node = new RenderObject(resource.id, object.className, typeNode,
       alias || '_renderinst');
-    node.renderResource = typeNode ? this.resolveRenderResource(typeNode) : null;
+    node.renderResource = typeNode ? this.resolveRenderResource(typeNode, alias === 'navigator_segment') : null;
     resource.setParent(null);
     node.setParent(parentNode);
     for (const child of [...resource.children]) child.setParent(node);
