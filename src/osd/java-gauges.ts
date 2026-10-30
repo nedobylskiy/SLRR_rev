@@ -11,11 +11,14 @@ export class JavaGauges {
   private readonly speedText = document.createElement('span');
   private readonly gearText = document.createElement('span');
   private readonly mileageText = document.createElement('span');
+  private readonly damageIcon = document.createElement('canvas');
   private readonly pinSpeed: string[];
   private readonly pinRpm: string[];
   private disposed = false;
   private travelledKm = 0;
   private lastUpdate = 0;
+  private damageCondition = 1;
+  private damageMask?: ImageData;
 
   constructor(osd: OsdLayer, pack: string, config: PartConfig) {
     const directives = new Map<string, GaugeDirective>();
@@ -45,6 +48,13 @@ export class JavaGauges {
     this.placeReadout(this.speedText, 'speed', 572, 558);
     this.placeReadout(this.gearText, 'gear', 204, 792);
     this.placeReadout(this.mileageText, 'mileage', 572, 686);
+    const damage = directives.get('osd_damage');
+    if (damage) {
+      this.damageIcon.className = 'java-gauge-damage';
+      this.damageIcon.width = 78; this.damageIcon.height = 192;
+      osd.createNativeElement(this.damageIcon, Number(damage.args[1]) || 0.926,
+        Number(damage.args[2]) || 0.855, 0.028, 0.13, 22);
+    }
     void this.load(osd, directives, atlas);
     this.update(0, 0, 0);
   }
@@ -72,12 +82,28 @@ export class JavaGauges {
     };
     try {
       await Promise.all([load('osd_gauge', atlas), load('osd_spdpin', this.speedPin), load('osd_rpmpin', this.rpmPin)]);
+      const damage = directives.get('osd_damage');
+      if (damage && !this.disposed) {
+        const url = await osd.imageUrl(damage.resource);
+        const source = new Image();
+        source.onload = () => {
+          if (this.disposed) return;
+          const context = this.damageIcon.getContext('2d', { willReadFrequently: true });
+          if (!context) return;
+          context.clearRect(0, 0, this.damageIcon.width, this.damageIcon.height);
+          // The stock LongOSDGauge atlas stores the top-down condition silhouette in its upper-left tile.
+          context.drawImage(source, 0, 0, 78, 192, 0, 0, this.damageIcon.width, this.damageIcon.height);
+          this.damageMask = context.getImageData(0, 0, this.damageIcon.width, this.damageIcon.height);
+          this.paintDamageIcon();
+        };
+        source.src = url;
+      }
     } catch (error) {
       this.root.dataset.gaugeError = error instanceof Error ? error.message : String(error);
     }
   }
 
-  update(speedKmh: number, rpm: number, gear: number) {
+  update(speedKmh: number, rpm: number, gear: number, damageCondition = 1) {
     const now = performance.now();
     if (this.lastUpdate) this.travelledKm += Math.max(0, speedKmh) * Math.min(100, now - this.lastUpdate) / 3_600_000;
     this.lastUpdate = now;
@@ -90,7 +116,26 @@ export class JavaGauges {
     this.speedText.textContent = String(Math.max(0, Math.round(speedKmh))).padStart(3, '0');
     this.gearText.textContent = gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear);
     this.mileageText.textContent = String(Math.floor(this.travelledKm)).padStart(7, '0');
+    const nextCondition = Math.max(0, Math.min(1, damageCondition));
+    if (Math.abs(nextCondition - this.damageCondition) > 0.015) {
+      this.damageCondition = nextCondition;
+      this.paintDamageIcon();
+    }
     this.root.setAttribute('aria-label', `${Math.round(speedKmh)} km/h, ${Math.round(rpm)} rpm, gear ${this.gearText.textContent}`);
+  }
+
+  private paintDamageIcon() {
+    if (!this.damageMask) return;
+    const context = this.damageIcon.getContext('2d');
+    if (!context) return;
+    const color = this.damageCondition > 0.72 ? [48, 255, 72]
+      : this.damageCondition > 0.38 ? [255, 190, 24] : [255, 48, 36];
+    const image = new ImageData(this.damageMask.width, this.damageMask.height);
+    for (let i = 0; i < image.data.length; i += 4) {
+      image.data[i] = color[0]; image.data[i + 1] = color[1]; image.data[i + 2] = color[2];
+      image.data[i + 3] = this.damageMask.data[i + 3];
+    }
+    context.putImageData(image, 0, 0);
   }
 
   dispose() { this.disposed = true; this.root.remove(); }

@@ -385,7 +385,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -561,7 +561,8 @@ export class Viewer {
       vehicleAudio?.update(this.camera, input.throttle, paused);
       if (java) java.instruments?.(Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6),
         crash instanceof Vehicle3D ? crash.suspension.mechanics?.rpm ?? 0 : 0,
-        crash instanceof Vehicle3D ? crash.suspension.mechanics?.gear ?? 0 : 0);
+        crash instanceof Vehicle3D ? crash.suspension.mechanics?.gear ?? 0 : 0,
+        crash instanceof Vehicle3D ? crash.osdDamageCondition : 1);
       if (now - lastHud > 100) {
         const intact = crash?.panel.mounts.filter(m => !m.broken).length;
         const up = crash instanceof Vehicle3D ? new THREE.Vector3(0, 1, 0).applyQuaternion(crash.body.orientation).y : 1;

@@ -260,6 +260,7 @@ nav button.active{
 .java-gauge-speed{font-size:clamp(11px,1.8vw,32px)}
 .java-gauge-gear{font-size:clamp(10px,1.4vw,25px)}
 .java-gauge-mileage{font-size:clamp(9px,1.2vw,21px)}
+.java-gauge-damage{display:block;object-fit:contain;image-rendering:auto}
 .viewport-expand-button,.viewport-window-button{
   position:absolute;
   top:12px;

@@ -105,6 +105,11 @@ export class DeformablePanel {
     }
   }
   get plasticBeams() { return this.beams.filter(b => Math.abs(b.rest - b.initial) > b.initial * 0.001).length; }
+  /** Permanent beam-length change, normalized to the solver's maximum plastic range. */
+  get permanentDamage() {
+    if (!this.beams.length) return 0;
+    return this.beams.reduce((sum, beam) => sum + Math.min(1, Math.abs(beam.rest - beam.initial) / (beam.initial * 0.5)), 0) / this.beams.length;
+  }
   reset() {
     this.resetVersion++;
     this.shapeVersion++;

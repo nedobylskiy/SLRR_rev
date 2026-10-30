@@ -148,7 +148,7 @@ async function runGameBoot() {
             const javaVehicle = result.gameTypes.get(car);
             const session = viewer.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, instruments: (speed, rpm, gear) => gauges?.update(speed, rpm, gear),
+              { ...javaControls, instruments: (speed, rpm, gear, damage) => gauges?.update(speed, rpm, gear, damage),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
