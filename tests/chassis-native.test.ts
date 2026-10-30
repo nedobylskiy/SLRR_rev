@@ -3,8 +3,32 @@ import { test } from 'node:test';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { ChassisNative } from '../src/runtime/chassis-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
+import { PartNative } from '../src/runtime/part-native';
 import { parsePartConfig } from '../src/formats/cfg';
 import { ackermannSteerAngle } from '../src/engine/suspension-3d';
+
+test('GII_RENDER reports the installed chassis camera count from its CFG', () => {
+  const cfg = parsePartConfig(`camera -0.390 0.251 0.132 0 0 0
+camera 0.010 0.196 -0.928 0 0 0 120
+camera 0.010 -0.266 -2.011 0 0 0`);
+  assert.equal(cfg.cameras.length, 3);
+  assert.equal(cfg.cameras[1]!.fov, 120);
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  const parts = new PartNative(jvm, gameTypes);
+  gameTypes.setRenderCountReader(receiver => parts.cameraCount(receiver));
+  const chassis = jv('Chassis', { className: 'java.game.parts.bodypart.Chassis', fields: new Map() });
+  const vehicle = jv('Vehicle', { className: 'java.game.Vehicle', fields: new Map([['chassis', chassis]]) });
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', vehicle, []);
+  parts.configure(chassis, cfg);
+  const count = () => jvm.natives.invoke('java.util.resource.GameRef', 'getInfo', vehicle,
+    [jv('int', 48), jv('int', 0)])!.value;
+  assert.equal(count(), 3);
+  parts.configure(chassis, parsePartConfig('camera 0 0 0 0 0 0'));
+  assert.equal(count(), 1);
+  parts.configure(chassis, parsePartConfig(''));
+  assert.equal(count(), 0);
+});
 
 test('Chassis reads the CFG steering limit during its Java constructor and retains later tuning', async () => {
   const sources = new Map([

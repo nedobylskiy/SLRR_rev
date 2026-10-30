@@ -47,6 +47,7 @@ export class GameTypeNative {
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void | Promise<void>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
+  private renderCountReader?: (receiver: JavaValue) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
@@ -353,6 +354,7 @@ export class GameTypeNative {
         case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
         case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
         case 25: return jv('int', Math.round(this.axisReader?.(receiver, index) ?? 0)); // GII_AXIS
+        case 48: return jv('int', this.renderCountReader?.(receiver) ?? 0); // GII_RENDER: CFG camera count.
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
     };
@@ -449,6 +451,7 @@ export class GameTypeNative {
     this.commandHandler = handler;
   }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
+  setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {
     return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
   }

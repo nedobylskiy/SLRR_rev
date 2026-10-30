@@ -87,6 +87,18 @@ if (process.argv.includes('--diagnose')) {
     const chassis = car?.value == null ? null : result.jvm.get(car, 'chassis');
     const chassisNode = chassis?.value == null ? null : result.gameTypes.getResource(chassis);
     process.stdout.write(`scene car: ${car?.type ?? '-'} chassis=${chassisNode?.resourcePack ?? '-'}:${chassisNode?.typeId ?? '-'}\n`);
+    if (process.argv.includes('--camera-check') && car?.value != null) {
+      const cameras = Number(result.jvm.invoke(car, 'getInfo', [jv('int', 48)]).value);
+      process.stdout.write(`scene car cameras: ${cameras}\n`);
+      if (cameras <= 0) throw new Error('Java vehicle lost its CFG internal cameras');
+      const active = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+      if (active.value != null) {
+        await result.jvm.invokeAsync(active, 'changeCamInternal');
+        const mode = Number(result.jvm.get(active, 'cameraMode').value);
+        process.stdout.write(`scene camera mode after Java switch: ${mode}\n`);
+        if (mode !== 5) throw new Error('Java did not switch to the internal camera');
+      }
+    }
     if (chassisNode) process.stdout.write(`scene car owner: ${chassisNode.parent?.className ?? '-'} id=${chassisNode.parent?.resourceId ?? '-'} live=${result.gameTypes.getById(chassisNode.parent?.resourceId ?? 0)?.className ?? '-'}\n`);
     const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
     const start = state.value == null ? null : result.jvm.get(state, 'posStart');

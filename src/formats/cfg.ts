@@ -3,16 +3,17 @@ export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
 export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
+export interface CfgCamera extends CfgPose { fov?: number }
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number] }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
 /** Ordered CFG subset. Unknown commands remain visible; attach is compatibility, not an instance. */
 export function parsePartConfig(source: string): PartConfig {
-  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], renders: [], links: [], unknown: [] };
+  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], cameras: [], renders: [], links: [], unknown: [] };
   let slot: CfgSlot | undefined, deformable: number | undefined, render: number | undefined;
   let renderPose: CfgPose | undefined, deformablePose: CfgPose | undefined, radius: number | undefined;
   let spring: Triple | undefined;
@@ -70,6 +71,7 @@ export function parsePartConfig(source: string): PartConfig {
         result.unknown.push({ line, command, args }); break;
       case 'spring': spring = [number(0), number(1), number(2)]; if (spring.some(v => v <= 0)) throw fail(); break;
       case 'wheel': result.wheels.push({ ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }); break;
+      case 'camera': result.cameras.push({ ...pose(), fov: args[6] === undefined ? undefined : number(6) }); break;
       case 'steering': result.steering = pose(); break;
       case 'maxsteer':
         result.maxSteer = number(0);

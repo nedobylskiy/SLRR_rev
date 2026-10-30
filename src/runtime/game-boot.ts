@@ -288,6 +288,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const parentKey = key(parent), childKey = key(child);
     return !!parentKey && !!childKey && await partFactory.compatibleSlots(parentKey, parentSlot, childKey, childSlot);
   });
+  gameTypes.setRenderCountReader(receiver => partNative.cameraCount(receiver));
   const dyno = new DynoNative(jvm);
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');

@@ -140,6 +140,29 @@ export class PartNative {
     if (state) state.slots = cfg?.slots ?? [];
   }
 
+  cameraCount(receiver: JavaValue): number {
+    const object = receiver.value as JavaObject | null;
+    if (!object) return 0;
+    const chassis = object.fields.get('chassis')?.value as JavaObject | null | undefined;
+    if (chassis) {
+      const count = this.configs.get(chassis)?.cameras.length;
+      if (count !== undefined) return count;
+    }
+    const root = this.gameTypes.getResource(receiver);
+    if (!root) return 0;
+    const visit = (node: ResourceObject): number => {
+      const handle = this.gameTypes.reference(node);
+      const count = handle.value == null ? 0 : this.configs.get(handle.value as JavaObject)?.cameras.length ?? 0;
+      if (count) return count;
+      for (const child of node.children) {
+        const nested = visit(child);
+        if (nested) return nested;
+      }
+      return 0;
+    };
+    return visit(root);
+  }
+
   slotOverrides(receiver: JavaValue): ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }> {
     return this.partSlots(receiver).positions;
   }
