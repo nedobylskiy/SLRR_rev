@@ -103,50 +103,49 @@ async function runGameBoot() {
     el('format').textContent = 'JAVA / ERROR';
     el('details').textContent = result.error.message;
   } else if (viewer) {
-    const selected = activeJavaTrack(result);
-    if (selected && source.byPath.has(selected.mapPack)) {
-      const javaControls = javaDrivingControls(result);
-      let animating = false, animateFailed = false;
-      const animationTimer = window.setInterval(() => {
-        if (animating || animateFailed) return;
-        const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
-        if (state.value == null || !result.gameTypes.hasCallback(state, 28)) return;
-        animating = true;
-        void result.jvm.invokeAsync(state, 'animate').catch(reason => {
-          animateFailed = true;
-          appendJavaEvent({ level: 'error', message: `Java animate: ${reason instanceof Error ? reason.message : String(reason)}` });
-        }).finally(() => { animating = false; });
-      }, 50);
-      const unlockMusic = () => { if (music?.snapshot().blocked) void music.resume(); };
-      window.addEventListener('pointerdown', unlockMusic);
-      window.addEventListener('keydown', unlockMusic);
-      const stopAnimation = () => {
-        window.clearInterval(animationTimer);
-        window.removeEventListener('pointerdown', unlockMusic);
-        window.removeEventListener('keydown', unlockMusic);
-      };
-      disposeJavaScene = stopAnimation;
+    const javaControls = javaDrivingControls(result);
+    let animating = false, animateFailed = false, loadingTrack = false;
+    let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
+    const animationTimer = window.setInterval(() => {
+      if (animating || animateFailed) return;
+      const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+      if (state.value == null || !result.gameTypes.hasCallback(state, 28)) return;
+      animating = true;
+      void result.jvm.invokeAsync(state, 'animate').catch(reason => {
+        animateFailed = true;
+        appendJavaEvent({ level: 'error', message: `Java animate: ${reason instanceof Error ? reason.message : String(reason)}` });
+      }).finally(() => { animating = false; });
+    }, 50);
+    const unlockMusic = () => { if (music?.snapshot().blocked) void music.resume(); };
+    window.addEventListener('pointerdown', unlockMusic);
+    window.addEventListener('keydown', unlockMusic);
+
+    const loadSelectedTrack = async (selected: NonNullable<ReturnType<typeof activeJavaTrack>>) => {
+      const stopPrevious = activeTrackCleanup;
+      activeTrackCleanup = undefined;
+      stopPrevious?.();
       let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
+      let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
       try {
         status('Loading Java track…');
         if (selected.chassis && source.byPath.has(selected.chassis.pack)) {
           try {
             const selection = await javaStockSelection(result, source, selected.chassis.pack);
             built = await new PartFactory(source).stock(selected.chassis, { mechanical: true, javaSelection: selection });
-            if (source !== assets || run !== sequence) { stopAnimation(); built.world.dispose(); return; }
-            await viewer.showWorld(built.world, source, true);
+            if (source !== assets || run !== sequence) { built.world.dispose(); return; }
+            await viewer!.showWorld(built.world, source, true);
           } catch (reason) {
             built?.world.dispose(); built = undefined;
             appendJavaEvent({ level: 'error', message: `Java car rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
           }
         }
-        const map = await viewer.showMap(selected.mapPack, source, (done, total) => {
+        const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
         }, true);
-        if (source !== assets || run !== sequence) { stopAnimation(); built?.world.dispose(); return; }
+        if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         if (built) {
-          const gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
+          gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
           const point = selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);
@@ -167,7 +166,7 @@ async function runGameBoot() {
             const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
             const car = result.jvm.get(player, 'car');
             const javaVehicle = result.gameTypes.get(car);
-            const session = viewer.drive(built.root, () => {}, true,
+            session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
               { ...javaControls, instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
@@ -178,26 +177,47 @@ async function runGameBoot() {
                 } });
             showMapDebugControls(map);
             showVehicleDebug(built.root, session);
-            disposeJavaScene = () => { clearVehicleDebug(); stopAnimation(); session(); gauges?.dispose(); built?.world.dispose(); };
             driveHud.hidden = true;
             el('scene-help').textContent = 'Controls follow the game ControlSet · Right drag: rotate camera';
           } catch (reason) {
-            gauges?.dispose();
+            gauges?.dispose(); gauges = null;
             appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
-            disposeJavaScene = () => { stopAnimation(); built?.world.dispose(); };
           }
-        } else disposeJavaScene = () => { stopAnimation(); built?.world.dispose(); };
+        }
+        activeTrackCleanup = () => { clearVehicleDebug(); session?.(); gauges?.dispose(); built?.world.dispose(); };
         el('filename').textContent = selected.mapPack;
         el('format').textContent = 'JAVA / TRACK';
         el('details').textContent = `${map.loaded} map models · ${map.objects} placed objects · Java selected ${selected.chassis?.pack ?? 'no car'}`;
         status('Java track loaded');
       } catch (reason) {
-        stopAnimation();
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
         status('Java scene unavailable', true);
       }
-    }
+    };
+
+    const checkActiveTrack = () => {
+      const selected = activeJavaTrack(result);
+      if (!selected || !source.byPath.has(selected.mapPack)) {
+        loadedTrackKey = '';
+        return;
+      }
+      const key = `${selected.mapPack}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}`;
+      if (key === loadedTrackKey || loadingTrack) return;
+      loadingTrack = true;
+      loadedTrackKey = key;
+      void loadSelectedTrack(selected).finally(() => { loadingTrack = false; });
+    };
+    const trackPoll = window.setInterval(checkActiveTrack, 150);
+    disposeJavaScene = () => {
+      window.clearInterval(animationTimer);
+      window.clearInterval(trackPoll);
+      window.removeEventListener('pointerdown', unlockMusic);
+      window.removeEventListener('keydown', unlockMusic);
+      activeTrackCleanup?.();
+      activeTrackCleanup = undefined;
+    };
+    checkActiveTrack();
   }
 }
 const menuButton = textElement('button', 'Main menu');
