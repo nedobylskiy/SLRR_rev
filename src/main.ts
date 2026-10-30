@@ -147,7 +147,19 @@ async function runGameBoot() {
           const point = selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);
-          const start = new Vector3(point.x, Number.isFinite(ground) ? Math.max(point.y, ground + 0.15) : point.y, point.z);
+          const wheelSlots = built.root.definition.config.slots.filter(slot => slot.type !== undefined && slot.type >= 101 && slot.type <= 104);
+          const lowestTireBottom = Math.min(...wheelSlots.map(slot => {
+            const index = slot.type! - 101, wheel = built!.root.definition.config.wheels[index], tyre = built!.world.wheelRefs[index];
+            const radius = (wheel?.radius ?? 0) * (tyre ? tyre.radius / 0.32865 : 1);
+            return new Vector3().setFromMatrixPosition(built!.root.slotFrame(slot)).y - radius;
+          }));
+          // Track start Y is the chassis origin, not the tire contact plane. Place
+          // each car from its own CFG wheel slots/radii so the tires start at the
+          // road instead of burying a low chassis origin and letting collision
+          // correction launch the suspension into its upper travel.
+          const tireClearance = wheelSlots.length === 4 && Number.isFinite(ground) && Number.isFinite(lowestTireBottom)
+            ? ground - lowestTireBottom + 0.02 : point.y;
+          const start = new Vector3(point.x, Number.isFinite(ground) ? Math.max(point.y, tireClearance) : point.y, point.z);
           try {
             const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
             const car = result.jvm.get(player, 'car');
