@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
 import { Assets } from '../src/assets';
-import { parsePartConfig } from '../src/formats/cfg';
+import { parsePartConfig, secondaryRenders } from '../src/formats/cfg';
 import { EngineWorld, PartFactory, poseMatrix, type PartDefinition } from '../src/engine/world';
 import type { RpkPack } from '../src/formats/rpk';
 import { modelMatrix } from '../src/engine/model-transform';
@@ -33,6 +33,9 @@ test('CFG preserves ordered stock, repeated attachments, physical data and unkno
     { resource: 1, pose: undefined },
     { resource: 2, pose: { position: [0, 1, 0], rotation: [0, 0, 0] } },
   ]);
+  const mixed = parsePartConfig('render 0x280 0 0 0 0 0 -3.142\nlod 2 2\nrender 0x4d0\nlod 1 1\nrender 0x460\nlod 0 0\nrender 0x500 0 1 0\nflags 4');
+  assert.deepEqual(mixed.renders.slice(0, 3).map(render => render.lod), [[2, 2], [1, 1], [0, 0]]);
+  assert.deepEqual(secondaryRenders(mixed).map(render => render.resource), [0x500]);
   for (const source of ['attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
 });
 test('CFG retains reused slot IDs and installs on the attach-capable mount', () => {

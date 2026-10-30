@@ -1,7 +1,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Assets, normalizePath } from '../assets';
 import { entryProperties } from '../formats/rpk';
-import { parsePartConfig, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
+import { parsePartConfig, secondaryRenders, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { parseScx } from '../formats/scx';
 import { slotMatrix } from './slot-frames';
@@ -110,7 +110,7 @@ export class PartFactory {
         catch (error) { throw new Error(`${cfgPath}: ${String(error)}`); }
         const renderId = config.render ?? config.mesh;
         const model = renderId === undefined ? undefined : await this.assets.modelForResource(canonical.pack, renderId);
-        const extraRenders = config.render === config.renders[0]?.resource ? config.renders.slice(1) : [];
+        const extraRenders = secondaryRenders(config);
         const additionalModels = (await Promise.all(extraRenders.map(async render => {
           try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose }; }
           catch (error) {

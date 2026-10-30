@@ -6,7 +6,7 @@ export interface CfgWheel extends CfgPose { radius?: number; parameters: number[
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -50,6 +50,10 @@ export function parsePartConfig(source: string): PartConfig {
         if (render === undefined) { render = resource; renderPose = poseValue; }
         break;
       }
+      case 'lod':
+        if (result.renders.length) result.renders.at(-1)!.lod = [integer(0), integer(1)];
+        else result.unknown.push({ line, command, args });
+        break;
       case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;
       case 'mesh': result.mesh = rid(); break;
       case 'texture': result.texture = rid(); break;
@@ -82,4 +86,10 @@ export function parsePartConfig(source: string): PartConfig {
   result.render = deformable ?? render;
   result.renderPose = deformable === undefined ? renderPose : deformablePose;
   return result;
+}
+
+/** Only ungrouped render entries are simultaneous models; LOD entries replace one another. */
+export function secondaryRenders(config: PartConfig) {
+  return config.render === config.renders[0]?.resource
+    ? config.renders.slice(1).filter(render => render.lod === undefined) : [];
 }
