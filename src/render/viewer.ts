@@ -182,7 +182,11 @@ export class Viewer {
 
     // A render instance is just a transform until its RPK resource is resolved and its SCX is loaded.
     const identity = node.renderResource;
-    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}` : '';
+    const overrides = node.renderType;
+    const overrideKey = overrides ? [...overrides.resourceReplacements]
+      .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
+      .sort().join(',') : '';
+    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}` : '';
     if (this.javaRenderTypes.get(node.id) === key) return;
     this.javaRenderTypes.set(node.id, key);
     modelGroup.clear();
@@ -194,7 +198,11 @@ export class Viewer {
     let templatePromise = this.javaRenderTemplates.get(templateKey);
     if (!templatePromise) {
       templatePromise = (async () => {
-        const model = await assets.modelForResource(identity.pack, identity.id);
+        const model = await assets.modelForResource(identity.pack, identity.id, new Set(), overrides ? {
+          replacements: overrides.resourceReplacements,
+          replacementPacks: overrides.resourceReplacementPacks,
+          sourcePacks: overrides.resourceReplacementSourcePacks,
+        } : undefined);
         const parsed = parseScx(await assets.read(model.path));
         const template = new THREE.Group();
         const warnings = await this.append(parsed, assets, model.textures, template, generation);

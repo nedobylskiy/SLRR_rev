@@ -13,6 +13,7 @@ export class ResourceObject {
   copiedFromResourceId: number | null = null;
   readonly resourceReplacements = new Map<number, number>();
   readonly resourceReplacementPacks = new Map<number, string>();
+  readonly resourceReplacementSourcePacks = new Map<number, string>();
   meshScale = { x: 1, y: 1, z: 1 };
 
   constructor(readonly id: number, readonly className: string, public typeId = 0,

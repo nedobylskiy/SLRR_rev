@@ -1,6 +1,11 @@
 import { parseRpk, entryProperties, type RpkEntry, type RpkPack } from './formats/rpk';
 
 export interface Asset { path: string; size: number }
+export interface ResourceOverrides {
+  replacements: ReadonlyMap<number, number>;
+  replacementPacks: ReadonlyMap<number, string>;
+  sourcePacks: ReadonlyMap<number, string>;
+}
 export function isSavedVehiclePath(path: string) {
   const p = path.replaceAll('\\', '/').toLowerCase();
   return !/\.[^/]+$/.test(p) && (p.startsWith('save/cars/') || /^save\/career\/[^/]+\/playercar[^/]*$/.test(p));
@@ -54,7 +59,7 @@ export class Assets {
     return { packPath, entry };
   }
   /** Follow resource → render → mesh → sourcefile. Textures are collected in RSD order. */
-  async modelForResource(packPath: string, id: number, visited = new Set<string>()): Promise<{ path: string; textures: string[] }> {
+  async modelForResource(packPath: string, id: number, visited = new Set<string>(), overrides?: ResourceOverrides): Promise<{ path: string; textures: string[] }> {
     const resolved = await this.resource(packPath, id);
     const key = `${normalizePath(resolved.packPath)}:${resolved.entry.typeId}`;
     if (visited.has(key)) throw new Error(`Resource cycle: ${key}`);
@@ -64,7 +69,9 @@ export class Assets {
     const textures: string[] = [];
     for (const prop of props.filter(p => p.key === 'texture')) {
       try {
-        const texture = await this.resource(resolved.packPath, parseRid(prop.value));
+        const sourceId = parseRid(prop.value);
+        const replacement = this.resourceOverride(resolved.packPath, sourceId, overrides);
+        const texture = await this.resource(replacement?.pack ?? resolved.packPath, replacement?.id ?? sourceId);
         const file = entryProperties(texture.entry).find(p => p.key === 'sourcefile')?.value;
         if (file) textures.push(file);
       } catch { textures.push(''); } // Preserve material indices when one texture is missing.
@@ -75,8 +82,22 @@ export class Assets {
     }
     const next = props.find(p => p.key === 'mesh') ?? props.find(p => p.key === 'render');
     if (!next) throw new Error(`Resource ${key} has no external SCX/render/mesh; embedded map chunks need a separate decoder`);
-    const model = await this.modelForResource(resolved.packPath, parseRid(next.value), visited);
+    const sourceId = parseRid(next.value);
+    const replacement = this.resourceOverride(resolved.packPath, sourceId, overrides);
+    const model = await this.modelForResource(replacement?.pack ?? resolved.packPath, replacement?.id ?? sourceId, visited);
     return { path: model.path, textures: textures.length ? textures : model.textures };
+  }
+
+  private resourceOverride(packPath: string, localId: number, overrides?: ResourceOverrides) {
+    if (!overrides) return undefined;
+    const normalizedPack = normalizeResourcePackPath(packPath);
+    for (const [sourceId, targetId] of overrides.replacements) {
+      const sourcePack = overrides.sourcePacks.get(sourceId);
+      if (!sourcePack || normalizeResourcePackPath(sourcePack) !== normalizedPack || (sourceId & 0xffff) !== localId) continue;
+      const targetPack = overrides.replacementPacks.get(sourceId) ?? sourcePack;
+      return { pack: targetPack, id: targetId & 0xffff };
+    }
+    return undefined;
   }
 }
 
