@@ -349,6 +349,9 @@ export class GameTypeNative {
       const node = this.require(receiver);
       switch (query) {
         case 0: return jv('int', 0); // GII_NULL
+        // MOCK: The host has no separate animated bone node yet. Use the live
+        // object's ID so Java camera commands can target its root transform.
+        case 1: return jv('int', node.resourceId); // GII_BONE
         case 5: return jv('int', node.resourceId); // GII_ID
         case 6: return jv('int', node.typeId); // GII_TYPE
         case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
