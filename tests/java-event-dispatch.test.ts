@@ -140,6 +140,66 @@ test('native event queue invokes the original Java hotkey handler after an input
   assert.equal(jvm.get(handler, 'state').value, 0, 'release event reaches Java');
 });
 
+test('free number keys invoke Java camera hotkeys while occupied slots keep their original action', async () => {
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'demo.java', source } : null });
+  const gameTypes = new GameTypeNative(jvm, () => {});
+  let input!: InputNative;
+  const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
+  input = new InputNative(jvm, controllers, gameTypes);
+  await jvm.loadClass('demo.Handler');
+  const handler = jvm.construct('demo.Handler', []);
+  const controller = jv('Controller', { className: 'java.io.Controller', fields: new Map() });
+  const focus = jv('Osd', handler.value);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', handler, []);
+  jvm.natives.invoke('java.lang.GameType', 'setEventMask', handler, [jv('int', EVENT_HOTKEY)]);
+  const addHotkey = (axis: number, command: number) => {
+    const hotkey = jvm.construct('demo.Hotkey', [jv('int', command)]);
+    jvm.natives.invoke('java.io.Input', 'createHotkey', jv('class', 'java.io.Input'),
+      [jv('int', axis), jv('int', 2), hotkey, jv('GameRef', handler.value), focus, jv('int', 1)]);
+  };
+  addHotkey(59, 7); // Track.java: F1, internal camera.
+  addHotkey(60, 0); // Track.java: F2, TV camera.
+  addHotkey(61, 8); // Track.java: F3, external camera.
+  addHotkey(62, 31); // Track.java: F4, rear view.
+  input.checkHotkeys(controller, focus);
+  input.setKeyboardCode('Digit1', true);
+  input.checkHotkeys(controller, focus);
+  assert.equal(jvm.get(handler, 'last').value, 7);
+  assert.equal(input.physicalAxis(0, 59), 1);
+  input.setKeyboardCode('Digit1', false);
+  input.checkHotkeys(controller, focus);
+  assert.equal(input.physicalAxis(0, 59), 0);
+  for (const [digit, axis, command] of [['Digit3', 61, 8], ['Digit4', 62, 31]] as const) {
+    input.setKeyboardCode(digit, true);
+    input.checkHotkeys(controller, focus);
+    assert.equal(jvm.get(handler, 'last').value, command);
+    assert.equal(input.physicalAxis(0, axis), 1);
+    input.setKeyboardCode(digit, false);
+    input.checkHotkeys(controller, focus);
+  }
+
+  addHotkey(3, 99); // An original Java hotkey reserves number 2.
+  input.checkHotkeys(controller, focus);
+  input.setKeyboardCode('Digit2', true);
+  input.checkHotkeys(controller, focus);
+  assert.equal(jvm.get(handler, 'last').value, 99);
+  assert.equal(input.physicalAxis(0, 60), 0);
+  input.setKeyboardCode('Digit2', false);
+  input.checkHotkeys(controller, focus);
+
+  jvm.natives.invoke('java.io.Controller', 'user_Add', controller,
+    [jv('int', 9), jv('int', 0), jv('int', 2), jv('float', 0), jv('float', 1), jv('float', 0), jv('float', 1)]);
+  input.setKeyboardCode('Digit1', true);
+  assert.equal(input.physicalAxis(0, 59), 0, 'a ControlSet binding reserves the digit');
+  input.setKeyboardCode('Digit1', false);
+  input.setKeyboardCode('F1', true);
+  input.checkHotkeys(controller, focus);
+  assert.equal(jvm.get(handler, 'last').value, 7, 'original F1 still works');
+  input.setKeyboardCode('F1', false);
+  gameTypes.dispose();
+});
+
 test('GameType timers deliver EVENT_TIME and can be cancelled', async () => {
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
     ? { path: 'demo.java', source } : null });

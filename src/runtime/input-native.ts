@@ -17,17 +17,28 @@ const codes: Record<string, number> = {
   Escape: 1, Enter: 28, NumpadEnter: 156, Space: 57, ArrowUp: 200,
   ArrowDown: 208, ArrowLeft: 203, ArrowRight: 205, Comma: 51, Period: 52,
   NumpadAdd: 78, NumpadSubtract: 74, PageUp: 201, PageDown: 209,
+  Digit1: 2, Digit2: 3, Digit3: 4, Digit4: 5,
 };
 for (const [letters, start] of [['QWERTYUIOP', 16], ['ASDFGHJKL', 30], ['ZXCVBNM', 44]] as const)
   [...letters].forEach((letter, index) => { codes[`Key${letter}`] = start + index; });
 for (let n = 1; n <= 10; n++) codes[`F${n}`] = 58 + n;
 codes.F11 = 87; codes.F12 = 88;
+const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> = {
+  Digit1: { cameraAxis: codes.F1, command: 7 },
+  Digit2: { cameraAxis: codes.F2, command: 0 },
+  Digit3: { cameraAxis: codes.F3, command: 8 },
+  Digit4: { cameraAxis: codes.F4, command: 31 },
+};
 
 /** Physical input samples and hotkey registrations; Java handlers receive the events. */
 export class InputNative {
   private readonly axes = new Map<string, number>();
   private readonly pressedKeys: number[] = [];
   private readonly hotkeys: HotkeyRegistration[] = [];
+  private readonly pressedCodes = new Set<string>();
+  private readonly cameraAliases = new Map<string, number>();
+  private currentController = jv('Controller', null);
+  private currentFocus = jv('Osd', null);
 
   constructor(private readonly jvm: SlrrJvm, private readonly controllers: ControllerNative,
     private readonly events: GameTypeNative) {
@@ -68,7 +79,33 @@ export class InputNative {
 
   setKeyboardCode(code: string, pressed: boolean): void {
     const axis = codes[code];
-    if (axis !== undefined) this.setPhysicalAxis(0, axis, pressed ? 1 : 0);
+    if (axis === undefined) return;
+    const wasPressed = this.pressedCodes.has(code);
+    if (pressed) this.pressedCodes.add(code); else this.pressedCodes.delete(code);
+    const shortcut = cameraShortcuts[code];
+    if (shortcut) {
+      if (pressed && !wasPressed && this.cameraShortcutAvailable(axis, shortcut.cameraAxis, shortcut.command))
+        this.cameraAliases.set(code, shortcut.cameraAxis);
+      if (!pressed) this.cameraAliases.delete(code);
+    }
+    this.setPhysicalAxis(0, axis, pressed ? 1 : 0);
+    if (shortcut) this.updateCameraAliasAxis(shortcut.cameraAxis);
+    else if (axis >= codes.F1 && axis <= codes.F4) this.updateCameraAliasAxis(axis);
+  }
+
+  private cameraShortcutAvailable(digitAxis: number, cameraAxis: number, command: number): boolean {
+    const active = (item: HotkeyRegistration) => item.owner.value == null || item.owner.value === this.currentFocus.value;
+    const camera = this.hotkeys.some(item => active(item) && (item.flags & 2) && item.axis === cameraAxis
+      && Number((item.hotkey.value as JavaObject | null)?.fields?.get('command')?.value) === command);
+    if (!camera || this.hotkeys.some(item => active(item) && (item.flags & 2) && item.axis === digitAxis)) return false;
+    return this.currentController.value == null || !this.controllers.bindings(this.currentController)
+      .some(binding => binding.device === 0 && binding.physicalAxis === digitAxis);
+  }
+
+  private updateCameraAliasAxis(axis: number): void {
+    const direct = Object.entries(codes).some(([code, value]) => value === axis && this.pressedCodes.has(code));
+    const aliased = [...this.cameraAliases.values()].includes(axis);
+    this.axes.set(`0:${axis}`, direct || aliased ? 1 : 0);
   }
 
   attachBrowserKeyboard(target: Window): () => void {
@@ -78,7 +115,8 @@ export class InputNative {
       this.setKeyboardCode(event.code, true);
     };
     const up = (event: KeyboardEvent) => this.setKeyboardCode(event.code, false);
-    const blur = () => { for (const key of this.axes.keys()) if (key.startsWith('0:')) this.axes.set(key, 0); };
+    const blur = () => { this.pressedCodes.clear(); this.cameraAliases.clear();
+      for (const key of this.axes.keys()) if (key.startsWith('0:')) this.axes.set(key, 0); };
     target.addEventListener('keydown', down);
     target.addEventListener('keyup', up);
     target.addEventListener('blur', blur);
@@ -105,6 +143,7 @@ export class InputNative {
   }
 
   checkHotkeys(controller: JavaValue, focus: JavaValue, cooperative = false): void {
+    this.currentController = controller; this.currentFocus = focus;
     let fired = false;
     for (const item of this.hotkeys) {
       if (item.owner.value != null && item.owner.value !== focus.value) continue;
