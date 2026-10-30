@@ -52,6 +52,7 @@ export class Viewer {
   private internalView = false;
   private collisionMeshes = new Map<EnginePart, number[]>();
   private alphaModes = new Map<string, ReturnType<typeof textureAlphaMode>>();
+  private skyFogUniforms = new Set<THREE.Color>();
   private grid = new THREE.GridHelper(12, 24, 0x46515a, 0x222c34);
   private driveGrid = new THREE.GridHelper(2000, 1000, 0x798893, 0x45535b);
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
@@ -108,6 +109,7 @@ export class Viewer {
     this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
     this.javaRenderRoot.clear(); this.javaRenderNodes.clear(); this.javaRenderModels.clear(); this.javaSkyDomeNodes.clear();
     this.javaRenderTypes.clear(); this.javaRenderRequests.clear();
+    this.skyFogUniforms.clear();
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
@@ -193,7 +195,7 @@ export class Viewer {
           if (!(object instanceof THREE.Mesh)) return;
           object.renderOrder = -1000;
           const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach(material => { material.depthWrite = false; material.needsUpdate = true; });
+          materials.forEach(material => this.configureSkyMaterial(material));
         });
         if (generation !== this.generation) this.disposeGroup(template);
         if (warnings.length) console.warn(`Java RenderRef ${node.alias}: ${warnings.join('; ')}`);
@@ -212,6 +214,7 @@ export class Viewer {
   setMapFog(settings: MapFogSettings) {
     if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
     this.mapFog = { ...settings };
+    for (const color of this.skyFogUniforms) color.setHex(settings.color);
     if (this.scene.fog instanceof THREE.Fog) {
       this.scene.fog.color.setHex(settings.color); this.scene.fog.near = settings.near; this.scene.fog.far = settings.far;
       this.scene.background = new THREE.Color(settings.color); this.mapStream?.setRange(settings.far + 100);
@@ -675,6 +678,25 @@ export class Viewer {
       materials.forEach(material => { material.map?.dispose(); material.dispose(); });
     });
     group.clear();
+  }
+  private configureSkyMaterial(material: THREE.Material): void {
+    const fogColor = new THREE.Color(this.mapFog.color);
+    this.skyFogUniforms.add(fogColor);
+    const previousCompile = material.onBeforeCompile;
+    material.onBeforeCompile = (shader, renderer) => {
+      previousCompile.call(material, shader, renderer);
+      shader.uniforms.slrrSkyFogColor = { value: fogColor };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying float vSlrrSkyElevation;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvec3 slrrSkyWorldPosition = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvSlrrSkyElevation = normalize( slrrSkyWorldPosition - cameraPosition ).y;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 slrrSkyFogColor;\nvarying float vSlrrSkyElevation;')
+        .replace('#include <opaque_fragment>', 'float slrrHorizonFog = 1.0 - smoothstep( -0.015, 0.14, vSlrrSkyElevation );\noutgoingLight = mix( outgoingLight, slrrSkyFogColor, slrrHorizonFog );\n#include <opaque_fragment>');
+    };
+    const previousKey = material.customProgramCacheKey.bind(material);
+    material.customProgramCacheKey = () => `${previousKey()}slrr-sky-horizon-fog-v1`;
+    material.depthWrite = false;
+    material.needsUpdate = true;
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];
