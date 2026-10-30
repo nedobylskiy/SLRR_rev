@@ -80,6 +80,6 @@ export class DrivingDemo {
         .multiply(new Matrix4().makeRotationX(-this.distance / m.radius * m.axleSign)).multiply(m.inverseOwn);
     }
     const s = this.steeringMount;
-    if (s) s.part.local.copy(s.frame).multiply(new Matrix4().makeRotationZ(-this.steer * 14)).multiply(s.inverseOwn);
+    if (s) s.part.local.copy(s.frame).multiply(new Matrix4().makeRotationZ(this.steer * 14)).multiply(s.inverseOwn);
   }
 }

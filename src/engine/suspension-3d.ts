@@ -156,6 +156,6 @@ export class Suspension3D {
       const travel = carrier.multiply(w.frame.clone().invert());
       for (const moving of this.movingParts[index]) if (moving.part.parent === this.root) moving.part.local.copy(travel).multiply(moving.base);
     }
-    if (this.steering) this.steering.part.local.copy(this.steering.frame).multiply(new Matrix4().makeRotationZ(-this.steer * 14)).multiply(this.steering.inverseOwn);
+    if (this.steering) this.steering.part.local.copy(this.steering.frame).multiply(new Matrix4().makeRotationZ(this.steer * 14)).multiply(this.steering.inverseOwn);
   }
 }
