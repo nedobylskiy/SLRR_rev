@@ -165,7 +165,8 @@ export class Viewer {
     modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
-    if (isNavigatorOverlay) {
+    const isLightResource = node.renderType?.resourceType === 13;
+    if (isNavigatorOverlay || isLightResource) {
       group.visible = false;
       modelGroup.clear();
       return;

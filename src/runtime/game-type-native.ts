@@ -425,10 +425,10 @@ export class GameTypeNative {
     const node = this.getResource(receiver);
     return node instanceof RenderObject ? node : undefined;
   }
-  resolveRenderResource(type: ResourceObject, preferSourceResource = false): { pack: string; id: number } | null {
-    // RenderRef duplicates keep the source type in typeId. The internal
-    // resourceId is an engine handle and can numerically look like a real RPK ID.
-    const sourceId = preferSourceResource ? type.typeId : type.resourceId;
+  resolveRenderResource(type: ResourceObject): { pack: string; id: number } | null {
+    // typeId is the RPK type. resourceId may be an engine-generated clone handle
+    // such as 0x40000112 and must never be interpreted as an RPK entry ID.
+    const sourceId = type.typeId;
     return this.resolvePackedResource?.(sourceId)
       ?? (type.resourcePack ? { pack: type.resourcePack, id: sourceId & 0xffff } : null);
   }
@@ -443,7 +443,7 @@ export class GameTypeNative {
     const typeNode = type?.value == null ? null : this.requireResource(type);
     const node = new RenderObject(resource.id, object.className, typeNode,
       alias || '_renderinst');
-    node.renderResource = typeNode ? this.resolveRenderResource(typeNode, alias === 'navigator_segment') : null;
+    node.renderResource = typeNode ? this.resolveRenderResource(typeNode) : null;
     resource.setParent(null);
     node.setParent(parentNode);
     for (const child of [...resource.children]) child.setParent(node);

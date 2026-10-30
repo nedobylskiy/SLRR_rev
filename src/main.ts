@@ -93,6 +93,9 @@ async function runGameBoot() {
   disposeJavaInput = () => { detachKeyboard(); window.clearInterval(poll); };
   el<HTMLButtonElement>('java-retry').disabled = false;
   el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
+  el('details').textContent = result.error
+    ? 'Java initialization stopped at the call shown in the console.'
+    : 'Init.java completed. Render resource warnings are handled separately from Java execution.';
   status(result.error ? 'Java boot blocked' : 'Java boot ready', !!result.error);
   if (result.error) {
     const location = /\n([^\n]+\.java):(\d+)\n>/.exec(result.error.message);
