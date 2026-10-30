@@ -514,7 +514,9 @@ export class Viewer {
           const frame = root.matrix().multiply(poseMatrix(internalPose));
           frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
           this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
-          const fieldOfView = internalPose.fov ?? 42;
+          // CFG camera's optional value is a game-specific zoom parameter, not
+          // a Three.js field-of-view in degrees. Keep the renderer's normal FOV.
+          const fieldOfView = 42;
           if (this.camera.near !== 0.03 || this.camera.fov !== fieldOfView) {
             this.camera.near = 0.03;
             this.camera.fov = fieldOfView;
