@@ -470,6 +470,13 @@ export class Viewer {
     let crash: CarCrashDemo | undefined, obstacle: THREE.Mesh | undefined, ramp: THREE.Mesh | undefined;
     const panelViews: PanelView[] = [], softParts = new Set<EnginePart>();
     const panelParts = new Map<PanelView, EnginePart>();
+    const vehicleBounds = new Map<EnginePart, THREE.Box3Helper>();
+    for (const part of root.world.parts.values()) {
+      const proxy = this.proxies.get(part);
+      if (!proxy || !part.definition.model) continue;
+      const helper = new THREE.Box3Helper(new THREE.Box3(), part.definition.mechanics ? 0x77d8ff : 0xffcf70);
+      helper.visible = false; helper.renderOrder = 20; this.scene.add(helper); vehicleBounds.set(part, helper);
+    }
     const localPositions = (part: EnginePart) => {
       const group = this.proxies.get(part); if (!group) throw new Error(`No render proxy for ${part.definition.alias}`);
       const transform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose));
@@ -584,6 +591,10 @@ export class Viewer {
       const input = java ? java.sample() : { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
       if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
       this.syncWorld(softParts);
+      for (const [part, helper] of vehicleBounds) {
+        const proxy = this.proxies.get(part);
+        if (proxy) { helper.box.setFromObject(proxy); helper.updateMatrixWorld(true); }
+      }
       if (java) {
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
@@ -659,6 +670,7 @@ export class Viewer {
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
       if (java) this.controls.enabled = true;
       panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
+      for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
       if (ramp) { ramp.removeFromParent(); ramp.geometry.dispose(); (ramp.material as THREE.Material).dispose(); }
       if (!track) for (const { part, local } of original) part.local.copy(local);
@@ -668,7 +680,7 @@ export class Viewer {
     };
     this.stopDriving = stop; focus();
     const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(1 / 240, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
-    return Object.assign(stop, { rear: () => { if (crash instanceof Vehicle3D) crash.rearCrash(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, launch: (speed: number) => { crash?.reset(speed); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, chassisCrumple: (value: number) => { if (crash instanceof Vehicle3D) crash.setChassisCrumple(value); }, tireModel: (value: import('../engine/tire-model').TireModelSettings) => { if (crash instanceof Vehicle3D) crash.suspension.tireModel = structuredClone(value); }, engineTuning: (idle: number, redline: number) => { if (crash instanceof Vehicle3D) crash.suspension.mechanics?.setTuning(idle, redline); }, jump: () => { if (crash instanceof Vehicle3D) crash.jump(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, roll: () => { if (crash instanceof Vehicle3D) crash.roll(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, breakEngine: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.block : undefined), breakStrut: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.corners[0].strut : undefined), wireframe: (value: boolean) => panelViews.forEach(v => v.wireframe(value)), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
+    return Object.assign(stop, { rear: () => { if (crash instanceof Vehicle3D) crash.rearCrash(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, launch: (speed: number) => { crash?.reset(speed); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, chassisCrumple: (value: number) => { if (crash instanceof Vehicle3D) crash.setChassisCrumple(value); }, tireModel: (value: import('../engine/tire-model').TireModelSettings) => { if (crash instanceof Vehicle3D) crash.suspension.tireModel = structuredClone(value); }, engineTuning: (idle: number, redline: number) => { if (crash instanceof Vehicle3D) crash.suspension.mechanics?.setTuning(idle, redline); }, jump: () => { if (crash instanceof Vehicle3D) crash.jump(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, roll: () => { if (crash instanceof Vehicle3D) crash.roll(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, breakEngine: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.block : undefined), breakStrut: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.corners[0].strut : undefined), wireframe: (value: boolean) => panelViews.forEach(v => v.wireframe(value)), vehicleFrames: (value: boolean) => vehicleBounds.forEach(helper => { helper.visible = value; }), bodyVisible: (value: boolean) => { const proxy = this.proxies.get(root); if (proxy) proxy.visible = value; }, diagnostics: () => ({ speedKmh: Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6), rpm: crash instanceof Vehicle3D ? Math.round(crash.suspension.mechanics?.rpm ?? 0) : 0, gear: crash instanceof Vehicle3D ? crash.suspension.mechanics?.gear ?? 0 : 0, boost: crash instanceof Vehicle3D ? crash.suspension.mechanics?.boost ?? 0 : 0, engineRunning: crash instanceof Vehicle3D ? crash.suspension.mechanics?.running ?? false : false, enginePower: crash instanceof Vehicle3D ? crash.suspension.mechanics?.power ?? 0 : 0, wheelSlip: crash instanceof Vehicle3D ? Math.max(...crash.suspension.wheels.map(w => Math.abs(w.slip))) : 0, wheelContacts: crash instanceof Vehicle3D ? crash.suspension.wheels.filter(w => w.contact).length : 0, chassis: Math.round(root.condition * 100), parts: [...root.world.parts.values()].map(part => ({ alias: part.definition.alias, id: part.definition.key.id, slot: part.parentSlot, wear: Math.round(part.condition * 100), mechanical: !!part.definition.mechanics })) }), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
   }
   private disposeGroup(group: THREE.Group): void {
     group.traverse(object => {

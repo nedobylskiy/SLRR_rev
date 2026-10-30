@@ -161,7 +161,9 @@ async function runGameBoot() {
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
                   result.gameTypes.updateTriggerContacts(car);
                 } });
-            disposeJavaScene = () => { stopAnimation(); session(); gauges?.dispose(); built?.world.dispose(); };
+            showMapDebugControls(map);
+            showVehicleDebug(built.root, session);
+            disposeJavaScene = () => { clearVehicleDebug(); stopAnimation(); session(); gauges?.dispose(); built?.world.dispose(); };
             driveHud.hidden = true;
             el('scene-help').textContent = 'Controls follow the game ControlSet · Right drag: rotate camera';
           } catch (reason) {
@@ -215,6 +217,7 @@ const crashButton = textElement('button', 'Car and obstacle'); crashButton.class
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
 mapDebugPanel.append(textElement('summary', 'Map collision frames'));
+const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
 const mapDebugChecks: HTMLInputElement[] = [];
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
@@ -222,8 +225,48 @@ for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side f
   input.onchange = () => viewer?.showMapDebug(layer, input.checked);
   label.prepend(input); mapDebugOptions.append(label); mapDebugChecks.push(input);
 }
+const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), vehicleFramesCheck = document.createElement('input');
+vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
+const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
+bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
-const showMapDebugControls = () => { mapDebugPanel.hidden = false; mapDebugPanel.open = false; for (const input of mapDebugChecks) input.checked = false; };
+let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
+vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
+bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);
+const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { walls: number; boxes: number } }) => {
+  mapDebugPanel.hidden = false; mapDebugPanel.open = false;
+  for (const input of mapDebugChecks) input.checked = false;
+  vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
+  if (map) mapDebugData.textContent = `Support triangles: ${map.terrain.faces.toLocaleString()}\nCollision walls: ${map.collision.walls.toLocaleString()}\nCFG collision boxes: ${map.collision.boxes.toLocaleString()}`;
+};
+const vehicleDebugPanel = document.createElement('details'); vehicleDebugPanel.className = 'vehicle-debug-panel'; vehicleDebugPanel.hidden = true;
+vehicleDebugPanel.append(textElement('summary', 'Vehicle runtime · physics / Java'));
+const vehicleDebugTelemetry = textElement('pre', '', 'vehicle-debug-telemetry'), vehicleDebugTree = textElement('pre', '', 'vehicle-debug-tree');
+vehicleDebugPanel.append(vehicleDebugTelemetry, vehicleDebugTree); el('scene-help').before(vehicleDebugPanel);
+let vehicleDebugTimer: number | undefined;
+function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>) {
+  clearVehicleDebug(); mapDebugSession = session; vehicleDebugPanel.hidden = false; vehicleDebugPanel.open = true;
+  const tree = (part: EnginePart, depth = 0): string[] => {
+    const prefix = depth === 0 ? '' : `${'  '.repeat(depth - 1)}├─ `;
+    const slot = part.parentSlot === undefined ? 'root' : `slot ${part.parentSlot}`;
+    const row = `${prefix}${part.definition.alias} [0x${part.definition.key.id.toString(16)}] · ${slot} · wear ${Math.round(part.condition * 100)}%`;
+    return [row, ...[...part.children.values()].flatMap(child => tree(child, depth + 1))];
+  };
+  const refresh = () => {
+    const state = session.diagnostics();
+    vehicleDebugTelemetry.textContent = [
+      `Speed ${state.speedKmh} km/h · RPM ${state.rpm} · gear ${state.gear < 0 ? 'R' : state.gear || 'N'}`,
+      `Engine ${state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,
+      `Wheels on ground ${state.wheelContacts}/4 · chassis ${state.chassis}% · parts ${state.parts.length}`,
+    ].join('\n');
+    vehicleDebugTree.textContent = tree(root).join('\n');
+  };
+  refresh(); vehicleDebugTimer = window.setInterval(refresh, 200);
+}
+function clearVehicleDebug() {
+  if (vehicleDebugTimer !== undefined) window.clearInterval(vehicleDebugTimer);
+  vehicleDebugTimer = undefined; mapDebugSession = undefined; vehicleDebugPanel.hidden = true; vehicleDebugPanel.open = false;
+}
 let crashSession: ReturnType<Viewer['drive']> | undefined;
 const tirePanel = document.createElement('details'); tirePanel.className = 'tire-tuning-panel'; tirePanel.hidden = true;
 tirePanel.append(textElement('summary', 'Tire model · Pacejka'));
@@ -366,7 +409,7 @@ trackDriveButton.onclick = async () => {
       if (request === sequence) status(`Track ${done}/${total}`);
     }, true);
     if (request !== sequence || !engineRoot) return;
-    showMapDebugControls();
+    showMapDebugControls(map);
     music?.changeMusicSet(MUSIC_SET.DRIVING);
     const start = new Vector3(0, map.terrain.height(0, -1461.785) + 0.15, -1461.785);
     if (start.y < -100) throw new Error('No track surface at the start line');
@@ -375,7 +418,8 @@ trackDriveButton.onclick = async () => {
     crashSession.chassisCrumple(Number(crumpleSlider.value));
     showTireControls();
     showEngineControls(engineRoot);
-    disposeDriving = crashSession; driveHud.hidden = false; driveHud.classList.add('crash-hud');
+    showVehicleDebug(engineRoot, crashSession);
+    disposeDriving = () => { clearVehicleDebug(); crashSession?.(); }; driveHud.hidden = false; driveHud.classList.add('crash-hud');
     trackDriving = true; setViewportExpanded(true);
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · driving'; el('format').textContent = 'MAP / PHYSICS';
@@ -397,7 +441,7 @@ mapButton.onclick = async () => {
       if (request === sequence) status(`Track ${done}/${total}`);
     });
     if (request !== sequence) return;
-    showMapDebugControls();
+    showMapDebugControls(result);
     el('details').textContent = `${result.loaded}/${result.total} models · ${result.objects} placed RDB/CFG objects · ${result.triangles.toLocaleString('en-US')} map triangles. Geometry and textures come from the original RPK/SCX; objects use RDB coordinates. Road collision is still approximate.\n${result.warnings.slice(0, 12).join('\n')}`;
     status(result.loaded ? 'Track loaded' : 'No geometry', !result.loaded);
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
@@ -412,6 +456,7 @@ function stopDrive() {
   tirePanel.hidden = true;
   enginePanel.hidden = true;
   crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
+  clearVehicleDebug();
   hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
   disposeDriving?.(); disposeDriving = undefined; driveHud.hidden = true; driveButton.textContent = 'Test drive';
@@ -446,7 +491,8 @@ crashButton.onclick = async () => {
   if (request !== sequence || !engineRoot || !viewer) return;
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
-    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, undefined, assets, music); disposeDriving = crashSession;
+    crashSession = viewer.drive(engineRoot, text => { driveHud.textContent = text; }, true, undefined, assets, music);
+    showVehicleDebug(engineRoot, crashSession); disposeDriving = () => { clearVehicleDebug(); crashSession?.(); };
     crashSession.chassisCrumple(Number(crumpleSlider.value));
     showTireControls();
     showEngineControls(engineRoot);
@@ -480,7 +526,8 @@ driveButton.onclick = async () => {
   if (!engineRoot || !viewer) return;
   try {
     beforeDrivingDetails = el('details').textContent ?? '';
-    disposeDriving = viewer.drive(engineRoot, text => { driveHud.textContent = text; });
+    const session = viewer.drive(engineRoot, text => { driveHud.textContent = text; });
+    showVehicleDebug(engineRoot, session); disposeDriving = () => { clearVehicleDebug(); session(); };
     driveHud.hidden = false; driveButton.textContent = 'End drive';
     el('scene-help').textContent = 'W/S or ↑/↓ throttle/reverse · A/D or ←/→ steer · Space brake · R reset car';
     el('details').textContent = 'Empty test area. Mounts, wheel sizes, wheelbase, and steering limit come from CFG. Driving is simplified, without collisions, suspension, or original engine logic. Click the scene to control the car; drag to rotate the camera.';

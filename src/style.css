@@ -304,6 +304,16 @@ body.viewport-expanded{overflow:hidden}
   width:min(320px,calc(100% - 24px));
   background:#101a20de
 }
+.workspace.viewport-expanded .vehicle-debug-panel{
+  position:absolute;
+  top:12px;
+  left:12px;
+  z-index:4;
+  width:min(390px,calc(100% - 24px));
+  max-height:55vh;
+  overflow:auto;
+  background:#101a20e8
+}
 .workspace.viewport-expanded .tire-tuning-panel{
   position:absolute;
   bottom:44px;
@@ -504,6 +514,12 @@ button:disabled{opacity:.45;cursor:default}
  .map-debug-options { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 10px 0 2px; }
  .map-debug-options label { display: flex; align-items: center; gap: 6px; }
  .map-debug-options input { width: auto; accent-color: #76e5c4; }
+ .map-debug-data { margin: 8px 0 0; color: #d2e1e6; font: 11px/1.55 Consolas, monospace; white-space: pre-wrap; }
+ .vehicle-debug-panel { padding: 8px 12px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .vehicle-debug-panel[hidden] { display: none; }
+ .vehicle-debug-panel summary { cursor: pointer; color: #76e5c4; }
+ .vehicle-debug-telemetry, .vehicle-debug-tree { margin: 8px 0 0; color: #d2e1e6; font: 11px/1.55 Consolas, monospace; white-space: pre; }
+ .vehicle-debug-tree { max-height: 24vh; overflow: auto; color: #a9d9c8; }
  .tire-tuning-panel { padding: 8px 18px; background: #182329; color: #b9d4de; font-size: 12px; }
  .tire-tuning-panel[hidden] { display: none; }
  .tire-tuning-panel summary { cursor: pointer; color: #76e5c4; }
