@@ -44,6 +44,7 @@ export class Viewer {
   private javaRenderRoot = new THREE.Group();
   private javaRenderNodes = new Map<number, THREE.Group>();
   private javaRenderModels = new Map<number, THREE.Group>();
+  private javaSkyDomeNodes = new Map<number, { group: THREE.Group; offset: THREE.Vector3 }>();
   private javaRenderTypes = new Map<number, string>();
   private javaRenderRequests = new Map<number, number>();
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
@@ -94,6 +95,8 @@ export class Viewer {
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
       this.frame?.(now); this.controls.update(); this.mapStream?.update(this.camera.position);
+      for (const { group, offset } of this.javaSkyDomeNodes.values())
+        group.position.copy(this.camera.position).add(offset);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.sunLight.position.clone().normalize(), 500);
       this.renderer.render(this.scene, this.camera);
@@ -103,7 +106,7 @@ export class Viewer {
     this.sunFlareRevision++;
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
     this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
-    this.javaRenderRoot.clear(); this.javaRenderNodes.clear(); this.javaRenderModels.clear();
+    this.javaRenderRoot.clear(); this.javaRenderNodes.clear(); this.javaRenderModels.clear(); this.javaSkyDomeNodes.clear();
     this.javaRenderTypes.clear(); this.javaRenderRequests.clear();
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
@@ -130,6 +133,7 @@ export class Viewer {
     if (node.resourceType !== 3) {
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
+      this.javaSkyDomeNodes.delete(node.id);
       this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
       return;
     }
@@ -150,6 +154,18 @@ export class Viewer {
     group.rotation.set(node.orientation.p, node.orientation.y, node.orientation.r, 'YXZ');
     const modelGroup = this.javaRenderModels.get(node.id)!;
     modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
+    // Scene.java names map sky shells "egbolt-*". The original renderer keeps these
+    // shells around the camera; leaving one at map origin makes it look like a hill.
+    const isSkyDome = /^egbolt[-_]/i.test(node.alias);
+    if (isSkyDome) {
+      const offset = new THREE.Vector3(node.position.x, node.position.y, node.position.z);
+      this.javaSkyDomeNodes.set(node.id, { group, offset });
+      group.position.copy(this.camera.position).add(offset);
+      group.renderOrder = -1000;
+    } else {
+      this.javaSkyDomeNodes.delete(node.id);
+      group.renderOrder = 0;
+    }
     for (const child of node.children) if (child instanceof RenderObject) {
       const childGroup = this.javaRenderNodes.get(child.id);
       if (childGroup && childGroup.parent !== group) group.add(childGroup);
@@ -165,20 +181,27 @@ export class Viewer {
     this.javaRenderRequests.set(node.id, request);
     if (!identity) return;
 
-    let templatePromise = this.javaRenderTemplates.get(key);
+    const templateKey = `${key}|${isSkyDome ? 'sky' : 'model'}`;
+    let templatePromise = this.javaRenderTemplates.get(templateKey);
     if (!templatePromise) {
       templatePromise = (async () => {
         const model = await assets.modelForResource(identity.pack, identity.id);
         const parsed = parseScx(await assets.read(model.path));
         const template = new THREE.Group();
         const warnings = await this.append(parsed, assets, model.textures, template, generation);
+        if (isSkyDome) template.traverse(object => {
+          if (!(object instanceof THREE.Mesh)) return;
+          object.renderOrder = -1000;
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach(material => { material.depthWrite = false; material.needsUpdate = true; });
+        });
         if (generation !== this.generation) this.disposeGroup(template);
         if (warnings.length) console.warn(`Java RenderRef ${node.alias}: ${warnings.join('; ')}`);
         return template;
       })();
-      this.javaRenderTemplates.set(key, templatePromise);
+      this.javaRenderTemplates.set(templateKey, templatePromise);
       void templatePromise.catch(() => {
-        if (this.javaRenderTemplates.get(key) === templatePromise) this.javaRenderTemplates.delete(key);
+        if (this.javaRenderTemplates.get(templateKey) === templatePromise) this.javaRenderTemplates.delete(templateKey);
       });
     }
     const template = await templatePromise;
