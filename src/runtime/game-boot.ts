@@ -272,6 +272,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     setMapFog?.({ color, near, far });
     return voidValue();
   });
+  // MOCK: The road-intersection graph is not imported yet. A null result follows
+  // the original Track.changeCamTV() branch for maps without a nearby crossing.
+  for (const distanceType of ['int', 'float'])
+    jvm.natives.register('java.util.resource.GroundRef', 'getNearestCross', ['Vector3', distanceType], () => jv('Vector3', null));
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));

@@ -83,7 +83,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */
-export function javaDrivingControls(result: BootResult): { sample(): DrivingInput; cameraMode(): number; cameraDistance(): number;
+export function javaDrivingControls(result: BootResult): { sample(): DrivingInput; cameraMode(): number; cameraIndex(): number; cameraDistance(): number;
   mouseButton(pressed: boolean): void; mouseMotion(dx: number, dy: number): void; cameraLook(): { x: number; y: number } } {
   const { jvm, controllers, gameTypes, input } = result;
   const activeState = () => jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
@@ -103,6 +103,10 @@ export function javaDrivingControls(result: BootResult): { sample(): DrivingInpu
     cameraMode() {
       const state = activeState();
       return state.value == null ? 1 : Number(jvm.get(state, 'cameraMode').value) || 1;
+    },
+    cameraIndex() {
+      const state = activeState();
+      return state.value == null ? 0 : Number(jvm.get(state, 'cameraNum').value) || 0;
     },
     cameraDistance() {
       const state = activeState();

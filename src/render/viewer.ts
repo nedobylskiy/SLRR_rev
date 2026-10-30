@@ -385,7 +385,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -509,29 +509,46 @@ export class Viewer {
       if (java) {
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
-        const distance = java.cameraDistance?.() ?? 7;
-        const offset = mode === 5 ? new THREE.Vector3(0, 1.35, -0.25)
-          : mode === 4 ? new THREE.Vector3(0, 3, -11)
-          : mode === 3 ? new THREE.Vector3(0, 3.5, 12)
-          : new THREE.Vector3(0, 2.5, distance);
-        const look = java.cameraLook?.();
-        if (look && mode !== 5) {
-          orbitYaw += look.x * 0.3;
-          orbitPitch = THREE.MathUtils.clamp(orbitPitch - look.y * 0.3, -1.1, 1.1);
-          const relative = offset.sub(new THREE.Vector3(0, 1.1, 0));
-          const radius = relative.length();
-          const elevation = THREE.MathUtils.clamp(Math.atan2(relative.y, Math.hypot(relative.x, relative.z)) + orbitPitch, -1.35, 1.35);
-          const azimuth = Math.atan2(relative.x, relative.z) + orbitYaw;
-          relative.set(radius * Math.cos(elevation) * Math.sin(azimuth), radius * Math.sin(elevation), radius * Math.cos(elevation) * Math.cos(azimuth));
-          offset.add(new THREE.Vector3(0, 1.1, 0));
+        const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
+        if (internalPose) {
+          const frame = root.matrix().multiply(poseMatrix(internalPose));
+          frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
+          this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
+          const fieldOfView = internalPose.fov ?? 42;
+          if (this.camera.near !== 0.03 || this.camera.fov !== fieldOfView) {
+            this.camera.near = 0.03;
+            this.camera.fov = fieldOfView;
+            this.camera.updateProjectionMatrix();
+          }
+        } else {
+          if (this.camera.near !== 0.01 || this.camera.fov !== 42) {
+            this.camera.near = 0.01;
+            this.camera.fov = 42;
+            this.camera.updateProjectionMatrix();
+          }
+          const distance = java.cameraDistance?.() ?? 7;
+          const offset = mode === 4 ? new THREE.Vector3(0, 3, -11)
+            : mode === 3 ? new THREE.Vector3(0, 3.5, 12)
+            : new THREE.Vector3(0, 2.5, distance);
+          const look = java.cameraLook?.();
+          if (look && mode !== 5) {
+            orbitYaw += look.x * 0.3;
+            orbitPitch = THREE.MathUtils.clamp(orbitPitch - look.y * 0.3, -1.1, 1.1);
+            const relative = offset.sub(new THREE.Vector3(0, 1.1, 0));
+            const radius = relative.length();
+            const elevation = THREE.MathUtils.clamp(Math.atan2(relative.y, Math.hypot(relative.x, relative.z)) + orbitPitch, -1.35, 1.35);
+            const azimuth = Math.atan2(relative.x, relative.z) + orbitYaw;
+            relative.set(radius * Math.cos(elevation) * Math.sin(azimuth), radius * Math.sin(elevation), radius * Math.cos(elevation) * Math.cos(azimuth));
+            offset.add(new THREE.Vector3(0, 1.1, 0));
+          }
+          offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+          const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+          const desired = demo.position.clone().add(offset);
+          const blend = last === undefined ? 1 : 1 - Math.exp(-seconds * (mode === 1 ? 5 : 9));
+          this.camera.position.lerp(desired, blend);
+          this.controls.target.lerp(target, blend);
+          this.camera.lookAt(this.controls.target);
         }
-        offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-        const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
-        const desired = demo.position.clone().add(offset);
-        const blend = last === undefined ? 1 : 1 - Math.exp(-seconds * (mode === 1 ? 5 : 9));
-        this.camera.position.lerp(desired, blend);
-        this.controls.target.lerp(target, blend);
-        this.camera.lookAt(this.controls.target);
       } else {
         const delta = demo.position.clone().sub(followed); this.camera.position.add(delta); this.controls.target.add(delta);
       }
