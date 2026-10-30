@@ -77,16 +77,10 @@ export class Vehicle3D extends CarCrashDemo {
     if (!Number.isFinite(value) || value < 0.5 || value > 1.5) throw new Error('Invalid chassis crumple multiplier');
     this.chassisCrumple = value;
   }
-  /** Aggregate health signal for the stock OSD damage silhouette. */
+  /** Chassis-only health signal used to tint the entire stock OSD damage silhouette. */
   get osdDamageCondition() {
-    const panels = [...this.soft.values()];
-    if (!panels.length) return 1;
-    const deformation = panels.reduce((sum, part) => sum + part.panel.permanentDamage, 0) / panels.length;
-    const mountCount = panels.reduce((sum, part) => sum + part.panel.mounts.length, 0);
-    const brokenMounts = panels.reduce((sum, part) => sum + part.panel.mounts.filter(mount => mount.broken).length, 0);
-    const broken = mountCount ? brokenMounts / mountCount : 0;
-    const detached = [...this.soft.keys(), ...this.rigid.keys()].filter(part => part !== this.root && !part.parent).length;
-    return Math.max(0, Math.min(1, 1 - deformation * 0.65 - broken * 0.35 - Math.min(0.25, detached * 0.08)));
+    const chassis = this.soft.get(this.root);
+    return chassis ? Math.max(0, Math.min(1, 1 - chassis.panel.permanentDamage)) : 1;
   }
   private configureStructure() {
     this.structuralMounts.clear(); this.wheelMounts = [];
