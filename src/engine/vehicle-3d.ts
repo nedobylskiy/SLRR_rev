@@ -77,10 +77,11 @@ export class Vehicle3D extends CarCrashDemo {
     if (!Number.isFinite(value) || value < 0.5 || value > 1.5) throw new Error('Invalid chassis crumple multiplier');
     this.chassisCrumple = value;
   }
-  /** Chassis-only health signal used to tint the entire stock OSD damage silhouette. */
+  /** Condition for the OSD body silhouette, including chassis and permanent deformation. */
   get osdDamageCondition() {
     const chassis = this.soft.get(this.root);
-    return chassis ? Math.max(0, Math.min(1, 1 - chassis.panel.permanentDamage)) : 1;
+    const deformation = chassis ? 1 - chassis.panel.permanentDamage : 1;
+    return Math.max(0, Math.min(1, this.root.condition, deformation));
   }
   private configureStructure() {
     this.structuralMounts.clear(); this.wheelMounts = [];
@@ -141,10 +142,12 @@ export class Vehicle3D extends CarCrashDemo {
       if (!kind || !this.connected(part)) continue;
       const position = new Vector3().setFromMatrixPosition(part.matrix()).applyMatrix4(delta);
       const distance = Math.hypot(position.x - point.x, position.z - point.z);
-      const reach = kind === 'engine' ? 0.85 : 0.65;
-      const weight = Math.exp(-((distance / reach) ** 2)) * (kind === 'engine' ? 0.25 : 1);
-      const threshold = kind === 'engine' ? 180000 : kind === 'suspension' ? 55000 : 40000;
-      part.condition = Math.max(0, Math.min(part.condition, 1 - energy * weight / threshold));
+      const reach = kind === 'engine' ? 1.1 : 0.65;
+      const weight = Math.exp(-((distance / reach) ** 2)) * (kind === 'engine' ? 0.5 : 1);
+      const threshold = kind === 'engine' ? 120000 : kind === 'suspension' ? 55000 : 40000;
+      // Component damage accumulates across impacts; taking only the worst single hit
+      // kept the engine block nearly pristine even after the chassis had failed.
+      part.condition = Math.max(0, part.condition - energy * weight / threshold);
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {

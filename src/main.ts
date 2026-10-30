@@ -154,7 +154,7 @@ async function runGameBoot() {
             const javaVehicle = result.gameTypes.get(car);
             const session = viewer.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, instruments: (speed, rpm, gear, damage) => gauges?.update(speed, rpm, gear, damage),
+              { ...javaControls, instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
@@ -257,7 +257,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     vehicleDebugTelemetry.textContent = [
       `Speed ${state.speedKmh} km/h · RPM ${state.rpm} · gear ${state.gear < 0 ? 'R' : state.gear || 'N'}`,
       `Engine ${state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,
-      `Wheels on ground ${state.wheelContacts}/4 · chassis ${state.chassis}% · parts ${state.parts.length}`,
+      `Wheels on ground ${state.wheelContacts}/4 · chassis ${state.chassis}% · block ${state.engineBlock}% · transmission avg ${state.transmission}% · parts ${state.parts.length}`,
     ].join('\n');
     vehicleDebugTree.textContent = tree(root).join('\n');
   };

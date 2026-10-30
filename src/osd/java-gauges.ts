@@ -18,6 +18,8 @@ export class JavaGauges {
   private travelledKm = 0;
   private lastUpdate = 0;
   private damageCondition = 1;
+  private engineCondition = 1;
+  private transmissionCondition = 1;
   private damageMask?: ImageData;
 
   constructor(osd: OsdLayer, pack: string, config: PartConfig) {
@@ -103,7 +105,7 @@ export class JavaGauges {
     }
   }
 
-  update(speedKmh: number, rpm: number, gear: number, damageCondition = 1) {
+  update(speedKmh: number, rpm: number, gear: number, damageCondition = 1, engineCondition = 1, transmissionCondition = 1) {
     const now = performance.now();
     if (this.lastUpdate) this.travelledKm += Math.max(0, speedKmh) * Math.min(100, now - this.lastUpdate) / 3_600_000;
     this.lastUpdate = now;
@@ -117,10 +119,17 @@ export class JavaGauges {
     this.gearText.textContent = gear < 0 ? 'R' : gear === 0 ? 'N' : String(gear);
     this.mileageText.textContent = String(Math.floor(this.travelledKm)).padStart(7, '0');
     const nextCondition = Math.max(0, Math.min(1, damageCondition));
+    let repaintDamage = false;
     if (Math.abs(nextCondition - this.damageCondition) > 0.015) {
       this.damageCondition = nextCondition;
-      this.paintDamageIcon();
+      repaintDamage = true;
     }
+    const nextEngine = Math.max(0, Math.min(1, engineCondition)), nextTransmission = Math.max(0, Math.min(1, transmissionCondition));
+    if (Math.abs(nextEngine - this.engineCondition) > 0.015 || Math.abs(nextTransmission - this.transmissionCondition) > 0.015) {
+      this.engineCondition = nextEngine; this.transmissionCondition = nextTransmission;
+      repaintDamage = true;
+    }
+    if (repaintDamage) this.paintDamageIcon();
     this.root.setAttribute('aria-label', `${Math.round(speedKmh)} km/h, ${Math.round(rpm)} rpm, gear ${this.gearText.textContent}`);
   }
 
@@ -128,10 +137,17 @@ export class JavaGauges {
     if (!this.damageMask) return;
     const context = this.damageIcon.getContext('2d');
     if (!context) return;
-    const color = this.damageCondition > 0.72 ? [48, 255, 72]
-      : this.damageCondition > 0.38 ? [255, 190, 24] : [255, 48, 36];
+    const colorFor = (condition: number) => condition > 0.72 ? [48, 255, 72]
+      : condition > 0.38 ? [255, 190, 24] : [255, 48, 36];
+    const bodyColor = colorFor(this.damageCondition), engineColor = colorFor(this.engineCondition), transmissionColor = colorFor(this.transmissionCondition);
     const image = new ImageData(this.damageMask.width, this.damageMask.height);
     for (let i = 0; i < image.data.length; i += 4) {
+      const x = (i / 4) % this.damageMask.width, y = Math.floor(i / 4 / this.damageMask.width);
+      // The stock top-down silhouette faces upward: engine at the front, transmission behind it.
+      const color = x >= this.damageMask.width * 0.25 && x <= this.damageMask.width * 0.75 && y >= this.damageMask.height * 0.08 && y <= this.damageMask.height * 0.29
+        ? engineColor
+        : x >= this.damageMask.width * 0.36 && x <= this.damageMask.width * 0.64 && y > this.damageMask.height * 0.29 && y <= this.damageMask.height * 0.48
+          ? transmissionColor : bodyColor;
       image.data[i] = color[0]; image.data[i + 1] = color[1]; image.data[i + 2] = color[2];
       image.data[i + 3] = this.damageMask.data[i + 3];
     }
