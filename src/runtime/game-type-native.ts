@@ -154,6 +154,7 @@ export class GameTypeNative {
       const node = this.requireResource(receiver);
       node.meshScale = { x: node.meshScale.x * Number(args[0].value),
         y: node.meshScale.y * Number(args[1].value), z: node.meshScale.z * Number(args[2].value) };
+      if (node instanceof RenderObject) this.notifyRenderChanged(node);
       return voidValue();
     });
     jvm.natives.register('java.util.resource.RenderRef', 'changeResource', ['ResourceRef', 'ResourceRef'],
@@ -422,6 +423,10 @@ export class GameTypeNative {
     const node = this.getResource(receiver);
     return node instanceof RenderObject ? node : undefined;
   }
+  resolveRenderResource(type: ResourceObject): { pack: string; id: number } | null {
+    return this.resolvePackedResource?.(type.resourceId)
+      ?? (type.resourcePack ? { pack: type.resourcePack, id: type.resourceId & 0xffff } : null);
+  }
   notifyRenderChanged(node: RenderObject): void { this.renderChanged?.(node); }
   createRender(receiver: JavaValue, parent: JavaValue | null, type: JavaValue | null,
     alias: string | null): RenderObject | undefined {
@@ -433,6 +438,7 @@ export class GameTypeNative {
     const typeNode = type?.value == null ? null : this.requireResource(type);
     const node = new RenderObject(resource.id, object.className, typeNode,
       alias || '_renderinst');
+    node.renderResource = typeNode ? this.resolveRenderResource(typeNode) : null;
     resource.setParent(null);
     node.setParent(parentNode);
     for (const child of [...resource.children]) child.setParent(node);

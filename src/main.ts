@@ -68,7 +68,13 @@ async function runGameBoot() {
   el<HTMLButtonElement>('java-retry').disabled = true;
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
     () => gameOsd.getViewportSize(),
-    node => { if (source === assets && run === sequence) viewer?.upsertJavaRenderObject(node); },
+    node => {
+      if (source !== assets || run !== sequence || !viewer) return;
+      void viewer.upsertJavaRenderObject(node, source).catch(reason => {
+        if (source === assets && run === sequence)
+          appendJavaEvent({ level: 'error', message: `Java RenderRef ${node.alias}: ${reason instanceof Error ? reason.message : String(reason)}` });
+      });
+    },
     gameOsd, music ? new SoundJavaBridge(music) : undefined, undefined, gameVideo,
     settings => { if (source === assets && run === sequence) viewer?.setMapFog(settings); },
     settings => { if (source === assets && run === sequence) viewer?.setSceneLight(settings); },

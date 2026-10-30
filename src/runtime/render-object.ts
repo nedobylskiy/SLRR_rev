@@ -5,6 +5,7 @@ import type { OrientationState, Vector3State } from './game-object';
 export class RenderObject extends ResourceObject {
   position: Vector3State = { x: 0, y: 0, z: 0 };
   orientation: OrientationState = { y: 0, p: 0, r: 0 };
+  renderResource: { pack: string; id: number } | null = null;
 
   constructor(id: number, className: string, public renderType: ResourceObject | null,
     alias: string) {

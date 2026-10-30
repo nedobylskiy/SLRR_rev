@@ -43,6 +43,10 @@ export class Viewer {
   private model = new THREE.Group();
   private javaRenderRoot = new THREE.Group();
   private javaRenderNodes = new Map<number, THREE.Group>();
+  private javaRenderModels = new Map<number, THREE.Group>();
+  private javaRenderTypes = new Map<number, string>();
+  private javaRenderRequests = new Map<number, number>();
+  private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
   private collisionMeshes = new Map<EnginePart, number[]>();
@@ -99,7 +103,11 @@ export class Viewer {
     this.sunFlareRevision++;
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
     this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
-    this.javaRenderRoot.clear(); this.javaRenderNodes.clear();
+    this.javaRenderRoot.clear(); this.javaRenderNodes.clear(); this.javaRenderModels.clear();
+    this.javaRenderTypes.clear(); this.javaRenderRequests.clear();
+    for (const promise of this.javaRenderTemplates.values())
+      void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
+    this.javaRenderTemplates.clear();
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
@@ -116,15 +124,22 @@ export class Viewer {
     });
     this.model.clear();
   }
-  upsertJavaRenderObject(node: RenderObject): void {
+  async upsertJavaRenderObject(node: RenderObject, assets: Assets): Promise<void> {
+    const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
     if (node.resourceType !== 3) {
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
+      this.javaRenderModels.delete(node.id);
+      this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
       return;
     }
     if (!group) {
       group = new THREE.Group();
       this.javaRenderNodes.set(node.id, group);
+      const modelGroup = new THREE.Group();
+      modelGroup.name = `${node.alias} model`;
+      group.add(modelGroup);
+      this.javaRenderModels.set(node.id, modelGroup);
     }
     const parent = node.parent instanceof RenderObject
       ? this.javaRenderNodes.get(node.parent.id) ?? this.javaRenderRoot : this.javaRenderRoot;
@@ -133,6 +148,43 @@ export class Viewer {
     group.userData.resourceTypeId = node.typeId;
     group.position.set(node.position.x, node.position.y, node.position.z);
     group.rotation.set(node.orientation.p, node.orientation.y, node.orientation.r, 'YXZ');
+    const modelGroup = this.javaRenderModels.get(node.id)!;
+    modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
+    for (const child of node.children) if (child instanceof RenderObject) {
+      const childGroup = this.javaRenderNodes.get(child.id);
+      if (childGroup && childGroup.parent !== group) group.add(childGroup);
+    }
+
+    // A render instance is just a transform until its RPK resource is resolved and its SCX is loaded.
+    const identity = node.renderResource;
+    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}` : '';
+    if (this.javaRenderTypes.get(node.id) === key) return;
+    this.javaRenderTypes.set(node.id, key);
+    modelGroup.clear();
+    const request = (this.javaRenderRequests.get(node.id) ?? 0) + 1;
+    this.javaRenderRequests.set(node.id, request);
+    if (!identity) return;
+
+    let templatePromise = this.javaRenderTemplates.get(key);
+    if (!templatePromise) {
+      templatePromise = (async () => {
+        const model = await assets.modelForResource(identity.pack, identity.id);
+        const parsed = parseScx(await assets.read(model.path));
+        const template = new THREE.Group();
+        const warnings = await this.append(parsed, assets, model.textures, template, generation);
+        if (generation !== this.generation) this.disposeGroup(template);
+        if (warnings.length) console.warn(`Java RenderRef ${node.alias}: ${warnings.join('; ')}`);
+        return template;
+      })();
+      this.javaRenderTemplates.set(key, templatePromise);
+      void templatePromise.catch(() => {
+        if (this.javaRenderTemplates.get(key) === templatePromise) this.javaRenderTemplates.delete(key);
+      });
+    }
+    const template = await templatePromise;
+    if (generation !== this.generation || this.javaRenderRequests.get(node.id) !== request
+      || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
+    modelGroup.add(template.clone(true));
   }
   setMapFog(settings: MapFogSettings) {
     if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
@@ -591,6 +643,15 @@ export class Viewer {
     this.stopDriving = stop; focus();
     const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(1 / 240, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
     return Object.assign(stop, { rear: () => { if (crash instanceof Vehicle3D) crash.rearCrash(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, launch: (speed: number) => { crash?.reset(speed); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, chassisCrumple: (value: number) => { if (crash instanceof Vehicle3D) crash.setChassisCrumple(value); }, tireModel: (value: import('../engine/tire-model').TireModelSettings) => { if (crash instanceof Vehicle3D) crash.suspension.tireModel = structuredClone(value); }, engineTuning: (idle: number, redline: number) => { if (crash instanceof Vehicle3D) crash.suspension.mechanics?.setTuning(idle, redline); }, jump: () => { if (crash instanceof Vehicle3D) crash.jump(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, roll: () => { if (crash instanceof Vehicle3D) crash.roll(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, drop: () => { crash?.dropOnRoof(); tireEffects?.reset(); keys.clear(); last = undefined; focus(); }, breakEngine: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.block : undefined), breakStrut: () => breakPart(crash instanceof Vehicle3D ? crash.suspension.mechanics?.corners[0].strut : undefined), wireframe: (value: boolean) => panelViews.forEach(v => v.wireframe(value)), slowMotion: (value: boolean) => { timeScale = value ? 0.25 : 1; }, pause: (value: boolean) => { paused = value; } });
+  }
+  private disposeGroup(group: THREE.Group): void {
+    group.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.forEach(material => { material.map?.dispose(); material.dispose(); });
+    });
+    group.clear();
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
     const warnings = [...model.warnings];
