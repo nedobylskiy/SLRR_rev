@@ -31,7 +31,7 @@ export class Suspension3D {
   private movingParts: { part: EnginePart; base: Matrix4 }[][] = [[], [], [], []];
   readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
-  readonly wheels: (TireContactState & { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; originalTyre?: WheelRefState; rest: number; bump: number; droop: number; length: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number; omega: number })[];
+  readonly wheels: (TireContactState & { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; originalTyre?: WheelRefState; rest: number; bump: number; droop: number; length: number; supportHeight?: number; supportX: number; supportZ: number; frame: Matrix4; inverseOwn: Matrix4; steering: number; spin: number; omega: number })[];
   steer = 0;
   tireModel: TireModelSettings = structuredClone(DEFAULT_TIRE_MODEL);
   constructor(readonly root: EnginePart, readonly body: RigidBody3D, readonly terrain: Terrain) {
@@ -44,7 +44,7 @@ export class Suspension3D {
       const [rest, bump, droop] = wheel.spring ?? [0.29, 0.1, 0.05], frame = root.slotFrame(slot), center = new Vector3().setFromMatrixPosition(frame);
       const hardpoint = center.clone().add(new Vector3(0, rest, 0));
       const originalTyre = root.world.wheelRefs[slot.type! - 101];
-      return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius * (originalTyre ? originalTyre.radius / 0.32865 : 1), originalTyre, rest, bump, droop, length: rest, contact: false, force: 0, contactPoint: new Vector3(), contactNormal: new Vector3(0, 1, 0), forward: new Vector3(0, 0, -1), slipSpeed: 0, lateralSpeed: 0, surface: 'road' as const, frame, inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0, omega: 0, slip: 0 };
+      return { part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: wheel.radius * (originalTyre ? originalTyre.radius / 0.32865 : 1), originalTyre, rest, bump, droop, length: rest, supportX: 0, supportZ: 0, contact: false, force: 0, contactPoint: new Vector3(), contactNormal: new Vector3(0, 1, 0), forward: new Vector3(0, 0, -1), slipSpeed: 0, lateralSpeed: 0, surface: 'road' as const, frame, inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0, omega: 0, slip: 0 };
     });
     if (this.wheels.length !== 4) throw new Error('3D prototype requires four configured wheels');
     for (const part of root.children.values()) {
@@ -56,7 +56,7 @@ export class Suspension3D {
     const slot = cfg.slots.find(s => s.type === 11), part = slot && root.children.get(slot.id);
     if (slot && part) this.steering = { part, frame: slotMatrix(cfg, slot), inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert() };
   }
-  reset() { this.steer = 0; this.mechanics?.reset(); this.wheels.forEach(w => { w.spin = w.omega = w.slip = w.slipSpeed = w.lateralSpeed = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.hardpoint.copy(w.originalHardpoint); }); this.movingParts.flat().forEach(m => m.base.copy(m.part.local)); }
+  reset() { this.steer = 0; this.mechanics?.reset(); this.wheels.forEach(w => { w.spin = w.omega = w.slip = w.slipSpeed = w.lateralSpeed = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.supportHeight = undefined; w.supportX = w.supportZ = 0; w.hardpoint.copy(w.originalHardpoint); }); this.movingParts.flat().forEach(m => m.base.copy(m.part.local)); }
   /** A bent chassis moves the rest seat; the wheel travel is applied on top of it. */
   setMechanicalBase(part: EnginePart, local: Matrix4) {
     for (const corner of this.movingParts) {
@@ -88,9 +88,16 @@ export class Suspension3D {
       const k = this.mechanics ? this.mechanics.spring(index) : this.springMass * 9.81 / count / sag;
       const damping = this.mechanics ? this.mechanics.damper(index) : 2 * 0.75 * Math.sqrt(k * this.springMass / count);
       let length = w.rest + w.droop;
+      let groundHeight = this.terrain.height(hard.x, hard.z, hard.y);
       if (down.y < -0.05) {
-        let ray = (hard.y - this.terrain.height(hard.x, hard.z, hard.y) - w.radius) / -down.y;
-        for (let i = 0; i < 2; i++) { const p = hard.clone().addScaledVector(down, ray); ray = (hard.y - this.terrain.height(p.x, p.z, hard.y) - w.radius) / -down.y; }
+        if (groundHeight > -999) {
+          // Reject near-vertical upward jumps from overlapping map meshes. Real ramps remain
+          // supported, while a bad triangle cannot kick the wheel through its full travel.
+          const distance = w.supportHeight === undefined ? Infinity : Math.hypot(hard.x - w.supportX, hard.z - w.supportZ);
+          if (Number.isFinite(distance)) groundHeight = Math.min(groundHeight, w.supportHeight! + distance * 2.2 + 0.04);
+          w.supportHeight = groundHeight; w.supportX = hard.x; w.supportZ = hard.z;
+        }
+        const ray = (hard.y - groundHeight - w.radius) / -down.y;
         length = ray;
       }
       w.contact = w.part.parent === this.root && w.part.condition > 0 && w.mountCondition > 0 && support > 0 && length < w.rest + w.droop && down.y < -0.05; w.length = Math.max(w.rest - w.bump, Math.min(w.rest + w.droop, length)); w.force = w.slipSpeed = w.lateralSpeed = 0;
@@ -103,7 +110,7 @@ export class Suspension3D {
         const wheelSteer = ackermannSteerAngle(this.steer, w.center.x, this.root.definition.config.ackermann ?? 2, w.steering);
         const forward = new Vector3(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), wheelSteer).transformDirection(alignment).applyQuaternion(this.body.orientation); forward.addScaledVector(normal, -forward.dot(normal)).normalize();
         const side = new Vector3().crossVectors(forward, normal).normalize(), velocity = this.body.pointVelocity(patch), longitudinal = velocity.dot(forward);
-        w.contactPoint.set(patch.x, (terrainHit?.height ?? this.terrain.height(patch.x, patch.z, hard.y)) + 0.012, patch.z);
+        w.contactPoint.set(patch.x, groundHeight + 0.012, patch.z);
         w.contactNormal.copy(normal); w.forward.copy(forward); w.surface = terrainHit?.surface ?? 'road';
         w.lateralSpeed = velocity.dot(side);
         const drive = this.mechanics ? drivetrain!.torque[index] : Math.max(-1, Math.min(1, input.throttle)) * this.body.mass * 5 / count;

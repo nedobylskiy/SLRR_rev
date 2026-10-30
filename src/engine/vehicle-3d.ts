@@ -391,7 +391,10 @@ export class Vehicle3D extends CarCrashDemo {
             const speed = Math.max(0, -this.body.pointVelocity(p).dot(this.terrain.normal(p.x, p.z, p.y)));
             const j = this.body.contact(p, this.terrain.normal(p.x, p.z, p.y), height - p.y, 0.12);
             this.recordCollision(j, p, speed);
-            if (j.length() > 40) this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.08).toArray() as Triple, p.toArray() as Triple);
+            // Coarse chassis corners also resolve routine contact with uneven terrain.
+            // Only a genuinely hard landing should transfer that correction into body deformation.
+            if (speed > 8 && j.length() > this.body.mass * 0.5)
+              this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.02).toArray() as Triple, p.toArray() as Triple);
           }
           const wall = this.mapCollision?.contact(p, 0.2, false);
           if (wall) {
