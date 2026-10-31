@@ -311,6 +311,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
   const refresh = () => {
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
+      `Position (m) X ${state.position.x.toFixed(1)} · Y ${state.position.y.toFixed(1)} · Z ${state.position.z.toFixed(1)}`,
       `Speed ${state.speedKmh} km/h · RPM ${state.rpm} · gear ${state.gear < 0 ? 'R' : state.gear || 'N'}`,
       `Engine ${state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,
       `Wheels on ground ${state.wheelContacts}/4 · chassis ${state.chassis}% · block ${state.engineBlock}% · transmission avg ${state.transmission}% · parts ${state.parts.length}`,

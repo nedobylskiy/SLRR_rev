@@ -367,6 +367,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   // MOCK: Track.exit cleanup for map systems not yet hosted by the engine.
   native('java.util.resource.GroundRef', 'delTraffic', []);
   native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
+  // MOCK: Traffic simulation is not hosted yet. Let city setup finish; no traffic cars are spawned.
+  for (const countType of ['int', 'float']) jvm.natives.register('java.util.resource.GroundRef', 'addTrafficN',
+    ['GameRef', countType, 'float', 'float', 'float'], ({ args }) => {
+      report({ level: 'native', message: `Host mock: GroundRef.addTrafficN(${countType}) skipped ${Number(args[1].value)} traffic cars` });
+      return jv('int', 0);
+    });
   // MOCK: Water-plane rendering is pending; Track.animate still needs its water bounds calls.
   jvm.natives.register('java.util.resource.GroundRef', 'setWater', ['Vector3', 'Vector3', 'float', 'float'], voidValue);
   jvm.natives.register('java.util.resource.GroundRef', 'addWaterLimit', ['Vector3', 'Vector3'], voidValue);
