@@ -8,7 +8,10 @@ import type { DrivingInput } from '../engine/driving-demo';
 export interface JavaTrackScene {
   mapPack: string;
   chassis?: { pack: string; id: number };
+  /** True once Track.lockCar() has attached the Java car to this track's map. */
+  ready: boolean;
   start?: { x: number; y: number; z: number; yaw: number };
+  carPose?: { x: number; y: number; z: number; yaw: number };
 }
 
 /** Read the active map and car chosen by GameLogic rather than selecting demo assets in the host UI. */
@@ -25,6 +28,7 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
   const mapPack = normalizeResourcePackPath(mapNode.resourcePack);
   const player = field(jv('class', 'java.game.GameLogic'), 'player');
   const car = field(player, 'car');
+  const carNode = car?.value == null ? null : gameTypes.get(car);
   const chassis = field(car, 'chassis');
   const chassisNode = chassis?.value == null ? null : gameTypes.getResource(chassis);
   const chassisIdentity = chassisNode ? result.resolveResourceIdentity(chassisNode.typeId) : undefined;
@@ -38,7 +42,9 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
   const z = Number(field(position, 'z')?.value), yaw = Number(field(orientation, 'y')?.value);
   const start = position?.value != null && [x, y, z, yaw].every(Number.isFinite)
     ? { x, y, z, yaw } : undefined;
-  return { mapPack, chassis: chassisKey, start };
+  const carPose = carNode && [carNode.position.x, carNode.position.y, carNode.position.z, carNode.orientation.y].every(Number.isFinite)
+    ? { x: carNode.position.x, y: carNode.position.y, z: carNode.position.z, yaw: carNode.orientation.y } : undefined;
+  return { mapPack, chassis: chassisKey, start, carPose, ready: !!mapNode && carNode?.parent === mapNode };
 }
 
 /** Read the lists selected by the executed chassis Java, including kit branches. */

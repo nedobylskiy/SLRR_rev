@@ -225,6 +225,12 @@ export class GameTypeNative {
       this.nodes.delete(this.object(receiver));
       return voidValue();
     });
+    jvm.natives.register(resourceRef, 'deleteNative', [], () => {
+      // Browser handles are reclaimed by JavaScript. Keep tree removal explicit:
+      // ResourceRef.finalize() can run while another Java handle still refers to
+      // the same native node, and destroy() already performs the scene cleanup.
+      return voidValue();
+    });
 
     const gameType = 'java.lang.GameType';
     jvm.natives.register(gameType, '<init>', [], () => voidValue());

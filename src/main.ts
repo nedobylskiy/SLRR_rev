@@ -106,6 +106,7 @@ async function runGameBoot() {
     const javaControls = javaDrivingControls(result);
     let animating = false, animateFailed = false, loadingTrack = false;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
+    let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
       if (animating || animateFailed) return;
       const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
@@ -146,7 +147,7 @@ async function runGameBoot() {
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         if (built) {
           gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
-          const point = selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
+          const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);
           const wheelSlots = built.root.definition.config.slots.filter(slot => slot.type !== undefined && slot.type >= 101 && slot.type <= 104);
@@ -200,10 +201,23 @@ async function runGameBoot() {
       const selected = activeJavaTrack(result);
       if (!selected || !source.byPath.has(selected.mapPack)) {
         loadedTrackKey = '';
+        pendingTrackKey = '';
         return;
       }
-      const key = `${selected.mapPack}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}`;
+      const javaStart = selected.start
+        ? `${selected.start.x.toFixed(3)},${selected.start.y.toFixed(3)},${selected.start.z.toFixed(3)},${selected.start.yaw.toFixed(3)}` : '';
+      const key = `${selected.mapPack}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
       if (key === loadedTrackKey || loadingTrack) return;
+      // GameLogic.actualState changes before Track.enter() finishes. Wait until
+      // Java has attached the car to this map and its scripted pose has settled;
+      // otherwise host physics can start from a half-transition state.
+      if (!selected.ready || !selected.carPose) { pendingTrackKey = ''; return; }
+      const pose = [selected.carPose.x, selected.carPose.y, selected.carPose.z, selected.carPose.yaw]
+        .map(value => value.toFixed(3)).join(',');
+      if (pendingTrackKey !== key || pendingCarPose !== pose) {
+        pendingTrackKey = key; pendingCarPose = pose; pendingTrackSince = performance.now(); return;
+      }
+      if (performance.now() - pendingTrackSince < 450) return;
       loadingTrack = true;
       loadedTrackKey = key;
       void loadSelectedTrack(selected).finally(() => { loadingTrack = false; });

@@ -32,7 +32,10 @@ export class ThreadNative {
         void this.jvm.invokeAsync(target, 'run').catch(error => {
           if (!state.stopped) this.report(`Thread.run: ${error instanceof Error ? error.message : String(error)}`);
         }).finally(() => { state.alive = false; state.pending = undefined; this.live.delete(state); });
-      }, 0);
+      // A zero-delay timer can run as soon as an async Java/native call yields,
+      // before the Java caller has finished constructing fields consumed by
+      // run(). Give that caller one short scheduling window to finish setup.
+      }, 10);
       return nil();
     });
     jvm.natives.register(owner, 'stop', [], ({ receiver }) => {
