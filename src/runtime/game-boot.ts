@@ -39,7 +39,8 @@ import type { SoundJavaBridge } from '../audio/sound-java';
 import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
-export type BootResult = { threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
+export interface JavaCallTiming { calls: number; averageMs: number; peakMs: number; lastAt: number }
+export type BootResult = { javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -108,7 +109,18 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const match = /^cars\/.+\/scripts\/src\/([a-z_$][\w$]*)\.java$/i.exec(path);
     if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
   }
+  const javaProfile = new Map<string, JavaCallTiming>();
   const jvm = new SlrrJvm({
+    observeSourceCall: (owner, method) => {
+      if (!['animate', 'handleMessage', 'handleEvent', 'osdCommand'].includes(method)) return;
+      const start = performance.now(), key = `${owner.split('.').at(-1)}.${method}`;
+      return () => {
+        const now = performance.now(), ms = now - start, old = javaProfile.get(key);
+        javaProfile.set(key, { calls: (old?.calls ?? 0) + 1,
+          averageMs: old ? old.averageMs + (ms - old.averageMs) * 0.1 : ms,
+          peakMs: old && now - old.lastAt < 2000 ? Math.max(old.peakMs, ms) : ms, lastAt: now });
+      };
+    },
     allowNumericNarrowing: true,
     resolveResourceId: (resource, path) => {
       const sourcePath = normalizePath(path);
@@ -502,11 +514,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { threads, jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
+    return { javaProfile, threads, jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { threads, jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
+    return { javaProfile, threads, jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }

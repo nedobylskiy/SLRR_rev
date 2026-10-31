@@ -178,7 +178,8 @@ async function runGameBoot() {
                   result.gameTypes.updateTriggerContacts(car);
                 } });
             showMapDebugControls(map);
-            showVehicleDebug(built.root, session, () => { const t = result.threads.eventLoopTiming; return `JVM event cycle: ${t.lastMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / cycles ${t.cycles} (wall, excludes wait)`; });
+            showVehicleDebug(built.root, session, () => [...result.javaProfile].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 3)
+              .map(([name, t]) => `JVM ${name}: ${t.averageMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / calls ${t.calls} / ${((performance.now() - t.lastAt) / 1000).toFixed(1)}s ago (wall)`).join('\n'));
             driveHud.hidden = true;
             el('scene-help').textContent = 'Controls follow the game ControlSet · Right drag: rotate camera';
           } catch (reason) {

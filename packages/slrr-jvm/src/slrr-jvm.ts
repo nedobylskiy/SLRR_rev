@@ -6,6 +6,9 @@ import type { Expr as ParsedExpr, FloatMode, SourceClass as ParsedClass, Stmt as
 export interface ImportRequest { className: string; importedBy?: string }
 export interface SourceLocation { path: string; source?: string }
 export interface SlrrJvmOptions {
+  /** Optional source-call observer. The returned callback runs on completion,
+   * including errors. For async methods this measures wall time, including awaits. */
+  observeSourceCall?(className: string, methodName: string): (() => void) | undefined;
   /** Maps a Java class name to a source file; null means no source at this name. */
   resolveImport(request: ImportRequest): SourceLocation | null | Promise<SourceLocation | null>;
   /** Optional when resolveImport always supplies source. No filesystem is built into the package. */
@@ -649,16 +652,18 @@ export class SlrrJvm implements JavaHost {
   }
 
   private invokeSource(entry: LoadedClass, method: SourceClass['methods'][number], receiver: JavaValue, args: JavaValue[]): JavaValue {
+    const completed = this.options.observeSourceCall?.(entry.name, method.name);
     this.activeClasses.push(entry.name);
     try { return this.machine.invoke(method, receiver, args); }
-    finally { this.activeClasses.pop(); }
+    finally { this.activeClasses.pop(); completed?.(); }
   }
 
   private async invokeSourceAsync(entry: LoadedClass, method: SourceClass['methods'][number], receiver: JavaValue,
     args: JavaValue[]): Promise<JavaValue> {
+    const completed = this.options.observeSourceCall?.(entry.name, method.name);
     this.activeClasses.push(entry.name);
     try { return await this.machine.invokeAsync(method, receiver, args); }
-    finally { this.activeClasses.pop(); }
+    finally { this.activeClasses.pop(); completed?.(); }
   }
 
   private lineage(entry: LoadedClass): LoadedClass[] {
