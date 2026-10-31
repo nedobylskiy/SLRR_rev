@@ -43,6 +43,9 @@ function transmissionCondition(part?: EnginePart) {
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
 export class Viewer {
+  private frameDuration = 1000 / 60;
+  private previousFrame?: number;
+  get fps() { return Math.round(1000 / this.frameDuration); }
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
@@ -104,6 +107,9 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      if (this.previousFrame !== undefined && now > this.previousFrame)
+        this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
+      this.previousFrame = now;
       this.frame?.(now); this.controls.update(); this.mapStream?.update(this.mapStreamFocus ?? this.camera.position);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
@@ -415,11 +421,14 @@ export class Viewer {
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
           bounds.expandByPoint(vertex.fromArray(mesh.positions, i).multiplyScalar(0.01));
         if (!bounds.isEmpty()) {
-          const center = bounds.getCenter(new THREE.Vector3()), size = bounds.getSize(new THREE.Vector3());
-          stream.add([{ matrix: new THREE.Matrix4(), position: center, radius: Math.hypot(size.x, size.z) / 2 }], async () => {
+          const center = bounds.getCenter(new THREE.Vector3());
+          stream.add([{ matrix: new THREE.Matrix4(), position: center,
+            bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
+            if (!wanted()) return [];
             const template = new THREE.Group();
             const model = parseScx(await assets.read(resource.path));
-            warnings.push(...await this.append(model, assets, resource.textures, template, generation, true));
+            if (!wanted()) return [];
+            warnings.push(...await this.append(model, assets, resource.textures, template, generation, true, wanted));
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
             for (const part of parts) part.geometry.scale(0.01, 0.01, 0.01);
             return parts;
@@ -476,12 +485,13 @@ export class Viewer {
               const matrix = poseMatrix(instance.pose);
               return { matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix) };
             });
-            stream.add(placements, async () => {
+            stream.add(placements, async wanted => {
               const template = new THREE.Group();
               for (const render of renderModels) {
+                if (!wanted()) break;
                 const parsed = parseScx(await assets.read(render.model.path));
                 const component = new THREE.Group();
-                warnings.push(...await this.append(parsed, assets, render.model.textures, component, generation, true));
+                warnings.push(...await this.append(parsed, assets, render.model.textures, component, generation, true, wanted));
                 const componentMatrix = modelMatrix(new THREE.Matrix4(), render.pose);
                 // Adding a child to template removes it from component.children.
                 // Iterate a snapshot so no mesh is skipped during reparenting.
@@ -824,10 +834,11 @@ export class Viewer {
     material.depthWrite = false;
     material.needsUpdate = true;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false): Promise<string[]> {
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true): Promise<string[]> {
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     for (const part of model.meshes) {
+      if (!wanted()) break;
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
       geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));

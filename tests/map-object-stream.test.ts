@@ -3,6 +3,37 @@ import assert from 'node:assert/strict';
 import { BoxGeometry, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
 
+test('loading prioritizes nearby placements over resource-table order', () => {
+  const stream = new MapObjectStream(new Group(), 1000), started: number[] = [];
+  for (const x of [900, 800, 700, 600, 10, 20]) stream.add([
+    { matrix: new Matrix4(), position: new Vector3(x, 0, 0) },
+  ], () => { started.push(x); return new Promise(() => {}); });
+  stream.update(new Vector3());
+  assert.deepEqual(started, [10, 20, 600, 700]);
+  stream.dispose();
+});
+
+test('teleport makes old requests irrelevant and rectangular bounds exclude distant chunks', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100);
+  let wanted: (() => boolean) | undefined, finish!: (parts: Mesh[]) => void, distantLoads = 0;
+  stream.add([{ matrix: new Matrix4(), position: new Vector3() }], relevant => {
+    wanted = relevant; return new Promise(resolve => { finish = resolve; });
+  });
+  stream.add([{ matrix: new Matrix4(), position: new Vector3(),
+    bounds: { minX: 1000, maxX: 3000, minZ: 1000, maxZ: 1001 } }], async () => { distantLoads++; return []; });
+  stream.update(new Vector3());
+  assert.equal(wanted!(), true);
+  assert.equal(distantLoads, 0);
+  stream.update(new Vector3(-500, 0, 0));
+  assert.equal(wanted!(), false);
+  let disposed = false;
+  const geometry = new BoxGeometry(); geometry.addEventListener('dispose', () => { disposed = true; });
+  finish([new Mesh(geometry, new MeshBasicMaterial())]); await Promise.resolve();
+  assert.equal(parent.children.length, 0);
+  assert.equal(disposed, true);
+  stream.dispose();
+});
+
 test('unused model resources are disposed and loaded again on return', async context => {
   let now = 0, loads = 0, released = 0;
   context.mock.method(performance, 'now', () => now);

@@ -1,9 +1,15 @@
 import { Group, InstancedMesh, Matrix4, Mesh, Texture, Vector3 } from 'three';
 
-export interface StreamPlacement { matrix: Matrix4; position: Vector3; radius?: number }
+export interface StreamPlacement { matrix: Matrix4; position: Vector3; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+function distanceTo(placement: StreamPlacement, camera: Vector3) {
+  const b = placement.bounds;
+  if (b) return Math.hypot(Math.max(b.minX - camera.x, 0, camera.x - b.maxX), Math.max(b.minZ - camera.z, 0, camera.z - b.maxZ));
+  return Math.max(0, Math.hypot(placement.position.x - camera.x, placement.position.z - camera.z) - (placement.radius ?? 0));
+}
 interface StreamType {
   placements: StreamPlacement[];
-  load: () => Promise<Mesh[]>;
+  load: (wanted: () => boolean) => Promise<Mesh[]>;
+  priority: number;
   meshes?: InstancedMesh[];
   loading: boolean;
   failed: boolean;
@@ -26,8 +32,8 @@ export class MapObjectStream {
     this.distance = value; this.dirty = true;
   }
 
-  add(placements: StreamPlacement[], load: () => Promise<Mesh[]>) {
-    this.types.push({ placements, load, loading: false, failed: false, active: [], slots: new Map(), pending: [] });
+  add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
+    this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [] });
     this.dirty = true;
   }
 
@@ -36,23 +42,25 @@ export class MapObjectStream {
     const cell = `${Math.floor(camera.x / 25)},${Math.floor(camera.z / 25)}`;
     if (cell !== this.lastCell || this.dirty) {
       this.lastCell = cell; this.dirty = false;
-      let loadsInFlight = this.types.filter(type => type.loading).length;
       for (const type of this.types) {
         for (let slot = type.active.length - 1; slot >= 0; slot--) {
-          const index = type.active[slot], p = type.placements[index].position;
-          if ((p.x - camera.x) ** 2 + (p.z - camera.z) ** 2 > (this.distance + 100 + (type.placements[index].radius ?? 0)) ** 2) this.remove(type, slot);
+          const index = type.active[slot];
+          if (distanceTo(type.placements[index], camera) > this.distance + 100) this.remove(type, slot);
         }
         const nearby: { index: number; distance: number }[] = [];
         for (let index = 0; index < type.placements.length; index++) {
-          const p = type.placements[index].position, distance = (p.x - camera.x) ** 2 + (p.z - camera.z) ** 2;
-          if (distance <= (this.distance + (type.placements[index].radius ?? 0)) ** 2 && !type.slots.has(index)) nearby.push({ index, distance });
+          const distance = distanceTo(type.placements[index], camera);
+          if (distance <= this.distance && !type.slots.has(index)) nearby.push({ index, distance });
         }
         nearby.sort((a, b) => a.distance - b.distance);
         type.pending = nearby.map(v => v.index);
-        if (nearby.length && !type.meshes && !type.loading && !type.failed && loadsInFlight < 4) {
-          this.load(type); loadsInFlight++;
-        }
+        type.priority = nearby[0]?.distance ?? Infinity;
       }
+    }
+    const ordered = [...this.types].sort((a, b) => a.priority - b.priority);
+    let available = 4 - this.types.filter(type => type.loading).length;
+    for (const type of ordered) if (available > 0 && type.pending.length && !type.meshes && !type.loading && !type.failed) {
+      this.load(type); available--;
     }
     for (const type of this.types) {
       if (type.active.length || type.pending.length || type.loading) type.unusedSince = undefined;
@@ -62,7 +70,7 @@ export class MapObjectStream {
       }
     }
     let remaining = this.budget;
-    for (const type of this.types) {
+    for (const type of ordered) {
       if (!type.meshes) continue;
       while (remaining && type.pending.length) {
         const index = type.pending.shift()!;
@@ -88,11 +96,14 @@ export class MapObjectStream {
 
   private load(type: StreamType) {
     type.loading = true;
-    void type.load().then(parts => {
-      if (this.disposed) {
+    const wanted = () => !this.disposed && (type.pending.length > 0 || type.active.length > 0);
+    void type.load(wanted).then(parts => {
+      type.loading = false;
+      if (!wanted()) {
         for (const part of parts) { part.geometry.dispose(); const materials = Array.isArray(part.material) ? part.material : [part.material]; materials.forEach(material => { const map = 'map' in material ? material.map : undefined; if (map instanceof Texture) map.dispose(); material.dispose(); }); }
         return;
       }
+      if (!parts.length) { this.dirty = true; return; }
       type.meshes = parts.map(part => {
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
         mesh.name = part.name; mesh.count = 0; mesh.frustumCulled = false; this.parent.add(mesh); return mesh;
