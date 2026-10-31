@@ -3,16 +3,17 @@ export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
 export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
+export interface CfgCamera extends CfgPose { fov?: number }
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose }[]; maxSteer?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
 /** Ordered CFG subset. Unknown commands remain visible; attach is compatibility, not an instance. */
 export function parsePartConfig(source: string): PartConfig {
-  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], renders: [], links: [], unknown: [] };
+  const result: PartConfig = { slots: [], stock: [], bodies: [], wheels: [], cameras: [], renders: [], links: [], unknown: [] };
   let slot: CfgSlot | undefined, deformable: number | undefined, render: number | undefined;
   let renderPose: CfgPose | undefined, deformablePose: CfgPose | undefined, radius: number | undefined;
   let spring: Triple | undefined;
@@ -31,7 +32,6 @@ export function parsePartConfig(source: string): PartConfig {
     switch (command.toLowerCase()) {
       case 'slot':
         slot = { ...pose(), id: integer(6), attach: [], compatible: [] };
-        if (result.slots.some(s => s.id === slot!.id)) throw new Error(`CFG line ${line}: duplicate slot ${slot.id}`);
         result.slots.push(slot); break;
       case 'compatible':
       case 'attach':
@@ -51,6 +51,10 @@ export function parsePartConfig(source: string): PartConfig {
         if (render === undefined) { render = resource; renderPose = poseValue; }
         break;
       }
+      case 'lod':
+        if (result.renders.length) result.renders.at(-1)!.lod = [integer(0), integer(1)];
+        else result.unknown.push({ line, command, args });
+        break;
       case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;
       case 'mesh': result.mesh = rid(); break;
       case 'texture': result.texture = rid(); break;
@@ -67,8 +71,16 @@ export function parsePartConfig(source: string): PartConfig {
         result.unknown.push({ line, command, args }); break;
       case 'spring': spring = [number(0), number(1), number(2)]; if (spring.some(v => v <= 0)) throw fail(); break;
       case 'wheel': result.wheels.push({ ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }); break;
+      case 'camera': result.cameras.push({ ...pose(), fov: args[6] === undefined ? undefined : number(6) }); break;
       case 'steering': result.steering = pose(); break;
-      case 'maxsteer': result.maxSteer = number(0); if (result.maxSteer <= 0) throw fail(); break;
+      case 'maxsteer':
+        result.maxSteer = number(0);
+        if (result.maxSteer <= 0) throw fail();
+        if (args.length > 1) {
+          result.ackermann = number(1);
+          if (result.ackermann < 0) throw fail();
+        }
+        break;
       default: result.unknown.push({ line, command, args });
     }
   }
@@ -76,4 +88,10 @@ export function parsePartConfig(source: string): PartConfig {
   result.render = deformable ?? render;
   result.renderPose = deformable === undefined ? renderPose : deformablePose;
   return result;
+}
+
+/** Only ungrouped render entries are simultaneous models; LOD entries replace one another. */
+export function secondaryRenders(config: PartConfig) {
+  return config.render === config.renders[0]?.resource
+    ? config.renders.slice(1).filter(render => render.lod === undefined) : [];
 }

@@ -15,6 +15,7 @@
     "audit:map-physics": "tsx tools/audit-map-physics.ts",
     "audit:map-lighting": "tsx tools/audit-map-lighting.ts",
     "audit:lightmap-usage": "tsx tools/audit-lightmap-usage.ts",
+    "audit:java-math": "tsx tools/audit-java-math.ts",
     "verify:map-objects": "tsx tools/verify-map-objects.ts",
     "verify:game": "tsx tools/verify-game.ts",
     "verify:saves": "tsx tools/verify-saves.ts",
@@ -23,6 +24,8 @@
     "verify:parts": "tsx tools/verify-parts.ts",
     "verify:world": "tsx tools/verify-world.ts",
     "verify:gameplay": "tsx tools/verify-gameplay.ts",
+    "verify:java-boot": "tsx tools/verify-java-boot.ts",
+    "decompile:system": "tsx tools/decompile-system-sources.ts",
     "verify:mounts": "tsx tools/verify-mounts.ts",
     "verify:hood": "tsx tools/verify-hood.ts",
     "verify:crash": "tsx tools/verify-crash.ts",
@@ -34,6 +37,7 @@
   },
   "dependencies": {
     "slrr-jvm": "file:packages/slrr-jvm",
+    "slrr-jvm-decompiler": "github:nedobylskiy/SLRR-JVM-decompiler#54f953d",
     "three": "^0.180.0"
   },
   "devDependencies": {

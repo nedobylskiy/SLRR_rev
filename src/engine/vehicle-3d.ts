@@ -51,6 +51,7 @@ function basis(panel: DeformablePanel) {
 /** Full rigid chassis motion with ray suspension and separate deformable or rigid detachable parts. */
 export class Vehicle3D extends CarCrashDemo {
   readonly body: RigidBody3D;
+  collisionCue?: { speed: number; impulse: number; position: Vector3 };
   private spawn?: { position: Vector3; yaw: number };
   readonly suspension: Suspension3D;
   readonly soft = new Map<EnginePart, SoftBodyPart>();
@@ -75,6 +76,12 @@ export class Vehicle3D extends CarCrashDemo {
   setChassisCrumple(value: number) {
     if (!Number.isFinite(value) || value < 0.5 || value > 1.5) throw new Error('Invalid chassis crumple multiplier');
     this.chassisCrumple = value;
+  }
+  /** Condition for the OSD body silhouette, including chassis and permanent deformation. */
+  get osdDamageCondition() {
+    const chassis = this.soft.get(this.root);
+    const deformation = chassis ? 1 - chassis.panel.permanentDamage : 1;
+    return Math.max(0, Math.min(1, this.root.condition, deformation));
   }
   private configureStructure() {
     this.structuralMounts.clear(); this.wheelMounts = [];
@@ -135,10 +142,12 @@ export class Vehicle3D extends CarCrashDemo {
       if (!kind || !this.connected(part)) continue;
       const position = new Vector3().setFromMatrixPosition(part.matrix()).applyMatrix4(delta);
       const distance = Math.hypot(position.x - point.x, position.z - point.z);
-      const reach = kind === 'engine' ? 0.85 : 0.65;
-      const weight = Math.exp(-((distance / reach) ** 2)) * (kind === 'engine' ? 0.25 : 1);
-      const threshold = kind === 'engine' ? 180000 : kind === 'suspension' ? 55000 : 40000;
-      part.condition = Math.max(0, Math.min(part.condition, 1 - energy * weight / threshold));
+      const reach = kind === 'engine' ? 1.1 : 0.65;
+      const weight = Math.exp(-((distance / reach) ** 2)) * (kind === 'engine' ? 0.5 : 1);
+      const threshold = kind === 'engine' ? 120000 : kind === 'suspension' ? 55000 : 40000;
+      // Component damage accumulates across impacts; taking only the worst single hit
+      // kept the engine block nearly pristine even after the chassis had failed.
+      part.condition = Math.max(0, part.condition - energy * weight / threshold);
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
@@ -214,6 +223,7 @@ export class Vehicle3D extends CarCrashDemo {
   }
   override reset(speed = 0) {
     super.reset(speed);
+    this.collisionCue = undefined;
     if (!this.body) return;
     if (this.spawn) {
       this.driving.position.x = this.spawn.position.x;
@@ -359,9 +369,16 @@ export class Vehicle3D extends CarCrashDemo {
     point.setComponent(axis, point.getComponent(axis) + guard.sign * depth).applyMatrix4(guard.frame).toArray(positions, offset);
     return { normal: guard.normal.toArray() as Triple, point: point.toArray() as Triple, velocity: this.body.pointVelocity(point).toArray() as Triple, restitution: 0, friction: 0.5, impulse: (impulse: Triple, at: Triple) => this.applyImpulse(new Vector3(...impulse).negate(), new Vector3(...at)) };
   }
+  private recordCollision(impulse: Vector3 | number, position: Vector3, speed: number) {
+    const magnitude = typeof impulse === 'number' ? impulse : impulse.length();
+    if (speed < 1.6 || magnitude < 180) return;
+    if (!this.collisionCue || speed * magnitude > this.collisionCue.speed * this.collisionCue.impulse)
+      this.collisionCue = { speed, impulse: magnitude, position: position.clone() };
+  }
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');
     if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
+    this.collisionCue = undefined;
     return this.clock.advance(seconds, tick => {
       const dt = this.clock.dt, previous = this.root.matrix();
       let detached = this.releaseFailedWheels();
@@ -371,16 +388,25 @@ export class Vehicle3D extends CarCrashDemo {
       for (let iteration = 0; iteration < 4; iteration++) {
         for (const p of this.body.corners()) {
           const height = this.terrain.height(p.x, p.z, p.y); if (p.y < height) {
+            const speed = Math.max(0, -this.body.pointVelocity(p).dot(this.terrain.normal(p.x, p.z, p.y)));
             const j = this.body.contact(p, this.terrain.normal(p.x, p.z, p.y), height - p.y, 0.12);
-            if (j.length() > 40) this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.08).toArray() as Triple, p.toArray() as Triple);
+            this.recordCollision(j, p, speed);
+            // Coarse chassis corners also resolve routine contact with uneven terrain.
+            // Only a genuinely hard landing should transfer that correction into body deformation.
+            if (speed > 8 && j.length() > this.body.mass * 0.5)
+              this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.02).toArray() as Triple, p.toArray() as Triple);
           }
           const wall = this.mapCollision?.contact(p, 0.2, false);
-          if (wall) this.body.contact(wall.point, wall.normal, wall.depth, 0.18);
+          if (wall) {
+            const speed = Math.max(0, -this.body.pointVelocity(wall.point).dot(wall.normal));
+            this.recordCollision(this.body.contact(wall.point, wall.normal, wall.depth, 0.18), wall.point, speed);
+          }
         }
         const mapBody = this.mapCollision?.bodyContact(this.body);
         if (mapBody) {
           const speed = Math.max(0, -this.body.pointVelocity(mapBody.point).dot(mapBody.normal));
           const j = this.body.contact(mapBody.point, mapBody.normal, mapBody.depth, 0.22);
+          this.recordCollision(j, mapBody.point, speed);
           this.impactSpeed = Math.max(this.impactSpeed, speed);
           this.reboundSpeed = Math.max(this.reboundSpeed, this.body.velocity.length());
           this.damageImpact(j, mapBody.point, mapBody.bounds, predicted, previous);
@@ -388,6 +414,7 @@ export class Vehicle3D extends CarCrashDemo {
         const c = boxContact(this.body, obstacle);
         if (c) {
           const speed = Math.max(0, -this.body.pointVelocity(c.point).dot(c.normal)), j = this.body.contact(c.point, c.normal, c.depth, 0.22);
+          this.recordCollision(j, c.point, speed);
           this.impactSpeed = Math.max(this.impactSpeed, speed); this.reboundSpeed = Math.max(this.reboundSpeed, this.body.velocity.length());
           this.damageImpact(j, c.point, obstacle, predicted, previous);
         }
@@ -415,6 +442,10 @@ export class Vehicle3D extends CarCrashDemo {
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }
         s.panel.advance(dt); if (attached) this.surfaceDirty = true;
+        if (attached && s.panel.collisionImpact) {
+          const hit = s.panel.collisionImpact;
+          this.recordCollision(Math.max(hit.impulse, this.body.mass * hit.speed * 0.25), new Vector3(...hit.point), hit.speed);
+        }
         if (tick % 24 === 0) {
           const strain = s.panel.beams.reduce((sum, b) => sum + Math.abs(b.rest - b.initial) / b.initial, 0) / s.panel.beams.length;
           s.part.condition = Math.min(s.part.condition, Math.max(0, 1 - strain / (s.root ? 0.3 : 0.4)));

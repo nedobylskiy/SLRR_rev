@@ -135,8 +135,12 @@ test('a 15 km/h impact marks the chassis without tearing off healthy body panels
   for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
   demo.register(root, shell, []);
   demo.reset(15 / 3.6);
-  for (let i = 0; i < 2 * 240; i++) demo.advance(1 / 240, neutral);
+  let collisionCueSeen = false;
+  let firstCue = -1, firstPanel = -1;
+  for (let i = 0; i < 2 * 240; i++) { demo.advance(1 / 240, neutral); collisionCueSeen ||= !!demo.collisionCue; if (firstCue < 0 && demo.collisionCue) firstCue = i; if (firstPanel < 0 && [...demo.soft.values()].some(s => s.panel.contacts > 0)) firstPanel = i; }
+  assert.equal(firstCue, firstPanel, 'collision audio starts with the first panel contact');
   assert.ok(demo.impactSpeed > 3, 'the chassis reached the obstacle');
+  assert.ok(collisionCueSeen, 'a solid contact emits an audio collision cue');
   assert.ok(root.condition < 1 && root.condition > 0.9, `chassis condition ${root.condition}`);
   assert.ok(hood.condition > 0.6, `hood condition ${hood.condition}; mounts ${demo.panel.mounts.map(m => `${m.broken}:${Math.round(m.force)}`).join(',')}; root ${root.condition}; door ${door.condition}`);
   assert.ok(door.condition > 0.6, `door condition ${door.condition}`);

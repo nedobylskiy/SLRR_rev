@@ -1,0 +1,9 @@
+# Virtual filesystem for Java File
+
+The interpreted `java.io.File` keeps synchronous game-style calls. The host loads a `KeyValue` backend into a `VirtualFileSystem` before starting `Init.java`, then performs each Java read or write against that in-memory view. The default browser backend is IndexedDB. `MemoryKeyValue` supports tests and environments without IndexedDB. A different backend can implement `entries()` and `set()` without changing the Java file implementation.
+
+Installation files are mounted read-only. Written files and deletions form a persistent overlay; an overlay entry wins over an installed file with the same normalized path. Paths are case-insensitive, use either slash style, and reject absolute paths and `..`. At boot, installed files directly under `save/controls/` are mounted so the original active control set is available. Additional installation paths can be mounted as Java startup reaches them.
+
+`File.open(MODE_READ)` accepts SDAT files and places the stream at the Java payload after the header. `File.open(MODE_WRITE)` starts a new type 2 SDAT file; `close()` finishes its trailer and writes it to the overlay. Primitive `int`, `float`, and null-terminated legacy strings use the existing `MemoryFile` encoding. Static `exists`, `copy`, `move`, and `delete` operate on the same virtual paths. Successful mutations are visible immediately in the in-memory view; `VirtualFileSystem.flush()` waits for IndexedDB writes to finish. The original Java API has synchronous `close()`, so the browser persists writes asynchronously after the in-memory change.
+
+SDAT resource remounting is still pending. A nonzero `ResourceRef` write or a `readResID()` from a file with remount records raises an explicit error rather than creating a save with invalid resource IDs. Ordinary control files do not use resource references.

@@ -24,6 +24,12 @@ export function tireSmoke(contact: TireContactState): number {
   return Math.max(0, Math.min(1, (Math.abs(contact.slipSpeed) - 3.5) / 3));
 }
 
+/** Fast scrub leaves a lighter deposit than a slow burnout at the same slip. */
+export function skidMarkOpacity(speedMps: number): number {
+  const t = Math.max(0, Math.min(1, (speedMps - 10) / 20));
+  return 1 - 0.68 * t;
+}
+
 class MarkBuffer {
   readonly geometry = new THREE.BufferGeometry();
   readonly mesh: THREE.Mesh;
@@ -119,10 +125,10 @@ export class TireEffects {
     texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.ClampToEdgeWrapping;
     this.marks.get('dirt')!.setTexture(texture);
   }
-  private addMark(i: number, wheel: TireContactState, a: THREE.Vector3, b: THREE.Vector3, width: number, stationary = false) {
+  private addMark(i: number, wheel: TireContactState, a: THREE.Vector3, b: THREE.Vector3, width: number, opacity: number, stationary = false) {
     const start = this.markU[i] * 0.8, end = start + a.distanceTo(b);
-    const alpha0 = stationary ? Math.max(0.3, smoothFade(start)) : smoothFade(start);
-    const alpha1 = stationary ? Math.max(0.42, smoothFade(end)) : smoothFade(end);
+    const alpha0 = (stationary ? Math.max(0.3, smoothFade(start)) : smoothFade(start)) * opacity;
+    const alpha1 = (stationary ? Math.max(0.42, smoothFade(end)) : smoothFade(end)) * opacity;
     const segment = this.marks.get(wheel.surface)!.add(a, b, wheel.contactNormal, wheel.forward, width, this.markU[i], end / 0.8, alpha0, alpha1);
     if (segment) this.markSegments[i].push({ surface: wheel.surface, ...segment, start, end, alpha0, alpha1 });
     this.markU[i] = end / 0.8;
@@ -139,7 +145,7 @@ export class TireEffects {
     this.previous[i] = undefined;
     this.markTimer[i] = this.markU[i] = 0;
   }
-  update(dt: number, wheels: readonly TireContactState[]) {
+  update(dt: number, wheels: readonly TireContactState[], vehicleSpeedMps = 0) {
     if (dt <= 0) return;
     for (const particle of this.smoke) {
       particle.age += dt;
@@ -150,6 +156,7 @@ export class TireEffects {
     this.smoke = this.smoke.filter(particle => particle.age < particle.life);
     for (let i = 0; i < wheels.length; i++) {
       const wheel = wheels[i], strength = tireScrub(wheel), smokeStrength = tireSmoke(wheel);
+      const markOpacity = skidMarkOpacity(Math.abs(vehicleSpeedMps));
       this.markHold[i] = strength > 0 ? 0.22 : Math.max(0, this.markHold[i] - dt);
       if (!wheel.contact || !this.markHold[i] || (this.markSurface[i] && this.markSurface[i] !== wheel.surface)) this.finishMark(i);
       const point = wheel.contactPoint, prior = this.previous[i];
@@ -163,13 +170,13 @@ export class TireEffects {
         if (distance > 0.075) {
           for (let j = 1; j <= steps; j++) {
             const a = prior.clone().lerp(point, (j - 1) / steps), b = prior.clone().lerp(point, j / steps);
-            this.addMark(i, wheel, a, b, 0.15 + strength * 0.055);
+            this.addMark(i, wheel, a, b, 0.15 + strength * 0.055, markOpacity);
           }
           this.previous[i] = point.clone();
         } else if (strength > 0 && this.markTimer[i] <= 0) {
           // A brake-held burnout keeps the contact point still while the tread scrubs the ground.
           const half = wheel.forward.clone().multiplyScalar(0.07);
-          this.addMark(i, wheel, point.clone().sub(half), point.clone().add(half), 0.15 + strength * 0.055, true);
+          this.addMark(i, wheel, point.clone().sub(half), point.clone().add(half), 0.15 + strength * 0.055, markOpacity, true);
           this.markTimer[i] = 0.14;
         }
       }

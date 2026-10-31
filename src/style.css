@@ -253,9 +253,26 @@ nav button.active{
   width:100%;
   height:100%
 }
-.track-window-button[hidden]{display:none}
-body.track-drive-expanded{overflow:hidden}
-.workspace.track-drive-expanded{
+.java-gauges{pointer-events:none}
+.java-gauge-atlas{position:absolute;inset:0;width:100%;height:100%;object-fit:fill}
+.java-gauge-pin{position:absolute;width:5.49%;height:24.1%;transform-origin:50% 94%;object-fit:fill}
+.java-gauge-readout{position:absolute;transform:translate(-50%,-50%);font-family:Arial,sans-serif;font-weight:700;color:#10251b;line-height:1;white-space:nowrap;font-size:clamp(10px,1.5vw,28px)}
+.java-gauge-speed{font-size:clamp(11px,1.8vw,32px)}
+.java-gauge-gear{font-size:clamp(10px,1.4vw,25px)}
+.java-gauge-mileage{font-size:clamp(9px,1.2vw,21px)}
+.java-gauge-damage{display:block;object-fit:contain;image-rendering:auto}
+.viewport-expand-button,.viewport-window-button{
+  position:absolute;
+  top:12px;
+  right:12px;
+  z-index:6;
+  background:#0b1014d9;
+  border-color:#8097a3;
+  color:#f3f7f9
+}
+.viewport-expand-button[hidden],.viewport-window-button[hidden]{display:none}
+body.viewport-expanded{overflow:hidden}
+.workspace.viewport-expanded{
   position:fixed;
   inset:0;
   z-index:40;
@@ -263,10 +280,10 @@ body.track-drive-expanded{overflow:hidden}
   height:100dvh;
   background:#0b1014
 }
-.workspace.track-drive-expanded .toolbar,
-.workspace.track-drive-expanded .detail{display:none}
-.workspace.track-drive-expanded #viewport{min-height:0}
-.workspace.track-drive-expanded .scene-help{
+.workspace.viewport-expanded .toolbar,
+.workspace.viewport-expanded .detail{display:none}
+.workspace.viewport-expanded #viewport{min-height:0}
+.workspace.viewport-expanded .scene-help{
   position:absolute;
   bottom:0;
   left:50%;
@@ -279,7 +296,7 @@ body.track-drive-expanded{overflow:hidden}
   background:#0b1014b8;
   color:#d1d9df
 }
-.workspace.track-drive-expanded .map-debug-panel{
+.workspace.viewport-expanded .map-debug-panel{
   position:absolute;
   bottom:44px;
   right:12px;
@@ -287,33 +304,61 @@ body.track-drive-expanded{overflow:hidden}
   width:min(320px,calc(100% - 24px));
   background:#101a20de
 }
-.workspace.track-drive-expanded .track-window-button{
+.workspace.viewport-expanded .vehicle-debug-panel{
   position:absolute;
   top:12px;
+  left:12px;
+  z-index:4;
+  width:min(390px,calc(100% - 24px));
+  max-height:55vh;
+  overflow:auto;
+  background:#101a20e8
+}
+.workspace.viewport-expanded .tire-tuning-panel{
+  position:absolute;
+  bottom:44px;
+  left:12px;
+  z-index:4;
+  width:min(340px,calc(100% - 24px));
+  max-height:calc(100dvh - 72px);
+  overflow:auto;
+  background:#101a20e8
+}
+.workspace.viewport-expanded .engine-tuning-panel{
+  position:absolute;
+  top:58px;
   right:12px;
-  z-index:5;
-  background:#0b1014d9;
-  border-color:#8097a3;
-  color:#f3f7f9
+  z-index:4;
+  width:min(340px,calc(100% - 24px));
+  background:#101a20e8
+}
+.workspace.viewport-expanded .viewport-window-button{
+  z-index:6
 }
 #viewport[hidden],#inspector[hidden]{
   display:none
 }
 .osd-layer{position:fixed;inset:0;z-index:50;background:#111;overflow:hidden}
-body:has(.osd-layer){overflow:hidden}
+.osd-layer-game{position:absolute;inset:0;z-index:4;background:transparent;pointer-events:none}
+.osd-layer-game .osd-stage{background:transparent}
+body:has(.osd-layer:not(.osd-layer-game)){overflow:hidden}
 .osd-layer[hidden],.osd-item[hidden]{display:none}
 .osd-stage{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);overflow:hidden;background:#d4d4d4}
 .osd-stage:focus{outline:none}
-.osd-background-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:9;pointer-events:none}
+.osd-background-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;pointer-events:none}
 .osd-item{position:absolute;display:block}
 .osd-rectangle{pointer-events:none}
 .osd-rectangle img,.osd-button img{display:block;width:100%;height:100%;object-fit:fill}
 .osd-button{padding:0;border:0;border-radius:0;background:transparent;cursor:pointer}
 .osd-button:hover,.osd-button:focus-visible{transform:scale(1.08);filter:brightness(1.12);outline:0}
+.osd-hit-target{padding:0;border:0;background:transparent;opacity:0;pointer-events:auto;cursor:pointer}
 .osd-menu-icon:hover,.osd-menu-icon:focus-visible{transform:none;filter:brightness(1.08)}
-.osd-text{white-space:nowrap;color:#171717;font:600 clamp(12px,1.7vw,24px)/1.2 Arial,sans-serif;transform:translateY(-50%);pointer-events:none}
-.osd-align-center{transform:translate(-50%,-50%)}
-.osd-align-right{transform:translate(-100%,-50%)}
+/* Java Text coordinates locate the top of the glyph line, not its vertical center. */
+.osd-text{white-space:nowrap;color:#171717;font:600 clamp(12px,1.7vw,24px)/1.2 Arial,sans-serif;pointer-events:none}
+.osd-image-button-label{margin-top:clamp(7px,1.35vh,15px)}
+.osd-fade-overlay{left:0!important;top:0!important;width:100%!important;height:100%!important;transform:none!important}
+.osd-align-center{transform:translateX(-50%)}
+.osd-align-right{transform:translateX(-100%)}
 .osd-menu-title{color:#986b6b;font-size:clamp(16px,1.8vw,30px);font-weight:500;letter-spacing:.075em}
 .osd-menu-version{color:#111;font-size:clamp(12px,1.25vw,22px);font-weight:500}
 .osd-menu-message{font-size:clamp(11px,1.1vw,17px);color:#5c2929}
@@ -469,6 +514,49 @@ button:disabled{opacity:.45;cursor:default}
  .map-debug-options { display: flex; flex-wrap: wrap; gap: 10px 18px; padding: 10px 0 2px; }
  .map-debug-options label { display: flex; align-items: center; gap: 6px; }
  .map-debug-options input { width: auto; accent-color: #76e5c4; }
+ .map-debug-data { margin: 8px 0 0; color: #d2e1e6; font: 11px/1.55 Consolas, monospace; white-space: pre-wrap; }
+ .vehicle-debug-panel { padding: 8px 12px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .vehicle-debug-panel[hidden] { display: none; }
+ .vehicle-debug-panel summary { cursor: pointer; color: #76e5c4; }
+ .vehicle-debug-telemetry, .vehicle-debug-tree { margin: 8px 0 0; color: #d2e1e6; font: 11px/1.55 Consolas, monospace; white-space: pre; }
+ .vehicle-debug-tree { max-height: 24vh; overflow: auto; color: #a9d9c8; }
+ .tire-tuning-panel { padding: 8px 18px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .tire-tuning-panel[hidden] { display: none; }
+ .tire-tuning-panel summary { cursor: pointer; color: #76e5c4; }
+ .tire-tuning-controls { display: grid; gap: 8px; padding: 12px 0 4px; }
+ .tire-tuning-controls strong { margin-top: 5px; color: #f3f7f9; }
+ .tire-tuning-controls label { display: grid; grid-template-columns: 110px 1fr 38px; align-items: center; gap: 8px; }
+ .tire-tuning-controls label:first-child { display: flex; gap: 8px; }
+ .tire-tuning-controls input[type="range"] { width: 100%; accent-color: #76e5c4; }
+ .tire-tuning-controls output { font-variant-numeric: tabular-nums; text-align: right; }
+ .tire-tuning-controls button { justify-self: start; }
+ .engine-tuning-panel { padding: 8px 18px; background: #182329; color: #b9d4de; font-size: 12px; }
+ .engine-tuning-panel[hidden] { display: none; }
+ .engine-tuning-panel summary { cursor: pointer; color: #76e5c4; }
+ .engine-tuning-controls { display: grid; gap: 10px; padding: 12px 0 4px; }
+ .engine-tuning-controls label { display: grid; grid-template-columns: 55px 1fr 75px; align-items: center; gap: 8px; }
+ .engine-tuning-controls input[type="range"] { width: 100%; accent-color: #76e5c4; }
+ .engine-tuning-controls output { font-variant-numeric: tabular-nums; text-align: right; }
+ .engine-tuning-controls small { color: #9cafb9; }
+ .engine-tuning-controls button { justify-self: start; }
+ .music-panel { position: fixed; right: 14px; bottom: 14px; z-index: 60; width: min(315px, calc(100vw - 28px)); padding: 9px 12px; border: 1px solid #567078; border-radius: 8px; background: #101a20ef; color: #dce9ec; box-shadow: 0 8px 30px #0008; font-size: 12px; }
+ .music-panel[hidden] { display: none; }
+ .music-panel summary { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; color: #76e5c4; }
+ .music-panel strong, .music-panel span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 8px; }
+ .music-panel .music-buttons { display: flex; gap: 7px; margin-top: 10px; }
+ .music-panel .music-buttons button { flex: 1; }
+ .music-panel input[type="range"] { display: block; width: 100%; margin: 10px 0 2px; accent-color: #76e5c4; }
+ .music-panel label { display: block; margin-top: 8px; }
  .hood-telemetry { width: 100%; color: #9fe1c9; font: 11px/1.6 Consolas, monospace; }
  .crash-hud { font: 11px/1.7 Consolas, monospace; white-space: pre-line; top: 10px; left: 10px; padding: 7px 10px; }
+.java-console { flex: 0 0 auto; border-top: 1px solid #35434c; background: #0a1117; color: #cad8df; font: 12px/1.45 Consolas, monospace; }
+.java-console-heading { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #26343c; }
+.java-console-heading strong { color: #76e5c4; letter-spacing: .12em; }
+.java-console-heading span { flex: 1; color: #9cafb9; }
+.java-console-heading button { padding: 5px 9px; font: inherit; }
+#java-log { max-height: 188px; min-height: 74px; overflow: auto; padding: 8px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.java-log-native { color: #8fa9b6; }
+.java-log-error { color: #ff9c81; }
+.java-log-info { color: #bce8d7; }
+.workspace.viewport-expanded .java-console { display: none; }
  .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }
