@@ -67,6 +67,7 @@ export class Viewer {
   private stopDriving?: () => void;
   private generation = 0;
   private mapStream?: MapObjectStream;
+  private mapStreamFocus?: THREE.Vector3;
   private mapDebug?: MapDebugView;
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
   private environmentTexture?: THREE.Texture;
@@ -102,7 +103,7 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
-      this.frame?.(now); this.controls.update(); this.mapStream?.update(this.camera.position);
+      this.frame?.(now); this.controls.update(); this.mapStream?.update(this.mapStreamFocus ?? this.camera.position);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
@@ -549,6 +550,9 @@ export class Viewer {
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); if (!track) this.model.add(obstacle);
     }
     const demo = crash?.driving ?? new DrivingDemo(root);
+    // World objects follow the player, not the view. A cockpit or orbit camera
+    // can be far enough from the car to make streaming appear stuck in one area.
+    this.mapStreamFocus = demo.position;
     const tireEffects = crash instanceof Vehicle3D ? new TireEffects() : undefined;
     const vehicleAudio = crash instanceof Vehicle3D && assets ? new VehicleAudio(assets, crash, audioVolumes) : undefined;
     if (tireEffects) this.scene.add(tireEffects.group);
@@ -688,6 +692,7 @@ export class Viewer {
     };
     const stop = () => {
       if (stopped) return; stopped = true;
+      if (this.mapStreamFocus === demo.position) this.mapStreamFocus = undefined;
       this.frame = undefined; this.stopDriving = undefined;
       releaseMouse();
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);
