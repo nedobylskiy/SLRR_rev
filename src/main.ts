@@ -178,7 +178,7 @@ async function runGameBoot() {
                   result.gameTypes.updateTriggerContacts(car);
                 } });
             showMapDebugControls(map);
-            showVehicleDebug(built.root, session);
+            showVehicleDebug(built.root, session, () => { const t = result.threads.eventLoopTiming; return `JVM event cycle: ${t.lastMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / cycles ${t.cycles} (wall, excludes wait)`; });
             driveHud.hidden = true;
             el('scene-help').textContent = 'Controls follow the game ControlSet · Right drag: rotate camera';
           } catch (reason) {
@@ -301,7 +301,7 @@ vehicleDebugPanel.append(vehicleTeleportButton);
 const vehicleDebugTelemetry = textElement('pre', '', 'vehicle-debug-telemetry'), vehicleDebugTree = textElement('pre', '', 'vehicle-debug-tree');
 vehicleDebugPanel.append(vehicleDebugTelemetry, vehicleDebugTree); el('scene-help').before(vehicleDebugPanel);
 let vehicleDebugTimer: number | undefined;
-function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>) {
+function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>, javaLoop?: () => string) {
   clearVehicleDebug(); mapDebugSession = session; vehicleDebugPanel.hidden = false; vehicleDebugPanel.open = true;
   const tree = (part: EnginePart, depth = 0): string[] => {
     const prefix = depth === 0 ? '' : `${'  '.repeat(depth - 1)}├─ `;
@@ -314,6 +314,8 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
       ...(viewer?.profiler.lines() ?? []),
+      ...(viewer?.physicsWork ? [viewer.physicsWork] : []),
+      ...(javaLoop ? [javaLoop()] : []),
       `Position (m) X ${state.position.x.toFixed(1)} · Y ${state.position.y.toFixed(1)} · Z ${state.position.z.toFixed(1)}`,
       `Speed ${state.speedKmh} km/h · RPM ${state.rpm} · gear ${state.gear < 0 ? 'R' : state.gear || 'N'}`,
       `Engine ${state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,

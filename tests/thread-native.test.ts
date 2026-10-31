@@ -37,8 +37,8 @@ test('a Java thread yields at wait while the caller continues, then notify resum
   const source = `package demo;
     interface Runnable { void run(); }
     class Worker implements Runnable {
-      Thread thread; int count;
-      void run() { thread.wait(); count++; }
+      Thread thread; int count; int entered;
+      void run() { entered = 1; thread.wait(); count++; }
     }
     class Thread {
       Runnable target;
@@ -56,7 +56,10 @@ test('a Java thread yields at wait while the caller continues, then notify resum
   const thread = await jvm.constructAsync('demo.Thread', [worker]);
   jvm.set(worker, 'thread', thread);
   await jvm.invokeAsync(thread, 'start');
-  await new Promise(resolve => setTimeout(resolve, 0));
+  const deadline = Date.now() + 1000;
+  while (jvm.get(worker, 'entered').value !== 1 && Date.now() < deadline)
+    await new Promise(resolve => setTimeout(resolve, 1));
+  assert.equal(jvm.get(worker, 'entered').value, 1);
   assert.equal(jvm.get(worker, 'count').value, 0);
   assert.equal((await jvm.invokeAsync(thread, 'isAlive')).value, 1);
   await jvm.invokeAsync(thread, 'notify');

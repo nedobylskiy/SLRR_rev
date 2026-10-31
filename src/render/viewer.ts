@@ -45,6 +45,7 @@ const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multi
 
 export class Viewer {
   readonly profiler: FrameProfiler;
+  physicsWork = '';
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
   get fps() { return Math.round(1000 / this.frameDuration); }
@@ -694,6 +695,11 @@ export class Viewer {
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
       const input = java ? java.sample() : { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
       if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if (crash instanceof Vehicle3D && !paused) {
+        for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
+          this.profiler.record(`Physics ${name}`, crash.timings[name]);
+        this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels}`;
+      }
       this.syncWorld(softParts);
       for (const [part, helper] of vehicleBounds) {
         const proxy = this.proxies.get(part);

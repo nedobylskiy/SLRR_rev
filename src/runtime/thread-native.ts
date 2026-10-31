@@ -11,6 +11,8 @@ interface ThreadState {
 
 /** Cooperative Java threads share one JVM heap and yield at wait/sleep native calls. */
 export class ThreadNative {
+  readonly eventLoopTiming = { lastMs: 0, peakMs: 0, cycles: 0 };
+  private readonly monitorStarted = new WeakMap<object, number>();
   private readonly states = new WeakMap<object, ThreadState>();
   private readonly live = new Set<ThreadState>();
   private readonly objectWaiters = new Map<object, Set<{ resolve: (value: JavaValue) => void; reject: (error: Error) => void }>>();
@@ -77,6 +79,14 @@ export class ThreadNative {
     const objectOwner = 'java.lang.Object';
     jvm.natives.registerAsync(objectOwner, 'wait', [], ({ receiver }) => new Promise<JavaValue>((resolve, reject) => {
       const key = this.monitor(receiver);
+      const started = this.monitorStarted.get(key);
+      if (started !== undefined) {
+        const ms = performance.now() - started;
+        this.eventLoopTiming.lastMs = ms;
+        this.eventLoopTiming.peakMs = Math.max(this.eventLoopTiming.peakMs, ms);
+        this.eventLoopTiming.cycles++;
+        this.monitorStarted.delete(key);
+      }
       const waiters = this.objectWaiters.get(key) ?? new Set();
       waiters.add({ resolve, reject }); this.objectWaiters.set(key, waiters);
     }));
@@ -85,6 +95,7 @@ export class ThreadNative {
         const key = this.monitor(receiver), waiters = this.objectWaiters.get(key);
         if (!waiters) return nil();
         for (const waiter of [...waiters]) {
+          this.monitorStarted.set(key, performance.now());
           waiters.delete(waiter); waiter.resolve(nil());
           if (!all) break;
         }

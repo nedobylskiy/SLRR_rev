@@ -50,6 +50,7 @@ function basis(panel: DeformablePanel) {
 
 /** Full rigid chassis motion with ray suspension and separate deformable or rigid detachable parts. */
 export class Vehicle3D extends CarCrashDemo {
+  readonly timings = { suspension: 0, contacts: 0, panels: 0, other: 0, ticks: 0, activePanels: 0 };
   readonly body: RigidBody3D;
   collisionCue?: { speed: number; impulse: number; position: Vector3 };
   private spawn?: { position: Vector3; yaw: number };
@@ -379,10 +380,14 @@ export class Vehicle3D extends CarCrashDemo {
     if (this.root.world.disposed) throw new Error('3D world disposed');
     if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
     this.collisionCue = undefined;
+    Object.assign(this.timings, { suspension: 0, contacts: 0, panels: 0, other: 0, ticks: 0, activePanels: 0 });
     return this.clock.advance(seconds, tick => {
+      let sectionStart = performance.now();
+      this.timings.ticks++;
       const dt = this.clock.dt, previous = this.root.matrix();
       let detached = this.releaseFailedWheels();
       this.suspension.step(dt, input); this.body.integrate(dt);
+      this.timings.suspension += performance.now() - sectionStart; sectionStart = performance.now();
       const incomingVelocity = this.body.velocity.clone(), incomingOmega = this.body.omega, predicted = this.body.matrix();
       const obstacle = new Box3(new Vector3(...this.obstacle.min), new Vector3(...this.obstacle.max));
       for (let iteration = 0; iteration < 4; iteration++) {
@@ -419,6 +424,7 @@ export class Vehicle3D extends CarCrashDemo {
           this.damageImpact(j, c.point, obstacle, predicted, previous);
         }
       }
+      this.timings.contacts += performance.now() - sectionStart; sectionStart = performance.now();
       this.syncBody(); this.bodySurface?.setFrames(previous, this.root.matrix());
       const omega = this.body.omega;
       // Gravity and normal suspension load alone do not require a node solve. Hard accelerations,
@@ -441,6 +447,7 @@ export class Vehicle3D extends CarCrashDemo {
           else { this.freeContacts(free, old, obstacle, true, s.panel.positions, s.guard); s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); }
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }
+        this.timings.activePanels++;
         s.panel.advance(dt); if (attached) this.surfaceDirty = true;
         if (attached && s.panel.collisionImpact) {
           const hit = s.panel.collisionImpact;
@@ -458,6 +465,7 @@ export class Vehicle3D extends CarCrashDemo {
         }
         s.activity.settle(dt, s.part.matrix(), !!s.part.parent || s.root);
       }
+      this.timings.panels += performance.now() - sectionStart; sectionStart = performance.now();
       for (const r of this.rigid.values()) {
         const wasAttached = !!r.part.parent;
         if (wasAttached && (this.suspension.wheels.some(w => w.part === r.part) || r.part.definition.mechanics && (r.part !== this.suspension.mechanics?.block || r.part.condition > 0))) continue;
@@ -502,6 +510,7 @@ export class Vehicle3D extends CarCrashDemo {
       if (tick % 24 === 0 && this.surfaceDirty) { this.updateSurface(); this.surfaceDirty = false; }
       this.suspension.sync();
       this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega);
+      this.timings.other += performance.now() - sectionStart;
     });
   }
   override dispose() { this.reset(); }
