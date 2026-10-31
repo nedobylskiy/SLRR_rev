@@ -244,7 +244,7 @@ export class Viewer {
     this.mapFog = { ...settings };
     for (const fog of this.skyFogUniforms) fog.color.setHex(settings.color);
     if (this.mapFogEnabled) this.scene.fog = new THREE.Fog(settings.color, settings.near, settings.far);
-    this.scene.background = new THREE.Color(settings.color); this.mapStream?.setRange(settings.far + 100);
+    this.scene.background = new THREE.Color(settings.color);
   }
   setMapFogEnabled(enabled: boolean) {
     this.mapFogEnabled = enabled;
@@ -400,6 +400,8 @@ export class Viewer {
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
     this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     let loaded = 0, triangles = 0;
+    const stream = new MapObjectStream(this.model, 900);
+    this.mapStream = stream;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
       try {
@@ -408,17 +410,27 @@ export class Viewer {
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
         collision.add(parsed);
-        const group = new THREE.Group(); group.name = `${id.toString(16)}: ${source.pack.entries.find(e => e.typeId === id)?.alias ?? ''}`;
-        group.scale.setScalar(0.01); this.model.add(group);
-        warnings.push(...await this.append(parsed, assets, resource.textures, group, generation));
+        const bounds = new THREE.Box3();
+        const vertex = new THREE.Vector3();
+        for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+          bounds.expandByPoint(vertex.fromArray(mesh.positions, i).multiplyScalar(0.01));
+        if (!bounds.isEmpty()) {
+          const center = bounds.getCenter(new THREE.Vector3()), size = bounds.getSize(new THREE.Vector3());
+          stream.add([{ matrix: new THREE.Matrix4(), position: center, radius: Math.hypot(size.x, size.z) / 2 }], async () => {
+            const template = new THREE.Group();
+            const model = parseScx(await assets.read(resource.path));
+            warnings.push(...await this.append(model, assets, resource.textures, template, generation, true));
+            const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
+            for (const part of parts) part.geometry.scale(0.01, 0.01, 0.01);
+            return parts;
+          });
+        }
         triangles += parsed.meshes.reduce((sum, mesh) => sum + mesh.indices.length / 3, 0);
         loaded++;
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
     let objects = 0;
-    const stream = new MapObjectStream(this.model, this.mapFog.far + 100);
-    this.mapStream = stream;
     for (const source of mapSources) try {
       const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
       const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
@@ -433,25 +445,52 @@ export class Viewer {
           const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
-          let model: Awaited<ReturnType<Assets['modelForResource']>> | undefined;
-          let renderPose = new THREE.Matrix4();
+          const renderModels: { model: Awaited<ReturnType<Assets['modelForResource']>>; pose: THREE.Matrix4 }[] = [];
+          // Keep the highest-detail LOD for the nearby-object stream. Lower LODs
+          // are substitutes, not extra pieces; loading all of them hides the map
+          // behind overlapping tree/building meshes, while skipping them all
+          // removes objects that only define LOD-tagged render entries.
+          const lodRenders = cfg.renders.filter(render => render.lod);
+          const nearLod = lodRenders.sort((a, b) =>
+            (b.lod![0] + b.lod![1]) - (a.lod![0] + a.lod![1]) || b.lod![1] - a.lod![1]
+          )[0];
           for (const render of cfg.renders) {
-            try { model = await assets.modelForResource(resource.packPath, render.resource); renderPose = render.pose ? poseMatrix(render.pose) : new THREE.Matrix4(); break; }
-            catch { /* A game type can list abstract LOD render IDs before a concrete mesh. */ }
+            // LOD entries are alternate versions. Unmarked render entries are
+            // simultaneous pieces of one object (e.g. a traffic-light head + pole,
+            // or the building and signage meshes of a City storefront).
+            if (render.lod && render !== nearLod) continue;
+            try {
+              renderModels.push({
+                model: await assets.modelForResource(resource.packPath, render.resource),
+                pose: render.pose ? poseMatrix(render.pose) : new THREE.Matrix4(),
+              });
+            } catch { /* Some entries are abstract game types with no concrete mesh. */ }
           }
           for (const instance of instances) for (const body of cfg.bodies) {
             if (body.collision === false || body.shape[0]?.toLowerCase() !== 'box') continue;
             const half = body.shape.slice(1, 4).map(Number);
             if (half.length === 3) collision.addBox(poseMatrix(instance.pose).multiply(poseMatrix(body)), new THREE.Vector3(half[0], half[1], half[2]));
           }
-          if (model) {
+          if (renderModels.length) {
             const placements: StreamPlacement[] = instances.map(instance => {
-              const matrix = modelMatrix(poseMatrix(instance.pose), renderPose);
+              const matrix = poseMatrix(instance.pose);
               return { matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix) };
             });
             stream.add(placements, async () => {
-              const parsed = parseScx(await assets.read(model.path)), template = new THREE.Group();
-              warnings.push(...await this.append(parsed, assets, model.textures, template, generation));
+              const template = new THREE.Group();
+              for (const render of renderModels) {
+                const parsed = parseScx(await assets.read(render.model.path));
+                const component = new THREE.Group();
+                warnings.push(...await this.append(parsed, assets, render.model.textures, component, generation, true));
+                const componentMatrix = modelMatrix(new THREE.Matrix4(), render.pose);
+                // Adding a child to template removes it from component.children.
+                // Iterate a snapshot so no mesh is skipped during reparenting.
+                for (const part of [...component.children]) {
+                  if (!(part instanceof THREE.Mesh)) continue;
+                  part.geometry.applyMatrix4(componentMatrix);
+                  template.add(part);
+                }
+              }
               return template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh).map(part => { part.name = `map object ${resource.entry.alias}: ${part.name}`; return part; });
             });
           }
@@ -785,7 +824,7 @@ export class Viewer {
     material.depthWrite = false;
     material.needsUpdate = true;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number): Promise<string[]> {
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false): Promise<string[]> {
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     for (const part of model.meshes) {
@@ -819,7 +858,10 @@ export class Viewer {
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
           const alphaEnabled = scxDiffuseUsesAlpha(model.version, part.materialFlags);
           if (alphaEnabled && alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
-          else if (alphaEnabled && alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
+          // Stock map textures such as cross.dds and falak*.dds carry an unused
+          // or reflection alpha channel. Keep fully opaque map materials solid;
+          // foliage cutouts above and explicit material opacity still apply.
+          else if (alphaEnabled && alpha === 'blend' && (!mapSurface || opacity < 1)) { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
       }
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];

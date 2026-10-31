@@ -1,6 +1,6 @@
 import { Group, InstancedMesh, Matrix4, Mesh, Texture, Vector3 } from 'three';
 
-export interface StreamPlacement { matrix: Matrix4; position: Vector3 }
+export interface StreamPlacement { matrix: Matrix4; position: Vector3; radius?: number }
 interface StreamType {
   placements: StreamPlacement[];
   load: () => Promise<Mesh[]>;
@@ -10,6 +10,7 @@ interface StreamType {
   active: number[];
   slots: Map<number, number>;
   pending: number[];
+  unusedSince?: number;
 }
 
 /** Keeps map-object geometry near the camera and uploads a bounded number of new instances per frame. */
@@ -39,18 +40,25 @@ export class MapObjectStream {
       for (const type of this.types) {
         for (let slot = type.active.length - 1; slot >= 0; slot--) {
           const index = type.active[slot], p = type.placements[index].position;
-          if ((p.x - camera.x) ** 2 + (p.z - camera.z) ** 2 > (this.distance + 100) ** 2) this.remove(type, slot);
+          if ((p.x - camera.x) ** 2 + (p.z - camera.z) ** 2 > (this.distance + 100 + (type.placements[index].radius ?? 0)) ** 2) this.remove(type, slot);
         }
         const nearby: { index: number; distance: number }[] = [];
         for (let index = 0; index < type.placements.length; index++) {
           const p = type.placements[index].position, distance = (p.x - camera.x) ** 2 + (p.z - camera.z) ** 2;
-          if (distance <= this.distance ** 2 && !type.slots.has(index)) nearby.push({ index, distance });
+          if (distance <= (this.distance + (type.placements[index].radius ?? 0)) ** 2 && !type.slots.has(index)) nearby.push({ index, distance });
         }
         nearby.sort((a, b) => a.distance - b.distance);
         type.pending = nearby.map(v => v.index);
         if (nearby.length && !type.meshes && !type.loading && !type.failed && loadsInFlight < 4) {
           this.load(type); loadsInFlight++;
         }
+      }
+    }
+    for (const type of this.types) {
+      if (type.active.length || type.pending.length || type.loading) type.unusedSince = undefined;
+      else if (type.meshes) {
+        type.unusedSince ??= performance.now();
+        if (performance.now() - type.unusedSince > 5000) this.release(type);
       }
     }
     let remaining = this.budget;
@@ -96,5 +104,19 @@ export class MapObjectStream {
 
   get active() { return this.types.reduce((sum, type) => sum + type.active.length, 0); }
   get total() { return this.types.reduce((sum, type) => sum + type.placements.length, 0); }
-  dispose() { this.disposed = true; this.types = []; }
+  private release(type: StreamType) {
+    const geometries = new Set(), materials = new Set(), textures = new Set<Texture>();
+    for (const mesh of type.meshes ?? []) {
+      mesh.removeFromParent(); mesh.dispose(); geometries.add(mesh.geometry);
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(material);
+    }
+    for (const material of materials as Set<import('three').Material>) {
+      for (const value of Object.values(material)) if (value instanceof Texture) textures.add(value);
+      material.dispose();
+    }
+    for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
+    for (const texture of textures) texture.dispose();
+    type.meshes = undefined; type.unusedSince = undefined;
+  }
+  dispose() { this.disposed = true; for (const type of this.types) this.release(type); this.types = []; }
 }
