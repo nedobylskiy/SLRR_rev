@@ -377,7 +377,20 @@ export class Viewer {
   }
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
     if (!keepWorld) this.clear(); const generation = this.generation;
-    const pack = await assets.pack(packPath), ids = mapRenderIds(pack), warnings: string[] = [];
+    const pack = await assets.pack(packPath), warnings: string[] = [];
+    const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
+    // A map can declare a sibling map package as a continuation (for example City → City2).
+    // Load it only when both its RDB and static map render resources are present.
+    for (const dependency of pack.dependencies) {
+      const path = dependency.path.replaceAll('\\', '/').toLowerCase();
+      if (!path.startsWith('maps/') || !path.endsWith('.rpk') || mapSources.some(source => source.path === path)) continue;
+      if (!assets.byPath.has(path.replace(/\.rpk$/i, '.rdb'))) continue;
+      try {
+        const linkedPack = await assets.pack(path);
+        if (mapRenderIds(linkedPack).length) mapSources.push({ path, pack: linkedPack });
+      } catch (error) { warnings.push(`Map dependency ${path}: ${String(error)}`); }
+    }
+    const ids = mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
@@ -387,15 +400,15 @@ export class Viewer {
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
     this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     let loaded = 0, triangles = 0;
-    for (const id of ids) {
+    for (const { source, id } of ids) {
       if (generation !== this.generation) break;
       try {
-        const resource = await assets.modelForResource(packPath, id);
+        const resource = await assets.modelForResource(source.path, id);
         const parsed = parseScx(await assets.read(resource.path));
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
         collision.add(parsed);
-        const group = new THREE.Group(); group.name = `${id.toString(16)}: ${pack.entries.find(e => e.typeId === id)?.alias ?? ''}`;
+        const group = new THREE.Group(); group.name = `${id.toString(16)}: ${source.pack.entries.find(e => e.typeId === id)?.alias ?? ''}`;
         group.scale.setScalar(0.01); this.model.add(group);
         warnings.push(...await this.append(parsed, assets, resource.textures, group, generation));
         triangles += parsed.meshes.reduce((sum, mesh) => sum + mesh.indices.length / 3, 0);
@@ -406,9 +419,9 @@ export class Viewer {
     let objects = 0;
     const stream = new MapObjectStream(this.model, this.mapFog.far + 100);
     this.mapStream = stream;
-    try {
-      const rdb = new TextDecoder('windows-1252').decode(await assets.read(packPath.replace(/\.rpk$/i, '.rdb')));
-      const placements = mapObjectPlacements(rdb, pack), byType = new Map<number, typeof placements>();
+    for (const source of mapSources) try {
+      const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
+      const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
       for (const placement of placements) {
         const list = byType.get(placement.typeId) ?? [];
         if (!list.length) byType.set(placement.typeId, list);
@@ -417,7 +430,7 @@ export class Viewer {
       for (const [typeId, instances] of byType) {
         if (generation !== this.generation) break;
         try {
-          const resource = await assets.resource(packPath, typeId);
+          const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
           let model: Awaited<ReturnType<Assets['modelForResource']>> | undefined;
@@ -445,7 +458,7 @@ export class Viewer {
           objects += instances.length;
         } catch (error) { warnings.push(`Object type 0x${typeId.toString(16)}: ${String(error)}`); }
       }
-    } catch (error) { warnings.push(`Map objects: ${String(error)}`); }
+    } catch (error) { warnings.push(`Map objects ${source.path}: ${String(error)}`); }
     if (generation === this.generation) { this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position); }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
