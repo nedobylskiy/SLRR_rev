@@ -29,6 +29,7 @@ import { VehicleAudio } from '../audio/vehicle-audio';
 import { RenderObject } from '../runtime/render-object';
 import type { RenderLightSettings, RenderFlareSource } from '../runtime/render-ref-native';
 import type { EnvironmentMapSource } from './environment-map';
+import { FrameProfiler } from './frame-profiler';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -43,6 +44,7 @@ function transmissionCondition(part?: EnginePart) {
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 
 export class Viewer {
+  readonly profiler: FrameProfiler;
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
   get fps() { return Math.round(1000 / this.frameDuration); }
@@ -88,6 +90,7 @@ export class Viewer {
   }
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.profiler = new FrameProfiler(this.renderer);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -110,12 +113,16 @@ export class Viewer {
       if (this.previousFrame !== undefined && now > this.previousFrame)
         this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
       this.previousFrame = now;
-      this.frame?.(now); this.controls.update(); this.mapStream?.update(this.mapStreamFocus ?? this.camera.position);
+      this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      this.controls.update();
+      this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position));
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.sunLight.position.clone().normalize(), 500);
-      this.renderer.render(this.scene, this.camera);
+      this.profiler.beginGpu();
+      this.profiler.measure('Render CPU', () => this.renderer.render(this.scene, this.camera));
+      this.profiler.endGpu();
     });
   }
   clear() {
@@ -337,6 +344,7 @@ export class Viewer {
   }
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   dispose() {
+    this.profiler.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
     this.environmentTexture?.dispose(); this.environmentTexture = undefined;

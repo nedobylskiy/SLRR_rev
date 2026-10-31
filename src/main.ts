@@ -112,10 +112,11 @@ async function runGameBoot() {
       const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
       if (state.value == null || !result.gameTypes.hasCallback(state, 28)) return;
       animating = true;
+      const animateStart = performance.now();
       void result.jvm.invokeAsync(state, 'animate').catch(reason => {
         animateFailed = true;
         appendJavaEvent({ level: 'error', message: `Java animate: ${reason instanceof Error ? reason.message : String(reason)}` });
-      }).finally(() => { animating = false; });
+      }).finally(() => { viewer?.profiler.record('Java animate (wall)', performance.now() - animateStart); animating = false; });
     }, 50);
     const unlockMusic = () => { if (music?.snapshot().blocked) void music.resume(); };
     window.addEventListener('pointerdown', unlockMusic);
@@ -312,6 +313,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
+      ...(viewer?.profiler.lines() ?? []),
       `Position (m) X ${state.position.x.toFixed(1)} · Y ${state.position.y.toFixed(1)} · Z ${state.position.z.toFixed(1)}`,
       `Speed ${state.speedKmh} km/h · RPM ${state.rpm} · gear ${state.gear < 0 ? 'R' : state.gear || 'N'}`,
       `Engine ${state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,
