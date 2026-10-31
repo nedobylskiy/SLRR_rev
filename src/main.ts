@@ -278,10 +278,13 @@ const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), v
 vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
 const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
+const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
+fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
 bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);
+fogCheck.onchange = () => viewer?.setMapFogEnabled(fogCheck.checked);
 const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { walls: number; boxes: number } }) => {
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;

@@ -59,7 +59,8 @@ export class Viewer {
   private internalView = false;
   private collisionMeshes = new Map<EnginePart, number[]>();
   private alphaModes = new Map<string, ReturnType<typeof textureAlphaMode>>();
-  private skyFogUniforms = new Set<THREE.Color>();
+  private skyFogUniforms = new Set<{ color: THREE.Color; enabled: { value: number } }>();
+  private mapFogEnabled = true;
   private grid = new THREE.GridHelper(12, 24, 0x46515a, 0x222c34);
   private driveGrid = new THREE.GridHelper(2000, 1000, 0x798893, 0x45535b);
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
@@ -241,11 +242,14 @@ export class Viewer {
   setMapFog(settings: MapFogSettings) {
     if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
     this.mapFog = { ...settings };
-    for (const color of this.skyFogUniforms) color.setHex(settings.color);
-    if (this.scene.fog instanceof THREE.Fog) {
-      this.scene.fog.color.setHex(settings.color); this.scene.fog.near = settings.near; this.scene.fog.far = settings.far;
-      this.scene.background = new THREE.Color(settings.color); this.mapStream?.setRange(settings.far + 100);
-    }
+    for (const fog of this.skyFogUniforms) fog.color.setHex(settings.color);
+    if (this.mapFogEnabled) this.scene.fog = new THREE.Fog(settings.color, settings.near, settings.far);
+    this.scene.background = new THREE.Color(settings.color); this.mapStream?.setRange(settings.far + 100);
+  }
+  setMapFogEnabled(enabled: boolean) {
+    this.mapFogEnabled = enabled;
+    this.scene.fog = enabled ? new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far) : null;
+    for (const fog of this.skyFogUniforms) fog.enabled.value = enabled ? 1 : 0;
   }
   setSceneLight(settings: RenderLightSettings) {
     for (const color of [settings.diffuse, settings.ambient, settings.specular])
@@ -377,7 +381,7 @@ export class Viewer {
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
-    this.scene.fog = new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far);
+    this.scene.fog = this.mapFogEnabled ? new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far) : null;
     this.scene.background = new THREE.Color(this.mapFog.color);
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
@@ -749,17 +753,19 @@ export class Viewer {
   }
   private configureSkyMaterial(material: THREE.Material): void {
     const fogColor = new THREE.Color(this.mapFog.color);
-    this.skyFogUniforms.add(fogColor);
+    const fogEnabled = { value: this.mapFogEnabled ? 1 : 0 };
+    this.skyFogUniforms.add({ color: fogColor, enabled: fogEnabled });
     const previousCompile = material.onBeforeCompile;
     material.onBeforeCompile = (shader, renderer) => {
       previousCompile.call(material, shader, renderer);
       shader.uniforms.slrrSkyFogColor = { value: fogColor };
+      shader.uniforms.slrrSkyFogEnabled = fogEnabled;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying float vSlrrSkyElevation;')
         .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvec3 slrrSkyWorldPosition = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvSlrrSkyElevation = normalize( slrrSkyWorldPosition - cameraPosition ).y;');
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 slrrSkyFogColor;\nvarying float vSlrrSkyElevation;')
-        .replace('#include <opaque_fragment>', 'float slrrHorizonFog = 1.0 - smoothstep( -0.015, 0.14, vSlrrSkyElevation );\noutgoingLight = mix( outgoingLight, slrrSkyFogColor, slrrHorizonFog );\n#include <opaque_fragment>');
+        .replace('#include <common>', '#include <common>\nuniform vec3 slrrSkyFogColor;\nuniform float slrrSkyFogEnabled;\nvarying float vSlrrSkyElevation;')
+        .replace('#include <opaque_fragment>', 'float slrrHorizonFog = ( 1.0 - smoothstep( -0.015, 0.14, vSlrrSkyElevation ) ) * slrrSkyFogEnabled;\noutgoingLight = mix( outgoingLight, slrrSkyFogColor, slrrHorizonFog );\n#include <opaque_fragment>');
     };
     const previousKey = material.customProgramCacheKey.bind(material);
     material.customProgramCacheKey = () => `${previousKey()}slrr-sky-horizon-fog-v1`;
