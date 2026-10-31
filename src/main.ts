@@ -290,6 +290,10 @@ const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { w
 };
 const vehicleDebugPanel = document.createElement('details'); vehicleDebugPanel.className = 'vehicle-debug-panel'; vehicleDebugPanel.hidden = true;
 vehicleDebugPanel.append(textElement('summary', 'Vehicle runtime · physics / Java'));
+const vehicleTeleportButton = textElement('button', 'Move car to (0, 1, 0)');
+vehicleTeleportButton.title = 'Teleport the car to the city center and reset its motion';
+vehicleTeleportButton.onclick = () => mapDebugSession?.teleport(new Vector3(0, 1, 0), 0);
+vehicleDebugPanel.append(vehicleTeleportButton);
 const vehicleDebugTelemetry = textElement('pre', '', 'vehicle-debug-telemetry'), vehicleDebugTree = textElement('pre', '', 'vehicle-debug-tree');
 vehicleDebugPanel.append(vehicleDebugTelemetry, vehicleDebugTree); el('scene-help').before(vehicleDebugPanel);
 let vehicleDebugTimer: number | undefined;
