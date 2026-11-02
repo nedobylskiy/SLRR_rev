@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseConstants, parseTufa, parseTrees } from '../src/formats/tufa';
-import { parseScx, scxDiffuseUsesAlpha } from '../src/formats/scx';
+import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../src/formats/scx';
 import { parseRpk, parseProperties, parseRdb } from '../src/formats/rpk';
 import { normalizePath } from '../src/assets';
 
@@ -82,6 +82,10 @@ test('SCX v4 diffuse vertex colors preserve RGB without confusing specular or UV
   assert.deepEqual(Array.from(mesh.uv), [0.25, 0.75]);
 });
 test('SCX v3 alphaOpacity flag keeps RGB road base opaque while allowing cutout fences', () => {
+  assert.equal(scxUsesVertexPaintMask(3, 0x100), true);
+  assert.equal(scxUsesVertexPaintMask(3, 0x101), false);
+  assert.equal(scxUsesVertexPaintMask(3, 0x40), false);
+  assert.equal(scxUsesVertexPaintMask(4, 0x100), false);
   assert.equal(scxDiffuseUsesAlpha(3, 0x40), false);
   assert.equal(scxDiffuseUsesAlpha(3, 0), false);
   assert.equal(scxDiffuseUsesAlpha(3, 0x101), true);

@@ -7,7 +7,7 @@ export class SceneLighting {
   readonly direction = new Vector3(3, 5, 4).normalize();
   shadows = false;
 
-  configureMaterial(material: MeshStandardMaterial, hasVertexColors = false) {
+  configureMaterial(material: MeshStandardMaterial, hasVertexColors = false, paintMask = false) {
     const previous = material.onBeforeCompile;
     const previousKey = material.customProgramCacheKey.bind(material);
     const key = previousKey();
@@ -22,14 +22,16 @@ export class SceneLighting {
           .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSlrrColor = slrrColor;');
         shader.fragmentShader = shader.fragmentShader
           .replace('#include <common>', '#include <common>\nuniform float slrrVertexColors;\nvarying vec3 vSlrrColor;')
-          .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix( vec3(1.0), vSlrrColor, slrrVertexColors );');
+          .replace('#include <color_fragment>', paintMask
+            ? '#include <color_fragment>\n#ifdef USE_MAP\ndiffuseColor.rgb = mix( diffuseColor.rgb, mix( vSlrrColor, diffuseColor.rgb, sampledDiffuseColor.a ), slrrVertexColors );\n#endif'
+            : '#include <color_fragment>\ndiffuseColor.rgb *= mix( vec3(1.0), vSlrrColor, slrrVertexColors );');
       }
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', '#include <common>\nuniform float slrrDynamicLighting;')
         .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
         .replace('#include <opaque_fragment>', 'outgoingLight = mix( diffuseColor.rgb * getShadowMask() + totalEmissiveRadiance, outgoingLight, slrrDynamicLighting );\n#include <opaque_fragment>');
     };
-    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v1|colors:${hasVertexColors}`;
+    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v2|colors:${hasVertexColors}|paint:${paintMask}`;
   }
 
   configureSun(sun: DirectionalLight) {

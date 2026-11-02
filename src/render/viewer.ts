@@ -5,7 +5,7 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel } from '../formats/scx';
 import type { Assets } from '../assets';
-import { parseScx, scxDiffuseUsesAlpha } from '../formats/scx';
+import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { loadPartCollision } from '../engine/part-collision';
@@ -906,7 +906,7 @@ export class Viewer {
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
       const opacity = Math.max(0, Math.min(1, part.diffuse[3] ?? 1));
       const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide, opacity, transparent: opacity < 1, depthWrite: opacity === 1 });
-      this.lighting.configureMaterial(material, !!part.colors);
+      this.lighting.configureMaterial(material, !!part.colors, scxUsesVertexPaintMask(model.version, part.materialFlags));
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
       const file = textures[part.textureIndex];

@@ -297,7 +297,7 @@ lightingLabel.title = 'Sun and ambient illumination; disable to inspect original
 lightingCheck.onchange = () => viewer?.setDynamicLightingEnabled(lightingCheck.checked);
 const vertexColorsLabel = textElement('label', 'Vertex colors (experimental)'), vertexColorsCheck = document.createElement('input');
 vertexColorsCheck.type = 'checkbox'; vertexColorsLabel.prepend(vertexColorsCheck); mapDebugOptions.append(vertexColorsLabel);
-vertexColorsLabel.title = 'Multiply textures by SCX vertex RGB; original blending semantics are not yet confirmed. Alpha is ignored.';
+vertexColorsLabel.title = 'SCX vertex RGB; facade paint materials use texture alpha to preserve windows. Original blending semantics remain experimental.';
 vertexColorsCheck.onchange = () => viewer?.setVertexColorsEnabled(vertexColorsCheck.checked);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
 const streamRangeLabel = document.createElement('label'); streamRangeLabel.className = 'map-stream-range';

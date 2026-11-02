@@ -18,6 +18,11 @@ export function scxDiffuseUsesAlpha(version: number, materialFlags = 0) {
   return version !== 3 || (materialFlags & 1) !== 0;
 }
 
+/** V3 facade paint materials use texture alpha as coverage, not surface opacity. */
+export function scxUsesVertexPaintMask(version: number, materialFlags = 0) {
+  return version === 3 && (materialFlags & 0x100) !== 0 && !scxDiffuseUsesAlpha(version, materialFlags);
+}
+
 function validate(mesh: ScxMesh) {
   if (mesh.indices.length % 3) throw new Error('SCX: incomplete triangle');
   for (const n of mesh.positions) if (!Number.isFinite(n)) throw new Error('SCX: non-finite position');
