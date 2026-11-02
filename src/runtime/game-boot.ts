@@ -475,6 +475,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   jvm.natives.registerField('java.game.Frontend', 'loadingScreen', loadingScreen);
   if (realLoadingScreen) jvm.natives.registerField('java.render.Frontend', 'loadingScreen', loadingScreen);
   const renderSignal = jv('GfxEngine', { className: 'java.render.GfxEngine', fields: new Map() });
+  const frontendSounds = ['SFX_MONEY', 'SFX_QUESTION', 'SFX_OK', 'SFX_WARNING', 'SFX_NOTIF',
+    'SFX_MENU_MOVE', 'SFX_MENU_BACK', 'SFX_MENU_SELECT'];
   if (realLoadingScreen) {
     jvm.natives.registerField('java.render.Frontend', 'render', renderSignal);
     jvm.natives.registerField('java.game.Frontend', 'render', renderSignal);
@@ -483,12 +485,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     for (const name of ['largeFont', 'mediumFont', 'smallFont', 'largeFont_strong', 'smallFont_strong',
       'largeFont_russian', 'largeFont_scale', 'smallFont_scale', 'largeFont_strong_scale',
       'smallFont_strong_scale', 'largeFont_russian_scale', 'defLoadingPic', 'fadeRes', 'fadeRes_HD', 'pointers',
-      'SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
+      ...frontendSounds])
       jvm.natives.registerField('java.game.Frontend', name,
         jvm.get(jv('class', 'java.render.Frontend'), name));
   }
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
-  if (!realLoadingScreen) for (const name of ['SFX_MENU_MOVE', 'SFX_MENU_SELECT', 'SFX_QUESTION'])
+  if (!realLoadingScreen) for (const name of frontendSounds)
     jvm.natives.registerField('java.game.Frontend', name, jv('int', 0));
 
   const entry = `${sourceRoot}Init.java`;
