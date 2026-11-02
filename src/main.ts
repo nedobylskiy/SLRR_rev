@@ -146,7 +146,7 @@ async function runGameBoot() {
         }
         const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
-        }, true);
+        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.chassis });
         if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
@@ -214,14 +214,14 @@ async function runGameBoot() {
       }
       const javaStart = selected.start
         ? `${selected.start.x.toFixed(3)},${selected.start.y.toFixed(3)},${selected.start.z.toFixed(3)},${selected.start.yaw.toFixed(3)}` : '';
-      const key = `${selected.mapPack}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
+      const key = `${selected.mapPack}:${selected.mapResourceId}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
       if (key === loadedTrackKey || loadingTrack) return;
       // GameLogic.actualState changes before Track.enter() finishes. Wait until
       // Java has attached the car to this map and its scripted pose has settled;
       // otherwise host physics can start from a half-transition state.
-      if (!selected.ready || !selected.carPose) { pendingTrackKey = ''; return; }
-      const pose = [selected.carPose.x, selected.carPose.y, selected.carPose.z, selected.carPose.yaw]
-        .map(value => value.toFixed(3)).join(',');
+      if (!selected.ready || selected.chassis && !selected.carPose) { pendingTrackKey = ''; return; }
+      const pose = selected.carPose ? [selected.carPose.x, selected.carPose.y, selected.carPose.z, selected.carPose.yaw]
+        .map(value => value.toFixed(3)).join(',') : 'no car';
       if (pendingTrackKey !== key || pendingCarPose !== pose) {
         pendingTrackKey = key; pendingCarPose = pose; pendingTrackSince = performance.now(); return;
       }

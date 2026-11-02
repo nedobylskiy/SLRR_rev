@@ -16,7 +16,8 @@ import type { PartDefinition } from '../engine/world';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
-import { mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, mapRenderIds } from '../engine/map';
+import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
 import { mapObjectPlacements, mapObjectSeed, mapRenderResource, parseIcfg } from '../engine/map-objects';
@@ -470,13 +471,24 @@ export class Viewer {
     if (generation === this.generation && !keepScene) this.fit();
     return warnings;
   }
-  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
+  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false,
+    options?: { groundId?: number; preserveCamera?: boolean }) {
     if (!keepWorld) this.clear(); const generation = this.generation;
     const pack = await assets.pack(packPath), warnings: string[] = [];
+    const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
+    const ground = groundEntry && groundRenderDefinition(groundEntry);
+    let room: typeof ground;
+    if (ground) {
+      const gameType = await assets.resource(packPath, ground.gameType);
+      const render = await assets.resource(packPath, ground.renderId);
+      // Direct ground meshes are interiors; large outdoor maps retain their existing chunk/continuation path.
+      if (entryProperties(gameType.entry).some(property => property.key === 'native' && property.value === 'ground')
+        && render.entry.type === 14 && entryProperties(render.entry).some(property => property.key === 'mesh')) room = ground;
+    }
     const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
     // A map can declare a sibling map package as a continuation (for example City → City2).
     // Load it only when both its RDB and static map render resources are present.
-    for (const dependency of pack.dependencies) {
+    for (const dependency of room ? [] : pack.dependencies) {
       const path = dependency.path.replaceAll('\\', '/').toLowerCase();
       if (!path.startsWith('maps/') || !path.endsWith('.rpk') || mapSources.some(source => source.path === path)) continue;
       if (!assets.byPath.has(path.replace(/\.rpk$/i, '.rdb'))) continue;
@@ -485,15 +497,20 @@ export class Viewer {
         if (mapRenderIds(linkedPack).length) mapSources.push({ path, pack: linkedPack });
       } catch (error) { warnings.push(`Map dependency ${path}: ${String(error)}`); }
     }
-    const ids = mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
+    const ids = room ? [{ source: mapSources[0], id: room.renderId }]
+      : mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
+    this.mapStream?.dispose(); this.mapStreamFocus = undefined;
+    this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.scene.fog = this.mapFogEnabled ? new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far) : null;
     this.scene.background = new THREE.Color(this.mapFog.color);
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
-    this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
+    if (!options?.preserveCamera) {
+      this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
+    }
     let loaded = 0, triangles = 0;
     const stream = new MapObjectStream(this.model, this.mapStreamRange);
     stream.setShadowRange(this.lighting.shadows ? 150 : 0);
@@ -502,7 +519,16 @@ export class Viewer {
       if (generation !== this.generation) break;
       try {
         const resource = await assets.modelForResource(source.path, id);
-        const parsed = parseScx(await assets.read(resource.path));
+        const placeGround = (parsed: ScxModel) => {
+          if (!room) return parsed;
+          const transform = poseMatrix(room.pose), point = new THREE.Vector3();
+          for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+            point.fromArray(mesh.positions, i).multiplyScalar(0.01).applyMatrix4(transform).multiplyScalar(100).toArray(mesh.positions, i);
+          for (const mesh of parsed.meshes) for (let i = 0; i < mesh.normals.length; i += 3)
+            point.fromArray(mesh.normals, i).transformDirection(transform).toArray(mesh.normals, i);
+          return parsed;
+        };
+        const parsed = placeGround(parseScx(await assets.read(resource.path)));
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
         collision.add(parsed);
@@ -516,7 +542,7 @@ export class Viewer {
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
             if (!wanted()) return [];
             const template = new THREE.Group();
-            const model = parseScx(await assets.read(resource.path));
+            const model = placeGround(parseScx(await assets.read(resource.path)));
             if (!wanted()) return [];
             warnings.push(...await this.append(model, assets, resource.textures, template, generation, true, wanted));
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
@@ -531,7 +557,7 @@ export class Viewer {
     }
     let objects = 0;
     const objectBatches = new Map<string, { pack: string; id: number; alias: string; placements: StreamPlacement[] }>();
-    for (const source of mapSources) try {
+    for (const source of room ? [] : mapSources) try {
       const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
       const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
       for (const placement of placements) {
