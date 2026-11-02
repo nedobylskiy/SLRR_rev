@@ -540,11 +540,15 @@ export class SlrrJvm implements JavaHost {
   }
 
   isInstance(receiver: JavaValue, name: string): boolean {
-    const object = this.object(receiver);
-    if (!object) return false;
+    if (receiver.value == null) return false;
+    // Strings use primitive host storage, including when widened to Object.
+    // Their Java runtime class and ancestry still participate in instanceof.
+    const className = typeof receiver.value === 'string' ? 'java.lang.String' : this.object(receiver)?.className;
+    if (!className) return false;
     const wanted = this.resolveName(name);
-    const entry = this.classes.get(object.className);
-    return entry ? this.lineage(entry).some(cls => cls.name === wanted || this.implementsInterface(cls, wanted)) : object.className === wanted;
+    if (wanted === 'java.lang.Object') return true;
+    const entry = this.classes.get(className);
+    return entry ? this.lineage(entry).some(cls => cls.name === wanted || this.implementsInterface(cls, wanted)) : className === wanted;
   }
 
   private object(value: JavaValue): JavaObject | null {
