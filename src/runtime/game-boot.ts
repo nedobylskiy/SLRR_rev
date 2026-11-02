@@ -273,7 +273,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    }, id => packedResources.get(id) ?? undefined, node => osdRectangles?.remove(node),
+    }, id => packedResources.get(id) ?? undefined, node => { osdRectangles?.remove(node); renderChanged?.(node); },
     async (receiver, cfgPath) => {
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);

@@ -35,6 +35,7 @@ import { SceneLighting } from './scene-lighting';
 import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
+import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -83,6 +84,12 @@ export class Viewer {
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private frame?: (now: number) => void;
   private stopDriving?: () => void;
+  private scriptCamera?: () => JavaSceneCamera | null;
+  private scriptCameraId?: number;
+  setJavaSceneCamera(reader?: () => JavaSceneCamera | null) {
+    if (this.scriptCameraId !== undefined && !this.stopDriving) this.controls.enabled = true;
+    this.scriptCamera = reader; this.scriptCameraId = undefined;
+  }
   private generation = 0;
   private mapStream?: MapObjectStream;
   private mapStreamRange = 500;
@@ -156,7 +163,21 @@ export class Viewer {
       }
       this.previousFrame = document.hidden ? undefined : now;
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
-      if (this.controls.enabled) this.controls.update();
+      const scriptCamera = !this.stopDriving ? this.scriptCamera?.() : null;
+      if (scriptCamera) {
+        const factor = this.scriptCameraId !== scriptCamera.id || !scriptCamera.smoothing ? 1
+          : 1 - Math.exp(-Math.min(this.frameDuration, 100) / 1000 / scriptCamera.smoothing);
+        this.scriptCameraId = scriptCamera.id;
+        this.controls.enabled = false;
+        this.camera.position.lerp(scriptCamera.position, factor);
+        this.controls.target.lerp(scriptCamera.target, factor);
+        this.camera.lookAt(this.controls.target);
+        this.camera.fov = scriptCamera.fov; this.camera.near = scriptCamera.near; this.camera.far = scriptCamera.far;
+        this.camera.updateProjectionMatrix();
+      } else {
+        if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
+        if (this.controls.enabled) this.controls.update();
+      }
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
@@ -442,6 +463,12 @@ export class Viewer {
     const warnings = await this.append(model, assets, textures, this.model, generation);
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  removeWorld(world: EngineWorld): void {
+    for (const [part, group] of this.proxies) if (part.world === world) {
+      group.removeFromParent(); this.disposeGroup(group);
+      this.proxies.delete(part); this.collisionMeshes.delete(part);
+    }
   }
   async showWorld(world: EngineWorld, assets: Assets, keepScene = false): Promise<string[]> {
     if (!keepScene) this.clear();

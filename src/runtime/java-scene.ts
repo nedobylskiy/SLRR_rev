@@ -9,6 +9,7 @@ export interface JavaTrackScene {
   mapPack: string;
   map: JavaValue;
   mapResourceId: number;
+  driving: boolean;
   chassis?: { pack: string; id: number };
   /** True once Track.lockCar() has attached the Java car to this track's map. */
   ready: boolean;
@@ -47,8 +48,11 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
   const carPose = carNode && [carNode.position.x, carNode.position.y, carNode.position.z, carNode.orientation.y].every(Number.isFinite)
     ? { x: carNode.position.x, y: carNode.position.y, z: carNode.position.z, yaw: carNode.orientation.y } : undefined;
   const mapResourceId = (result.resolveResourceIdentity(mapNode.typeId)?.id ?? mapNode.typeId) & 0xffff;
-  return { mapPack, map: map!, mapResourceId, chassis: chassisKey, start, carPose,
-    ready: car?.value == null || carNode?.parent === mapNode };
+  const driving = !!state && jvm.isInstance(state, 'java.game.Track');
+  const attached = carNode?.parent === mapNode;
+  return { mapPack, map: map!, mapResourceId, chassis: driving || attached ? chassisKey : undefined, start,
+    carPose: driving || attached ? carPose : undefined, driving,
+    ready: !driving || car?.value == null || attached };
 }
 
 /** Read the lists selected by the executed chassis Java, including kit branches. */

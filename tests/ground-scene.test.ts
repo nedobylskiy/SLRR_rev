@@ -20,9 +20,9 @@ test('compiled GroundRef RSD chooses its own room mesh and pose, not all rooms i
   }
 });
 
-test('Java scene discovery loads an empty map while still waiting for an existing car to attach', async () => {
-  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'java.game.GameLogic'
-    ? { path: 'GameLogic.java', source: 'package java.game; class GameLogic { static Object actualState; static Object player; }' } : null });
+test('non-driving maps do not wait for a stored car; tracks still wait for car attachment', async () => {
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['java.game.GameLogic', 'java.game.Track'].includes(className)
+    ? { path: 'GameLogic.java', source: 'package java.game; class GameLogic { static Object actualState; static Object player; } class Track { Object map; }' } : null });
   await jvm.loadClass('java.game.GameLogic');
   await jvm.globalAsync('java.game.GameLogic');
   const resources = new GameTypeNative(jvm, () => {});
@@ -37,6 +37,11 @@ test('Java scene discovery loads an empty map while still waiting for an existin
   assert.equal(empty.mapPack, 'misc/garage.rpk'); assert.equal(empty.mapResourceId, 0x7a);
   const car = object('java.game.Vehicle', { chassis: jv('Chassis', null) }); jvm.set(player, 'car', car);
   jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', car, []);
+  assert.equal(activeJavaTrack(result)!.ready, true, 'a stored car must not prevent loading the car dealer');
+  assert.equal(activeJavaTrack(result)!.carPose, undefined);
+  await jvm.loadClass('java.game.Track');
+  const track = jvm.construct('java.game.Track', []); jvm.set(track, 'map', map);
+  jvm.set(jv('class', 'java.game.GameLogic'), 'actualState', track);
   assert.equal(activeJavaTrack(result)!.ready, false);
   resources.get(car)!.setParent(resources.getResource(map)!);
   assert.equal(activeJavaTrack(result)!.ready, true);

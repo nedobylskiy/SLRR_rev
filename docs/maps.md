@@ -52,6 +52,10 @@ The alpha classifier handles DXT blocks and uncompressed 32-bit DDS masks. `hidr
 
 LOD switching by camera distance is not implemented; the object loader selects one detailed CFG LOD, while render residency is controlled by streaming.
 
+Scene transitions forward Java `RenderRef.destroy()` to the visual backend, cancelling pending mesh loads and removing the corresponding render group. Player-car visual groups are also released when leaving their scene. Garage and dealer sections load their selected ground without starting the driving simulation or waiting for a stored player car to attach to the dealer map.
+
+Non-driving sections use the native camera created by their Java code: the adapter reads its initial pose and `render`/`hide`, `move`, `look`, `dist`, `height`, `zoom`, clipping-plane and `smooth` commands. OrbitControls relinquishes control while this camera is rendering. Smoothing is currently an exponential approximation; original force/torque dynamics, timed zoom and Java cursor-driven camera orbit are not implemented by this adapter.
+
 The map debug panel also provides independent lighting comparisons:
 
 - **Dynamic lighting** (on by default) applies the renderer's sun, ambient illumination and material reflections. Turning it off shows diffuse textures/colors with emissive contributions and fog retained. Java scene light updates continue to be stored.

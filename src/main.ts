@@ -1,6 +1,7 @@
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
+import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
 import { parseRpk, entryProperties } from './formats/rpk';
@@ -87,6 +88,7 @@ async function runGameBoot() {
     flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   disposeGameBoot = () => result.dispose();
+  viewer?.setJavaSceneCamera(() => javaSceneCamera(result));
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const poll = window.setInterval(() => {
     try { result.input.pollCooperative(); }
@@ -140,17 +142,18 @@ async function runGameBoot() {
             if (source !== assets || run !== sequence) { built.world.dispose(); return; }
             await viewer!.showWorld(built.world, source, true);
           } catch (reason) {
+            if (built) viewer?.removeWorld(built.world);
             built?.world.dispose(); built = undefined;
             appendJavaEvent({ level: 'error', message: `Java car rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
           }
         }
         const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
-        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.chassis });
+        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving });
         if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
-        if (built) {
+        if (built && selected.driving) {
           gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
           const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
@@ -192,13 +195,18 @@ async function runGameBoot() {
             appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
           }
         }
-        activeTrackCleanup = () => { clearVehicleDebug(); session?.(); physicsBinding?.dispose(); gauges?.dispose(); built?.world.dispose(); };
+        activeTrackCleanup = () => {
+          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); gauges?.dispose();
+          if (built) viewer?.removeWorld(built.world);
+          built?.world.dispose();
+        };
         el('filename').textContent = selected.mapPack;
         el('format').textContent = 'JAVA / TRACK';
         el('details').textContent = `${map.loaded} map models · ${map.objects} placed objects · Java selected ${selected.chassis?.pack ?? 'no car'}`;
         status('Java track loaded');
       } catch (reason) {
         physicsBinding?.dispose();
+        if (built) viewer?.removeWorld(built.world);
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
         status('Java scene unavailable', true);
@@ -232,6 +240,7 @@ async function runGameBoot() {
     };
     const trackPoll = window.setInterval(checkActiveTrack, 150);
     disposeJavaScene = () => {
+      viewer?.setJavaSceneCamera(undefined);
       window.clearInterval(animationTimer);
       window.clearInterval(trackPoll);
       window.removeEventListener('pointerdown', unlockMusic);

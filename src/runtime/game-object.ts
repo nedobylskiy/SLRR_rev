@@ -13,6 +13,7 @@ export class GameObject extends ResourceObject {
   worldTreeRoot = false;
   collisionActivationQueued = false;
   collisionEnabled = false;
+  cameraRendering = false;
   position = zeroVector();
   orientation = zeroOrientation();
   velocity = zeroVector();

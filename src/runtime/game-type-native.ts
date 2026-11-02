@@ -224,7 +224,10 @@ export class GameTypeNative {
         if (remaining.length) this.notifications.set(handler, remaining);
         else this.notifications.delete(handler);
       }
-      if (node instanceof RenderObject) this.renderRemoved?.(node);
+      if (node instanceof RenderObject) {
+        node.resourceType = 0;
+        this.renderRemoved?.(node);
+      }
       this.cancelTimers(this.object(receiver));
       node.setParent(null);
       for (const child of [...node.children]) child.setParent(null);
@@ -353,6 +356,11 @@ export class GameTypeNative {
         node.resourcePack = type.resourcePack;
         node.resourceScript = type.resourceScript;
         const cfgPath = this.catalog?.resolve(type.resourcePack, type.typeId)?.cfgPath;
+        if (this.catalog?.resolve(type.resourcePack, type.typeId)?.nativeType === 'camera') {
+          const pose = String(args[2].value ?? '').split(',').slice(0, 6).map(Number);
+          if (pose.length === 6 && pose.every(Number.isFinite)) this.require(receiver).setMatrix(
+            { x: pose[0], y: pose[1], z: pose[2] }, { y: pose[3], p: pose[4], r: pose[5] });
+        }
         if (cfgPath) await this.configureUnscriptedResource?.(receiver, cfgPath);
       }
       return receiver;
@@ -421,6 +429,11 @@ export class GameTypeNative {
           const commands = this.lastCommands.get(node) ?? new Map<string, string>();
           commands.set(args[2].value.trim().split(/\s+/, 1)[0], args[2].value);
           this.lastCommands.set(node, commands);
+          if (node instanceof GameObject) {
+            const verb = args[2].value.trim().split(/\s+/, 1)[0];
+            if (verb === 'render') node.cameraRendering = true;
+            if (verb === 'hide') node.cameraRendering = false;
+          }
         }
         await this.commandHandler?.(receiver, args[2].value);
       }
