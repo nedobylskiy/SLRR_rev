@@ -84,6 +84,12 @@ export class OsdButtonNative {
     if (!this.visible(box)) return;
     const gadget = await this.findGadget(box, physics);
     if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0)) return;
+    const osd = this.object(this.requireObject(box.group).fields.get('osd'));
+    const active = this.object(osd?.fields.get('actGadget'));
+    // Publish the active editor before dispatching a different gadget's command.
+    // Do not send its submit command: that would also wake a modal dialog's wait.
+    if (osd && active && active !== gadget && this.jvm.isInstance(jv('Gadget', active), 'java.render.osd.StringInput'))
+      this.jvm.set(jv('Osd', osd), 'stringValue', active.fields.get('inputString') ?? jv('String', ''));
     await this.jvm.invokeAsync(jv(gadget.className.split('.').at(-1)!, gadget), 'click');
   }
 

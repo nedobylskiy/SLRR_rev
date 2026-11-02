@@ -18,6 +18,8 @@ const codes: Record<string, number> = {
   ArrowDown: 208, ArrowLeft: 203, ArrowRight: 205, Comma: 51, Period: 52,
   NumpadAdd: 78, NumpadSubtract: 74, PageUp: 201, PageDown: 209,
   Digit1: 2, Digit2: 3, Digit3: 4, Digit4: 5,
+  Digit5: 6, Digit6: 7, Digit7: 8, Digit8: 9, Digit9: 10, Digit0: 11,
+  Backspace: 14, Tab: 15, ShiftLeft: 42, ShiftRight: 54, ControlLeft: 29, ControlRight: 157,
 };
 for (const [letters, start] of [['QWERTYUIOP', 16], ['ASDFGHJKL', 30], ['ZXCVBNM', 44]] as const)
   [...letters].forEach((letter, index) => { codes[`Key${letter}`] = start + index; });
@@ -69,17 +71,18 @@ export class InputNative {
 
   physicalAxis(device: number, axis: number): number { return this.axes.get(`${device}:${axis}`) ?? 0; }
 
-  setPhysicalAxis(device: number, axis: number, value: number): void {
+  setPhysicalAxis(device: number, axis: number, value: number, character = 0): void {
     if (!Number.isFinite(value)) throw new Error('Input axis value must be finite');
     const key = `${device}:${axis}`;
     const previous = this.axes.get(key) ?? 0;
     this.axes.set(key, value);
-    if (device === 0 && value > 0.2 && previous <= 0.2) this.pressedKeys.push(axis);
+    // Native lastKey ABI: low word = physical scan, high word = typed character.
+    if (device === 0 && value > 0.2 && previous <= 0.2) this.pressedKeys.push((character << 16) | axis);
   }
 
-  setKeyboardCode(code: string, pressed: boolean): void {
+  setKeyboardCode(code: string, pressed: boolean, character = 0, repeat = false): void {
     const axis = codes[code];
-    if (axis === undefined) return;
+    if (axis === undefined) { if (pressed && character) this.pressedKeys.push(character << 16); return; }
     const wasPressed = this.pressedCodes.has(code);
     if (pressed) this.pressedCodes.add(code); else this.pressedCodes.delete(code);
     const shortcut = cameraShortcuts[code];
@@ -88,7 +91,8 @@ export class InputNative {
         this.cameraAliases.set(code, shortcut.cameraAxis);
       if (!pressed) this.cameraAliases.delete(code);
     }
-    this.setPhysicalAxis(0, axis, pressed ? 1 : 0);
+    this.setPhysicalAxis(0, axis, pressed ? 1 : 0, character);
+    if (pressed && wasPressed && repeat && character) this.pressedKeys.push((character << 16) | axis);
     if (shortcut) this.updateCameraAliasAxis(shortcut.cameraAxis);
     else if (axis >= codes.F1 && axis <= codes.F4) this.updateCameraAliasAxis(axis);
   }
@@ -110,9 +114,16 @@ export class InputNative {
 
   attachBrowserKeyboard(target: Window): () => void {
     const down = (event: KeyboardEvent) => {
+      const element = document.activeElement as HTMLElement | null;
+      if (element?.matches('input, textarea, select, [contenteditable="true"]') || event.isComposing) return;
+      const character = event.ctrlKey || event.metaKey || event.altKey ? 0
+        : event.key.length === 1 ? event.key.charCodeAt(0)
+        : event.key === 'Backspace' ? 8 : event.key === 'Enter' ? 13 : event.key === 'Escape' ? 27 : 0;
+      const focus = this.currentFocus.value as JavaObject | null;
+      if (character && focus?.fields?.get('actGadget')?.value != null) event.preventDefault();
       if (document.activeElement?.tagName === 'CANVAS'
         && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
-      this.setKeyboardCode(event.code, true);
+      this.setKeyboardCode(event.code, true, character, event.repeat);
     };
     const up = (event: KeyboardEvent) => this.setKeyboardCode(event.code, false);
     const blur = () => { this.pressedCodes.clear(); this.cameraAliases.clear();

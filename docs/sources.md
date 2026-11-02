@@ -21,6 +21,14 @@ Links checked on October 27, 2026. Local files and reproducible checks are the p
 
 Installed RPK/RDB, SCX, TUFA, CFG, and Java files; 139 SDAT files; two different EXEs; `libcall.dll`; `Downloads/dllcall/{dllmain.cpp,dll.h,main.cpp}`; a supplied `Object.java`; and a screenshot of the author's description of `runDLL/runMethod`. Hashes appear in reports; save contents are not published.
 
+The installed system contains conflicting copies of some classes. In build 940, `StringRequesterDialog.class` uses the old `frontend:0xd8` input background (now the green OK texture), while the copy embedded in `Dialog.class` selects the correct StringInput resources, font and filename flags. Recover that verified copy with:
+
+```powershell
+npm run decompile:system -- --overwrite --class=java.render.osd.dialog.StringRequesterDialog --container=system/scripts/render/osd/dialog/Dialog.class
+```
+
+This updates only the recovered Java under `decompiled`, away from the original engine's auto-compiled `src` folders. The runtime continues interpreting Java; it does not substitute a hand-built dialog or execute TUFA. The container override is explicit because a dedicated file is not always the right copy, and another installation or mod can differ.
+
 Additional third-party material: the contributed [Elias working archive](elias-workspace-archive.md), available as a [ZIP](https://drive.google.com/file/d/1jBThp7EfOokCvFS4ku7k6HihiGmYl7XP/view?usp=drivesdk). Its IDA database and comments suggest hypotheses about the native ABI, wheel table, and physics data stride. Game files from the archive are not published here. The archived EXE has a different SHA-256 from both local EXEs.
 
 ## Rights and boundaries of publication
