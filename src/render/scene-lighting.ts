@@ -3,7 +3,7 @@ import { DirectionalLight, MeshStandardMaterial, Vector3 } from 'three';
 /** Debug switches for renderer lighting; original baked lighting is left intact. */
 export class SceneLighting {
   readonly dynamic = { value: 1 };
-  readonly vertexColors = { value: 0 };
+  readonly vertexColors = { value: 1 };
   readonly direction = new Vector3(3, 5, 4).normalize();
   shadows = false;
 

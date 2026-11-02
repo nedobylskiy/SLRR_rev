@@ -296,7 +296,7 @@ lightingCheck.type = 'checkbox'; lightingCheck.checked = true; lightingLabel.pre
 lightingLabel.title = 'Sun and ambient illumination; disable to inspect original texture colors';
 lightingCheck.onchange = () => viewer?.setDynamicLightingEnabled(lightingCheck.checked);
 const vertexColorsLabel = textElement('label', 'Vertex colors (experimental)'), vertexColorsCheck = document.createElement('input');
-vertexColorsCheck.type = 'checkbox'; vertexColorsLabel.prepend(vertexColorsCheck); mapDebugOptions.append(vertexColorsLabel);
+vertexColorsCheck.type = 'checkbox'; vertexColorsCheck.checked = true; vertexColorsLabel.prepend(vertexColorsCheck); mapDebugOptions.append(vertexColorsLabel);
 vertexColorsLabel.title = 'SCX vertex RGB; facade paint materials use texture alpha to preserve windows. Original blending semantics remain experimental.';
 vertexColorsCheck.onchange = () => viewer?.setVertexColorsEnabled(vertexColorsCheck.checked);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
