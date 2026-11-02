@@ -43,7 +43,8 @@ export class GameTypeNative {
   private readonly notifications = new Map<JavaObject, Notification[]>();
   private readonly triggerContacts = new Map<ResourceObject, boolean>();
   private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
-  private readonly callbacks = new WeakMap<JavaObject, Set<number>>();
+  private readonly callbacks = new Map<JavaObject, Set<number>>();
+  private animatingCallbacks = false;
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void | Promise<void>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
@@ -211,6 +212,7 @@ export class GameTypeNative {
       const node = this.getResource(receiver);
       if (!node) return voidValue();
       this.notifications.delete(this.object(receiver));
+      this.callbacks.delete(this.object(receiver));
       for (const [handler, subscriptions] of this.notifications) {
         const remaining = subscriptions.filter(subscription => subscription.watched !== node);
         if (remaining.length) this.notifications.set(handler, remaining);
@@ -283,11 +285,13 @@ export class GameTypeNative {
       return voidValue();
     });
     jvm.natives.register(gameType, 'unregisterCallback', ['int'], ({ receiver, args }) => {
-      this.callbacks.get(this.object(receiver))?.delete(Number(args[0].value) | 0);
+      const object = this.object(receiver), callbacks = this.callbacks.get(object);
+      callbacks?.delete(Number(args[0].value) | 0);
+      if (!callbacks?.size) this.callbacks.delete(object);
       return voidValue();
     });
     jvm.natives.register(gameType, 'unregisterCallbacks', [], ({ receiver }) => {
-      this.callbacks.get(this.object(receiver))?.clear();
+      this.callbacks.delete(this.object(receiver));
       return voidValue();
     });
     jvm.natives.register(gameType, 'addTimer', ['float', 'int'], ({ receiver, args }) => {
@@ -475,6 +479,23 @@ export class GameTypeNative {
   hasCallback(receiver: JavaValue, callback: number): boolean {
     return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
   }
+  /** Native animate hooks include OSDs, not just GameLogic.actualState. */
+  async animateCallbacks(onError: (error: Error) => void): Promise<void> {
+    if (this.animatingCallbacks) return;
+    this.animatingCallbacks = true;
+    try {
+      for (const object of [...this.callbacks.keys()]) {
+        if (!this.callbacks.get(object)?.has(28)) continue;
+        try { await this.jvm.invokeAsync(jv(object.className, object), 'animate'); }
+        catch (reason) {
+          const callbacks = this.callbacks.get(object);
+          callbacks?.delete(28);
+          if (!callbacks?.size) this.callbacks.delete(object);
+          onError(new Error(`${object.className}.animate: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }));
+        }
+      }
+    } finally { this.animatingCallbacks = false; }
+  }
   lastCommand(receiver: JavaValue, name: string): string | undefined {
     const node = receiver.value == null ? null : this.getResource(receiver);
     return node ? this.lastCommands.get(node)?.get(name) : undefined;
@@ -604,6 +625,7 @@ export class GameTypeNative {
     this.pendingEvents.length = 0;
     this.notifications.clear();
     this.triggerContacts.clear();
+    this.callbacks.clear();
   }
 
   private cancelTimers(object: JavaObject): void {

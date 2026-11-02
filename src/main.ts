@@ -109,18 +109,15 @@ async function runGameBoot() {
     el('details').textContent = result.error.message;
   } else if (viewer) {
     const javaControls = javaDrivingControls(result);
-    let animating = false, animateFailed = false, loadingTrack = false;
+    let animating = false, loadingTrack = false;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
-      if (animating || animateFailed) return;
-      const state = result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
-      if (state.value == null || !result.gameTypes.hasCallback(state, 28)) return;
+      if (animating) return;
       animating = true;
       const animateStart = performance.now();
-      void result.jvm.invokeAsync(state, 'animate').catch(reason => {
-        animateFailed = true;
-        appendJavaEvent({ level: 'error', message: `Java animate: ${reason instanceof Error ? reason.message : String(reason)}` });
+      void result.gameTypes.animateCallbacks(error => {
+        appendJavaEvent({ level: 'error', message: `Java animate: ${error.message}` });
       }).finally(() => { viewer?.profiler.record('Java animate (wall)', performance.now() - animateStart); animating = false; });
     }, 50);
     const unlockMusic = () => { if (music?.snapshot().blocked) void music.resume(); };
