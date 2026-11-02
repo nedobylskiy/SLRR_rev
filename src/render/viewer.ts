@@ -708,7 +708,8 @@ export class Viewer {
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
-        this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels}`;
+        const backends = new Set([...crash.soft.values()].map(part => part.panel.backend === 'wasm' ? 'C++/WASM' : 'TypeScript'));
+        this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels}\nSoft-body solver: ${[...backends].join(' + ')}`;
       }
       this.syncWorld(softParts);
       for (const [part, helper] of vehicleBounds) {

@@ -20,6 +20,9 @@ import { SoundJavaBridge } from './audio/sound-java';
 import { gameSoundVolume, setGameSoundVolume } from './audio/audio-settings';
 import { DEFAULT_TIRE_MODEL, type TireModelSettings } from './engine/tire-model';
 import { bootGame, type BootEvent } from './runtime/game-boot';
+import { initializeSoftBodyWasm, softBodyRuntime, type SoftBodyBackend } from './engine/soft-body-wasm';
+
+const softBodyReady = initializeSoftBodyWasm();
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Connecting…</span><button id="memory-lab">Memory stream</button><label class="button">Open game folder<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -52,6 +55,7 @@ function appendJavaEvent(event: BootEvent) {
 }
 async function runGameBoot() {
   if (!assets) return;
+  await softBodyReady;
   disposeJavaScene?.(); disposeJavaScene = undefined;
   driveHud.hidden = true; driveHud.classList.remove('crash-hud');
   disposeJavaInput?.(); disposeJavaInput = undefined;
@@ -64,6 +68,7 @@ async function runGameBoot() {
   const gameVideo = new OsdVideo(gameOsd, source, localInstallation);
   disposeGameOsd = () => gameOsd.dispose();
   el('java-log').replaceChildren();
+  appendJavaEvent({ level: 'native', message: softBodyRuntime.available ? 'Soft-body C++/WASM ready (TS fallback available)' : `Soft-body TS fallback: ${softBodyRuntime.error ?? 'WASM unavailable'}` });
   el('java-run-state').textContent = 'Running Init.java';
   el<HTMLButtonElement>('java-retry').disabled = true;
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
@@ -296,6 +301,13 @@ const updateStreamRange = () => {
 streamRangeInput.oninput = updateStreamRange;
 streamRangeLabel.append(streamRangeValue, streamRangeInput); mapDebugPanel.append(streamRangeLabel);
 updateStreamRange();
+const softBodyLabel = textElement('label', 'Soft-body solver'); softBodyLabel.className = 'map-stream-range';
+const softBodySelect = document.createElement('select'); softBodySelect.setAttribute('aria-label', 'Soft-body solver');
+for (const [value, title] of [['auto', 'Auto (prefer C++ / WASM)'], ['ts', 'TypeScript'], ['wasm', 'C++ / WASM (TS fallback)']] as const) {
+  const option = document.createElement('option'); option.value = value; option.textContent = title; softBodySelect.append(option);
+}
+softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.value as SoftBodyBackend; };
+softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
 bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);

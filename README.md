@@ -2,6 +2,8 @@
 
 An independent TypeScript/WebGL 2 engine for Street Legal Racing: Redline assets. This is a **research prototype**, not a complete replacement for the game.
 
+Soft-body physics has an optional [C++ / WebAssembly backend](docs/soft-body-wasm.md) alongside the TypeScript implementation, with automatic fallback and a live debug selector. The bundled module runs without a native compiler.
+
 The project reads original RPK and SCX v3/v4 assets and provides a resource inspector and WebGL scene. Its RPK/CFG factory assembles a Baiern from 33 base parts; mounts have also been checked on Einvagen, Duhen, Ninja, and Zed. The [driving prototype](docs/mounts-and-driving.md) and [Test Track loader](docs/maps.md) exercise the current physics and rendering systems. The separately published [SLRR-JVM package](https://github.com/nedobylskiy/SLRR-JVM) interprets original `.java` methods with host-provided imports and native functions; the engine can use [SLRR-JVM Decompiler](https://github.com/nedobylskiy/SLRR-JVM-decompiler) to recover missing system sources from TUFA `.class` files. Neither runtime executes `.class` bytecode. See [engine architecture](docs/engine-world.md) for the implemented boundaries; the full Java dialect, native game API, garage, and networked game loop remain open work.
 
 ## Launch
