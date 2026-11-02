@@ -3,6 +3,13 @@ import { parsePartConfig, type CfgPose, type PartConfig } from '../formats/cfg';
 
 export interface MapObjectPlacement { id: number; alias: string; typeId: number; pose: CfgPose }
 
+/** Provisional variant zero until the original per-instance selection is restored.
+ * Zero entries intentionally suppress a component; they are not missing resources.
+ */
+export function mapRenderResource(render: PartConfig['renders'][number], variant = 0): number {
+  return render.variants?.length ? render.variants[variant % render.variants.length] : render.resource;
+}
+
 /** Object instances exist in the map's source RDB even when omitted from its compiled RPK. */
 export function mapObjectPlacements(rdb: string, pack: RpkPack): MapObjectPlacement[] {
   const files = parseRdb(rdb), byName = new Map(files.map(file => [file.name.toLowerCase(), file]));

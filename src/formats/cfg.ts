@@ -7,7 +7,7 @@ export interface CfgCamera extends CfgPose { fov?: number }
 export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number] }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number]; variants?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -55,6 +55,18 @@ export function parsePartConfig(source: string): PartConfig {
         if (result.renders.length) result.renders.at(-1)!.lod = [integer(0), integer(1)];
         else result.unknown.push({ line, command, args });
         break;
+      case 'rendertypes': {
+        // Some stock storefront CFGs begin with an orphan table before any render.
+        if (!result.renders.length) { result.unknown.push({ line, command, args }); break; }
+        const count = integer(0);
+        if (args.length !== count + 1) throw fail();
+        result.renders.at(-1)!.variants = Array.from({ length: count }, (_, i) => {
+          const value = args[i + 1].replace(/r$/i, ''), parsed = Number(value);
+          if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 0xffffffff) throw fail();
+          return parsed;
+        });
+        break;
+      }
       case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;
       case 'mesh': result.mesh = rid(); break;
       case 'texture': result.texture = rid(); break;

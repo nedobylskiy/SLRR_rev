@@ -34,6 +34,8 @@ Rendering is independent of residency. Each loaded instance is tested against th
 
 Fog is controlled independently through `MapFogSettings` and the original Java scene calls (fallback profile: 260–900 m). Reducing render/stream range may have little effect on FPS when physics or another CPU task dominates the frame, even if submitted geometry and memory usage decrease.
 
+Map CFG `rendertypes` tables override the preceding `render` placeholder. For example, `18x6_haromboltiv.cfg` places a component at height 6.5 m with placeholder `0x1de` (an entrance mesh), but its variant table references canopy meshes `homlok12a` through `homlok12f` and empty entries. Ignoring this table produced floating entrances. The map loader now uses variant zero, retains the original component pose, and skips zero resource entries. Original per-instance variant selection and synchronization with day/night variants are still pending; all instances currently share the first configured variant.
+
 The map debug panel also provides independent lighting comparisons:
 
 - **Dynamic lighting** (on by default) applies the renderer's sun, ambient illumination and material reflections. Turning it off shows diffuse textures/colors with emissive contributions and fog retained. Java scene light updates continue to be stored.

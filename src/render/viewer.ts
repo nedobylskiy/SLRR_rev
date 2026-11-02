@@ -19,7 +19,7 @@ import { Vehicle3D } from '../engine/vehicle-3d';
 import { mapRenderIds } from '../engine/map';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
-import { mapObjectPlacements, parseIcfg } from '../engine/map-objects';
+import { mapObjectPlacements, mapRenderResource, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
 import { stockContainerTexture } from './stock-container-texture';
 import { MapObjectStream, type StreamPlacement } from './map-object-stream';
@@ -512,9 +512,11 @@ export class Viewer {
             // simultaneous pieces of one object (e.g. a traffic-light head + pole,
             // or the building and signage meshes of a City storefront).
             if (render.lod && render !== nearLod) continue;
+            const renderResource = mapRenderResource(render);
+            if (!renderResource) continue;
             try {
               renderModels.push({
-                model: await assets.modelForResource(resource.packPath, render.resource),
+                model: await assets.modelForResource(resource.packPath, renderResource),
                 pose: render.pose ? poseMatrix(render.pose) : new THREE.Matrix4(),
               });
             } catch { /* Some entries are abstract game types with no concrete mesh. */ }
