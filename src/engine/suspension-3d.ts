@@ -1,4 +1,4 @@
-import { Matrix4, Quaternion, Vector3 } from 'three';
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 import type { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 import { RigidBody3D } from './rigid-body-3d';
@@ -8,7 +8,7 @@ import type { TireSurface } from './map-terrain';
 import { DEFAULT_TIRE_MODEL, tireForces, type TireModelSettings } from './tire-model';
 import type { WheelRefState } from '../runtime/wheel-ref-native';
 
-export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
+export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; mayReach?(bounds: Box3): boolean; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
 export interface TireContactState { contact: boolean; force: number; contactPoint: Vector3; contactNormal: Vector3; forward: Vector3; slipSpeed: number; lateralSpeed: number; slip: number; surface: TireSurface }
 /** Legacy contact response retained for comparisons with the tunable model. */
 export function tyreContactForces(normalLoad: number, alignment: number, slipSpeed: number, lateralSpeed: number) {

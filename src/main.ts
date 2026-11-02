@@ -20,6 +20,9 @@ import { SoundJavaBridge } from './audio/sound-java';
 import { gameSoundVolume, setGameSoundVolume } from './audio/audio-settings';
 import { DEFAULT_TIRE_MODEL, type TireModelSettings } from './engine/tire-model';
 import { bootGame, type BootEvent } from './runtime/game-boot';
+import { initializeSoftBodyWasm, softBodyRuntime, type SoftBodyBackend } from './engine/soft-body-wasm';
+
+const softBodyReady = initializeSoftBodyWasm();
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Connecting…</span><button id="memory-lab">Memory stream</button><label class="button">Open game folder<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
@@ -52,6 +55,7 @@ function appendJavaEvent(event: BootEvent) {
 }
 async function runGameBoot() {
   if (!assets) return;
+  await softBodyReady;
   disposeJavaScene?.(); disposeJavaScene = undefined;
   driveHud.hidden = true; driveHud.classList.remove('crash-hud');
   disposeJavaInput?.(); disposeJavaInput = undefined;
@@ -64,6 +68,7 @@ async function runGameBoot() {
   const gameVideo = new OsdVideo(gameOsd, source, localInstallation);
   disposeGameOsd = () => gameOsd.dispose();
   el('java-log').replaceChildren();
+  appendJavaEvent({ level: 'native', message: softBodyRuntime.available ? 'Soft-body C++/WASM ready (TS fallback available)' : `Soft-body TS fallback: ${softBodyRuntime.error ?? 'WASM unavailable'}` });
   el('java-run-state').textContent = 'Running Init.java';
   el<HTMLButtonElement>('java-retry').disabled = true;
   const result = await bootGame(source, event => { if (source === assets && run === sequence) appendJavaEvent(event); },
@@ -280,8 +285,24 @@ const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), v
 vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
 const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
+const inertialCameraLabel = textElement('label', 'Inertial chase camera'), inertialCameraCheck = document.createElement('input');
+inertialCameraCheck.type = 'checkbox'; inertialCameraLabel.prepend(inertialCameraCheck); mapDebugOptions.append(inertialCameraLabel);
+inertialCameraLabel.title = 'Experimental external camera with its own velocity and smooth catch-up; cockpit views stay unchanged';
+inertialCameraCheck.onchange = () => viewer?.setInertialCameraEnabled(inertialCameraCheck.checked);
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
+const shadowsLabel = textElement('label', 'Shadow maps'), shadowsCheck = document.createElement('input');
+shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
+shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
+shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
+const lightingLabel = textElement('label', 'Dynamic lighting'), lightingCheck = document.createElement('input');
+lightingCheck.type = 'checkbox'; lightingCheck.checked = true; lightingLabel.prepend(lightingCheck); mapDebugOptions.append(lightingLabel);
+lightingLabel.title = 'Sun and ambient illumination; disable to inspect original texture colors';
+lightingCheck.onchange = () => viewer?.setDynamicLightingEnabled(lightingCheck.checked);
+const vertexColorsLabel = textElement('label', 'Vertex colors (experimental)'), vertexColorsCheck = document.createElement('input');
+vertexColorsCheck.type = 'checkbox'; vertexColorsCheck.checked = true; vertexColorsLabel.prepend(vertexColorsCheck); mapDebugOptions.append(vertexColorsLabel);
+vertexColorsLabel.title = 'SCX vertex RGB; facade paint materials use texture alpha to preserve windows. Original blending semantics remain experimental.';
+vertexColorsCheck.onchange = () => viewer?.setVertexColorsEnabled(vertexColorsCheck.checked);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
 const streamRangeLabel = document.createElement('label'); streamRangeLabel.className = 'map-stream-range';
 const streamRangeValue = textElement('span', ''), streamRangeInput = document.createElement('input');
@@ -296,6 +317,13 @@ const updateStreamRange = () => {
 streamRangeInput.oninput = updateStreamRange;
 streamRangeLabel.append(streamRangeValue, streamRangeInput); mapDebugPanel.append(streamRangeLabel);
 updateStreamRange();
+const softBodyLabel = textElement('label', 'Soft-body solver'); softBodyLabel.className = 'map-stream-range';
+const softBodySelect = document.createElement('select'); softBodySelect.setAttribute('aria-label', 'Soft-body solver');
+for (const [value, title] of [['auto', 'Auto (prefer C++ / WASM)'], ['ts', 'TypeScript'], ['wasm', 'C++ / WASM (TS fallback)']] as const) {
+  const option = document.createElement('option'); option.value = value; option.textContent = title; softBodySelect.append(option);
+}
+softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.value as SoftBodyBackend; };
+softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
 bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);
@@ -328,6 +356,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
       ...(viewer?.profiler.lines() ?? []),
+      ...(viewer?.streamInfo ? [viewer.streamInfo] : []),
       ...(viewer?.physicsWork ? [viewer.physicsWork] : []),
       ...(javaLoop ? [javaLoop()] : []),
       `Position (m) X ${state.position.x.toFixed(1)} · Y ${state.position.y.toFixed(1)} · Z ${state.position.z.toFixed(1)}`,

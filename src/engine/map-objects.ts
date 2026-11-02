@@ -1,7 +1,19 @@
 import { parseRdb, type RpkPack } from '../formats/rpk';
 import { parsePartConfig, type CfgPose, type PartConfig } from '../formats/cfg';
 
-export interface MapObjectPlacement { id: number; alias: string; typeId: number; pose: CfgPose }
+export interface MapObjectPlacement { id: number; alias: string; typeId: number; pose: CfgPose; seed?: number }
+
+/** Installed build 940: 0x4bd040 derives the seed; 0x4bddcb/0x4be042 index both tables. */
+export function mapObjectSeed(instance: Pick<MapObjectPlacement, 'pose' | 'seed'>): number {
+  if (instance.seed !== undefined && instance.seed >= 0) return instance.seed;
+  const [x, y, z] = instance.pose.position.map(Math.fround);
+  return Math.trunc(Math.fround(Math.fround(x + y) + z)) & 0x7fffffff;
+}
+
+/** Zero entries intentionally suppress a component; they are not missing resources. */
+export function mapRenderResource(render: PartConfig['renders'][number], variant = 0): number {
+  return render.variants?.length ? render.variants[variant % render.variants.length] : render.resource;
+}
 
 /** Object instances exist in the map's source RDB even when omitted from its compiled RPK. */
 export function mapObjectPlacements(rdb: string, pack: RpkPack): MapObjectPlacement[] {
@@ -14,10 +26,12 @@ export function mapObjectPlacements(rdb: string, pack: RpkPack): MapObjectPlacem
     const params = payload?.properties.find(p => p.key === 'params')?.value;
     if (!gameType || !/^0x[\da-f]+$/i.test(gameType) || !params) continue;
     const values = params.split(',').map(v => Number(v.trim()));
-    if (values.length !== 6 || values.some(v => !Number.isFinite(v))) continue;
+    if ((values.length !== 6 && values.length !== 7) || values.some(v => !Number.isFinite(v))) continue;
+    if (values.length === 7 && (!Number.isInteger(values[6]) || values[6] < -2147483648 || values[6] > 2147483647)) continue;
     const typeId = Number.parseInt(gameType.slice(2), 16) >>> 0;
     if (typeId >>> 16 && !pack.dependencies.some(dep => dep.id >>> 16 === typeId >>> 16)) continue;
     placements.push({ id, alias: file.properties.find(p => p.key === 'alias')?.value ?? '', typeId,
+      ...(values.length === 7 ? { seed: values[6] } : {}),
       pose: { position: values.slice(0, 3) as CfgPose['position'], rotation: values.slice(3) as CfgPose['rotation'] } });
   }
   return placements;

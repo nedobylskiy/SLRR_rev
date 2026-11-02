@@ -24,7 +24,22 @@ export function textureAlphaMode(bytes: Uint8Array, path: string, decodedImage?:
   const width = view.getUint32(16, true), height = view.getUint32(12, true), fourcc = ascii(bytes, 84, 4);
   if (!width || !height || width > 16384 || height > 16384) return 'opaque';
   const blockSize = fourcc === 'DXT1' ? 8 : fourcc === 'DXT3' || fourcc === 'DXT5' ? 16 : 0;
-  if (!blockSize) return view.getUint32(104, true) ? 'blend' : 'opaque';
+  if (!blockSize) {
+    const mask = view.getUint32(104, true);
+    if (!mask) return 'opaque';
+    if (view.getUint32(88, true) !== 32 || bytes.length < 128 + width * height * 4) return 'blend';
+    let shift = 0;
+    while (shift < 32 && ((mask >>> shift) & 1) === 0) shift++;
+    const maximum = mask >>> shift;
+    let zero = 0, middle = 0, full = 0;
+    const stride = Math.max(1, Math.floor(width * height / 65536));
+    for (let pixel = 0; pixel < width * height; pixel += stride) {
+      const alpha = ((view.getUint32(128 + pixel * 4, true) & mask) >>> shift);
+      if (alpha === 0) zero++; else if (alpha === maximum) full++; else middle++;
+    }
+    return zero > (zero + middle + full) * 0.02 && full > (zero + middle + full) * 0.05
+      ? 'cutout' : zero || middle ? 'blend' : 'opaque';
+  }
   const blocks = Math.ceil(width / 4) * Math.ceil(height / 4), available = Math.min(blocks, Math.floor((bytes.length - 128) / blockSize));
   if (!available) return 'opaque';
   const stride = Math.max(1, Math.floor(available / 4096));
