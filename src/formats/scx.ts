@@ -3,6 +3,9 @@ import { BinaryReader } from '../binary';
 export interface ScxMesh {
   name: string; positions: Float32Array; normals: Float32Array;
   uv: Float32Array; uv2?: Float32Array; uv3?: Float32Array;
+  /** Packed diffuse RGB decoded as D3DCOLOR (ARGB). Alpha semantics remain unverified. */
+  colors?: Uint8Array;
+  paintMask?: boolean;
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
   layer2Index?: number; materialFlags?: number; textureChannel?: number; layer2Channel?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
@@ -14,6 +17,11 @@ export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string
 /** V3's alphaOpacity flag controls whether diffuse-map alpha affects the surface. */
 export function scxDiffuseUsesAlpha(version: number, materialFlags = 0) {
   return version !== 3 || (materialFlags & 1) !== 0;
+}
+
+/** V3 facade paint materials use texture alpha as coverage, not surface opacity. */
+export function scxUsesVertexPaintMask(version: number, materialFlags = 0) {
+  return version === 3 && (materialFlags & 0x100) !== 0 && !scxDiffuseUsesAlpha(version, materialFlags);
 }
 
 function validate(mesh: ScxMesh) {
@@ -52,17 +60,19 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const count = r.count(r.u32(), size > 56 ? 64 : 44);
       const positions = new Float32Array(count * 3), normals = new Float32Array(count * 3), uv = new Float32Array(count * 2), uv2 = new Float32Array(count * 2);
       const uv3 = size > 56 ? new Float32Array(count * 2) : undefined;
+      const colors = new Uint8Array(count * 3);
       for (let i = 0; i < count; i++) {
         for (let j = 0; j < 3; j++) positions[i * 3 + j] = r.f32();
         for (let j = 0; j < 3; j++) normals[i * 3 + j] = r.f32();
         uv[i * 2] = r.f32(); uv[i * 2 + 1] = r.f32();
         uv2[i * 2] = r.f32(); uv2[i * 2 + 1] = r.f32();
-        r.skip(4);
+        const packed = r.u32();
+        colors.set([(packed >>> 16) & 255, (packed >>> 8) & 255, packed & 255], i * 3);
         if (uv3) { r.skip(8); uv3[i * 2] = r.f32(); uv3[i * 2 + 1] = r.f32(); r.skip(4); }
       }
       const triangles = r.count(r.u32(), 12);
       const indices = Uint32Array.from({ length: triangles * 3 }, () => r.u32());
-      const mesh = { name, positions, normals, uv, uv2, uv3, indices, diffuse,
+      const mesh = { name, positions, normals, uv, uv2, uv3, colors, indices, diffuse,
         textureIndex, layer2Index, materialFlags, textureChannel, layer2Channel };
       validate(mesh); meshes.push(mesh);
     }
@@ -78,9 +88,10 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const vertices = current.positions.length / 3;
       const mesh: ScxMesh = { name: current.name ?? `material_${meshes.length}`, positions: current.positions,
         normals: current.normals ?? new Float32Array(vertices * 3), uv: current.uv ?? new Float32Array(vertices * 2),
-        uv2: current.uv2, uv3: current.uv3, textureMap: current.textureMap,
+        uv2: current.uv2, uv3: current.uv3, colors: current.colors, paintMask: current.paintMask, textureMap: current.textureMap,
         lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
+        materialFlags: current.materialFlags,
         indices: current.indices, diffuse: current.diffuse ?? [0.6, 0.65, 0.7, 1], textureIndex: current.textureIndex ?? 0xffff };
       validate(mesh); meshes.push(mesh);
     };
@@ -94,7 +105,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       if (item.type === 0 || (item.type === 1 && physicsOnly)) {
         finish(); current = {};
         if (item.type === 0) {
-          r.skip(8); const n = r.count(r.u32(), 4);
+          r.skip(4); current.materialFlags = r.u32();
+          const n = r.count(r.u32(), 4);
           for (let j = 0; j < n; j++) {
             const type = r.u32();
             if (type <= 2) { const color = Array.from({ length: 4 }, () => r.u8() / 255); if (type === 0) current.diffuse = color; }
@@ -109,6 +121,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
               // Keep DiffuseMap authoritative when both entries are present, regardless of their order.
               if (type === 0x06000000 || (type === 0x06000001 && current.textureIndex === undefined)) {
                 current.textureIndex = index; current.textureMap = map;
+                // V4 bridge/truss materials use the same map slot as painted
+                // facades, but bit 29 makes alpha surface coverage instead of paint.
+                current.paintMask = type === 0x06000001 && !(current.materialFlags! & 0x20000000);
               }
               if (type === 0x06000004) { current.lightmapIndex = index; current.lightmapMap = map; }
               if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
@@ -120,8 +135,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       } else if (item.type === 4) {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
-          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap } = current;
-          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap };
+          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags } = current;
+          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);
@@ -129,13 +144,18 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         current.positions = new Float32Array(n * 3); current.normals = new Float32Array(n * 3); current.uv = new Float32Array(n * 2);
         if (flags & 0x400) current.uv2 = new Float32Array(n * 2);
         if (flags & 0x800) current.uv3 = new Float32Array(n * 2);
+        if (flags & 0x80) current.colors = new Uint8Array(n * 3);
         for (let i = 0; i < n; i++) {
           for (let j = 0; j < 3; j++) current.positions[i * 3 + j] = r.f32();
           // Weight flag encodes 1..4 influences; the last weight is implicit.
           if (flags & 4) r.skip(4); else if (flags & 8) r.skip(8); else if (flags & 16) r.skip(12);
           if (flags & 32) r.skip(4);
           if (flags & 0x40) for (let j = 0; j < 3; j++) current.normals[i * 3 + j] = r.f32();
-          if (flags & 0x80) r.skip(4); if (flags & 0x100) r.skip(4);
+          if (current.colors) {
+            const packed = r.u32();
+            current.colors.set([(packed >>> 16) & 255, (packed >>> 8) & 255, packed & 255], i * 3);
+          }
+          if (flags & 0x100) r.skip(4);
           if (flags & 0x200) { current.uv[i * 2] = r.f32(); current.uv[i * 2 + 1] = r.f32(); }
           if (current.uv2) { current.uv2[i * 2] = r.f32(); current.uv2[i * 2 + 1] = r.f32(); }
           if (current.uv3) { current.uv3[i * 2] = r.f32(); current.uv3[i * 2 + 1] = r.f32(); }

@@ -1,7 +1,83 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
+
+test('finishing a model load does not rescan distant placements until the focus changes', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  let distantChecks = 0;
+  stream.add([{ position: new Vector3(), matrix: new Matrix4() }], async () => [new Mesh(new BoxGeometry(), new MeshBasicMaterial())]);
+  stream.add([{ position: new Vector3(1000, 0, 0), matrix: new Matrix4().makeTranslation(1000, 0, 0),
+    get radius() { distantChecks++; return 0; } }], async () => [new Mesh(new BoxGeometry(), new MeshBasicMaterial())]);
+  stream.update(focus); const initial = distantChecks;
+  assert.ok(initial > 0);
+  await Promise.resolve(); stream.update(focus);
+  assert.equal(stream.visible, 1, 'completed model becomes visible without rebuilding the index query');
+  assert.equal(distantChecks, initial, 'a load completion does not revisit unrelated far objects');
+  stream.update(new Vector3(1000, 0, 0)); await Promise.resolve(); stream.update(new Vector3(1000, 0, 0));
+  assert.ok(distantChecks > initial);
+  assert.equal(stream.visible, 1, 'teleport still requests the destination model');
+  stream.dispose();
+});
+
+test('palette colors share one model and follow instances when the camera compacts the batch', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 200); camera.lookAt(0, 0, -1);
+  let loads = 0;
+  stream.add([-20, 20].map((z, i) => ({ matrix: new Matrix4().makeTranslation(0, 0, z), position: new Vector3(0, 0, z), paintColor: i ? 0x336699 : 0xff0000 })), async () => {
+    loads++; return [new Mesh(new BoxGeometry(), new MeshBasicMaterial())];
+  });
+  stream.update(focus, camera); await Promise.resolve(); stream.update(focus, camera);
+  const mesh = parent.children[0] as InstancedMesh, color = new Color();
+  assert.equal(parent.children.length, 1); assert.equal(mesh.count, 1);
+  mesh.getColorAt(0, color); assert.equal(color.getHex(), 0xff0000);
+  camera.lookAt(0, 0, 1); stream.update(focus, camera);
+  mesh.getColorAt(0, color); assert.equal(color.getHex(), 0x336699);
+  assert.equal(loads, 1); assert.equal(mesh.instanceColor!.count, 2);
+  stream.dispose();
+});
+
+test('instances of one model are culled independently without unloading and camera rotation reuses the model', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 200); camera.lookAt(0, 0, -1);
+  let loads = 0;
+  stream.add([-20, 20].map(z => ({ matrix: new Matrix4().makeTranslation(0, 0, z), position: new Vector3(0, 0, z) })), async () => {
+    loads++; return [new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial())];
+  });
+  stream.update(focus, camera); await Promise.resolve(); stream.update(focus, camera);
+  const mesh = parent.children[0] as InstancedMesh, matrix = new Matrix4();
+  assert.equal(stream.active, 2); assert.equal(stream.visible, 1); assert.equal(mesh.count, 1);
+  mesh.getMatrixAt(0, matrix); assert.equal(matrix.elements[14], -20);
+  const version = mesh.instanceMatrix.version;
+  stream.update(focus, camera); assert.equal(mesh.instanceMatrix.version, version, 'stationary view does not reupload matrices');
+  camera.lookAt(0, 0, 1); stream.update(focus, camera);
+  mesh.getMatrixAt(0, matrix); assert.equal(matrix.elements[14], 20);
+  assert.equal(stream.active, 2); assert.equal(loads, 1);
+  stream.setRange(10); stream.update(focus, camera);
+  assert.equal(stream.active, 2, 'hysteresis keeps models resident');
+  assert.equal(stream.visible, 0); assert.equal(mesh.visible, false, 'draw range changes immediately');
+  stream.setRange(100); stream.update(focus, camera);
+  assert.equal(stream.visible, 1); assert.equal(loads, 1);
+  stream.setShadowRange(30); stream.update(focus, camera);
+  assert.equal(stream.visible, 2, 'nearby off-screen casters remain available to the shadow pass');
+  stream.setShadowRange(0); stream.update(focus, camera);
+  assert.equal(stream.visible, 1, 'disabling shadows restores normal camera culling');
+  stream.dispose();
+});
+
+test('instance frustum tests include parent transforms and mesh bounds away from their origin', async () => {
+  const parent = new Group(); parent.position.x = 100;
+  const stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  const camera = new PerspectiveCamera(30, 1, 0.1, 200); camera.position.x = 100; camera.lookAt(125, 0, -10);
+  stream.add([{ matrix: new Matrix4().makeTranslation(0, 0, -10), position: new Vector3(0, 0, -10) }], async () => {
+    const geometry = new BoxGeometry(2, 2, 2); geometry.translate(25, 0, 0);
+    return [new Mesh(geometry, new MeshBasicMaterial())];
+  });
+  stream.update(focus, camera); await Promise.resolve(); stream.update(focus, camera);
+  assert.equal(stream.visible, 1);
+  camera.lookAt(75, 0, 10); stream.update(focus, camera); assert.equal(stream.visible, 0);
+  stream.dispose();
+});
 
 test('camera culling follows streamed instance bounds after additions, removals and teleport', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100, 1);

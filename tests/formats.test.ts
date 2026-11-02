@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseConstants, parseTufa, parseTrees } from '../src/formats/tufa';
-import { parseScx, scxDiffuseUsesAlpha } from '../src/formats/scx';
+import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../src/formats/scx';
 import { parseRpk, parseProperties, parseRdb } from '../src/formats/rpk';
 import { normalizePath } from '../src/assets';
 
@@ -48,10 +48,12 @@ test('SCX v3 preserves layer2 texture index and all three UV channels', () => {
   const vertex = Buffer.alloc(44);
   vertex.writeFloatLE(0.25, 24); vertex.writeFloatLE(0.5, 28);
   vertex.writeFloatLE(0.75, 32); vertex.writeFloatLE(0.875, 36);
+  vertex.writeUInt32LE(0x7f123456, 40);
   const data = Buffer.concat([Buffer.from('INVO'), u32(3), material, u32(1), vertex, u32(0), u32(0)]);
   const mesh = parseScx(data).meshes[0];
   assert.equal(mesh.textureIndex, 2);
   assert.equal(mesh.layer2Index, 5);
+  assert.deepEqual(Array.from(mesh.colors!), [0x12, 0x34, 0x56]);
   assert.deepEqual(Array.from(mesh.uv), [0.25, 0.5]);
   assert.deepEqual(Array.from(mesh.uv2!), [0.75, 0.875]);
   const extended = Buffer.alloc(136);
@@ -66,21 +68,45 @@ test('SCX v3 preserves layer2 texture index and all three UV channels', () => {
   assert.equal(wide.textureChannel, 2);
   assert.equal(wide.layer2Channel, 0);
 });
+
+test('SCX v4 diffuse vertex colors preserve RGB without confusing specular or UV data', () => {
+  const vertex = Buffer.alloc(28);
+  vertex.writeUInt32LE(0x00123456, 12);
+  vertex.writeUInt32LE(0xffabcdef, 16);
+  vertex.writeFloatLE(0.25, 20); vertex.writeFloatLE(0.75, 24);
+  const chunks = [u32(0, 20, 0, 0, 0), Buffer.concat([u32(4, 44, 1, 0x381), vertex]), u32(5, 12, 0)];
+  let offset = 12 + chunks.length * 8;
+  const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
+  const mesh = parseScx(Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks])).meshes[0];
+  assert.deepEqual(Array.from(mesh.colors!), [0x12, 0x34, 0x56]);
+  assert.deepEqual(Array.from(mesh.uv), [0.25, 0.75]);
+});
 test('SCX v3 alphaOpacity flag keeps RGB road base opaque while allowing cutout fences', () => {
+  assert.equal(scxUsesVertexPaintMask(3, 0x100), true);
+  assert.equal(scxUsesVertexPaintMask(3, 0x101), false);
+  assert.equal(scxUsesVertexPaintMask(3, 0x40), false);
+  assert.equal(scxUsesVertexPaintMask(4, 0x100), false);
   assert.equal(scxDiffuseUsesAlpha(3, 0x40), false);
   assert.equal(scxDiffuseUsesAlpha(3, 0), false);
   assert.equal(scxDiffuseUsesAlpha(3, 0x101), true);
   assert.equal(scxDiffuseUsesAlpha(4, 0), true);
 });
 test('SCX v4 uses the secondary diffuse map only when the primary map is absent', () => {
-  const fixture = (properties: Array<[number, number]>) => {
-    const material = Buffer.concat([u32(0, 0), u32(properties.length), ...properties.map(([type, index]) => Buffer.concat([u32(type, index), Buffer.alloc(24)]))]);
+  const fixture = (properties: Array<[number, number]>, flags = 0) => {
+    const material = Buffer.concat([u32(0, flags), u32(properties.length), ...properties.map(([type, index]) => Buffer.concat([u32(type, index), Buffer.alloc(24)]))]);
     const chunks = [Buffer.concat([u32(0, material.length + 8), material]), u32(4, 16, 0, 1), u32(5, 12, 0)];
     let offset = 12 + chunks.length * 8;
     const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
     return Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks]);
   };
   assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].textureIndex, 3);
+  assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].paintMask, true);
+  const bridge = parseScx(fixture([[0x06000001, 3]], 0xa0000000)).meshes[0];
+  assert.equal(bridge.materialFlags, 0xa0000000);
+  assert.equal(bridge.paintMask, false, 'bridge alpha cuts holes instead of filling them with paint');
+  assert.equal(parseScx(fixture([[0x06000001, 3]], 0x80000000)).meshes[0].paintMask, true);
+  assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].paintMask, false);
+  assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].paintMask, false);
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].textureIndex, 1);
   assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].textureIndex, 1);
   const lit = parseScx(fixture([[0x06000000, 3], [0x06000004, 4]])).meshes[0];
