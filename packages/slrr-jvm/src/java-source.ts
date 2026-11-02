@@ -405,7 +405,18 @@ export class JavaSourceMachine {
     if ((op === '/' || op === '%') && y === 0 && type === 'int') throw new Error('Java integer division by zero');
     const operations: Record<string, () => number> = { '+': () => x + y, '-': () => x - y, '*': () => x * y, '/': () => x / y, '%': () => x % y, '&': () => x & y, '|': () => x | y, '^': () => x ^ y, '<<': () => x << y, '>>': () => x >> y, '>>>': () => x >>> y };
     if (!operations[op]) throw new Error(`Unsupported Java operator ${op}`);
-    return coerce(type, jv(type, operations[op]()));
+    const result = coerce(type, jv(type, operations[op]()));
+    // Resource tables use RID_BASE + index. Keep the pack identity only for
+    // integer offsets that stay within the same 16-bit local resource range.
+    const base = a.resource && !b.resource ? a : op === '+' && b.resource && !a.resource ? b : undefined;
+    if (type === 'int' && (op === '+' || op === '-') && base?.resource) {
+      const delta = Number(result.value) - Number(base.value), localId = base.resource.id + delta;
+      if (Number.isInteger(localId) && localId >= 0 && localId <= 0xffff) {
+        result.resource = { pack: base.resource.pack, id: localId };
+        result.resourceId = Number(result.value);
+      }
+    }
+    return result;
   }
   private statement(stmt: Stmt, scope: Scope, self: JavaValue, method: SourceMethod): Flow {
     this.step(); const ev = (e: Expr) => this.expression(e, scope, self, method), run = (s: Stmt, sc = scope) => this.statement(s, sc, self, method);

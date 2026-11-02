@@ -66,3 +66,71 @@ test('Java File reads original SDAT and writes a persistent SDAT stream', async 
   assert.equal(call('delete', klass, jv('String', 'save/test/moved')), 0);
   assert.equal(call('exists', klass, jv('String', 'save/test/moved')), 0);
 });
+
+test('Java File remounts ResourceRefs across persistence and different runtime ID assignments', async () => {
+  const backend = new MemoryKeyValue(), fs = await VirtualFileSystem.load(backend);
+  const setup = (files: VirtualFileSystem, swapped = false) => {
+    const jvm = new SlrrJvm({ resolveImport: () => null });
+    const resources = new GameTypeNative(jvm, () => {}, undefined, undefined, undefined, undefined,
+      id => id === 0x30002a ? { pack: swapped ? 'cars.rpk' : 'frontend.rpk', id: 0x2a } : undefined);
+    new FileNative(jvm, files, resources);
+    const file = (path: string) => jv('File', { className: 'java.io.File', fields: new Map([['name', jv('String', path)]]) });
+    const call = (method: string, receiver: JavaValue, ...args: JavaValue[]) => jvm.natives.invoke('java.io.File', method, receiver, args)!;
+    const ref = (id: JavaValue) => {
+      const value = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+      jvm.natives.invoke('java.util.resource.ResourceRef', 'set', value, [id]);
+      return value;
+    };
+    return { resources, file, call, ref };
+  };
+  const first = setup(fs), writer = first.file('save/career/test/player');
+  first.call('open', writer, jv('int', 1));
+  const frontend = first.ref(jv('int', 0x30002a));
+  const carId = jv('int', 0x50002a); carId.resource = { pack: 'CARS', id: 0x2a };
+  const car = first.ref(carId);
+  first.call('write', writer, jv('int', 123));
+  for (const value of [frontend, car, frontend, jv('ResourceRef', null)])
+    assert.equal(first.call('write', writer, value).value, 4);
+  first.call('close', writer); await fs.flush();
+  const reloaded = await VirtualFileSystem.load(backend), saved = parseSdat(reloaded.read('save/career/test/player')!);
+  assert.deepEqual([...saved.packs], [[1, 'frontend.rpk'], [2, 'cars.rpk']]);
+  const wire = new MemoryFile(saved.payload);
+  assert.deepEqual(Array.from({ length: 5 }, () => wire.readInt()), [123, 0x1002a, 0x2002a, 0x1002a, 0]);
+  const second = setup(reloaded, true), reader = second.file('save/career/test/player');
+  second.call('open', reader, jv('int', 0));
+  assert.equal(second.call('readInt', reader).value, 123);
+  const ids = Array.from({ length: 4 }, () => second.call('readResID', reader));
+  assert.equal(ids[0].value, ids[2].value, 'repeated references share one remounted ID');
+  assert.notEqual(ids[0].value, ids[1].value, 'same local ID in two packs stays distinct');
+  assert.equal(ids[3].value, 0);
+  for (const [index, pack] of [[0, 'frontend.rpk'], [1, 'cars.rpk']] as const) {
+    // Deliberately discard JavaValue metadata, as scripts store readResID in int fields.
+    const resource = second.resources.getResource(second.ref(jv('int', ids[index].value)))!;
+    assert.deepEqual(second.resources.resolveRenderResource(resource), { pack, id: 0x2a });
+  }
+  const copy = second.file('save/career/test/copy');
+  second.call('open', copy, jv('int', 1));
+  second.call('write', copy, second.ref(jv('int', ids[1].value)));
+  second.call('close', copy);
+  assert.deepEqual([...parseSdat(reloaded.read('save/career/test/copy')!).packs], [[1, 'cars.rpk']]);
+});
+
+test('File.readResID rejects missing and unsupported embedded resources instead of using runtime IDs', async () => {
+  const fs = await VirtualFileSystem.load(new MemoryKeyValue());
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  new FileNative(jvm, fs, new GameTypeNative(jvm, () => {}));
+  for (const type of [1, 2]) {
+    const payload = new MemoryFile(); payload.writeInt(0x1002a);
+    fs.write('save/ref', serializeSdat({ type, flags: 0, payload: payload.toBytes(), packs: new Map([[1, 'cars.rpk']]), unsaved: [] }));
+    const file = jv('File', { className: 'java.io.File', fields: new Map([['name', jv('String', 'save/ref')]]) });
+    jvm.natives.invoke('java.io.File', 'open', file, [jv('int', 0)]);
+    assert.deepEqual(jvm.natives.invoke('java.io.File', 'readResID', file, [])!.resource, { pack: 'cars.rpk', id: 0x2a });
+  }
+  for (const [id, pattern] of [[0x2002a, /missing pack ordinal/], [0xffff0001, /embedded SDAT/]] as const) {
+    const payload = new MemoryFile(); payload.writeInt(id);
+    fs.write('save/ref', serializeSdat({ type: 2, flags: 0, payload: payload.toBytes(), packs: new Map(), unsaved: [] }));
+    const file = jv('File', { className: 'java.io.File', fields: new Map([['name', jv('String', 'save/ref')]]) });
+    jvm.natives.invoke('java.io.File', 'open', file, [jv('int', 0)]);
+    assert.throws(() => jvm.natives.invoke('java.io.File', 'readResID', file, []), pattern);
+  }
+});

@@ -5,6 +5,7 @@ import { RenderObject } from './render-object';
 import type { ResourceCatalog } from './resource-catalog';
 import type { BootEvent } from './game-boot';
 import type { ResourceIdentity } from 'slrr-jvm';
+import { normalizeResourcePackPath } from '../assets';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
@@ -39,6 +40,8 @@ export class GameTypeNative {
   private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
   private readonly trackPackSlots = new Map<string, number>();
+  private readonly savedResources = new Map<number, ResourceIdentity>();
+  private readonly savedResourceIds = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly notifications = new Map<JavaObject, Notification[]>();
   private readonly triggerContacts = new Map<ResourceObject, boolean>();
@@ -66,7 +69,7 @@ export class GameTypeNative {
     jvm.natives.register(resourceRef, 'set', ['int'], ({ receiver, args }) => {
       const object = this.object(receiver);
       const id = Number(args[0].value) | 0;
-      const origin = args[0].resource ?? this.resolvePackedResource?.(id);
+      const origin = args[0].resource ?? this.resolveResourceIdentity(id);
       const live = this.liveByResourceId.get(id);
       // getInfo(GII_OWNER) yields a plain instance ID. It can numerically overlap
       // a loaded packed resource, so only an explicit resource literal outranks it.
@@ -431,6 +434,24 @@ export class GameTypeNative {
     return node instanceof GameObject ? node : undefined;
   }
   getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
+  resolveResourceIdentity(id: number): ResourceIdentity | undefined {
+    return this.savedResources.get(id) ?? this.resolvePackedResource?.(id);
+  }
+  /** Remount a saved RPK entry independently of the current source dependency slots. */
+  remountSavedResource(pack: string, localId: number): JavaValue {
+    const identity = { pack: normalizeResourcePackPath(pack), id: localId & 0xffff };
+    const key = `${identity.pack}:${identity.id}`;
+    let id = this.savedResourceIds.get(key);
+    if (id === undefined) {
+      if (this.savedResources.size >= 0x10000000) throw new Error('Saved resource ID space exhausted');
+      id = 0x50000000 + this.savedResources.size;
+      this.savedResourceIds.set(key, id);
+      this.savedResources.set(id, identity);
+    }
+    const value = jv('int', id);
+    value.resource = identity;
+    return value;
+  }
   getRender(receiver: JavaValue): RenderObject | undefined {
     const node = this.getResource(receiver);
     return node instanceof RenderObject ? node : undefined;
@@ -439,7 +460,7 @@ export class GameTypeNative {
     // typeId is the RPK type. resourceId may be an engine-generated clone handle
     // such as 0x40000112 and must never be interpreted as an RPK entry ID.
     const sourceId = type.typeId;
-    return this.resolvePackedResource?.(sourceId)
+    return this.resolveResourceIdentity(sourceId)
       ?? (type.resourcePack ? { pack: type.resourcePack, id: sourceId & 0xffff } : null);
   }
   notifyRenderChanged(node: RenderObject): void { this.renderChanged?.(node); }
@@ -626,6 +647,8 @@ export class GameTypeNative {
     this.notifications.clear();
     this.triggerContacts.clear();
     this.callbacks.clear();
+    this.savedResources.clear();
+    this.savedResourceIds.clear();
   }
 
   private cancelTimers(object: JavaObject): void {

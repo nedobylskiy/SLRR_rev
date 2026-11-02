@@ -97,7 +97,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const packedResources = new Map<number, ResourceIdentity | null>();
   const unlistedResourceSlots = new Map<string, number>();
   let nextUnlistedSlot = 0x7000;
-  const resolveResourceIdentity = (id: number) => packedResources.get(id) ?? undefined;
+  const resolveResourceIdentity = (id: number): ResourceIdentity | undefined =>
+    packedResources.get(id) ?? gameTypes?.resolveResourceIdentity(id);
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
     if (path.endsWith('.java')) {
