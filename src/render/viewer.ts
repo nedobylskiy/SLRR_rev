@@ -30,6 +30,7 @@ import { RenderObject } from '../runtime/render-object';
 import type { RenderLightSettings, RenderFlareSource } from '../runtime/render-ref-native';
 import type { EnvironmentMapSource } from './environment-map';
 import { FrameProfiler } from './frame-profiler';
+import { SceneLighting } from './scene-lighting';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -89,6 +90,21 @@ export class Viewer {
   private environmentRevision = 0;
   private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
+  private lighting = new SceneLighting();
+  setShadowMapsEnabled(enabled: boolean) {
+    this.lighting.shadows = enabled;
+    this.renderer.shadowMap.enabled = enabled;
+    this.sunLight.castShadow = enabled;
+    this.mapStream?.setShadowRange(enabled ? 150 : 0);
+    this.scene.traverse(object => {
+      if (object instanceof THREE.Mesh) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(material => { material.needsUpdate = true; });
+      }
+    });
+  }
+  setDynamicLightingEnabled(enabled: boolean) { this.lighting.dynamic.value = enabled ? 1 : 0; }
+  setVertexColorsEnabled(enabled: boolean) { this.lighting.vertexColors.value = enabled ? 1 : 0; }
   private sunFlare?: Lensflare;
   private sunFlareTexture?: THREE.Texture;
   private sunFlareRevision = 0;
@@ -103,12 +119,17 @@ export class Viewer {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.lighting.configureSun(this.sunLight);
+    this.lighting.configureMaterial(this.ground.material);
+    this.ground.receiveShadow = true;
     container.append(this.renderer.domElement);
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.scene.add(this.ambientLight);
     this.sunLight.position.set(3, 5, 4); this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
     this.scene.add(this.grid);
     this.driveGrid.visible = false; this.scene.add(this.driveGrid);
     this.ground.rotation.x = -Math.PI / 2; this.ground.position.y = -0.002; this.ground.visible = false; this.scene.add(this.ground);
@@ -130,8 +151,9 @@ export class Viewer {
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
+      this.lighting.updateSun(this.sunLight, this.mapStreamFocus ?? this.controls.target);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
-        .addScaledVector(this.sunLight.position.clone().normalize(), 500);
+        .addScaledVector(this.lighting.direction, 500);
       this.profiler.beginGpu();
       this.profiler.measure('Render CPU', () => this.renderer.render(this.scene, this.camera));
       this.profiler.endGpu();
@@ -247,6 +269,7 @@ export class Viewer {
         if (isSkyDome) template.traverse(object => {
           if (!(object instanceof THREE.Mesh)) return;
           object.renderOrder = -1000;
+          object.castShadow = false; object.receiveShadow = false;
           const materials = Array.isArray(object.material) ? object.material : [object.material];
           materials.forEach(material => this.configureSkyMaterial(material));
         });
@@ -317,7 +340,7 @@ export class Viewer {
     context.putImageData(pixels, 0, 0); color.close(); alpha.close();
     phase = 'lens flare setup';
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-    if (source.sunDirection) this.sunLight.position.set(source.sunDirection.x, source.sunDirection.y, source.sunDirection.z);
+    if (source.sunDirection) this.lighting.direction.set(source.sunDirection.x, source.sunDirection.y, source.sunDirection.z).normalize();
     const tint = new THREE.Color((source.color >>> 8) & 0xffffff);
     const flare = new Lensflare();
     const glowSize = Math.max(48 + source.minSize * 16, Math.min(384, 96 + source.maxSize * 16));
@@ -427,6 +450,7 @@ export class Viewer {
     this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     let loaded = 0, triangles = 0;
     const stream = new MapObjectStream(this.model, this.mapStreamRange);
+    stream.setShadowRange(this.lighting.shadows ? 150 : 0);
     this.mapStream = stream;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
@@ -843,6 +867,7 @@ export class Viewer {
     group.clear();
   }
   private configureSkyMaterial(material: THREE.Material): void {
+    material.userData.sky = true;
     const fogColor = new THREE.Color(this.mapFog.color);
     const fogEnabled = { value: this.mapFogEnabled ? 1 : 0 };
     this.skyFogUniforms.add({ color: fogColor, enabled: fogEnabled });
@@ -871,6 +896,7 @@ export class Viewer {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.BufferAttribute(part.positions, 3));
       geometry.setAttribute('normal', new THREE.BufferAttribute(part.normals, 3));
+      if (part.colors) geometry.setAttribute('slrrColor', new THREE.BufferAttribute(part.colors, 3, true));
       const primaryChannel = part.textureMap?.channel ?? part.textureChannel ?? 0;
       const uv = primaryChannel === 1 ? part.uv2 : primaryChannel === 2 ? part.uv3 : part.uv;
       geometry.setAttribute('uv', new THREE.BufferAttribute(uv ?? part.uv, 2));
@@ -880,7 +906,9 @@ export class Viewer {
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
       const opacity = Math.max(0, Math.min(1, part.diffuse[3] ?? 1));
       const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide, opacity, transparent: opacity < 1, depthWrite: opacity === 1 });
+      this.lighting.configureMaterial(material, !!part.colors);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
+      mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
       const file = textures[part.textureIndex];
       if (file) {
         try {
@@ -926,12 +954,15 @@ export class Viewer {
               roughness: 0.85, metalness: 0, side: THREE.DoubleSide, transparent: true,
               depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
             const layer = new THREE.Mesh(layerGeometry, layerMaterial);
+            this.lighting.configureMaterial(layerMaterial, !!part.colors);
+            layer.receiveShadow = true;
             layer.name = `${part.name} / layer2`;
             layer.renderOrder = 1;
             target.add(layer);
           } else texture.dispose(); // Opaque mix modes need the original material rule, not a covering pass.
         } catch (e) { warnings.push(`Texture layer ${layerFile}: ${e}`); }
       }
+      mesh.castShadow = !material.transparent;
       if (generation !== this.generation) return warnings;
     }
     return warnings;

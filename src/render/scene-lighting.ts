@@ -1,0 +1,49 @@
+import { DirectionalLight, MeshStandardMaterial, Vector3 } from 'three';
+
+/** Debug switches for renderer lighting; original baked lighting is left intact. */
+export class SceneLighting {
+  readonly dynamic = { value: 1 };
+  readonly vertexColors = { value: 0 };
+  readonly direction = new Vector3(3, 5, 4).normalize();
+  shadows = false;
+
+  configureMaterial(material: MeshStandardMaterial, hasVertexColors = false) {
+    const previous = material.onBeforeCompile;
+    const previousKey = material.customProgramCacheKey.bind(material);
+    const key = previousKey();
+    material.onBeforeCompile = (shader, renderer) => {
+      previous.call(material, shader, renderer);
+      // Sky materials retain their own appearance and horizon fog blend.
+      shader.uniforms.slrrDynamicLighting = material.userData.sky ? { value: 1 } : this.dynamic;
+      if (hasVertexColors) {
+        shader.uniforms.slrrVertexColors = material.userData.sky ? { value: 0 } : this.vertexColors;
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nattribute vec3 slrrColor;\nvarying vec3 vSlrrColor;')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSlrrColor = slrrColor;');
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nuniform float slrrVertexColors;\nvarying vec3 vSlrrColor;')
+          .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix( vec3(1.0), vSlrrColor, slrrVertexColors );');
+      }
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float slrrDynamicLighting;')
+        .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
+        .replace('#include <opaque_fragment>', 'outgoingLight = mix( diffuseColor.rgb * getShadowMask() + totalEmissiveRadiance, outgoingLight, slrrDynamicLighting );\n#include <opaque_fragment>');
+    };
+    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v1|colors:${hasVertexColors}`;
+  }
+
+  configureSun(sun: DirectionalLight) {
+    sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -100, right: 100, top: 100, bottom: -100, near: 1, far: 500 });
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.shadow.normalBias = 0.12;
+    sun.shadow.bias = -0.0001;
+  }
+
+  updateSun(sun: DirectionalLight, focus: Vector3) {
+    // Move the light and its target together so the script's sun direction stays unchanged.
+    sun.position.copy(focus).addScaledVector(this.direction, 250);
+    sun.target.position.copy(focus);
+    sun.target.updateMatrixWorld();
+  }
+}

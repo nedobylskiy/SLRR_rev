@@ -24,6 +24,10 @@ test('instances of one model are culled independently without unloading and came
   assert.equal(stream.visible, 0); assert.equal(mesh.visible, false, 'draw range changes immediately');
   stream.setRange(100); stream.update(focus, camera);
   assert.equal(stream.visible, 1); assert.equal(loads, 1);
+  stream.setShadowRange(30); stream.update(focus, camera);
+  assert.equal(stream.visible, 2, 'nearby off-screen casters remain available to the shadow pass');
+  stream.setShadowRange(0); stream.update(focus, camera);
+  assert.equal(stream.visible, 1, 'disabling shadows restores normal camera culling');
   stream.dispose();
 });
 

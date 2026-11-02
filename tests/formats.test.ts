@@ -48,10 +48,12 @@ test('SCX v3 preserves layer2 texture index and all three UV channels', () => {
   const vertex = Buffer.alloc(44);
   vertex.writeFloatLE(0.25, 24); vertex.writeFloatLE(0.5, 28);
   vertex.writeFloatLE(0.75, 32); vertex.writeFloatLE(0.875, 36);
+  vertex.writeUInt32LE(0x7f123456, 40);
   const data = Buffer.concat([Buffer.from('INVO'), u32(3), material, u32(1), vertex, u32(0), u32(0)]);
   const mesh = parseScx(data).meshes[0];
   assert.equal(mesh.textureIndex, 2);
   assert.equal(mesh.layer2Index, 5);
+  assert.deepEqual(Array.from(mesh.colors!), [0x12, 0x34, 0x56]);
   assert.deepEqual(Array.from(mesh.uv), [0.25, 0.5]);
   assert.deepEqual(Array.from(mesh.uv2!), [0.75, 0.875]);
   const extended = Buffer.alloc(136);
@@ -65,6 +67,19 @@ test('SCX v3 preserves layer2 texture index and all three UV channels', () => {
   assert.equal(wide.materialFlags, 0x40);
   assert.equal(wide.textureChannel, 2);
   assert.equal(wide.layer2Channel, 0);
+});
+
+test('SCX v4 diffuse vertex colors preserve RGB without confusing specular or UV data', () => {
+  const vertex = Buffer.alloc(28);
+  vertex.writeUInt32LE(0x00123456, 12);
+  vertex.writeUInt32LE(0xffabcdef, 16);
+  vertex.writeFloatLE(0.25, 20); vertex.writeFloatLE(0.75, 24);
+  const chunks = [u32(0, 20, 0, 0, 0), Buffer.concat([u32(4, 44, 1, 0x381), vertex]), u32(5, 12, 0)];
+  let offset = 12 + chunks.length * 8;
+  const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
+  const mesh = parseScx(Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks])).meshes[0];
+  assert.deepEqual(Array.from(mesh.colors!), [0x12, 0x34, 0x56]);
+  assert.deepEqual(Array.from(mesh.uv), [0.25, 0.75]);
 });
 test('SCX v3 alphaOpacity flag keeps RGB road base opaque while allowing cutout fences', () => {
   assert.equal(scxDiffuseUsesAlpha(3, 0x40), false);

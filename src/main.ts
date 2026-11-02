@@ -287,6 +287,18 @@ const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleChe
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
+const shadowsLabel = textElement('label', 'Shadow maps'), shadowsCheck = document.createElement('input');
+shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
+shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
+shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
+const lightingLabel = textElement('label', 'Dynamic lighting'), lightingCheck = document.createElement('input');
+lightingCheck.type = 'checkbox'; lightingCheck.checked = true; lightingLabel.prepend(lightingCheck); mapDebugOptions.append(lightingLabel);
+lightingLabel.title = 'Sun and ambient illumination; disable to inspect original texture colors';
+lightingCheck.onchange = () => viewer?.setDynamicLightingEnabled(lightingCheck.checked);
+const vertexColorsLabel = textElement('label', 'Vertex colors (experimental)'), vertexColorsCheck = document.createElement('input');
+vertexColorsCheck.type = 'checkbox'; vertexColorsLabel.prepend(vertexColorsCheck); mapDebugOptions.append(vertexColorsLabel);
+vertexColorsLabel.title = 'Multiply textures by SCX vertex RGB; original blending semantics are not yet confirmed. Alpha is ignored.';
+vertexColorsCheck.onchange = () => viewer?.setVertexColorsEnabled(vertexColorsCheck.checked);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
 const streamRangeLabel = document.createElement('label'); streamRangeLabel.className = 'map-stream-range';
 const streamRangeValue = textElement('span', ''), streamRangeInput = document.createElement('input');

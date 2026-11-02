@@ -36,11 +36,16 @@ export class MapObjectStream {
   private readonly lastFocus = new Vector3(Infinity, Infinity, Infinity);
   private hadView = false;
   private viewDirty = true;
+  private shadowRange = 0;
   constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
   setRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
     this.distance = value; this.dirty = this.viewDirty = true;
+  }
+
+  setShadowRange(value: number) {
+    this.shadowRange = value; this.viewDirty = true;
   }
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
@@ -115,7 +120,9 @@ export class MapObjectStream {
       if (cull) {
         let bounds = type.instanceBounds.get(index);
         if (!bounds) { bounds = type.localBounds!.clone().applyMatrix4(type.placements[index].matrix); type.instanceBounds.set(index, bounds); }
-        if (!this.frustum.intersectsSphere(bounds)) continue;
+        // Off-screen objects near the car may still cast visible sun shadows.
+        if (!this.frustum.intersectsSphere(bounds)
+          && (!this.shadowRange || distanceTo(type.placements[index], focus) > this.shadowRange)) continue;
       }
       visible.push(index);
     }
@@ -156,6 +163,7 @@ export class MapObjectStream {
         type.localBounds!.union(part.geometry.boundingSphere!);
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
         mesh.name = part.name; mesh.renderOrder = part.renderOrder;
+        mesh.castShadow = part.castShadow; mesh.receiveShadow = part.receiveShadow;
         mesh.count = 0; mesh.visible = false;
         // Placements are baked into instance matrices; these map batches have no
         // per-frame local transform to compose.
