@@ -19,20 +19,22 @@ export class SceneLighting {
         shader.uniforms.slrrVertexColors = material.userData.sky ? { value: 0 } : this.vertexColors;
         shader.uniforms.slrrPaintColor = { value: paintColor };
         shader.vertexShader = shader.vertexShader
-          .replace('#include <common>', `#include <common>\n${hasVertexColors ? 'attribute vec3 slrrColor;' : ''}\nvarying vec3 vSlrrColor;`)
-          .replace('#include <begin_vertex>', `#include <begin_vertex>\nvSlrrColor = ${hasVertexColors ? 'slrrColor' : 'vec3(1.0)'};`);
+          .replace('#include <common>', `#include <common>\n${hasVertexColors ? 'attribute vec3 slrrColor;' : ''}\nuniform vec3 slrrPaintColor;\nvarying vec3 vSlrrColor;\nvarying vec3 vSlrrPaintColor;`)
+          .replace('#include <begin_vertex>', `#include <begin_vertex>\nvSlrrColor = ${hasVertexColors ? 'slrrColor' : 'vec3(1.0)'};\nvSlrrPaintColor = slrrPaintColor;\n#ifdef USE_INSTANCING_COLOR\nvSlrrPaintColor = instanceColor;\n#endif`);
         shader.fragmentShader = shader.fragmentShader
-          .replace('#include <common>', '#include <common>\nuniform float slrrVertexColors;\nuniform vec3 slrrPaintColor;\nvarying vec3 vSlrrColor;')
+          .replace('#include <common>', '#include <common>\nuniform float slrrVertexColors;\nvarying vec3 vSlrrPaintColor;\nvarying vec3 vSlrrColor;')
           .replace('#include <color_fragment>', paintMask
-            ? '#include <color_fragment>\n#ifdef USE_MAP\ndiffuseColor.rgb = mix( diffuseColor.rgb, mix( vSlrrColor * slrrPaintColor, diffuseColor.rgb, sampledDiffuseColor.a ), slrrVertexColors );\n#endif'
-            : '#include <color_fragment>\ndiffuseColor.rgb *= mix( vec3(1.0), vSlrrColor, slrrVertexColors );');
+            ? '#ifdef USE_MAP\ndiffuseColor.rgb = mix( diffuseColor.rgb, mix( vSlrrColor * vSlrrPaintColor, diffuseColor.rgb, sampledDiffuseColor.a ), slrrVertexColors );\n#endif'
+            : 'diffuseColor.rgb *= mix( vec3(1.0), vSlrrColor, slrrVertexColors );');
       }
       shader.fragmentShader = shader.fragmentShader
+        // CFG palette colors affect paint regions, not windows/signage on the same instance.
+        .replace('#include <color_fragment>', '')
         .replace('#include <common>', '#include <common>\nuniform float slrrDynamicLighting;')
         .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
         .replace('#include <opaque_fragment>', 'outgoingLight = mix( diffuseColor.rgb * getShadowMask() + totalEmissiveRadiance, outgoingLight, slrrDynamicLighting );\n#include <opaque_fragment>');
     };
-    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v3|colors:${hasVertexColors}|paint:${paintMask}`;
+    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v4|colors:${hasVertexColors}|paint:${paintMask}`;
   }
 
   configureSun(sun: DirectionalLight) {

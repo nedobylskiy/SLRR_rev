@@ -1,7 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
+
+test('palette colors share one model and follow instances when the camera compacts the batch', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 200); camera.lookAt(0, 0, -1);
+  let loads = 0;
+  stream.add([-20, 20].map((z, i) => ({ matrix: new Matrix4().makeTranslation(0, 0, z), position: new Vector3(0, 0, z), paintColor: i ? 0x336699 : 0xff0000 })), async () => {
+    loads++; return [new Mesh(new BoxGeometry(), new MeshBasicMaterial())];
+  });
+  stream.update(focus, camera); await Promise.resolve(); stream.update(focus, camera);
+  const mesh = parent.children[0] as InstancedMesh, color = new Color();
+  assert.equal(parent.children.length, 1); assert.equal(mesh.count, 1);
+  mesh.getColorAt(0, color); assert.equal(color.getHex(), 0xff0000);
+  camera.lookAt(0, 0, 1); stream.update(focus, camera);
+  mesh.getColorAt(0, color); assert.equal(color.getHex(), 0x336699);
+  assert.equal(loads, 1); assert.equal(mesh.instanceColor!.count, 2);
+  stream.dispose();
+});
 
 test('instances of one model are culled independently without unloading and camera rotation reuses the model', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();

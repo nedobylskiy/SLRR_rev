@@ -40,6 +40,10 @@ The installed build 940 EXE confirms deterministic per-instance selection. At `0
 
 V4 storefront wall materials use `DiffuseMixSecond` (`0x06000001`) without a primary diffuse map. Their texture alpha is paint coverage, not a hole in the wall. This renderer uses the selected CFG palette color (or the original material diffuse color when no palette is specified) in masked areas, preserving texture RGB in covered areas. This corrects the former opaque black wall masks; the exact V4 native material blend equations still require separate verification.
 
+Map component batches are shared by resource pack/ID across CFG types. Each instance stores its local render pose in its matrix and its palette color in the instance color buffer; changing palette colors does not duplicate geometry, textures or materials. The SCX shader applies this instance color only to paint regions, preserving windows and signage. At `(734.1, 7, -310.4)` with a 500 m radius, the City/City2 placement audit finds 334 shared component resource groups versus 1,582 groups when split by CFG component and palette color. These are pre-frustum resource groups, not measured GPU draw calls or an FPS benchmark.
+
+Bridge masks such as `hidracs.dds` and `BridgeKorlat2.dds` use uncompressed 32-bit DDS alpha. The alpha classifier samples this data as well as DXT blocks so transparent gaps select a depth-writing cutout pass. This is independent of paint coverage: V3's explicit alpha-opacity flag remains authoritative. LOD switching by camera distance is not implemented; the object loader selects one detailed CFG LOD, while render residency is controlled by streaming.
+
 The map debug panel also provides independent lighting comparisons:
 
 - **Dynamic lighting** (on by default) applies the renderer's sun, ambient illumination and material reflections. Turning it off shows diffuse textures/colors with emissive contributions and fog retained. Java scene light updates continue to be stored.

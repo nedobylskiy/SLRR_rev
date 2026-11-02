@@ -484,6 +484,7 @@ export class Viewer {
       progress?.(loaded, ids.length);
     }
     let objects = 0;
+    const objectBatches = new Map<string, { pack: string; id: number; alias: string; placements: StreamPlacement[] }>();
     for (const source of mapSources) try {
       const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
       const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
@@ -511,35 +512,19 @@ export class Viewer {
             // simultaneous pieces of one object (e.g. a traffic-light head + pole,
             // or the building and signage meshes of a City storefront).
             if (render.lod && render !== nearLod) continue;
-            const variants = new Map<string, { id: number; color?: number; instances: typeof instances }>();
             for (const instance of instances) {
               const seed = mapObjectSeed(instance), id = mapRenderResource(render, seed);
               if (!id) continue;
               const color = render.colors?.length ? render.colors[seed % render.colors.length] : undefined;
-              const key = `${id}:${color ?? ''}`;
-              let variant = variants.get(key);
-              if (!variant) { variant = { id, color, instances: [] }; variants.set(key, variant); }
-              variant.instances.push(instance);
-            }
-            for (const variant of variants.values()) {
-              const placements: StreamPlacement[] = variant.instances.map(instance => {
-                const matrix = poseMatrix(instance.pose);
-                return { matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix) };
-              });
-              // Resolve only the selected component, lazily when a placement enters range.
-              stream.add(placements, async wanted => {
-                const model = await assets.modelForResource(resource.packPath, variant.id);
-                if (!wanted()) return [];
-                const parsed = parseScx(await assets.read(model.path)), component = new THREE.Group();
-                if (!wanted()) return [];
-                warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted, variant.color));
-                const componentMatrix = modelMatrix(new THREE.Matrix4(), render.pose ? poseMatrix(render.pose) : undefined);
-                for (const part of component.children) if (part instanceof THREE.Mesh) {
-                  part.geometry.applyMatrix4(componentMatrix);
-                  part.name = `map object ${resource.entry.alias}: ${part.name}`;
-                }
-                return component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
-              });
+              const key = `${resource.packPath.toLowerCase()}:${id}`;
+              let batch = objectBatches.get(key);
+              if (!batch) {
+                batch = { pack: resource.packPath, id, alias: resource.entry.alias, placements: [] };
+                objectBatches.set(key, batch);
+              }
+              const matrix = poseMatrix(instance.pose);
+              if (render.pose) matrix.multiply(poseMatrix(render.pose));
+              batch.placements.push({ matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix), paintColor: color });
             }
           }
           for (const instance of instances) for (const body of cfg.bodies) {
@@ -551,6 +536,20 @@ export class Viewer {
         } catch (error) { warnings.push(`Object type 0x${typeId.toString(16)}: ${String(error)}`); }
       }
     } catch (error) { warnings.push(`Map objects ${source.path}: ${String(error)}`); }
+    // Signs, poles and other components shared by different CFG types use one
+    // model batch; local render poses and palette colors belong to each instance.
+    for (const batch of objectBatches.values()) stream.add(batch.placements, async wanted => {
+      const model = await assets.modelForResource(batch.pack, batch.id);
+      if (!wanted()) return [];
+      const parsed = parseScx(await assets.read(model.path)), component = new THREE.Group();
+      if (!wanted()) return [];
+      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted));
+      for (const part of component.children) if (part instanceof THREE.Mesh) {
+        part.geometry.scale(0.01, 0.01, 0.01);
+        part.name = `map object ${batch.alias}: ${part.name}`;
+      }
+      return component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
+    });
     if (generation === this.generation) { terrain.prepare(); this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position); }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }

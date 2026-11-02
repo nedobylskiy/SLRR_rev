@@ -1,6 +1,6 @@
-import { Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
+import { Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
 
-export interface StreamPlacement { matrix: Matrix4; position: Vector3; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+export interface StreamPlacement { matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
   const b = placement.bounds;
   if (b) return Math.hypot(Math.max(b.minX - camera.x, 0, camera.x - b.maxX), Math.max(b.minZ - camera.z, 0, camera.z - b.maxZ));
@@ -37,6 +37,7 @@ export class MapObjectStream {
   private hadView = false;
   private viewDirty = true;
   private shadowRange = 0;
+  private readonly instanceColor = new Color();
   constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
   setRange(value: number) {
@@ -128,7 +129,12 @@ export class MapObjectStream {
     }
     if (visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index)) {
       for (const mesh of type.meshes!) {
-        for (let slot = 0; slot < visible.length; slot++) mesh.setMatrixAt(slot, type.placements[visible[slot]].matrix);
+        for (let slot = 0; slot < visible.length; slot++) {
+          const placement = type.placements[visible[slot]];
+          mesh.setMatrixAt(slot, placement.matrix);
+          if (mesh.instanceColor) mesh.setColorAt(slot, this.instanceColor.setHex(placement.paintColor ?? 0xffffff));
+        }
+        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.count = visible.length; mesh.instanceMatrix.needsUpdate = true;
         // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
         mesh.computeBoundingSphere(); mesh.visible = mesh.count > 0;
@@ -164,6 +170,7 @@ export class MapObjectStream {
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
         mesh.name = part.name; mesh.renderOrder = part.renderOrder;
         mesh.castShadow = part.castShadow; mesh.receiveShadow = part.receiveShadow;
+        if (type.placements.some(placement => placement.paintColor !== undefined)) mesh.setColorAt(0, this.instanceColor.setHex(0xffffff));
         mesh.count = 0; mesh.visible = false;
         // Placements are baked into instance matrices; these map batches have no
         // per-frame local transform to compose.
