@@ -5,6 +5,7 @@ export interface ScxMesh {
   uv: Float32Array; uv2?: Float32Array; uv3?: Float32Array;
   /** Packed diffuse RGB decoded as D3DCOLOR (ARGB). Alpha semantics remain unverified. */
   colors?: Uint8Array;
+  paintMask?: boolean;
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
   layer2Index?: number; materialFlags?: number; textureChannel?: number; layer2Channel?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
@@ -87,7 +88,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const vertices = current.positions.length / 3;
       const mesh: ScxMesh = { name: current.name ?? `material_${meshes.length}`, positions: current.positions,
         normals: current.normals ?? new Float32Array(vertices * 3), uv: current.uv ?? new Float32Array(vertices * 2),
-        uv2: current.uv2, uv3: current.uv3, colors: current.colors, textureMap: current.textureMap,
+        uv2: current.uv2, uv3: current.uv3, colors: current.colors, paintMask: current.paintMask, textureMap: current.textureMap,
         lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
         indices: current.indices, diffuse: current.diffuse ?? [0.6, 0.65, 0.7, 1], textureIndex: current.textureIndex ?? 0xffff };
@@ -118,6 +119,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
               // Keep DiffuseMap authoritative when both entries are present, regardless of their order.
               if (type === 0x06000000 || (type === 0x06000001 && current.textureIndex === undefined)) {
                 current.textureIndex = index; current.textureMap = map;
+                current.paintMask = type === 0x06000001;
               }
               if (type === 0x06000004) { current.lightmapIndex = index; current.lightmapMap = map; }
               if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
@@ -129,8 +131,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       } else if (item.type === 4) {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
-          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap } = current;
-          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap };
+          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask } = current;
+          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);

@@ -19,7 +19,7 @@ import { Vehicle3D } from '../engine/vehicle-3d';
 import { mapRenderIds } from '../engine/map';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
-import { mapObjectPlacements, mapRenderResource, parseIcfg } from '../engine/map-objects';
+import { mapObjectPlacements, mapObjectSeed, mapRenderResource, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
 import { stockContainerTexture } from './stock-container-texture';
 import { MapObjectStream, type StreamPlacement } from './map-object-stream';
@@ -498,7 +498,6 @@ export class Viewer {
           const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
-          const renderModels: { model: Awaited<ReturnType<Assets['modelForResource']>>; pose: THREE.Matrix4 }[] = [];
           // Keep the highest-detail LOD for the nearby-object stream. Lower LODs
           // are substitutes, not extra pieces; loading all of them hides the map
           // behind overlapping tree/building meshes, while skipping them all
@@ -512,43 +511,41 @@ export class Viewer {
             // simultaneous pieces of one object (e.g. a traffic-light head + pole,
             // or the building and signage meshes of a City storefront).
             if (render.lod && render !== nearLod) continue;
-            const renderResource = mapRenderResource(render);
-            if (!renderResource) continue;
-            try {
-              renderModels.push({
-                model: await assets.modelForResource(resource.packPath, renderResource),
-                pose: render.pose ? poseMatrix(render.pose) : new THREE.Matrix4(),
+            const variants = new Map<string, { id: number; color?: number; instances: typeof instances }>();
+            for (const instance of instances) {
+              const seed = mapObjectSeed(instance), id = mapRenderResource(render, seed);
+              if (!id) continue;
+              const color = render.colors?.length ? render.colors[seed % render.colors.length] : undefined;
+              const key = `${id}:${color ?? ''}`;
+              let variant = variants.get(key);
+              if (!variant) { variant = { id, color, instances: [] }; variants.set(key, variant); }
+              variant.instances.push(instance);
+            }
+            for (const variant of variants.values()) {
+              const placements: StreamPlacement[] = variant.instances.map(instance => {
+                const matrix = poseMatrix(instance.pose);
+                return { matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix) };
               });
-            } catch { /* Some entries are abstract game types with no concrete mesh. */ }
+              // Resolve only the selected component, lazily when a placement enters range.
+              stream.add(placements, async wanted => {
+                const model = await assets.modelForResource(resource.packPath, variant.id);
+                if (!wanted()) return [];
+                const parsed = parseScx(await assets.read(model.path)), component = new THREE.Group();
+                if (!wanted()) return [];
+                warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted, variant.color));
+                const componentMatrix = modelMatrix(new THREE.Matrix4(), render.pose ? poseMatrix(render.pose) : undefined);
+                for (const part of component.children) if (part instanceof THREE.Mesh) {
+                  part.geometry.applyMatrix4(componentMatrix);
+                  part.name = `map object ${resource.entry.alias}: ${part.name}`;
+                }
+                return component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
+              });
+            }
           }
           for (const instance of instances) for (const body of cfg.bodies) {
             if (body.collision === false || body.shape[0]?.toLowerCase() !== 'box') continue;
             const half = body.shape.slice(1, 4).map(Number);
             if (half.length === 3) collision.addBox(poseMatrix(instance.pose).multiply(poseMatrix(body)), new THREE.Vector3(half[0], half[1], half[2]));
-          }
-          if (renderModels.length) {
-            const placements: StreamPlacement[] = instances.map(instance => {
-              const matrix = poseMatrix(instance.pose);
-              return { matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix) };
-            });
-            stream.add(placements, async wanted => {
-              const template = new THREE.Group();
-              for (const render of renderModels) {
-                if (!wanted()) break;
-                const parsed = parseScx(await assets.read(render.model.path));
-                const component = new THREE.Group();
-                warnings.push(...await this.append(parsed, assets, render.model.textures, component, generation, true, wanted));
-                const componentMatrix = modelMatrix(new THREE.Matrix4(), render.pose);
-                // Adding a child to template removes it from component.children.
-                // Iterate a snapshot so no mesh is skipped during reparenting.
-                for (const part of [...component.children]) {
-                  if (!(part instanceof THREE.Mesh)) continue;
-                  part.geometry.applyMatrix4(componentMatrix);
-                  template.add(part);
-                }
-              }
-              return template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh).map(part => { part.name = `map object ${resource.entry.alias}: ${part.name}`; return part; });
-            });
           }
           objects += instances.length;
         } catch (error) { warnings.push(`Object type 0x${typeId.toString(16)}: ${String(error)}`); }
@@ -890,7 +887,7 @@ export class Viewer {
     material.depthWrite = false;
     material.needsUpdate = true;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true): Promise<string[]> {
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number): Promise<string[]> {
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     for (const part of model.meshes) {
@@ -908,7 +905,8 @@ export class Viewer {
       const color = part.diffuse.slice(0, 3).map(n => Math.max(0, Math.min(1, n)));
       const opacity = Math.max(0, Math.min(1, part.diffuse[3] ?? 1));
       const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide, opacity, transparent: opacity < 1, depthWrite: opacity === 1 });
-      this.lighting.configureMaterial(material, !!part.colors, scxUsesVertexPaintMask(model.version, part.materialFlags));
+      this.lighting.configureMaterial(material, !!part.colors, !!part.paintMask || scxUsesVertexPaintMask(model.version, part.materialFlags),
+        part.paintMask ? paintColor === undefined ? material.color.clone() : new THREE.Color(paintColor & 0xffffff) : undefined);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
       const file = textures[part.textureIndex];
@@ -926,7 +924,7 @@ export class Viewer {
           if (!alpha) { alpha = textureAlphaMode(selected.bytes, selected.path, texture.image); this.alphaModes.set(alphaKey, alpha); }
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
-          const alphaEnabled = scxDiffuseUsesAlpha(model.version, part.materialFlags);
+          const alphaEnabled = !part.paintMask && scxDiffuseUsesAlpha(model.version, part.materialFlags);
           if (alphaEnabled && alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
           // Stock map textures such as cross.dds and falak*.dds carry an unused
           // or reflection alpha channel. Keep fully opaque map materials solid;

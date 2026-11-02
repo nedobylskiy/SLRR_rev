@@ -100,6 +100,9 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
     return Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks]);
   };
   assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].textureIndex, 3);
+  assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].paintMask, true);
+  assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].paintMask, false);
+  assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].paintMask, false);
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].textureIndex, 1);
   assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].textureIndex, 1);
   const lit = parseScx(fixture([[0x06000000, 3], [0x06000004, 4]])).meshes[0];
