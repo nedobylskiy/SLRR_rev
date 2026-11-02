@@ -18,6 +18,9 @@ export class DeformablePanel {
   clock = new FixedClock(240, 32);
   private previous: Float64Array; private anchorLambda: Float64Array;
   private incoming: Float64Array;
+  private ground: Float64Array;
+  /** World-space support height. Standalone panel labs use a plane at zero. */
+  groundHeight = (_x: number, _z: number, _fromY: number): number => 0;
   private stepContacts = new Map<number, PanelContact>();
   private minX = Infinity; private maxX = -Infinity; private minZ = Infinity; private maxZ = -Infinity;
   private inverseMass: number;
@@ -50,6 +53,7 @@ export class DeformablePanel {
     this.positions = new Float64Array(count * 3); this.rest = new Float64Array(count * 3); this.velocities = new Float64Array(count * 3);
     this.previous = new Float64Array(count * 3); this.anchorLambda = new Float64Array(count * 3); this.anchorVelocities = new Float64Array(count * 3); this.inverseMass = count / options.mass;
     this.incoming = new Float64Array(count * 3);
+    this.ground = new Float64Array(count);
     for (let z = 0; z < this.nz; z++) for (let x = 0; x < this.nx; x++) {
       const px = this.minX + x / (this.nx - 1) * (this.maxX - this.minX), pz = this.minZ + z / (this.nz - 1) * (this.maxZ - this.minZ);
       let sum = 0, weight = 0;
@@ -187,6 +191,10 @@ export class DeformablePanel {
       for (let axis = 0; axis < 3; axis++) { const target = attached ? this.anchorVelocities[i + axis] : 0; p[i + axis] += (target + (this.velocities[i + axis] - target) * damping) * dt; }
     }
     this.anchorVelocities.fill(0);
+    // Sample once per node/tick, rather than querying the map in every XPBD
+    // iteration. Use the previous height to select the reachable road/deck.
+    for (let i = 0; i < p.length; i += 3)
+      this.ground[i / 3] = this.groundHeight(p[i], p[i + 2], this.previous[i + 1]) + 0.015;
     const incoming = this.incoming, contacts = this.stepContacts; contacts.clear();
     for (let i = 0; i < p.length; i++) incoming[i] = (p[i] - this.previous[i]) / dt;
     const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
@@ -202,7 +210,7 @@ export class DeformablePanel {
         const i = n * 3 + axis, alpha = 1e-7 / dt2, dl = (-(p[i] - this.rest[i]) - alpha * this.anchorLambda[i]) / (inv + alpha);
         this.anchorLambda[i] += dl; p[i] += inv * dl;
       }
-      for (let i = 1; i < p.length; i += 3) p[i] = Math.max(0.015, p[i]);
+      for (let i = 1; i < p.length; i += 3) p[i] = Math.max(this.ground[(i - 1) / 3], p[i]);
       for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
       if (iteration === 0 || iteration === 4 || iteration === 8 || iteration === 11) surfaces();
     }
@@ -235,7 +243,7 @@ export class DeformablePanel {
         this.collisionImpact = { speed: -before, impulse: Math.hypot(...impulse), point: [...contact.point] };
       contact.impulse?.(impulse, contact.point);
     }
-    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= 0.015001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= this.ground[i / 3] + 0.000001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
     this.shapeVersion++;
   }
   private contactBox(i: number, box: PanelCollider) {

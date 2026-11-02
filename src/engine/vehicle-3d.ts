@@ -161,6 +161,7 @@ export class Vehicle3D extends CarCrashDemo {
     this.addSoft(hood, this.panel, false);
   }
   private addSoft(part: EnginePart, panel: DeformablePanel, root: boolean) {
+    panel.groundHeight = (x, z, fromY) => this.terrain.height(x, z, fromY);
     // Bind reference basis before moving targets into the world.
     const old = panel.positions.slice(); panel.reset();
     if (part === this.hood) { const inverse = part.matrix().invert(); for (let i = 0; i < panel.positions.length; i += 3) new Vector3().fromArray(panel.positions, i).applyMatrix4(inverse).toArray(panel.positions, i); }
