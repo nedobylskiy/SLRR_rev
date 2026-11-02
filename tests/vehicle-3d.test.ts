@@ -51,6 +51,34 @@ function setup(mechanical = false) {
   return { world, root, hood, door, lamp, demo, struts, sway, block, crank };
 }
 
+test('attached deformation defers whole-body collision skinning until a part comes loose', () => {
+  const { world, root, lamp, demo } = setup();
+  demo.disableObstacle();
+  const triangles = [-0.8, -0.5, -2, 0.8, -0.5, -2, 0.8, 0.6, 2];
+  const samples: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) samples.push(x, y, z);
+  demo.register(root, samples, triangles); demo.setBodyTriangles(triangles); demo.reset();
+  const panel = demo.soft.get(root)!.panel;
+  const collision = demo as unknown as { updateSurface(): void }, update = collision.updateSurface.bind(demo);
+  let rebuilds = 0;
+  collision.updateSurface = () => { rebuilds++; update(); };
+  let solves = 0;
+  for (let i = 0; i < 120; i++) {
+    for (const part of demo.soft.values()) part.activity.wake();
+    demo.advance(1 / 240, neutral); solves += demo.timings.activePanels;
+  }
+  assert.ok(solves >= 120, 'the real deformation solver remains active');
+  assert.ok([...demo.soft.values()].every(part => part.root || part.part.parent));
+  assert.equal(rebuilds, 0, 'attached panels do not consume the collision mesh');
+  lamp.condition = 0; demo.advance(1 / 240, neutral);
+  assert.equal(lamp.parent, undefined);
+  assert.ok(rebuilds > 0, 'release builds current deformed collision geometry immediately');
+  const atRelease = rebuilds;
+  for (let i = 0; i < 12; i++) { panel.impulseAt([0.01, 0, 0], [0, 1, 0]); demo.advance(1 / 240, neutral); }
+  assert.ok(rebuilds > atRelease, 'loose rigid parts keep receiving refreshed body geometry');
+  world.dispose();
+});
+
 test('suspension hardware follows wheel travel without wheel spin, while the anti-roll bar stays on the chassis', () => {
   const { world, root, demo, struts, sway } = setup(true);
   const wheel = demo.suspension.wheels[0], spring = root.children.get(311)!, shock = root.children.get(301)!;

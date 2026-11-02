@@ -436,7 +436,9 @@ export class Vehicle3D extends CarCrashDemo {
       for (const s of ordered) {
         const attached = !!s.part.parent || s.root, frame = s.part.matrix();
         if (!attached) this.updateGuard(s);
-        if ((!attached || s.part === this.hood && (s.activity.deforming || s.activity.forced)) && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
+        // Attached panels never collide with this triangle surface. Re-skin/refit the
+        // assembly only when a loose part actually needs it, not for suspension jolts.
+        if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         if (!s.root && s.part.condition === 0) s.panel.mounts.forEach(m => { m.broken = true; });
         if (attached) s.panel.setAnchorFrame(frame.elements);
         if (!s.activity.deforming && (s.activity.forced || !s.root && s.part.condition === 0 && attached || attached && (shock || s.activity.threatened(frame, obstacle)))) s.activity.wake();
@@ -466,6 +468,9 @@ export class Vehicle3D extends CarCrashDemo {
         s.activity.settle(dt, s.part.matrix(), !!s.part.parent || s.root);
       }
       this.timings.panels += performance.now() - sectionStart; sectionStart = performance.now();
+      if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4 && [...this.rigid.values()].some(r => !r.part.parent)) {
+        this.updateSurface(); this.surfaceDirty = false;
+      }
       for (const r of this.rigid.values()) {
         const wasAttached = !!r.part.parent;
         if (wasAttached && (this.suspension.wheels.some(w => w.part === r.part) || r.part.definition.mechanics && (r.part !== this.suspension.mechanics?.block || r.part.condition > 0))) continue;
@@ -506,8 +511,8 @@ export class Vehicle3D extends CarCrashDemo {
         r.previous.copy(r.body.matrix());
       }
       if (detached) { const omega = this.body.omega; this.body.setMass(vehicleAssemblyMass([...this.root.world.parts.values()].filter(p => this.connected(p)))); this.body.setAngularVelocity(omega); this.updateSurface(); }
-      // Refit deformed body contact geometry periodically; never retain detached-panel ghost colliders.
-      if (tick % 24 === 0 && this.surfaceDirty) { this.updateSurface(); this.surfaceDirty = false; }
+      // Retain the dirty flag until a loose part needs collision geometry. Topology
+      // changes above still rebuild immediately, removing detached-part ghost faces.
       this.suspension.sync();
       this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega);
       this.timings.other += performance.now() - sectionStart;
