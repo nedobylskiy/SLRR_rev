@@ -11,13 +11,17 @@ export function tireSurfaceForTexture(path: string): TireSurface {
   if (/(?:grass|gras|trava|fu\.dds|gyep|lawn)/.test(name)) return 'grass';
   return 'road';
 }
-interface Face { ax: number; az: number; ay: number; bx: number; bz: number; by: number; cx: number; cz: number; cy: number; normal: Vector3; surface: TireSurface }
+interface Bounds { minX: number; maxX: number; minZ: number; maxZ: number }
+interface Face extends Bounds { ax: number; az: number; ay: number; bx: number; bz: number; by: number; cx: number; cz: number; cy: number; normal: Vector3; surface: TireSurface; denominator: number; order: number }
+interface Branch extends Bounds { faces?: Face[]; left?: Branch; right?: Branch }
+interface Cell { faces: Face[]; tree?: Branch }
 
 /** Vertical collision sampling from original map SCX geometry, indexed in 16 m cells. */
 export class MapTerrain implements Terrain {
   ramp = false;
   constructor(private readonly objects?: MapCollision) {}
-  private readonly cells = new Map<string, Face[]>();
+  private readonly cells = new Map<string, Cell>();
+  private readonly stack: Branch[] = [];
   private readonly allFaces: Face[] = [];
   private readonly size = 16;
   faces = 0;
@@ -40,12 +44,15 @@ export class MapTerrain implements Terrain {
         const x0 = Math.floor(Math.min(ax, bx, cx) / this.size), x1 = Math.floor(Math.max(ax, bx, cx) / this.size);
         const z0 = Math.floor(Math.min(az, bz, cz) / this.size), z1 = Math.floor(Math.max(az, bz, cz) / this.size);
         if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) continue;
-        const face: Face = { ax, ay, az, bx, by, bz, cx, cy, cz, normal: cross.normalize(), surface };
+        const pad = Math.max(Math.abs(ax - cx), Math.abs(bx - cx), Math.abs(az - cz), Math.abs(bz - cz)) * 0.00002 + 1e-9;
+        const face: Face = { ax, ay, az, bx, by, bz, cx, cy, cz, normal: cross.normalize(), surface,
+          minX: Math.min(ax, bx, cx) - pad, maxX: Math.max(ax, bx, cx) + pad, minZ: Math.min(az, bz, cz) - pad, maxZ: Math.max(az, bz, cz) + pad,
+          denominator: (bz - cz) * (ax - cx) + (cx - bx) * (az - cz), order: this.faces };
         if (face.normal.y < 0) face.normal.negate();
         for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
-          const key = `${x},${z}`, list = this.cells.get(key) ?? [];
-          if (!list.length) this.cells.set(key, list);
-          list.push(face);
+          const key = `${x},${z}`, cell = this.cells.get(key) ?? { faces: [] };
+          if (!cell.faces.length) this.cells.set(key, cell);
+          cell.faces.push(face); cell.tree = undefined;
         }
         this.allFaces.push(face);
         this.faces++;
@@ -55,20 +62,43 @@ export class MapTerrain implements Terrain {
   forEachFace(visit: (a: Vector3, b: Vector3, c: Vector3) => void) {
     for (const f of this.allFaces) visit(new Vector3(f.ax, f.ay, f.az), new Vector3(f.bx, f.by, f.bz), new Vector3(f.cx, f.cy, f.cz));
   }
+  /** Build before starting the drive; later additions invalidate only affected cells. */
+  prepare() { for (const cell of this.cells.values()) cell.tree ??= this.build([...cell.faces]); }
+  private build(faces: Face[]): Branch {
+    const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+    for (const f of faces) {
+      bounds.minX = Math.min(bounds.minX, f.minX); bounds.maxX = Math.max(bounds.maxX, f.maxX);
+      bounds.minZ = Math.min(bounds.minZ, f.minZ); bounds.maxZ = Math.max(bounds.maxZ, f.maxZ);
+    }
+    if (faces.length <= 8) return { ...bounds, faces };
+    const x = bounds.maxX - bounds.minX >= bounds.maxZ - bounds.minZ;
+    faces.sort((a, b) => x ? a.minX + a.maxX - b.minX - b.maxX : a.minZ + a.maxZ - b.minZ - b.maxZ);
+    const mid = Math.floor(faces.length / 2);
+    return { ...bounds, left: this.build(faces.slice(0, mid)), right: this.build(faces.slice(mid)) };
+  }
   sample(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined {
-    const list = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
+    const cell = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
     let best: { height: number; normal: Vector3; surface: TireSurface } | undefined;
-    for (const f of list ?? []) {
-      const denominator = (f.bz - f.cz) * (f.ax - f.cx) + (f.cx - f.bx) * (f.az - f.cz);
-      if (Math.abs(denominator) < 1e-10) continue;
-      const u = ((f.bz - f.cz) * (x - f.cx) + (f.cx - f.bx) * (z - f.cz)) / denominator;
-      const v = ((f.cz - f.az) * (x - f.cx) + (f.ax - f.cx) * (z - f.cz)) / denominator;
-      if (u < -1e-5 || v < -1e-5 || u + v > 1.00001) continue;
-      const h = u * f.ay + v * f.by + (1 - u - v) * f.cy;
-      // A ground child (such as a ramp) can overlap the road; ray support uses
-      // the highest reachable deck, while a body below it stays on the road.
-      if (fromY !== undefined && h > fromY + 0.5) continue;
-      if (!best || h > best.height) best = { height: h, normal: f.normal, surface: f.surface };
+    let bestOrder = Infinity;
+    const stack = this.stack; stack.length = 0;
+    if (cell) stack.push(cell.tree ??= this.build([...cell.faces]));
+    while (stack.length) {
+      const branch = stack.pop()!;
+      if (x < branch.minX || x > branch.maxX || z < branch.minZ || z > branch.maxZ) continue;
+      if (!branch.faces) { stack.push(branch.right!, branch.left!); continue; }
+      for (const f of branch.faces) {
+        if (x < f.minX || x > f.maxX || z < f.minZ || z > f.maxZ) continue;
+        const denominator = f.denominator;
+        if (Math.abs(denominator) < 1e-10) continue;
+        const u = ((f.bz - f.cz) * (x - f.cx) + (f.cx - f.bx) * (z - f.cz)) / denominator;
+        const v = ((f.cz - f.az) * (x - f.cx) + (f.ax - f.cx) * (z - f.cz)) / denominator;
+        if (u < -1e-5 || v < -1e-5 || u + v > 1.00001) continue;
+        const h = u * f.ay + v * f.by + (1 - u - v) * f.cy;
+        // A ground child (such as a ramp) can overlap the road; ray support uses
+        // the highest reachable deck, while a body below it stays on the road.
+        if (fromY !== undefined && h > fromY + 0.5) continue;
+        if (!best || h > best.height || h === best.height && f.order < bestOrder) { best = { height: h, normal: f.normal, surface: f.surface }; bestOrder = f.order; }
+      }
     }
     if (fromY !== undefined) {
       const box = this.objects?.support(x, z, fromY + 0.5);

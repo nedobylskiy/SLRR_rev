@@ -527,7 +527,7 @@ export class Viewer {
         } catch (error) { warnings.push(`Object type 0x${typeId.toString(16)}: ${String(error)}`); }
       }
     } catch (error) { warnings.push(`Map objects ${source.path}: ${String(error)}`); }
-    if (generation === this.generation) { this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position); }
+    if (generation === this.generation) { terrain.prepare(); this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position); }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
   showInternals(value: boolean) {
@@ -708,8 +708,11 @@ export class Viewer {
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
+        for (const [key, title] of [['panelSolve', 'Panel solve + contacts'], ['panelSurface', 'Body collision mesh'], ['panelSleep', 'Panel sleep checks']] as const)
+          this.profiler.record(title, crash.timings[key]);
         const backends = new Set([...crash.soft.values()].map(part => part.panel.backend === 'wasm' ? 'C++/WASM' : 'TypeScript'));
-        this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels}\nSoft-body solver: ${[...backends].join(' + ')}`;
+        const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
+        this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
       this.syncWorld(softParts);
       for (const [part, helper] of vehicleBounds) {

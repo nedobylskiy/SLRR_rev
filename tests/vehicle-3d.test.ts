@@ -366,6 +366,43 @@ test('a detached panel settles instead of gaining motion after landing', () => {
   world.dispose();
 });
 
+test('supported debris sleeps without repeated rigid solves and wakes for an external impulse', () => {
+  const { world, demo, hood } = setup();
+  demo.disableObstacle(); world.detach(hood); demo.panel.mounts.forEach(m => { m.broken = true; });
+  for (let i = 0; i < demo.panel.positions.length; i += 3) { demo.panel.positions[i] += 5; demo.panel.positions[i + 1] += 2; }
+  const state = demo.soft.get(hood)!;
+  for (let tick = 0; tick < 6 * 240 && !state.activity.resting; tick++) demo.advance(1 / 240, neutral);
+  assert.equal(state.activity.resting, true);
+  const positions = demo.panel.positions.slice(), carry = demo.panel.advanceRigid.bind(demo.panel);
+  let carries = 0;
+  demo.panel.advanceRigid = (...args) => { carries++; return carry(...args); };
+  for (let tick = 0; tick < 120; tick++) demo.advance(1 / 240, neutral);
+  assert.equal(carries, 0, 'sleeping debris skips contact integration and rigid node carry');
+  assert.deepEqual(demo.panel.positions, positions);
+  state.activity.freeBody!.impulse(new Vector3(20, 100, 0));
+  demo.advance(1 / 240, neutral);
+  assert.equal(state.activity.resting, false); assert.ok(carries > 0);
+  assert.notDeepEqual(demo.panel.positions, positions);
+  world.dispose();
+});
+
+test('a moving chassis wakes sleeping debris in its swept bounds', () => {
+  const { world, demo, hood } = setup();
+  demo.disableObstacle(); world.detach(hood); demo.panel.mounts.forEach(m => { m.broken = true; });
+  for (let i = 0; i < demo.panel.positions.length; i += 3) { demo.panel.positions[i] += 5; demo.panel.positions[i + 1] += 2; }
+  const state = demo.soft.get(hood)!;
+  for (let tick = 0; tick < 6 * 240 && !state.activity.resting; tick++) demo.advance(1 / 240, neutral);
+  assert.equal(state.activity.resting, true);
+  const center = state.activity.freeBody!.position;
+  demo.body.position.copy(center).add(new Vector3(0, 0.1, 0)); demo.body.velocity.set(0, 0, -6);
+  const carry = demo.panel.advanceRigid.bind(demo.panel);
+  let carries = 0;
+  demo.panel.advanceRigid = (...args) => { carries++; return carry(...args); };
+  demo.advance(1 / 240, neutral);
+  assert.ok(carries > 0 || state.activity.deforming, 'approaching chassis reactivates contact handling');
+  world.dispose();
+});
+
 test('bent chassis moves real attachment frames and suspension points, changing a straight drive', () => {
   const healthy = setup(), damaged = setup(), samples: number[] = [];
   for (const x of [-0.85, 0.85]) for (const y of [-0.6, 0.6]) for (const z of [-2.1, 2.1]) samples.push(x, y, z);

@@ -12,6 +12,8 @@
     "build:jvm": "tsc -p packages/slrr-jvm/tsconfig.json",
     "build:wasm": "node tools/build-soft-body-wasm.mjs",
     "benchmark:soft-body": "tsx tools/benchmark-soft-body.ts",
+    "benchmark:terrain": "tsx tools/benchmark-terrain.ts",
+    "benchmark:vehicle-physics": "tsx tools/benchmark-vehicle-physics.ts",
     "test": "npm run build:jvm && tsx --test tests/*.test.ts",
     "test:wasm": "node --import tsx --import ./tools/enable-soft-body-wasm.ts --test tests/deformable-panel.test.ts tests/triangle-surface.test.ts tests/vehicle-3d.test.ts tests/soft-body-wasm.test.ts",
     "audit": "tsx tools/audit.ts",

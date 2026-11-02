@@ -48,3 +48,23 @@ npm run build
 `test:wasm` preloads the real module and runs existing panel, triangle-contact and whole-vehicle tests with WASM selected. Additional tests compare TS/WASM state, contacts, plasticity and collective release at three cage resolutions, including the maximum capacity; cover negative terrain and state-preserving backend switching; and check malformed/missing modules. The default test command also runs the existing regressions without the WASM preload, covering the TS fallback.
 
 The benchmark includes JS collision handling and state synchronization, warms V8 up, then reports the median of five runs of 1000 active steps on a 126-node, 1075-beam panel. Initial measurements on the development machine were approximately **0.24 ms/tick for TS and 0.25 ms/tick for WASM**. This first implementation establishes a compatible backend, not a demonstrated speedup. Overall FPS also depends on renderer/GPU cost, and sleeping panels do not run either XPBD kernel. Use the live selector and physics timings to compare the same driving scenario; future optimizations should be checked against these parity tests.
+
+## Surrounding physics optimizations
+
+Two costs outside the numerical kernel were optimized after the initial port:
+
+- `MapTerrain` builds a 2D BVH inside each 16 m cell, replacing a linear scan of every support triangle per height query. The driving loader prepares the index before simulation starts. New geometry invalidates affected cell trees. Queries retain the original barycentric test, deck selection and first-face tie order.
+- A detached panel that has become rigid now sleeps after 0.5 seconds of continuous support with linear speed below 0.05 m/s and angular speed below 0.1 rad/s. Sleeping debris skips repeated gravity, per-node contact checks and rigid carry. An external impulse or the owner's moving swept chassis bounds reactivates contact processing; it can return to XPBD on a hard hit. There is no change to the fixed simulation step or active constraint iterations.
+
+Additional debug timings distinguish the complete panel step and contacts, body collision-mesh updates and sleep checks. The panel also reports the count of sleeping loose panels.
+
+Reproduce the measurements with:
+
+```powershell
+npm run benchmark:terrain
+npm run benchmark:vehicle-physics
+```
+
+The terrain benchmark uses 3200 support triangles in a dense cell and reports five warmed runs of 20,000 height queries. Development measurements dropped from **290 ms to 6.3 ms**, with the same result checksum. This measures height lookup, not overall simulation or rendering.
+
+The vehicle benchmark requires a local game installation. It assembles the original Baiern assets, crashes at 50 km/h, then applies the brake after three simulated seconds and reports consecutive three-second windows. With WASM selected, the stationary aftermath (6–12 seconds) decreased from approximately **10.8–13.7 ms to 0.90–0.94 ms per eight physics ticks** after adding debris sleep. These are headless physics measurements on the development machine, not browser FPS guarantees. The impact phase remains active and is not accelerated by sleeping stationary debris.

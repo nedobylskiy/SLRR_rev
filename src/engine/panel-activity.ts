@@ -10,10 +10,19 @@ export class PanelActivity {
   private impulseVersion = 0;
   readonly frame = new Matrix4();
   freeBody?: RigidBody3D;
+  resting = false;
+  private restTicks = 0;
   constructor(readonly panel: DeformablePanel) {}
-  reset(frame: Matrix4) { this.frame.copy(frame); this.deforming = false; this.quietTicks = this.activeTicks = 0; this.freeBody = undefined; this.impulseVersion = this.panel.impulseVersion; }
+  reset(frame: Matrix4) { this.frame.copy(frame); this.deforming = false; this.quietTicks = this.activeTicks = this.restTicks = 0; this.resting = false; this.freeBody = undefined; this.impulseVersion = this.panel.impulseVersion; }
   get forced() { return this.impulseVersion !== this.panel.impulseVersion; }
-  wake() { this.deforming = true; this.activeTicks = this.quietTicks = 0; this.freeBody = undefined; }
+  wake() { this.deforming = true; this.activeTicks = this.quietTicks = this.restTicks = 0; this.resting = false; this.freeBody = undefined; }
+  /** A supported, still rigid fragment needs no repeated gravity/contact solve. */
+  rest(dt: number, supported: boolean) {
+    const body = this.freeBody;
+    this.restTicks = supported && body && body.velocity.lengthSq() < 0.0025 && body.omega.lengthSq() < 0.01 ? this.restTicks + 1 : 0;
+    this.resting = this.restTicks * dt >= 0.5;
+    if (this.resting && body) { body.velocity.set(0, 0, 0); body.setAngularVelocity(new Vector3()); }
+  }
   /** Conservative swept cage bounds, used only to wake the exact node/contact solver. */
   threatened(nextFrame: Matrix4, obstacle: Box3) {
     const delta = nextFrame.clone().multiply(this.frame.clone().invert()), box = new Box3(), point = new Vector3(), p = this.panel.positions;
