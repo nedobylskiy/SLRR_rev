@@ -56,10 +56,10 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
 }
 
 /** Read the lists selected by the executed chassis Java, including kit branches. */
-export async function javaStockSelection(result: BootResult, assets: Assets, chassisPack: string): Promise<JavaStockSelection> {
+export async function javaStockSelection(result: BootResult, assets: Assets, chassisPack: string,
+  vehicle?: JavaValue, requireRunningGear = true): Promise<JavaStockSelection> {
   const { jvm } = result;
-  const player = jvm.get(jv('class', 'java.game.GameLogic'), 'player');
-  const car = jvm.get(player, 'car');
+  const car = vehicle ?? jvm.get(jvm.get(jv('class', 'java.game.GameLogic'), 'player'), 'car');
   const chassis = jvm.get(car, 'chassis');
   if (chassis.value == null) throw new Error('Java vehicle has no chassis');
   const values = (name: string): number[] => {
@@ -90,7 +90,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   const mechanical = await Promise.all(mechanicalLists.flatMap(name => values(`parts_list_RGear_${name}`)).map(id => resolve(id)));
   const tyreIds = values('parts_list_RGear_tyres');
   const tyres = await Promise.all(tyreIds.map(id => resolve(id)));
-  if (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4)
+  if (requireRunningGear && (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4))
     throw new Error('Executed Java chassis did not select four wheels and four suspensions');
   const wheelRefs = Array.from({ length: 4 }, (_, index) => result.chassis.wheelState(chassis, index));
   return { body, mechanical, tyres, wheelRefs, installed, rootPositions: result.parts.slotOverrides(chassis) };

@@ -470,6 +470,12 @@ export class Viewer {
       this.proxies.delete(part); this.collisionMeshes.delete(part);
     }
   }
+  syncWorldVisuals(world: EngineWorld): void {
+    for (const [part, group] of this.proxies) if (part.world === world) {
+      group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
+      group.matrixWorldNeedsUpdate = true;
+    }
+  }
   async showWorld(world: EngineWorld, assets: Assets, keepScene = false): Promise<string[]> {
     if (!keepScene) this.clear();
     const generation = this.generation, warnings: string[] = [];

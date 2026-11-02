@@ -2,6 +2,7 @@ import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
 import { javaSceneCamera } from './runtime/java-scene-camera';
+import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
 import { parseRpk, entryProperties } from './formats/rpk';
@@ -111,7 +112,9 @@ async function runGameBoot() {
     el('details').textContent = result.error.message;
   } else if (viewer) {
     const javaControls = javaDrivingControls(result);
+    const sceneVehicles = new JavaSceneVehicles(result, source, viewer, message => appendJavaEvent({ level: 'error', message }));
     let animating = false, loadingTrack = false;
+    let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
@@ -127,6 +130,8 @@ async function runGameBoot() {
     window.addEventListener('keydown', unlockMusic);
 
     const loadSelectedTrack = async (selected: NonNullable<ReturnType<typeof activeJavaTrack>>) => {
+      sceneVehicles.update(null);
+      sceneTerrain = undefined;
       const stopPrevious = activeTrackCleanup;
       activeTrackCleanup = undefined;
       stopPrevious?.();
@@ -135,7 +140,7 @@ async function runGameBoot() {
       let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
       try {
         status('Loading Java track…');
-        if (selected.chassis && source.byPath.has(selected.chassis.pack)) {
+        if (selected.driving && selected.chassis && source.byPath.has(selected.chassis.pack)) {
           try {
             const selection = await javaStockSelection(result, source, selected.chassis.pack);
             built = await new PartFactory(source).stock(selected.chassis, { mechanical: true, javaSelection: selection });
@@ -152,6 +157,7 @@ async function runGameBoot() {
         }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving });
         if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
+        sceneTerrain = map.terrain;
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
         if (built && selected.driving) {
           gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
@@ -216,6 +222,7 @@ async function runGameBoot() {
     const checkActiveTrack = () => {
       const selected = activeJavaTrack(result);
       if (!selected || !source.byPath.has(selected.mapPack)) {
+        sceneVehicles.update(null);
         loadedTrackKey = '';
         pendingTrackKey = '';
         return;
@@ -223,6 +230,8 @@ async function runGameBoot() {
       const javaStart = selected.start
         ? `${selected.start.x.toFixed(3)},${selected.start.y.toFixed(3)},${selected.start.z.toFixed(3)},${selected.start.yaw.toFixed(3)}` : '';
       const key = `${selected.mapPack}:${selected.mapResourceId}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
+      if (key === loadedTrackKey && !loadingTrack)
+        sceneVehicles.update(!selected.driving && javaSceneCamera(result) ? selected.map : null, sceneTerrain);
       if (key === loadedTrackKey || loadingTrack) return;
       // GameLogic.actualState changes before Track.enter() finishes. Wait until
       // Java has attached the car to this map and its scripted pose has settled;
@@ -241,6 +250,7 @@ async function runGameBoot() {
     const trackPoll = window.setInterval(checkActiveTrack, 150);
     disposeJavaScene = () => {
       viewer?.setJavaSceneCamera(undefined);
+      sceneVehicles.dispose();
       window.clearInterval(animationTimer);
       window.clearInterval(trackPoll);
       window.removeEventListener('pointerdown', unlockMusic);
