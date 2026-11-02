@@ -283,6 +283,19 @@ bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisible
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
 mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
+const streamRangeLabel = document.createElement('label'); streamRangeLabel.className = 'map-stream-range';
+const streamRangeValue = textElement('span', ''), streamRangeInput = document.createElement('input');
+streamRangeInput.type = 'range'; streamRangeInput.min = '200'; streamRangeInput.max = '2000'; streamRangeInput.step = '50';
+streamRangeInput.value = String(viewer?.streamRange ?? 900);
+streamRangeInput.setAttribute('aria-label', 'Streaming radius in meters');
+const updateStreamRange = () => {
+  const value = Number(streamRangeInput.value);
+  streamRangeValue.textContent = `Streaming radius: ${value} m`;
+  viewer?.setMapStreamRange(value);
+};
+streamRangeInput.oninput = updateStreamRange;
+streamRangeLabel.append(streamRangeValue, streamRangeInput); mapDebugPanel.append(streamRangeLabel);
+updateStreamRange();
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
 bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);

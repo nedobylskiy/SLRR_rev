@@ -74,6 +74,13 @@ export class Viewer {
   private stopDriving?: () => void;
   private generation = 0;
   private mapStream?: MapObjectStream;
+  private mapStreamRange = 900;
+  get streamRange() { return this.mapStreamRange; }
+  setMapStreamRange(value: number) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
+    this.mapStreamRange = value;
+    this.mapStream?.setRange(value);
+  }
   private mapStreamFocus?: THREE.Vector3;
   private mapDebug?: MapDebugView;
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
@@ -418,7 +425,7 @@ export class Viewer {
     this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
     this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     let loaded = 0, triangles = 0;
-    const stream = new MapObjectStream(this.model, 900);
+    const stream = new MapObjectStream(this.model, this.mapStreamRange);
     this.mapStream = stream;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
