@@ -41,6 +41,7 @@ console.log(`Baiern: ${triangles.length / 9} body triangles, ${demo.soft.size} p
 for (let phase = 0; phase < 4; phase++) {
   const totals = { wall: 0, solve: 0, surface: 0, sleep: 0, active: 0, refits: 0 };
   for (let tick = 0; tick < 720; tick++) {
+    if (process.argv.includes('--keep-awake')) for (const s of demo.soft.values()) s.activity.resting = false;
     const start = performance.now(); demo.advance(1 / 240, { throttle: 0, steer: 0, brake: phase > 0 }); totals.wall += performance.now() - start;
     totals.solve += demo.timings.panelSolve; totals.surface += demo.timings.panelSurface; totals.sleep += demo.timings.panelSleep;
     totals.active += demo.timings.activePanels; totals.refits += demo.timings.surfaceUpdates;

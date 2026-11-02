@@ -68,6 +68,8 @@ export class Vehicle3D extends CarCrashDemo {
   private lastOmega = new Vector3();
   private surfaceDirty = false;
   private pendingShock = false;
+  private readonly freeContactBuffers = new WeakMap<Float64Array, { points: Vector3[]; current: Float64Array; previous: Float64Array }>();
+  private readonly freeContactPoint = new Vector3();
   private pendingReleaseVelocity = new Map<EnginePart, Vector3>();
   private structuralMounts = new Map<EnginePart, { parent: EnginePart; field: DeformedFrame; ownInverse: Matrix4 }>();
   private wheelMounts: DeformedFrame[] = [];
@@ -300,13 +302,19 @@ export class Vehicle3D extends CarCrashDemo {
     }
     const matrix = body.matrix(), inverse = matrix.clone().invert();
     const swept = body.bounds.clone().applyMatrix4(matrix).union(body.bounds.clone().applyMatrix4(previous)), nearBody = this.rigidSurface?.intersectsWorld(swept);
-    const points: Vector3[] = [];
+    let buffers = shape && this.freeContactBuffers.get(shape);
+    if (shape && !buffers) {
+      buffers = { points: Array.from({ length: shape.length / 3 }, () => new Vector3()), current: new Float64Array(shape.length), previous: new Float64Array(shape.length) };
+      this.freeContactBuffers.set(shape, buffers);
+    }
+    const points = buffers?.points ?? body.corners();
+    const projected = buffers?.current ?? new Float64Array(points.length * 3), before = buffers?.previous ?? new Float64Array(points.length * 3);
     let ground: { point: Vector3; normal: Vector3; depth: number } | undefined;
     let surface: { point: Vector3; normal: Vector3; depth: number } | undefined;
     let guarded: { point: Vector3; depth: number } | undefined;
-    if (shape) { const delta = matrix.clone().multiply(previous.clone().invert()); for (let i = 0; i < shape.length; i += 3) points.push(new Vector3().fromArray(shape, i).applyMatrix4(delta)); }
-    else points.push(...body.corners());
-    for (const [index, point] of points.entries()) {
+    if (shape) { const delta = matrix.clone().multiply(previous.clone().invert()); for (let i = 0; i < shape.length; i += 3) points[i / 3].fromArray(shape, i).applyMatrix4(delta); }
+    for (let index = 0; index < points.length; index++) {
+      const point = points[index];
       if (guard) {
         const local = point.clone().applyMatrix4(guard.inverse), depth = guard.minimum[index] - guard.sign * local.getComponent(guard.axis);
         if (depth > 0) {
@@ -314,17 +322,20 @@ export class Vehicle3D extends CarCrashDemo {
           else if (!guarded || depth > guarded.depth) guarded = { point, depth };
         }
       }
-      const height = this.terrain.height(point.x, point.z, point.y);
+      const sample = this.terrain.sample?.(point.x, point.z, point.y);
+      const height = sample?.height ?? this.terrain.height(point.x, point.z, point.y);
       if (point.y < height) {
-        const normal = this.terrain.normal(point.x, point.z, point.y), depth = height - point.y;
+        const normal = sample?.normal ?? this.terrain.normal(point.x, point.z, point.y), depth = height - point.y;
         if (!apply) solve(point, normal, depth);
         else { solve(point, normal, depth, false, false); if (!ground || depth > ground.depth) ground = { point, normal, depth }; }
       }
       if (!nearBody) continue;
-      const old = point.clone().applyMatrix4(inverse).applyMatrix4(previous), projected = new Float64Array(point.toArray());
-      const hit = this.rigidSurface?.project(projected, new Float64Array(old.toArray()), 0);
+      const old = this.freeContactPoint.copy(point).applyMatrix4(inverse).applyMatrix4(previous);
+      const offset = index * 3;
+      point.toArray(projected, offset); old.toArray(before, offset);
+      const hit = this.rigidSurface?.project(projected, before, offset);
       if (hit) {
-        const normal = new Vector3(...hit.normal), depth = new Vector3().fromArray(projected).sub(point).dot(normal);
+        const normal = new Vector3(...hit.normal), depth = this.freeContactPoint.fromArray(projected, offset).sub(point).dot(normal);
         if (!apply) solve(point, normal, depth, true);
         else { solve(point, normal, depth, true, false); if (!surface || depth > surface.depth) surface = { point, normal, depth }; }
       }
@@ -335,6 +346,12 @@ export class Vehicle3D extends CarCrashDemo {
     if (surface) body.position.addScaledVector(surface.normal, Math.max(0, surface.depth - 0.001) * 0.6);
     if (guarded && guard) solve(guarded.point, guard.normal, Math.min(guarded.depth, 0.08), true);
     return { speed, supported: !!ground || !!surface || !!guarded };
+  }
+  /** Upper bound for every node's relative contact speed, independent of normal. */
+  private freeContactSpeedBound(body: RigidBody3D) {
+    const radius = body.bounds.getSize(new Vector3()).length() * 0.5 + body.bounds.getCenter(new Vector3()).distanceTo(body.center);
+    return body.velocity.length() + body.omega.length() * radius + this.body.velocity.length()
+      + this.body.omega.length() * (body.position.distanceTo(this.body.position) + radius);
   }
   private releasePanel(s: SoftBodyPart) {
     const center = centerOf(s.panel.positions);
@@ -452,7 +469,9 @@ export class Vehicle3D extends CarCrashDemo {
           const free = s.activity.freeBody!, old = free.matrix();
           if (s.activity.resting && free.velocity.lengthSq() === 0 && free.momentum.lengthSq() === 0 && (!sweptCarrier || !free.bounds.clone().applyMatrix4(old).intersectsBox(sweptCarrier))) continue;
           free.integrate(dt);
-          if (this.freeContacts(free, old, obstacle, false, s.panel.positions, s.guard).speed > FREE_PANEL_WAKE_SPEED) s.activity.wake();
+          // If even the conservative maximum is below the wake threshold, the
+          // extra full geometry probe cannot wake XPBD. Resolve contacts once.
+          if (this.freeContactSpeedBound(free) > FREE_PANEL_WAKE_SPEED && this.freeContacts(free, old, obstacle, false, s.panel.positions, s.guard).speed > FREE_PANEL_WAKE_SPEED) s.activity.wake();
           else {
             const contact = this.freeContacts(free, old, obstacle, true, s.panel.positions, s.guard);
             s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); s.activity.rest(dt, contact.supported);
