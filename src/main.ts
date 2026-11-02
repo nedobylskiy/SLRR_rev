@@ -286,7 +286,7 @@ mapDebugPanel.append(mapDebugOptions); el('scene-help').before(mapDebugPanel);
 const streamRangeLabel = document.createElement('label'); streamRangeLabel.className = 'map-stream-range';
 const streamRangeValue = textElement('span', ''), streamRangeInput = document.createElement('input');
 streamRangeInput.type = 'range'; streamRangeInput.min = '200'; streamRangeInput.max = '2000'; streamRangeInput.step = '50';
-streamRangeInput.value = String(viewer?.streamRange ?? 900);
+streamRangeInput.value = String(viewer?.streamRange ?? 500);
 streamRangeInput.setAttribute('aria-label', 'Streaming radius in meters');
 const updateStreamRange = () => {
   const value = Number(streamRangeInput.value);

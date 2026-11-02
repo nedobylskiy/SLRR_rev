@@ -26,7 +26,7 @@ export class MapObjectStream {
   private lastCell = '';
   private dirty = true;
   private disposed = false;
-  constructor(private readonly parent: Group, private distance = 900, readonly budget = 48) {}
+  constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
   setRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');

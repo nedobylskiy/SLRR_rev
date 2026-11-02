@@ -74,7 +74,7 @@ export class Viewer {
   private stopDriving?: () => void;
   private generation = 0;
   private mapStream?: MapObjectStream;
-  private mapStreamRange = 900;
+  private mapStreamRange = 500;
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
