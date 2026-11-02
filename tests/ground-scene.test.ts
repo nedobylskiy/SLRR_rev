@@ -20,6 +20,16 @@ test('compiled GroundRef RSD chooses its own room mesh and pose, not all rooms i
   }
 });
 
+test('dealer GroundRef accepts a mesh-only params record with an implicit identity pose', () => {
+  const text = new TextEncoder().encode('gametype 0x00010035\r\nparams 0x00000002\r\n');
+  const data = new Uint8Array(8 + text.length);
+  data.set([82, 83, 68, 0]); new DataView(data.buffer).setUint32(4, text.length, true); data.set(text, 8);
+  const entry: RpkEntry = { superId: 0x10004, typeId: 1, type: 1, flags: 0, compatibility: 1,
+    offset: 0, size: data.length, alias: 'dealer', data };
+  assert.deepEqual(groundRenderDefinition(entry), { gameType: 0x10035, renderId: 2,
+    pose: { position: [0, 0, 0], rotation: [0, 0, 0] } });
+});
+
 test('non-driving maps do not wait for a stored car; tracks still wait for car attachment', async () => {
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['java.game.GameLogic', 'java.game.Track'].includes(className)
     ? { path: 'GameLogic.java', source: 'package java.game; class GameLogic { static Object actualState; static Object player; } class Track { Object map; }' } : null });

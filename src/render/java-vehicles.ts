@@ -20,6 +20,7 @@ export class JavaSceneVehicles {
   private loading = false;
   private disposed = false;
   private terrain?: Pick<MapTerrain, 'height'>;
+  private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
     private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals'>,
     private readonly report: (message: string) => void,
@@ -81,19 +82,23 @@ export class JavaSceneVehicles {
     // Native physics normally resolves a freshly placed car out of the floor.
     // Static displays have no driving solver, so resolve wheel penetration here.
     let lift = 0;
-    if (this.terrain) for (const slot of built.root.definition.config.slots) {
+    const settled = this.settled.get(built);
+    const needsContact = this.terrain && (settled?.pose !== pose || settled.revision !== pose.poseRevision);
+    if (needsContact) for (const slot of built.root.definition.config.slots) {
       if (slot.type === undefined || slot.type < 101 || slot.type > 199 || !built.root.children.has(slot.id)) continue;
       const wheel = built.root.definition.config.wheels[slot.type - 101];
       if (!wheel?.radius) continue;
       const center = new Vector3().setFromMatrixPosition(built.root.slotFrame(slot)).applyMatrix4(built.root.local);
       const radius = wheel.radius * (built.world.wheelRefs[slot.type - 101]?.radius ?? 0.32865) / 0.32865;
-      const ground = this.terrain.height(center.x, center.z, Math.max(center.y + radius, pose.position.y + 2));
+      // Search the placement's floor, not furniture/ceilings above its origin.
+      const ground = this.terrain!.height(center.x, center.z, pose.position.y);
       if (Number.isFinite(ground) && ground > -999) lift = Math.max(lift, ground - (center.y - radius));
     }
     if (lift > 0.001) {
       pose.setMatrix({ ...pose.position, y: pose.position.y + lift }, pose.orientation);
       built.root.local.elements[13] += lift;
     }
+    if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision });
     this.viewer.syncWorldVisuals(built.world);
   }
 
@@ -111,7 +116,7 @@ export class JavaSceneVehicles {
       built = await this.factory.stock(key, { mechanical: true, javaSelection: selection });
       if (this.disposed || !this.wanted.has(node)) { built.world.dispose(); return; }
       this.sync(node, built, ref);
-      await this.viewer.showWorld(built.world, this.assets, true);
+      await this.viewer.showWorld(built.world, this.assets, true, true);
       if (this.disposed || !this.wanted.has(node)) { this.release(built); return; }
       this.models.set(node, built);
     } catch (error) {

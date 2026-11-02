@@ -12,8 +12,8 @@ export function groundRenderDefinition(entry: RpkEntry): { gameType: number; ren
     const properties = parseProperties(new TextDecoder('windows-1252').decode(bytes.subarray(offset + 8)));
     const gameType = properties.find(property => property.key === 'gametype')?.value;
     const params = properties.find(property => property.key === 'params')?.value.split(',').map(value => value.trim());
-    if (!gameType || !/^0x[0-9a-f]+$/i.test(gameType) || !params || params.length !== 7 || !/^0x[0-9a-f]+$/i.test(params[0])) return;
-    const pose = params.slice(1).map(Number);
+    if (!gameType || !/^0x[0-9a-f]+$/i.test(gameType) || !params || ![1, 7].includes(params.length) || !/^0x[0-9a-f]+$/i.test(params[0])) return;
+    const pose = params.length === 1 ? [0, 0, 0, 0, 0, 0] : params.slice(1).map(Number);
     if (!pose.every(Number.isFinite)) throw new Error('Ground RSD has a non-finite pose');
     return { gameType: Number(gameType), renderId: Number(params[0]),
       pose: { position: pose.slice(0, 3) as CfgPose['position'], rotation: pose.slice(3) as CfgPose['rotation'] } };

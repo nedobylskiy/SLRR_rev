@@ -64,6 +64,8 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.equal(built[0].root.local.elements[12], 10);
   renderer.update(map, { height: () => 2 }); await settle();
   assert.ok(Math.abs(built[0].root.local.elements[13] - 2.7) < 1e-9, 'static wheel contact resolves floor penetration');
+  renderer.update(map, { height: () => 5 });
+  assert.ok(Math.abs(built[0].root.local.elements[13] - 2.7) < 1e-9, 'a settled car must not ratchet up to furniture or ceilings');
   const chassisNode = gameTypes.get(vehicles[0].chassis)!;
   assert.ok(chassisNode instanceof GameObject);
   chassisNode.setState({ x: 15, y: 2, z: 3 }, { y: 0, p: 0, r: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });

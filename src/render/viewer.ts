@@ -476,9 +476,10 @@ export class Viewer {
       group.matrixWorldNeedsUpdate = true;
     }
   }
-  async showWorld(world: EngineWorld, assets: Assets, keepScene = false): Promise<string[]> {
+  async showWorld(world: EngineWorld, assets: Assets, keepScene = false, publishTogether = false): Promise<string[]> {
     if (!keepScene) this.clear();
     const generation = this.generation, warnings: string[] = [];
+    const staged: THREE.Group[] = [];
     for (const part of world.parts.values()) {
       const model = part.definition.model;
       if (!model) continue;
@@ -486,6 +487,7 @@ export class Viewer {
       const collision = await loadPartCollision(assets, part.definition);
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
+      if (publishTogether) { group.visible = false; staged.push(group); }
       group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
@@ -501,6 +503,7 @@ export class Viewer {
         if (generation !== this.generation) return warnings;
       }
     }
+    if (generation === this.generation && !world.disposed) for (const group of staged) group.visible = true;
     if (generation === this.generation && !keepScene) this.fit();
     return warnings;
   }
