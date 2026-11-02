@@ -84,6 +84,7 @@ export class GameTypeNative {
       node.resourceId = id;
       node.typeId = node.resourceId;
       node.resourceType = resource?.type ?? 0;
+      node.sceneLightManaged = false;
       node.resourcePack = resource?.pack ?? (origin?.pack ?? null);
       node.resourceScript = resource?.script ?? null;
       node.alias = resource?.alias ?? node.alias;
@@ -124,6 +125,7 @@ export class GameTypeNative {
       node.resourceId = source?.resourceId ?? literal?.id ?? 0;
       node.typeId = source?.typeId ?? node.resourceId;
       node.resourceType = source?.resourceType ?? 0;
+      node.sceneLightManaged = source?.sceneLightManaged ?? false;
       node.resourcePack = source?.resourcePack ?? (typeof literal?.pack === 'string' ? literal.pack : null);
       node.resourceScript = source?.resourceScript ?? null;
       node.copiedFromResourceId = null;
@@ -136,6 +138,7 @@ export class GameTypeNative {
       if (source === target) return voidValue();
       target.typeId = source.typeId;
       target.resourceType = source.resourceType;
+      target.sceneLightManaged = source.sceneLightManaged;
       target.resourcePack = source.resourcePack;
       target.resourceScript = source.resourceScript;
       target.params = source.params;

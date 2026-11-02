@@ -9,6 +9,8 @@ export class ResourceObject {
   resourceScript: string | null = null;
   /** ResourceRef.type(); zero until a host resource has been created. */
   resourceType = 0;
+  /** setLight currently drives the existing scene sun/ambient bridge. */
+  sceneLightManaged = false;
   /** Source resource ID when this binding was duplicated as an independent resource. */
   copiedFromResourceId: number | null = null;
   readonly resourceReplacements = new Map<number, number>();

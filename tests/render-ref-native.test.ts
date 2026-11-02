@@ -66,6 +66,12 @@ test('RenderRef.setLight forwards all three source colors from a light resource'
   assert.equal(jvm.natives.invoke('java.util.resource.RenderRef', 'setLight', sun,
     [jv('int', 0x00d8d4b0), jv('int', 0x00375070), jv('int', 0x00d8d4b0)])?.type, 'void');
   assert.deepEqual(colors, [{ diffuse: 0xd8d4b0, ambient: 0x375070, specular: 0xd8d4b0 }]);
+  assert.equal(resources.getResource(sun)?.sceneLightManaged, true);
+  const clone = ref('java.util.resource.RenderRef');
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'duplicate', clone, [jv('ResourceRef', sun.value)]);
+  assert.equal(resources.getResource(clone)?.sceneLightManaged, true, 'a cloned scene light must not render twice');
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', clone, [jv('int', 29)]);
+  assert.equal(resources.getResource(clone)?.sceneLightManaged, false, 'rebinding a handle clears its previous scene-light role');
 });
 
 test('RenderRef.setFlare forwards the original texture and settings', async () => {

@@ -33,6 +33,7 @@ import { FrameProfiler } from './frame-profiler';
 import { SceneLighting } from './scene-lighting';
 import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
+import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -64,7 +65,10 @@ export class Viewer {
   private javaSkyDomeNodes = new Map<number, { group: THREE.Group; offset: THREE.Vector3 }>();
   private javaRenderTypes = new Map<number, string>();
   private javaRenderRequests = new Map<number, number>();
+  private javaRenderRevisions = new Map<number, number>();
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
+  private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
+  private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
   private inertialCameraEnabled = false;
@@ -168,7 +172,9 @@ export class Viewer {
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
     this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
     this.javaRenderRoot.clear(); this.javaRenderNodes.clear(); this.javaRenderModels.clear(); this.javaSkyDomeNodes.clear();
+    this.javaRenderLights.clear(); this.javaLightDefinitions.clear();
     this.javaRenderTypes.clear(); this.javaRenderRequests.clear();
+    this.javaRenderRevisions.clear();
     this.skyFogUniforms.clear();
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
@@ -195,8 +201,10 @@ export class Viewer {
     if (node.resourceType !== 3) {
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
+      this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       this.javaSkyDomeNodes.delete(node.id);
       this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
+      this.javaRenderRevisions.delete(node.id);
       return;
     }
     if (!group) {
@@ -215,15 +223,45 @@ export class Viewer {
     group.position.set(node.position.x, node.position.y, node.position.z);
     group.rotation.set(node.orientation.p, node.orientation.y, node.orientation.r, 'YXZ');
     const modelGroup = this.javaRenderModels.get(node.id)!;
+    const revision = (this.javaRenderRevisions.get(node.id) ?? 0) + 1;
+    this.javaRenderRevisions.set(node.id, revision);
     modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
-    const isLightResource = node.renderType?.resourceType === 13;
-    if (isNavigatorOverlay || isLightResource) {
+    if (isNavigatorOverlay || node.renderType?.sceneLightManaged) {
       group.visible = false;
       modelGroup.clear();
+      this.javaRenderTypes.delete(node.id);
+      this.javaRenderRequests.set(node.id, (this.javaRenderRequests.get(node.id) ?? 0) + 1);
+      this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       return;
     }
+    const lightIdentity = node.renderResource;
+    if (lightIdentity && (!node.renderType?.resourceType || node.renderType.resourceType === 13)) {
+      const key = `${lightIdentity.pack.toLowerCase()}:${lightIdentity.id}`;
+      let definition = this.javaLightDefinitions.get(key);
+      if (!definition) {
+        definition = assets.resource(lightIdentity.pack, lightIdentity.id).then(({ entry }) => parseResourceLight(entry));
+        this.javaLightDefinitions.set(key, definition);
+        void definition.catch(() => { if (this.javaLightDefinitions.get(key) === definition) this.javaLightDefinitions.delete(key); });
+      }
+      const light = await definition;
+      if (generation !== this.generation || this.javaRenderRevisions.get(node.id) !== revision
+        || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
+      if (light) {
+        if (node.renderType) node.renderType.resourceType = 13;
+        modelGroup.clear(); this.javaRenderTypes.delete(node.id);
+        this.javaRenderRequests.set(node.id, (this.javaRenderRequests.get(node.id) ?? 0) + 1);
+        this.javaSkyDomeNodes.delete(node.id); group.visible = true;
+        if (this.javaRenderLights.get(node.id)?.key !== key) {
+          this.javaRenderLights.get(node.id)?.group.removeFromParent();
+          const lights = createResourceLight(light);
+          group.add(lights); this.javaRenderLights.set(node.id, { key, group: lights });
+        }
+        return;
+      }
+    }
+    this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
     group.visible = true;
     // Scene.java names map sky shells "egbolt-*". The original renderer keeps these
     // shells around the camera; leaving one at map origin makes it look like a hill.

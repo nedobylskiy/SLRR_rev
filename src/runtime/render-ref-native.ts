@@ -49,7 +49,9 @@ export class RenderRefNative {
       return voidValue();
     });
     jvm.natives.register(owner, 'setLight', ['int', 'int', 'int'], ({ receiver, args }) => {
-      if (!this.resources.getResource(receiver)) throw new Error('RenderRef.setLight has no resource');
+      const resource = this.resources.getResource(receiver);
+      if (!resource) throw new Error('RenderRef.setLight has no resource');
+      resource.sceneLightManaged = true;
       this.setSceneLight?.({ diffuse: Number(args[0].value) & 0xffffff,
         ambient: Number(args[1].value) & 0xffffff,
         specular: Number(args[2].value) & 0xffffff });
