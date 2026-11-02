@@ -27,6 +27,7 @@ interface StreamType {
 /** Keeps map-object geometry near the camera and uploads a bounded number of new instances per frame. */
 export class MapObjectStream {
   private types: StreamType[] = [];
+  private ordered: StreamType[] = [];
   private lastCell = '';
   private dirty = true;
   private disposed = false;
@@ -74,8 +75,9 @@ export class MapObjectStream {
         type.pending = nearby.map(v => v.index);
         type.priority = nearby[0]?.distance ?? Infinity;
       }
+      this.ordered = [...this.types].sort((a, b) => a.priority - b.priority);
     }
-    const ordered = [...this.types].sort((a, b) => a.priority - b.priority);
+    const ordered = this.ordered;
     let available = 4 - this.types.filter(type => type.loading).length;
     for (const type of ordered) if (available > 0 && type.pending.length && !type.meshes && !type.loading && !type.failed) {
       this.load(type); available--;
@@ -178,7 +180,8 @@ export class MapObjectStream {
         this.parent.add(mesh); return mesh;
       });
       type.loading = false;
-      this.dirty = true;
+      // Pending placements already describe the current focus. Completing one
+      // model must not rescan the entire city index on the next frame.
     }).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); });
   }
 
@@ -200,5 +203,5 @@ export class MapObjectStream {
     type.meshes = undefined; type.unusedSince = undefined; type.localBounds = undefined;
     type.drawn.length = type.candidates.length = 0; type.instanceBounds.clear();
   }
-  dispose() { this.disposed = true; for (const type of this.types) this.release(type); this.types = []; }
+  dispose() { this.disposed = true; for (const type of this.types) this.release(type); this.types = []; this.ordered = []; }
 }

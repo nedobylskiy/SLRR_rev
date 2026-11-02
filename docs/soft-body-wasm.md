@@ -72,3 +72,13 @@ The vehicle benchmark requires a local game installation. It assembles the origi
 For fragments which cannot yet sleep, the rigid contact path now skips its separate XPBD wake probe when a conservative linear/angular relative-speed bound proves that the wake threshold cannot be reached. Slow contacts are still resolved once; potentially hard contacts retain the probe. Per-fragment node buffers and points are reused so the triangle BVH query cache survives between calls. Terrain contacts also reuse a single sample's height and normal. A regression compares the optimized response against unconditional probing while counting terrain queries.
 
 Run `npm run benchmark:vehicle-physics -- --keep-awake` to stress this path without allowing debris sleep. On the same development setup, the 6–12 second windows improved from approximately **10.1–10.2 ms to 2.3–2.4 ms per eight ticks**, with the same final vehicle velocity. This deliberately awake fixture isolates contact overhead; it is not a new production setting or an FPS claim.
+
+### Attached panels above dense terrain
+
+Zero XPBD solves does not mean zero panel cost: sleeping attached cages still probe terrain before deciding whether to wake. City bridge profiling found these per-node height queries dominating an otherwise rigid vehicle's panel time.
+
+The terrain cell BVH now retains conservative height bounds. A swept cage first checks those bounds and nearby CFG support boxes; cages entirely clear of reachable surfaces skip exact height queries. Near surfaces, the original node tests still run, and obstacle overlaps still wake the panel. Height queries also prune unreachable overhead branches and branches below an already found support. Bounds include the barycentric edge tolerance, and equal-height candidates retain the original tie order. No physics ticks or active solver iterations were removed.
+
+A local controlled bridge run loaded City and City2 (313,893 support triangles and 19,723 CFG boxes), placed a stock Baiern at `(745.5, 6.9, -269.2)`, and held 19 km/h for three 160-frame windows of eight ticks each. Waking was disabled only in this diagnostic fixture to isolate rigid-carry overhead. Panel averages changed from **5.43 / 3.94 / 2.05 ms** to **3.83 / 0.92 / 0.73 ms**. These are headless diagnostic timings, not production FPS or an impact benchmark.
+
+The viewer also skips hidden vehicle-bounds helpers. Streaming load completion no longer invalidates the entire city's proximity query, and type priority sorting runs when the focus cell/range/index changes. A `Sun flare CPU` measurement isolates the lens-flare framebuffer copies within `Render CPU`; these times overlap and must not be added together.

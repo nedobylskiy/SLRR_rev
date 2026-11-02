@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
 import type { ScxModel } from '../formats/scx';
 import type { Terrain } from './suspension-3d';
 import type { MapCollision } from './map-collision';
@@ -12,8 +12,8 @@ export function tireSurfaceForTexture(path: string): TireSurface {
   return 'road';
 }
 interface Bounds { minX: number; maxX: number; minZ: number; maxZ: number }
-interface Face extends Bounds { ax: number; az: number; ay: number; bx: number; bz: number; by: number; cx: number; cz: number; cy: number; normal: Vector3; surface: TireSurface; denominator: number; order: number }
-interface Branch extends Bounds { faces?: Face[]; left?: Branch; right?: Branch }
+interface Face extends Bounds { minY: number; maxY: number; ax: number; az: number; ay: number; bx: number; bz: number; by: number; cx: number; cz: number; cy: number; normal: Vector3; surface: TireSurface; denominator: number; order: number }
+interface Branch extends Bounds { minY: number; maxY: number; faces?: Face[]; left?: Branch; right?: Branch }
 interface Cell { faces: Face[]; tree?: Branch }
 
 /** Vertical collision sampling from original map SCX geometry, indexed in 16 m cells. */
@@ -45,7 +45,9 @@ export class MapTerrain implements Terrain {
         const z0 = Math.floor(Math.min(az, bz, cz) / this.size), z1 = Math.floor(Math.max(az, bz, cz) / this.size);
         if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) continue;
         const pad = Math.max(Math.abs(ax - cx), Math.abs(bx - cx), Math.abs(az - cz), Math.abs(bz - cz)) * 0.00002 + 1e-9;
+        const yPad = (Math.max(ay, by, cy) - Math.min(ay, by, cy)) * 0.00002 + 1e-9;
         const face: Face = { ax, ay, az, bx, by, bz, cx, cy, cz, normal: cross.normalize(), surface,
+          minY: Math.min(ay, by, cy) - yPad, maxY: Math.max(ay, by, cy) + yPad,
           minX: Math.min(ax, bx, cx) - pad, maxX: Math.max(ax, bx, cx) + pad, minZ: Math.min(az, bz, cz) - pad, maxZ: Math.max(az, bz, cz) + pad,
           denominator: (bz - cz) * (ax - cx) + (cx - bx) * (az - cz), order: this.faces };
         if (face.normal.y < 0) face.normal.negate();
@@ -65,16 +67,38 @@ export class MapTerrain implements Terrain {
   /** Build before starting the drive; later additions invalidate only affected cells. */
   prepare() { for (const cell of this.cells.values()) cell.tree ??= this.build([...cell.faces]); }
   private build(faces: Face[]): Branch {
-    const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+    const bounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, minY: Infinity, maxY: -Infinity };
     for (const f of faces) {
       bounds.minX = Math.min(bounds.minX, f.minX); bounds.maxX = Math.max(bounds.maxX, f.maxX);
       bounds.minZ = Math.min(bounds.minZ, f.minZ); bounds.maxZ = Math.max(bounds.maxZ, f.maxZ);
+      bounds.minY = Math.min(bounds.minY, f.minY); bounds.maxY = Math.max(bounds.maxY, f.maxY);
     }
     if (faces.length <= 8) return { ...bounds, faces };
     const x = bounds.maxX - bounds.minX >= bounds.maxZ - bounds.minZ;
     faces.sort((a, b) => x ? a.minX + a.maxX - b.minX - b.maxX : a.minZ + a.maxZ - b.minZ - b.maxZ);
     const mid = Math.floor(faces.length / 2);
     return { ...bounds, left: this.build(faces.slice(0, mid)), right: this.build(faces.slice(mid)) };
+  }
+  /** Conservative broad phase for sleeping panel cages, including overlapping decks. */
+  mayReach(bounds: Box3): boolean {
+    if (bounds.min.y < -999.975) return true; // Preserve the height() fallback floor.
+    if (this.objects?.maySupport(bounds)) return true;
+    const overlaps = (b: Branch | Face) => b.maxY >= bounds.min.y - 0.025 && b.minY <= bounds.max.y + 0.5
+      && b.maxX >= bounds.min.x && b.minX <= bounds.max.x && b.maxZ >= bounds.min.z && b.minZ <= bounds.max.z;
+    const stack = this.stack;
+    for (let x = Math.floor(bounds.min.x / this.size); x <= Math.floor(bounds.max.x / this.size); x++)
+      for (let z = Math.floor(bounds.min.z / this.size); z <= Math.floor(bounds.max.z / this.size); z++) {
+        const cell = this.cells.get(`${x},${z}`);
+        if (!cell) continue;
+        stack.length = 0; stack.push(cell.tree ??= this.build([...cell.faces]));
+        while (stack.length) {
+          const branch = stack.pop()!;
+          if (!overlaps(branch)) continue;
+          if (branch.faces) { if (branch.faces.some(overlaps)) return true; }
+          else stack.push(branch.left!, branch.right!);
+        }
+      }
+    return false;
   }
   sample(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined {
     const cell = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
@@ -85,9 +109,11 @@ export class MapTerrain implements Terrain {
     while (stack.length) {
       const branch = stack.pop()!;
       if (x < branch.minX || x > branch.maxX || z < branch.minZ || z > branch.maxZ) continue;
+      if (fromY !== undefined && branch.minY > fromY + 0.5 || best && branch.maxY < best.height) continue;
       if (!branch.faces) { stack.push(branch.right!, branch.left!); continue; }
       for (const f of branch.faces) {
         if (x < f.minX || x > f.maxX || z < f.minZ || z > f.maxZ) continue;
+        if (fromY !== undefined && f.minY > fromY + 0.5 || best && f.maxY < best.height) continue;
         const denominator = f.denominator;
         if (Math.abs(denominator) < 1e-10) continue;
         const u = ((f.bz - f.cz) * (x - f.cx) + (f.cx - f.bx) * (z - f.cz)) / denominator;

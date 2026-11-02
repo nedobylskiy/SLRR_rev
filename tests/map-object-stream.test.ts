@@ -3,6 +3,23 @@ import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
 
+test('finishing a model load does not rescan distant placements until the focus changes', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  let distantChecks = 0;
+  stream.add([{ position: new Vector3(), matrix: new Matrix4() }], async () => [new Mesh(new BoxGeometry(), new MeshBasicMaterial())]);
+  stream.add([{ position: new Vector3(1000, 0, 0), matrix: new Matrix4().makeTranslation(1000, 0, 0),
+    get radius() { distantChecks++; return 0; } }], async () => [new Mesh(new BoxGeometry(), new MeshBasicMaterial())]);
+  stream.update(focus); const initial = distantChecks;
+  assert.ok(initial > 0);
+  await Promise.resolve(); stream.update(focus);
+  assert.equal(stream.visible, 1, 'completed model becomes visible without rebuilding the index query');
+  assert.equal(distantChecks, initial, 'a load completion does not revisit unrelated far objects');
+  stream.update(new Vector3(1000, 0, 0)); await Promise.resolve(); stream.update(new Vector3(1000, 0, 0));
+  assert.ok(distantChecks > initial);
+  assert.equal(stream.visible, 1, 'teleport still requests the destination model');
+  stream.dispose();
+});
+
 test('palette colors share one model and follow instances when the camera compacts the batch', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
   const camera = new PerspectiveCamera(60, 1, 0.1, 200); camera.lookAt(0, 0, -1);

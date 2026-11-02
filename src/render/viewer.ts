@@ -343,6 +343,10 @@ export class Viewer {
     if (source.sunDirection) this.lighting.direction.set(source.sunDirection.x, source.sunDirection.y, source.sunDirection.z).normalize();
     const tint = new THREE.Color((source.color >>> 8) & 0xffffff);
     const flare = new Lensflare();
+    const renderFlare = flare.onBeforeRender;
+    // Lensflare copies the framebuffer for occlusion; time it separately so
+    // driver stalls here are distinguishable from ordinary scene submission.
+    flare.onBeforeRender = (...args) => this.profiler.measure('Sun flare CPU', () => renderFlare.apply(flare, args));
     const glowSize = Math.max(48 + source.minSize * 16, Math.min(384, 96 + source.maxSize * 16));
     flare.addElement(new LensflareElement(texture, glowSize, 0, tint));
     const ghosts = Math.min(5, Math.max(0, Math.floor(source.flareCount / 3)), Math.max(0, source.rayCount));
@@ -739,6 +743,7 @@ export class Viewer {
       }
       this.syncWorld(softParts);
       for (const [part, helper] of vehicleBounds) {
+        if (!helper.visible) continue;
         const proxy = this.proxies.get(part);
         if (proxy) { helper.box.setFromObject(proxy); helper.updateMatrixWorld(true); }
       }

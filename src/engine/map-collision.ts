@@ -59,6 +59,18 @@ export class MapCollision {
   }
   forEachBox(visit: (matrix: Matrix4, half: Vector3) => void) { for (const box of this.allBoxes) visit(box.matrix, box.half); }
   forEachWall(visit: (triangle: Triangle) => void) { for (const wall of this.allWalls) visit(wall.triangle); }
+  /** Conservative support bounds for sleeping panel cages; exact rays run only nearby. */
+  maySupport(bounds: Box3): boolean {
+    for (let x = Math.floor(bounds.min.x / this.size); x <= Math.floor(bounds.max.x / this.size); x++)
+      for (let z = Math.floor(bounds.min.z / this.size); z <= Math.floor(bounds.max.z / this.size); z++)
+        for (const box of this.boxCells.get(`${x},${z}`) ?? []) {
+          const b = box.bounds;
+          if (b.max.y >= bounds.min.y - 0.025 && b.min.y <= bounds.max.y + 0.5
+            && b.max.x >= bounds.min.x && b.min.x <= bounds.max.x && b.max.z >= bounds.min.z && b.min.z <= bounds.max.z) return true;
+        }
+    return false;
+  }
+
   /** Downward wheel support from original CFG boxes, respecting their object and body poses. */
   support(x: number, z: number, fromY: number): { height: number; normal: Vector3 } | undefined {
     const boxes = this.boxCells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);

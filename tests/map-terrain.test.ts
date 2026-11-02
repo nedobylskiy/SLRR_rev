@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { MapTerrain } from '../src/engine/map-terrain';
 import type { ScxModel } from '../src/formats/scx';
+import { Box3, Matrix4, Vector3 } from 'three';
+import { MapCollision } from '../src/engine/map-collision';
 
 test('map terrain samples original triangle height and slope in metres', () => {
   const model: ScxModel = { version: 3, warnings: [], meshes: [{ name: 'road',
@@ -57,7 +59,28 @@ test('terrain BVH agrees with exhaustive triangle sampling and invalidates after
   for (let query = 0; query < 500; query++) {
     const x = ((query * 0.137) % 15.8) - 7.9, z = ((query * 0.291) % 15.8) - 7.9, fromY = query % 3 - 1;
     assert.ok(Math.abs(terrain.height(x, z, fromY) - exhaustive(x, z, fromY)) < 1e-8);
+    const height = terrain.height(x, z, fromY);
+    // A rejection must never suppress a real node contact, including lower decks.
+    const bounds = new Box3(new Vector3(x, height + 0.02, z), new Vector3(x + 0.001, height + 0.02, z + 0.001));
+    assert.equal(terrain.mayReach(bounds), true);
   }
   terrain.add({ version: 3, warnings: [], meshes: [{ ...mesh, positions: new Float32Array([-800, 500, -800, 800, 500, -800, -800, 500, 800]), indices: new Uint32Array([0, 1, 2]) }] });
   assert.equal(terrain.height(-2, -2, 6), 5, 'new geometry invalidates the prepared cell tree');
+});
+
+test('panel terrain broad phase rejects clear space but retains slopes, CFG supports and fallback floor', () => {
+  const collision = new MapCollision(), terrain = new MapTerrain(collision);
+  const box = (x: number, y: number, z: number) => new Box3(new Vector3(x, y, z), new Vector3(x + 0.1, y + 0.1, z + 0.1));
+  terrain.add({ version: 3, warnings: [], meshes: [{ name: 'negative slope crossing cells',
+    positions: new Float32Array([-3200, -300, -3200, 0, -300, -3200, -3200, -100, 0]),
+    indices: new Uint32Array([0, 1, 2]), normals: new Float32Array(9), uv: new Float32Array(6), diffuse: [1, 1, 1, 1], textureIndex: 0,
+  }] });
+  assert.equal(terrain.mayReach(box(-24, 1, -24)), false, 'ground is below the entire cage');
+  assert.equal(terrain.mayReach(box(-24, -6, -24)), false, 'overhead deck is unreachable by height rays');
+  assert.equal(terrain.mayReach(box(24, -2, 24)), false, 'no geometry nearby');
+  assert.equal(terrain.mayReach(box(-24, -2.48, -24)), true, 'slope is close enough for a node contact');
+  assert.equal(terrain.mayReach(box(100, -1000, 100)), true, 'height fallback stays consistent');
+  collision.addBox(new Matrix4().makeRotationY(0.7).setPosition(24, -3, 24), new Vector3(2, 1, 2));
+  assert.equal(terrain.mayReach(box(24, -1.98, 24)), true, 'rotated CFG box can support a panel');
+  assert.equal(terrain.mayReach(box(24, 1, 24)), false);
 });

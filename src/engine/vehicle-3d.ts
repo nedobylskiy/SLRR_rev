@@ -75,6 +75,7 @@ export class Vehicle3D extends CarCrashDemo {
   private wheelMounts: DeformedFrame[] = [];
   private engineHull = new Box3();
   private surfaceTick = -4;
+  private readonly groundMayReach = (bounds: Box3) => this.terrain.mayReach?.(bounds) ?? true;
   private chassisCrumple = DEFAULT_CHASSIS_CRUMPLE;
   setChassisCrumple(value: number) {
     if (!Number.isFinite(value) || value < 0.5 || value > 1.5) throw new Error('Invalid chassis crumple multiplier');
@@ -463,7 +464,7 @@ export class Vehicle3D extends CarCrashDemo {
         if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         if (!s.root && s.part.condition === 0) s.panel.mounts.forEach(m => { m.broken = true; });
         if (attached) s.panel.setAnchorFrame(frame.elements);
-        if (!s.activity.deforming && (s.activity.forced || !s.root && s.part.condition === 0 && attached || attached && (shock || s.activity.threatened(frame, obstacle)))) s.activity.wake();
+        if (!s.activity.deforming && (s.activity.forced || !s.root && s.part.condition === 0 && attached || attached && (shock || s.activity.threatened(frame, obstacle, this.groundMayReach)))) s.activity.wake();
         if (!attached && !s.activity.deforming && !s.activity.freeBody) s.activity.wake();
         if (!attached && !s.activity.deforming) {
           const free = s.activity.freeBody!, old = free.matrix();
