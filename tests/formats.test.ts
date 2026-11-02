@@ -92,8 +92,8 @@ test('SCX v3 alphaOpacity flag keeps RGB road base opaque while allowing cutout 
   assert.equal(scxDiffuseUsesAlpha(4, 0), true);
 });
 test('SCX v4 uses the secondary diffuse map only when the primary map is absent', () => {
-  const fixture = (properties: Array<[number, number]>) => {
-    const material = Buffer.concat([u32(0, 0), u32(properties.length), ...properties.map(([type, index]) => Buffer.concat([u32(type, index), Buffer.alloc(24)]))]);
+  const fixture = (properties: Array<[number, number]>, flags = 0) => {
+    const material = Buffer.concat([u32(0, flags), u32(properties.length), ...properties.map(([type, index]) => Buffer.concat([u32(type, index), Buffer.alloc(24)]))]);
     const chunks = [Buffer.concat([u32(0, material.length + 8), material]), u32(4, 16, 0, 1), u32(5, 12, 0)];
     let offset = 12 + chunks.length * 8;
     const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
@@ -101,6 +101,10 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
   };
   assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].textureIndex, 3);
   assert.equal(parseScx(fixture([[0x06000001, 3]])).meshes[0].paintMask, true);
+  const bridge = parseScx(fixture([[0x06000001, 3]], 0xa0000000)).meshes[0];
+  assert.equal(bridge.materialFlags, 0xa0000000);
+  assert.equal(bridge.paintMask, false, 'bridge alpha cuts holes instead of filling them with paint');
+  assert.equal(parseScx(fixture([[0x06000001, 3]], 0x80000000)).meshes[0].paintMask, true);
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].paintMask, false);
   assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].paintMask, false);
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].textureIndex, 1);

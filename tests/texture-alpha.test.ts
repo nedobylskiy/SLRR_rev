@@ -20,7 +20,7 @@ test('DXT1 one-bit mask and DXT5 smooth alpha are distinguished', () => {
   assert.equal(textureAlphaMode(dds('DXT5', [128, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 'glass.dds'), 'blend');
 });
 
-test('uncompressed 32-bit DDS bridge masks are cutouts rather than generic blending', () => {
+test('uncompressed 32-bit DDS masks distinguish cutouts, solid surfaces and smooth blending', () => {
   const raw = (alphas: number[], mask = 0xff000000) => {
     const bytes = new Uint8Array(128 + alphas.length * 4), view = new DataView(bytes.buffer);
     bytes.set(new TextEncoder().encode('DDS '));

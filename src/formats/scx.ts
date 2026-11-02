@@ -91,6 +91,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         uv2: current.uv2, uv3: current.uv3, colors: current.colors, paintMask: current.paintMask, textureMap: current.textureMap,
         lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
+        materialFlags: current.materialFlags,
         indices: current.indices, diffuse: current.diffuse ?? [0.6, 0.65, 0.7, 1], textureIndex: current.textureIndex ?? 0xffff };
       validate(mesh); meshes.push(mesh);
     };
@@ -104,7 +105,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       if (item.type === 0 || (item.type === 1 && physicsOnly)) {
         finish(); current = {};
         if (item.type === 0) {
-          r.skip(8); const n = r.count(r.u32(), 4);
+          r.skip(4); current.materialFlags = r.u32();
+          const n = r.count(r.u32(), 4);
           for (let j = 0; j < n; j++) {
             const type = r.u32();
             if (type <= 2) { const color = Array.from({ length: 4 }, () => r.u8() / 255); if (type === 0) current.diffuse = color; }
@@ -119,7 +121,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
               // Keep DiffuseMap authoritative when both entries are present, regardless of their order.
               if (type === 0x06000000 || (type === 0x06000001 && current.textureIndex === undefined)) {
                 current.textureIndex = index; current.textureMap = map;
-                current.paintMask = type === 0x06000001;
+                // V4 bridge/truss materials use the same map slot as painted
+                // facades, but bit 29 makes alpha surface coverage instead of paint.
+                current.paintMask = type === 0x06000001 && !(current.materialFlags! & 0x20000000);
               }
               if (type === 0x06000004) { current.lightmapIndex = index; current.lightmapMap = map; }
               if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
@@ -131,8 +135,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       } else if (item.type === 4) {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
-          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask } = current;
-          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask };
+          const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags } = current;
+          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);
