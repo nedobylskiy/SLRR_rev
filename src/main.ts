@@ -130,6 +130,7 @@ async function runGameBoot() {
       stopPrevious?.();
       let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
       let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
+      let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
       try {
         status('Loading Java track…');
         if (selected.chassis && source.byPath.has(selected.chassis.pack)) {
@@ -148,6 +149,7 @@ async function runGameBoot() {
         }, true);
         if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
+        physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
         if (built) {
           gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
           const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
@@ -172,7 +174,8 @@ async function runGameBoot() {
             const javaVehicle = result.gameTypes.get(car);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
+              { ...javaControls, sample: () => { physicsBinding?.sync(); return javaControls.sample(); },
+                instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
@@ -189,12 +192,13 @@ async function runGameBoot() {
             appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
           }
         }
-        activeTrackCleanup = () => { clearVehicleDebug(); session?.(); gauges?.dispose(); built?.world.dispose(); };
+        activeTrackCleanup = () => { clearVehicleDebug(); session?.(); physicsBinding?.dispose(); gauges?.dispose(); built?.world.dispose(); };
         el('filename').textContent = selected.mapPack;
         el('format').textContent = 'JAVA / TRACK';
         el('details').textContent = `${map.loaded} map models · ${map.objects} placed objects · Java selected ${selected.chassis?.pack ?? 'no car'}`;
         status('Java track loaded');
       } catch (reason) {
+        physicsBinding?.dispose();
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
         status('Java scene unavailable', true);

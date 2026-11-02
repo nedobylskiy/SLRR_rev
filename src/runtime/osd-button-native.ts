@@ -1,6 +1,7 @@
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
+import type { PhysicsRefNative } from './physics-ref-native';
 
 interface HitBox { group: JavaValue; width: number; height: number; label: string;
   position?: { x: number; y: number; z: number }; element?: OsdElement }
@@ -17,6 +18,9 @@ export class OsdButtonNative {
   private readonly boxes = new WeakMap<JavaObject, HitBox>();
   private readonly live = new Set<OsdElement>();
   private readonly activeBoxes = new Set<HitBox>();
+  private worldPhysics?: PhysicsRefNative;
+
+  setWorldPhysics(physics: PhysicsRefNative): void { this.worldPhysics = physics; }
 
   constructor(private readonly jvm: SlrrJvm,
     private readonly layer?: Pick<OsdLayer, 'createHitTarget'>,
@@ -27,8 +31,10 @@ export class OsdButtonNative {
     const nil = () => jv('void', undefined);
     jvm.natives.register(owner, 'createBox', ['ResourceRef', 'float', 'float', 'float', 'String'], ({ receiver, args }) => {
       const group = args[0];
-      if (this.object(group)?.className !== 'java.render.Group')
-        throw new Error('PhysicsRef.createBox currently supports OSD groups only');
+      if (this.object(group)?.className !== 'java.render.Group') {
+        if (!this.worldPhysics) throw new Error('PhysicsRef world backend is not connected');
+        return this.worldPhysics.createBox(receiver, args);
+      }
       const box = {
         group, width: Number(args[1].value), height: Number(args[2].value), label: String(args[4].value ?? ''),
       };
@@ -38,7 +44,10 @@ export class OsdButtonNative {
     });
     jvm.natives.register(owner, 'setMatrix', ['Vector3', 'Ypr'], ({ receiver, args }) => {
       const physics = this.requireObject(receiver), box = this.boxes.get(physics);
-      if (!box) throw new Error('PhysicsRef.setMatrix requires an OSD hit box');
+      if (!box) {
+        if (!this.worldPhysics) throw new Error('PhysicsRef world backend is not connected');
+        return this.worldPhysics.setMatrix(receiver, args[0], args[1]);
+      }
       const position = this.requireObject(args[0]);
       box.position = {
         x: Number(position.fields.get('x')?.value ?? 0),
@@ -72,7 +81,10 @@ export class OsdButtonNative {
     });
     jvm.natives.register(owner, 'getPos', [], ({ receiver }) => {
       const position = this.boxes.get(this.requireObject(receiver))?.position;
-      if (!position) throw new Error('PhysicsRef.getPos requires a positioned OSD hit box');
+      if (!position) {
+        if (!this.worldPhysics) throw new Error('PhysicsRef.getPos requires a positioned OSD hit box');
+        return this.worldPhysics.getPos(receiver);
+      }
       return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(Object.entries(position)
         .map(([axis, value]) => [axis, jv('float', value)])) });
     });

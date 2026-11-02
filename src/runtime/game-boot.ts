@@ -28,6 +28,7 @@ import { RenderRefNative, type RenderLightSettings, type RenderFlareSource } fro
 import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
+import { PhysicsRefNative } from './physics-ref-native';
 import { OsdRectangleNative } from './osd-rectangle-native';
 import { SfxRefNative } from './sfx-ref-native';
 import type { MapFogSettings } from '../render/viewer';
@@ -40,7 +41,7 @@ import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export interface JavaCallTiming { calls: number; averageMs: number; peakMs: number; lastAt: number }
-export type BootResult = { javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
+export type BootResult = { javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -276,6 +277,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);
     });
+  const physicsRefs = new PhysicsRefNative(jvm, gameTypes);
+  osdButtons.setWorldPhysics(physicsRefs);
   jvm.natives.register('java.util.resource.GroundRef', 'setFog', ['int', 'float', 'float'], ({ receiver, args }) => {
     if (!gameTypes.get(receiver)) throw new Error('GroundRef.setFog has no map game object');
     const color = Number(args[0].value) & 0xffffff;
@@ -493,7 +496,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    sfxRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
@@ -515,11 +518,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { javaProfile, threads, jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
+    return { javaProfile, threads, jvm, gameTypes, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { javaProfile, threads, jvm, gameTypes, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
+    return { javaProfile, threads, jvm, gameTypes, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }
