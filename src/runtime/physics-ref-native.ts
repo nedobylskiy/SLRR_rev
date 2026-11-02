@@ -42,11 +42,20 @@ export class PhysicsRefNative {
   }
 
   createBox(receiver: JavaValue, args: readonly JavaValue[]): JavaValue {
-    const node = this.resources.getResource(receiver);
+    let node = this.resources.getResource(receiver);
     const parent = args[0].value == null ? undefined : this.resources.getResource(args[0]);
-    if (!node || !parent) throw new Error('PhysicsRef.createBox requires native handles for the box and parent');
+    if (!parent) throw new Error('PhysicsRef.createBox parent has no native handle');
     const dimensions = args.slice(1, 4).map(value => Number(value.value));
     if (!dimensions.every(value => Number.isFinite(value) && value > 0)) throw new Error('PhysicsRef.createBox requires positive finite dimensions');
+    // Garage keeps its PhysicsRef field across exit()/enter(): destroy removes
+    // the body, while createBox recreates it on the same live Java wrapper.
+    if (!node) {
+      this.jvm.natives.invoke('java.util.resource.ResourceRef', 'newNative', receiver, []);
+      node = this.resources.getResource(receiver);
+    }
+    if (!node) throw new Error('PhysicsRef.createBox could not allocate a native box handle');
+    for (const [old, box] of this.boxes)
+      if (old !== node && box.receiver.value === receiver.value) this.boxes.delete(old);
     node.setParent(parent);
     node.resourceId = 0x30000000 + node.id;
     node.resourceType = 2; // INSTANCE_PHYSICS

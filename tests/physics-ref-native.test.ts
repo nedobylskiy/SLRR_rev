@@ -74,3 +74,34 @@ test('world boxes validate input, compose parent transforms and refresh parent o
   assert.equal(collision.boxes, 0, 'base ResourceRef cleanup is detected too');
   binding.dispose(); binding.dispose(); physics.dispose(); resources.dispose(); osd.dispose();
 });
+
+test('a retained Garage PhysicsRef recreates its body after destroy and map replacement', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null }), resources = new GameTypeNative(jvm, () => {});
+  const physics = new PhysicsRefNative(jvm, resources);
+  const box = object('java.util.resource.PhysicsRef'), maps = [object('java.game.Scene'), object('java.game.Scene')];
+  for (const map of maps) jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', map, []);
+  const collisions = maps.map(() => new MapCollision());
+  const bindings = maps.map((map, i) => physics.bindCollision(map, collisions[i]));
+  const args = (map: JavaValue, width = 2) => [jv('ResourceRef', map.value), jv('float', width),
+    jv('float', 0.05), jv('float', 5), jv('String', 'aknafedel')];
+  physics.createBox(box, args(maps[0]));
+  const first = resources.getResource(box);
+  assert.equal(collisions[0].boxes, 1);
+  jvm.natives.invoke('java.util.resource.PhysicsRef', 'destroy', box, []);
+  assert.equal(collisions[0].boxes, 0);
+  assert.equal(resources.getResource(box), undefined);
+  assert.throws(() => physics.createBox(box, args(maps[1], -1)), /positive finite/);
+  assert.equal(resources.getResource(box), undefined, 'invalid input must not allocate a replacement');
+  physics.createBox(box, args(maps[1]));
+  assert.notEqual(resources.getResource(box), first);
+  physics.setMatrix(box, vector(0, -0.035, 0), jv('Ypr', null));
+  assert.equal(collisions[0].boxes, 0);
+  assert.equal(collisions[1].boxes, 1);
+  assert.ok(Math.abs(collisions[1].support(0, 0, 1)!.height + 0.01) < 1e-9);
+  // Base-class destruction also permits reuse without retaining the old collider.
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy', box, []);
+  physics.createBox(box, args(maps[0]));
+  assert.equal(collisions[0].boxes, 1); assert.equal(collisions[1].boxes, 0);
+  for (const binding of bindings) binding.dispose();
+  physics.dispose(); resources.dispose();
+});
