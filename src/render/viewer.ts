@@ -31,6 +31,7 @@ import type { RenderLightSettings, RenderFlareSource } from '../runtime/render-r
 import type { EnvironmentMapSource } from './environment-map';
 import { FrameProfiler } from './frame-profiler';
 import { SceneLighting } from './scene-lighting';
+import { FollowCamera } from './follow-camera';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -147,7 +148,7 @@ export class Viewer {
       }
       this.previousFrame = document.hidden ? undefined : now;
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
-      this.controls.update();
+      if (this.controls.enabled) this.controls.update();
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
@@ -720,6 +721,7 @@ export class Viewer {
     this.ground.visible = !track; this.grid.visible = false; this.driveGrid.visible = !track;
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(softParts);
     const followed = demo.position.clone();
+    const followCamera = new FollowCamera();
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
     this.camera.position.copy(this.controls.target).add(withCrash ? new THREE.Vector3(7, 4, -3) : new THREE.Vector3(5, 3, 7)); this.controls.update();
     if (java) this.controls.enabled = false;
@@ -727,6 +729,7 @@ export class Viewer {
     this.frame = now => {
       if (document.hidden) { last = undefined; return; }
       // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
+      const firstFrame = last === undefined;
       const elapsed = last === undefined ? 0 : Math.max(0, (now - last) / 1000);
       const seconds = paused ? 0 : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
@@ -752,6 +755,7 @@ export class Viewer {
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
         if (internalPose) {
+          followCamera.reset();
           const frame = root.matrix().multiply(poseMatrix(internalPose));
           frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
           this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
@@ -786,10 +790,8 @@ export class Viewer {
           }
           offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
           const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
-          const desired = demo.position.clone().add(offset);
-          const blend = last === undefined ? 1 : 1 - Math.exp(-seconds * (mode === 1 ? 5 : 9));
-          this.camera.position.lerp(desired, blend);
-          this.controls.target.lerp(target, blend);
+          offset.y -= 1.1;
+          followCamera.update(this.camera.position, this.controls.target, target, offset, seconds, mode === 1 ? 5 : 9, firstFrame);
           this.camera.lookAt(this.controls.target);
         }
       } else {

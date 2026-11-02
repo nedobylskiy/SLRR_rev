@@ -129,3 +129,5 @@ The physics session still owns a separate 240Hz FixedClock; the global clock and
 |Lateral impulse|The vertical axis of the body reaches dot(up, worldUp) ≈ −0.999; the hood separates, the roof shell is deformed|
 
 Reset returns the original poses, shapes, and attachments of existing objects; the number of world details remains 33. The initial resources and installation do not change. These checks do not prove a match with the physics of the old EXE. Saving full 3D state and new wireframes for the network is not yet connected to Part.save/load.
+
+The Java-selected external camera follows the rendered vehicle's actual displacement before damping its relative view offset. Its look target stays on the same vehicle pose, avoiding frame-dependent camera/car separation when the fixed clock retains a backlog. OrbitControls only updates while enabled, so inspection-camera damping cannot overwrite a Java driving camera. First frames, teleports and returning from a CFG cockpit camera reset the follow frame. This does not interpolate physics poses or eliminate the visible frame cadence of low FPS.
