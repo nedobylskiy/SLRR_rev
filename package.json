@@ -7,7 +7,7 @@
   "scripts": {
     "postinstall": "npm run build:jvm",
     "predev": "npm run build:jvm",
-    "dev": "vite --host 127.0.0.1",
+    "dev": "vite --host 0.0.0.0",
     "build": "npm run build:jvm && tsc --noEmit && vite build",
     "build:jvm": "tsc -p packages/slrr-jvm/tsconfig.json",
     "build:wasm": "node tools/build-soft-body-wasm.mjs",

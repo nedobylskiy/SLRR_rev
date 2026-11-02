@@ -15,7 +15,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). By default, resources are read from the installed Steam game:
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The development server binds to `0.0.0.0`; another device on the same network can use the Network URL printed by Vite. Game assets, music and video are served by the host computer. By default, resources are read from the installed Steam game:
 
 ```text
 C:\Program Files (x86)\Steam\steamapps\common\Street Legal Racing Redline

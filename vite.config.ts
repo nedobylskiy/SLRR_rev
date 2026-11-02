@@ -39,7 +39,10 @@ function gameAssets(): Plugin {
       server.middlewares.use('/api/game', async (req, res) => {
         if (req.method !== 'GET') { res.statusCode = 405; res.end(); return; }
         const host = req.headers.host ?? '';
-        if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) { res.statusCode = 403; res.end(); return; }
+        let hostname = '';
+        try { hostname = new URL(`http://${host}`).hostname.toLowerCase(); } catch { /* Reject invalid hosts below. */ }
+        const localAddress = req.socket.localAddress?.replace(/^::ffff:/, '').toLowerCase();
+        if (!['127.0.0.1', 'localhost', '[::1]', localAddress].includes(hostname)) { res.statusCode = 403; res.end(); return; }
         try {
           const url = new URL(req.url ?? '/', 'http://127.0.0.1');
           res.setHeader('Cache-Control', 'no-store');
@@ -94,5 +97,5 @@ export default defineConfig({
     { find: /^slrr-jvm$/, replacement: path.resolve('packages/slrr-jvm/src/index.ts') },
     { find: /^slrr-jvm-compiler$/, replacement: path.resolve('src/runtime/jvm-compiler-browser.ts') },
   ] },
-  server: { host: '127.0.0.1', port: 5173, strictPort: true },
+  server: { host: '0.0.0.0', port: 5173, strictPort: true },
 });
