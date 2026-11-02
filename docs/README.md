@@ -11,6 +11,7 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 | [RPK/RDB](formats/rpk.md) |Binary table, dependencies, resource IDs|
 | [SCX/SCY/TEX](formats/scx.md) |Geometry, materials, versions 3 and 4|
 |[Maps](maps.md)|Loading built-in Test Track and support boundaries|
+|[Music integration](music.md)|Original Java Sound calls, browser playback, and track metadata|
 | [TUFA/TREE](formats/tufa.md) |Original `.class`, constants, methods, nodes|
 |[Other formats](formats/other.md)|CFG, textures, maps, animation, unknown|
 |[Vehicle condition](vehicle-serialization.md)|Old SDAT, save/load, new buffer format|
@@ -25,6 +26,7 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 |[Car in 3D](vehicle-3d.md)|CFG suspension, deformable mounts, part condition, physics meshes and performance|
 |[Stock suspension and engine components](original-mechanics.md)|Selection of original parts, numerical parameters, damage and limitations of the prototype|
 | [Part source runtime](part-runtime.md) |Original save/load via memory and check limits|
+|[Java virtual filesystem](virtual-filesystem.md)|Replaceable KeyValue backend, IndexedDB overlay, and SDAT File calls|
 |[Multiplayer](multiplayer.md)|Server authority, snapshots, lifecycle|
 |[DLLs and binaries](legacy-extensions.md)|runDLL/runMethod, intermediate EXE, bridge errors|
 |[Roadmap](roadmap.md)|Stages with acceptance criteria|

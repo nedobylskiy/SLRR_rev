@@ -70,6 +70,11 @@ export class OsdLayer {
     this.stage.style.height = `${width * 9 / 16}px`;
   }
 
+  getViewportSize() {
+    return { width: Number.parseFloat(this.stage.style.width) || this.stage.clientWidth || 16,
+      height: Number.parseFloat(this.stage.style.height) || this.stage.clientHeight || 9 };
+  }
+
   private place(node: HTMLElement, x: number, y: number, width: number, height: number, depth: number) {
     const bounds = osdBounds(x, y, width, height);
     node.style.left = `${bounds.left}%`;
@@ -106,13 +111,26 @@ export class OsdLayer {
     };
   }
 
-  private imageUrl(resource: OsdResource) {
+  imageUrl(resource: OsdResource) {
     const key = `${resource.pack.toLowerCase()}:${resource.id}`;
     let cached = this.images.get(key);
     if (!cached) {
       cached = (async () => {
-        const { entry } = await this.assets.resource(resource.pack, resource.id);
-        const source = entryProperties(entry).find(property => property.key === 'sourcefile')?.value;
+        let current = resource;
+        let source: string | undefined;
+        const visited = new Set<string>();
+        for (let depth = 0; depth < 8; depth++) {
+          const identity = `${current.pack}:${current.id}`;
+          if (visited.has(identity)) break;
+          visited.add(identity);
+          const { packPath, entry } = await this.assets.resource(current.pack, current.id);
+          const properties = entryProperties(entry);
+          source = properties.find(property => property.key === 'sourcefile')?.value;
+          if (source) break;
+          const texture = properties.find(property => property.key === 'texture');
+          if (!texture || !/^0x[0-9a-f]+$/i.test(texture.value)) break;
+          current = { pack: packPath, id: Number.parseInt(texture.value.slice(2), 16) };
+        }
         if (!source) throw new Error(`OSD resource ${key} has no sourcefile`);
         const bytes = await this.assets.read(source);
         const url = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: /\.png$/i.test(source) ? 'image/png' : 'image/jpeg' }));
@@ -132,10 +150,27 @@ export class OsdLayer {
     return handle;
   }
 
+  /** Host-side native widgets use the same OSD stage and lifetime as Java-created gadgets. */
+  createNativeElement(node: HTMLElement, x: number, y: number, width: number, height: number, depth: number) {
+    return this.handle(this.place(node, x, y, width, height, depth));
+  }
+
   createText(value: string, align: OsdAlign, x: number, y: number, depth = 2) {
     const node = this.place(document.createElement('span'), x, y, 0, 0, depth);
     node.classList.add('osd-text', `osd-align-${align}`);
     node.textContent = value;
+    return this.handle(node);
+  }
+
+  createHitTarget(label: string, x: number, y: number, width: number, height: number, depth: number,
+    action: () => void, hover?: () => void, leave?: () => void) {
+    const node = this.place(document.createElement('button'), x, y, width, height, depth) as HTMLButtonElement;
+    node.type = 'button';
+    node.classList.add('osd-hit-target');
+    node.setAttribute('aria-label', label.trim() || 'OSD action');
+    node.onclick = action;
+    if (hover) node.onmouseenter = hover;
+    if (leave) node.onmouseleave = leave;
     return this.handle(node);
   }
 

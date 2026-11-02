@@ -170,6 +170,19 @@ export class PartAssemblyRuntime implements JavaHost {
     } catch (e) { staging.dispose(); throw e; }
   }
   parent(name: string) { return this.classes.get(name)?.parent ?? null; }
+  constructorCall(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): JavaValue {
+    const name = target === 'super' ? this.parent(fromClass) : fromClass;
+    const method = name && this.classes.get(name)?.methods.find(method => method.name === name && method.parameters.length === args.length);
+    if (method) return this.machine.invoke(method, receiver, args);
+    if (target === 'super' && args.length === 0) return nil();
+    throw new Error(`Unsupported part constructor call ${fromClass}.${target}(${args.length})`);
+  }
+  isInstance(receiver: JavaValue, name: string) {
+    if (receiver.value === null) return false;
+    for (let current: string | null = receiver.value instanceof AssemblyPart ? receiver.value.definition.className : receiver.type; current; current = this.parent(current))
+      if (current === name) return true;
+    return false;
+  }
   global(name: string): JavaValue {
     const constant = this.classes.get('Part')?.constants.get(name); if (constant) return constant;
     if (name === 'GII_TYPE') return jv('int', 6);
@@ -178,7 +191,7 @@ export class PartAssemblyRuntime implements JavaHost {
   }
   get(receiver: JavaValue, name: string): JavaValue {
     const obj = receiver.value;
-    if (obj instanceof AssemblyPart) { const v = obj.fields.get(name); if (!v) throw new Error(`Missing field ${obj.definition.className}.${name}`); return v; }
+    if (obj instanceof AssemblyPart) { const v = obj.fields.get(name); if (!v) throw new Error(`Missing Java field ${obj.definition.className}.${name}`); return v; }
     if (obj && typeof obj === 'object' && 'tag' in obj && 'fields' in obj) { const v = (obj as NativeRecord).fields.get(name); if (v) return v; }
     throw new Error(`Missing Java field ${receiver.type}.${name}`);
   }

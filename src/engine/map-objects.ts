@@ -28,5 +28,9 @@ export function parseIcfg(data: Uint8Array): PartConfig {
   if (new TextDecoder().decode(data.subarray(0, 4)) !== 'ICFG' || data.length < 16) throw new Error('Invalid ICFG payload');
   const subtypeEnd = data.indexOf(0, 8);
   if (subtypeEnd < 8) throw new Error('ICFG subtype missing');
-  return parsePartConfig(new TextDecoder('windows-1252').decode(data.subarray(subtypeEnd + 1)).replace(/\0+$/, ''));
+  const source = new TextDecoder('windows-1252').decode(data.subarray(subtypeEnd + 1)).replace(/\0+$/, '')
+    // A few stock City lamp CFGs have an omitted separator in a rotation value
+    // (for example "-1.570.000000" where the intended values are -1.570 and 0.000000).
+    .replace(/(-?\d+\.\d{3})(\.\d{6})(?=\s)/g, '$1 $2');
+  return parsePartConfig(source);
 }

@@ -2,7 +2,7 @@ import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import type { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 
-export interface DrivingInput { throttle: number; steer: number; brake: boolean; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean }
+export interface DrivingInput { throttle: number; steer: number; brake: boolean; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }
 export const NEUTRAL_INPUT: DrivingInput = { throttle: 0, steer: 0, brake: false };
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const approach = (n: number, target: number, step: number) => n + clamp(target - n, -step, step);
@@ -80,6 +80,6 @@ export class DrivingDemo {
         .multiply(new Matrix4().makeRotationX(-this.distance / m.radius * m.axleSign)).multiply(m.inverseOwn);
     }
     const s = this.steeringMount;
-    if (s) s.part.local.copy(s.frame).multiply(new Matrix4().makeRotationZ(-this.steer * 14)).multiply(s.inverseOwn);
+    if (s) s.part.local.copy(s.frame).multiply(new Matrix4().makeRotationZ(this.steer * 14)).multiply(s.inverseOwn);
   }
 }

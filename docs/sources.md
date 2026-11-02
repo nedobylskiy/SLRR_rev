@@ -1,6 +1,6 @@
 # Sources and origin of information
 
-Links checked on October 24, 2026. Local files and reproducible checks are the primary evidence for supported structures. External repositories are research references, not guarantees of correctness.
+Links checked on October 27, 2026. Local files and reproducible checks are the primary evidence for supported structures. External repositories are research references, not guarantees of correctness.
 
 ## Public discussions
 
@@ -11,6 +11,7 @@ Links checked on October 24, 2026. Local files and reproducible checks are the p
 5. [CookiePLMonster/SLRR-Proofix](https://github.com/CookiePLMonster/SLRR-Proofix) - separate fix project, useful for future binary behavior mapping. Its code was not transferred to the current implementation.
 6. [Connor-Moyle/blender-slrr-scx-importer](https://github.com/Connor-Moyle/blender-slrr-scx-importer) - additional importer; viewed as a source of comparison. Its own heuristics and tag differences are not carried over to the decoder.
 7. [nedobylskiy/SLRRMultiplayer](https://github.com/nedobylskiy/SLRRMultiplayer) - discovered public project of the old mod. It is not considered proof that the necessary sources of the network implementation have been obtained. Target repository of the new project: [nedobylskiy/SLRR_rev](https://github.com/nedobylskiy/SLRR_rev).
+8. [nicolas-found42/street-legal](https://github.com/nicolas-found42/street-legal), examined at commit `33eca3c735f55e5a30c8b7b6f5b00f85e3c9a799`. Its [chassis update research](https://github.com/nicolas-found42/street-legal/blob/33eca3c735f55e5a30c8b7b6f5b00f85e3c9a799/crates/slr-boot/src/native_car_update.rs) traces native `forceUpdate`: it invokes the Java `updatevariables` callback before folding installed-part and wheel data into physics parameters. The project targets build 606; its own status notes that the active-script update path is incomplete. Compare findings against our build 940 before implementing behavior.
 
 ## JVM options
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
 import { Assets } from '../src/assets';
-import { parsePartConfig } from '../src/formats/cfg';
+import { parsePartConfig, secondaryRenders } from '../src/formats/cfg';
 import { EngineWorld, PartFactory, poseMatrix, type PartDefinition } from '../src/engine/world';
 import type { RpkPack } from '../src/formats/rpk';
 import { modelMatrix } from '../src/engine/model-transform';
@@ -33,7 +33,18 @@ test('CFG preserves ordered stock, repeated attachments, physical data and unkno
     { resource: 1, pose: undefined },
     { resource: 2, pose: { position: [0, 1, 0], rotation: [0, 0, 0] } },
   ]);
-  for (const source of ['slot 0 0 0 0 0 0 1\nslot 0 0 0 0 0 0 1', 'attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
+  const mixed = parsePartConfig('render 0x280 0 0 0 0 0 -3.142\nlod 2 2\nrender 0x4d0\nlod 1 1\nrender 0x460\nlod 0 0\nrender 0x500 0 1 0\nflags 4');
+  assert.deepEqual(mixed.renders.slice(0, 3).map(render => render.lod), [[2, 2], [1, 1], [0, 0]]);
+  assert.deepEqual(secondaryRenders(mixed).map(render => render.resource), [0x500]);
+  for (const source of ['attach 0x01 2', 'body 0 0 0 0 0 0 -1 sphere 1', 'slot NaN 0 0 0 0 0 1', 'stockpart 0x100000000']) assert.throws(() => parsePartConfig(source));
+});
+test('CFG retains reused slot IDs and installs on the attach-capable mount', () => {
+  const root = definition(1, 'slot 0 0 -1 0 0 0 501\nslot 0 0 2 0 0 0 501\nattach 0x02 1');
+  assert.deepEqual(root.config.slots.map(s => s.position), [[0, 0, -1], [0, 0, 2]]);
+  const world = new EngineWorld(), parent = world.create(root), child = world.create(definition(2, 'slot 0 0 0 0 0 0 1'));
+  world.install(parent, 501, child, 1);
+  assert.equal(new Vector3().setFromMatrixPosition(child.matrix()).z, 2);
+  world.dispose();
 });
 test('CFG retains linked suspension anchors and the slot bone position', () => {
   const chassis = parsePartConfig('slot 0.1 0 0 0 0 0 301\nslottype 201\nbonepos 0.2 0.4 0');
@@ -84,4 +95,35 @@ test('factory retries out-of-order stock, honors nested stock and resolves depen
   built.world.dispose();
   configs.set('5.cfg', 'slot bad');
   await assert.rejects(() => new PartFactory(assets).stock({ pack: 'test.rpk', id: 1 }), /CFG line/);
+});
+
+test('Java installed tree replaces CFG stock expansion, including nested parts and slot poses', async () => {
+  const configs = new Map([
+    ['1.cfg', 'slot 0 0 0 0 0 0 5\nstockpart 0x03'],
+    ['2.cfg', 'slot 0 0 0 0 0 0 6\nslot 0 0 0 0 0 0 7\nstockpart 0x04'],
+    ['3.cfg', 'slot 0 0 0 0 0 0 8'],
+    ['4.cfg', 'slot 0 0 0 0 0 0 9'],
+    ['5.cfg', 'slot 0 0 0 0 0 0 10'],
+  ]);
+  const encoder = new TextEncoder();
+  const assets = new Assets([...configs].map(([path]) => ({ path, size: 0 })), async path => encoder.encode(configs.get(path)!));
+  const pack: RpkPack = { version: 512, dependencies: [], warnings: [], entries: [...configs.keys()].map((_, i) =>
+    ({ typeId: i + 1, superId: 0, type: 8, flags: 0, compatibility: 1, offset: 0, size: 0,
+      alias: String(i + 1), data: encoder.encode(`native part ${i + 1}.cfg`) })) };
+  assets.pack = async () => pack;
+  const key = (id: number) => ({ pack: 'test.rpk', id });
+  const built = await new PartFactory(assets).stock(key(1), { javaSelection: {
+    body: [key(3)], mechanical: [key(4)], tyres: [], wheelRefs: [],
+    rootPositions: new Map([[5, { position: [2, 0, 0] as [number, number, number] }]]),
+    installed: [{ key: key(2), parentSlot: 5, ownSlot: 6, positions: new Map(), wear: 0.8,
+      children: [{ key: key(5), parentSlot: 7, ownSlot: 10, positions: new Map(), wear: 1, children: [] }] }],
+  } });
+  assert.equal(built.world.parts.size, 3);
+  const child = built.root.children.get(5)!;
+  assert.equal(child.definition.key.id, 2);
+  assert.equal(child.condition, 0.8);
+  assert.equal(new Vector3().setFromMatrixPosition(child.matrix()).x, 2);
+  assert.equal(child.children.get(7)?.definition.key.id, 5);
+  assert.equal(built.warnings.length, 0);
+  built.world.dispose();
 });

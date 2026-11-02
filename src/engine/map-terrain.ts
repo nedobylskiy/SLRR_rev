@@ -31,7 +31,12 @@ export class MapTerrain implements Terrain {
         const bx = p[b] * 0.01, by = p[b + 1] * 0.01, bz = p[b + 2] * 0.01;
         const cx = p[c] * 0.01, cy = p[c + 1] * 0.01, cz = p[c + 2] * 0.01;
         const cross = new Vector3(bx - ax, by - ay, bz - az).cross(new Vector3(cx - ax, cy - ay, cz - az));
-        if (Math.abs(cross.y) < 0.45 * cross.length() || Math.min(ay, by, cy) < -20 || Math.max(ay, by, cy) > 50) continue;
+        // Map elevations are not centered on world Y=0: tracks can dip well below
+        // -20 m. Clipping those triangles makes the suspension see a bottomless
+        // hole, then the chassis free-falls and the impact solver tears parts off
+        // when it reaches geometry at a lower elevation. Keep the upper cutoff
+        // to avoid treating the sky dome as ground.
+        if (Math.abs(cross.y) < 0.45 * cross.length() || Math.max(ay, by, cy) > 50) continue;
         const x0 = Math.floor(Math.min(ax, bx, cx) / this.size), x1 = Math.floor(Math.max(ax, bx, cx) / this.size);
         const z0 = Math.floor(Math.min(az, bz, cz) / this.size), z1 = Math.floor(Math.max(az, bz, cz) / this.size);
         if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) continue;

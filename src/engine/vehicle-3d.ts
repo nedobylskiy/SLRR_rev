@@ -50,7 +50,9 @@ function basis(panel: DeformablePanel) {
 
 /** Full rigid chassis motion with ray suspension and separate deformable or rigid detachable parts. */
 export class Vehicle3D extends CarCrashDemo {
+  readonly timings = { suspension: 0, contacts: 0, panels: 0, other: 0, ticks: 0, activePanels: 0 };
   readonly body: RigidBody3D;
+  collisionCue?: { speed: number; impulse: number; position: Vector3 };
   private spawn?: { position: Vector3; yaw: number };
   readonly suspension: Suspension3D;
   readonly soft = new Map<EnginePart, SoftBodyPart>();
@@ -75,6 +77,12 @@ export class Vehicle3D extends CarCrashDemo {
   setChassisCrumple(value: number) {
     if (!Number.isFinite(value) || value < 0.5 || value > 1.5) throw new Error('Invalid chassis crumple multiplier');
     this.chassisCrumple = value;
+  }
+  /** Condition for the OSD body silhouette, including chassis and permanent deformation. */
+  get osdDamageCondition() {
+    const chassis = this.soft.get(this.root);
+    const deformation = chassis ? 1 - chassis.panel.permanentDamage : 1;
+    return Math.max(0, Math.min(1, this.root.condition, deformation));
   }
   private configureStructure() {
     this.structuralMounts.clear(); this.wheelMounts = [];
@@ -135,10 +143,12 @@ export class Vehicle3D extends CarCrashDemo {
       if (!kind || !this.connected(part)) continue;
       const position = new Vector3().setFromMatrixPosition(part.matrix()).applyMatrix4(delta);
       const distance = Math.hypot(position.x - point.x, position.z - point.z);
-      const reach = kind === 'engine' ? 0.85 : 0.65;
-      const weight = Math.exp(-((distance / reach) ** 2)) * (kind === 'engine' ? 0.25 : 1);
-      const threshold = kind === 'engine' ? 180000 : kind === 'suspension' ? 55000 : 40000;
-      part.condition = Math.max(0, Math.min(part.condition, 1 - energy * weight / threshold));
+      const reach = kind === 'engine' ? 1.1 : 0.65;
+      const weight = Math.exp(-((distance / reach) ** 2)) * (kind === 'engine' ? 0.5 : 1);
+      const threshold = kind === 'engine' ? 120000 : kind === 'suspension' ? 55000 : 40000;
+      // Component damage accumulates across impacts; taking only the worst single hit
+      // kept the engine block nearly pristine even after the chassis had failed.
+      part.condition = Math.max(0, part.condition - energy * weight / threshold);
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
@@ -151,6 +161,7 @@ export class Vehicle3D extends CarCrashDemo {
     this.addSoft(hood, this.panel, false);
   }
   private addSoft(part: EnginePart, panel: DeformablePanel, root: boolean) {
+    panel.groundHeight = (x, z, fromY) => this.terrain.height(x, z, fromY);
     // Bind reference basis before moving targets into the world.
     const old = panel.positions.slice(); panel.reset();
     if (part === this.hood) { const inverse = part.matrix().invert(); for (let i = 0; i < panel.positions.length; i += 3) new Vector3().fromArray(panel.positions, i).applyMatrix4(inverse).toArray(panel.positions, i); }
@@ -214,6 +225,7 @@ export class Vehicle3D extends CarCrashDemo {
   }
   override reset(speed = 0) {
     super.reset(speed);
+    this.collisionCue = undefined;
     if (!this.body) return;
     if (this.spawn) {
       this.driving.position.x = this.spawn.position.x;
@@ -359,28 +371,48 @@ export class Vehicle3D extends CarCrashDemo {
     point.setComponent(axis, point.getComponent(axis) + guard.sign * depth).applyMatrix4(guard.frame).toArray(positions, offset);
     return { normal: guard.normal.toArray() as Triple, point: point.toArray() as Triple, velocity: this.body.pointVelocity(point).toArray() as Triple, restitution: 0, friction: 0.5, impulse: (impulse: Triple, at: Triple) => this.applyImpulse(new Vector3(...impulse).negate(), new Vector3(...at)) };
   }
+  private recordCollision(impulse: Vector3 | number, position: Vector3, speed: number) {
+    const magnitude = typeof impulse === 'number' ? impulse : impulse.length();
+    if (speed < 1.6 || magnitude < 180) return;
+    if (!this.collisionCue || speed * magnitude > this.collisionCue.speed * this.collisionCue.impulse)
+      this.collisionCue = { speed, impulse: magnitude, position: position.clone() };
+  }
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');
     if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
+    this.collisionCue = undefined;
+    Object.assign(this.timings, { suspension: 0, contacts: 0, panels: 0, other: 0, ticks: 0, activePanels: 0 });
     return this.clock.advance(seconds, tick => {
+      let sectionStart = performance.now();
+      this.timings.ticks++;
       const dt = this.clock.dt, previous = this.root.matrix();
       let detached = this.releaseFailedWheels();
       this.suspension.step(dt, input); this.body.integrate(dt);
+      this.timings.suspension += performance.now() - sectionStart; sectionStart = performance.now();
       const incomingVelocity = this.body.velocity.clone(), incomingOmega = this.body.omega, predicted = this.body.matrix();
       const obstacle = new Box3(new Vector3(...this.obstacle.min), new Vector3(...this.obstacle.max));
       for (let iteration = 0; iteration < 4; iteration++) {
         for (const p of this.body.corners()) {
           const height = this.terrain.height(p.x, p.z, p.y); if (p.y < height) {
+            const speed = Math.max(0, -this.body.pointVelocity(p).dot(this.terrain.normal(p.x, p.z, p.y)));
             const j = this.body.contact(p, this.terrain.normal(p.x, p.z, p.y), height - p.y, 0.12);
-            if (j.length() > 40) this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.08).toArray() as Triple, p.toArray() as Triple);
+            this.recordCollision(j, p, speed);
+            // Coarse chassis corners also resolve routine contact with uneven terrain.
+            // Only a genuinely hard landing should transfer that correction into body deformation.
+            if (speed > 8 && j.length() > this.body.mass * 0.5)
+              this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.02).toArray() as Triple, p.toArray() as Triple);
           }
           const wall = this.mapCollision?.contact(p, 0.2, false);
-          if (wall) this.body.contact(wall.point, wall.normal, wall.depth, 0.18);
+          if (wall) {
+            const speed = Math.max(0, -this.body.pointVelocity(wall.point).dot(wall.normal));
+            this.recordCollision(this.body.contact(wall.point, wall.normal, wall.depth, 0.18), wall.point, speed);
+          }
         }
         const mapBody = this.mapCollision?.bodyContact(this.body);
         if (mapBody) {
           const speed = Math.max(0, -this.body.pointVelocity(mapBody.point).dot(mapBody.normal));
           const j = this.body.contact(mapBody.point, mapBody.normal, mapBody.depth, 0.22);
+          this.recordCollision(j, mapBody.point, speed);
           this.impactSpeed = Math.max(this.impactSpeed, speed);
           this.reboundSpeed = Math.max(this.reboundSpeed, this.body.velocity.length());
           this.damageImpact(j, mapBody.point, mapBody.bounds, predicted, previous);
@@ -388,10 +420,12 @@ export class Vehicle3D extends CarCrashDemo {
         const c = boxContact(this.body, obstacle);
         if (c) {
           const speed = Math.max(0, -this.body.pointVelocity(c.point).dot(c.normal)), j = this.body.contact(c.point, c.normal, c.depth, 0.22);
+          this.recordCollision(j, c.point, speed);
           this.impactSpeed = Math.max(this.impactSpeed, speed); this.reboundSpeed = Math.max(this.reboundSpeed, this.body.velocity.length());
           this.damageImpact(j, c.point, obstacle, predicted, previous);
         }
       }
+      this.timings.contacts += performance.now() - sectionStart; sectionStart = performance.now();
       this.syncBody(); this.bodySurface?.setFrames(previous, this.root.matrix());
       const omega = this.body.omega;
       // Gravity and normal suspension load alone do not require a node solve. Hard accelerations,
@@ -403,7 +437,9 @@ export class Vehicle3D extends CarCrashDemo {
       for (const s of ordered) {
         const attached = !!s.part.parent || s.root, frame = s.part.matrix();
         if (!attached) this.updateGuard(s);
-        if ((!attached || s.part === this.hood && (s.activity.deforming || s.activity.forced)) && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
+        // Attached panels never collide with this triangle surface. Re-skin/refit the
+        // assembly only when a loose part actually needs it, not for suspension jolts.
+        if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         if (!s.root && s.part.condition === 0) s.panel.mounts.forEach(m => { m.broken = true; });
         if (attached) s.panel.setAnchorFrame(frame.elements);
         if (!s.activity.deforming && (s.activity.forced || !s.root && s.part.condition === 0 && attached || attached && (shock || s.activity.threatened(frame, obstacle)))) s.activity.wake();
@@ -414,7 +450,12 @@ export class Vehicle3D extends CarCrashDemo {
           else { this.freeContacts(free, old, obstacle, true, s.panel.positions, s.guard); s.part.local.copy(free.matrix()); s.activity.carry(dt, s.part.local, free); }
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }
+        this.timings.activePanels++;
         s.panel.advance(dt); if (attached) this.surfaceDirty = true;
+        if (attached && s.panel.collisionImpact) {
+          const hit = s.panel.collisionImpact;
+          this.recordCollision(Math.max(hit.impulse, this.body.mass * hit.speed * 0.25), new Vector3(...hit.point), hit.speed);
+        }
         if (tick % 24 === 0) {
           const strain = s.panel.beams.reduce((sum, b) => sum + Math.abs(b.rest - b.initial) / b.initial, 0) / s.panel.beams.length;
           s.part.condition = Math.min(s.part.condition, Math.max(0, 1 - strain / (s.root ? 0.3 : 0.4)));
@@ -426,6 +467,10 @@ export class Vehicle3D extends CarCrashDemo {
           const frame = basis(s.panel).multiply(s.inverseBasis), center = centerOf(s.panel.positions); frame.setPosition(center.sub(s.center.clone().applyMatrix4(frame))); s.part.local.copy(frame);
         }
         s.activity.settle(dt, s.part.matrix(), !!s.part.parent || s.root);
+      }
+      this.timings.panels += performance.now() - sectionStart; sectionStart = performance.now();
+      if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4 && [...this.rigid.values()].some(r => !r.part.parent)) {
+        this.updateSurface(); this.surfaceDirty = false;
       }
       for (const r of this.rigid.values()) {
         const wasAttached = !!r.part.parent;
@@ -467,10 +512,11 @@ export class Vehicle3D extends CarCrashDemo {
         r.previous.copy(r.body.matrix());
       }
       if (detached) { const omega = this.body.omega; this.body.setMass(vehicleAssemblyMass([...this.root.world.parts.values()].filter(p => this.connected(p)))); this.body.setAngularVelocity(omega); this.updateSurface(); }
-      // Refit deformed body contact geometry periodically; never retain detached-panel ghost colliders.
-      if (tick % 24 === 0 && this.surfaceDirty) { this.updateSurface(); this.surfaceDirty = false; }
+      // Retain the dirty flag until a loose part needs collision geometry. Topology
+      // changes above still rebuild immediately, removing detached-part ghost faces.
       this.suspension.sync();
       this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega);
+      this.timings.other += performance.now() - sectionStart;
     });
   }
   override dispose() { this.reset(); }

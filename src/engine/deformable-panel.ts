@@ -6,7 +6,7 @@ export interface PanelMount { nodes: number[]; broken: boolean; force: number; o
 export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four' }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
-export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; impulse?: (impulse: Triple, point: Triple) => void }
+export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; collider?: boolean; impulse?: (impulse: Triple, point: Triple) => void }
 export interface PanelSurface { project(p: Float64Array, previous: Float64Array, offset: number): PanelContact | undefined }
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -18,6 +18,9 @@ export class DeformablePanel {
   clock = new FixedClock(240, 32);
   private previous: Float64Array; private anchorLambda: Float64Array;
   private incoming: Float64Array;
+  private ground: Float64Array;
+  /** World-space support height. Standalone panel labs use a plane at zero. */
+  groundHeight = (_x: number, _z: number, _fromY: number): number => 0;
   private stepContacts = new Map<number, PanelContact>();
   private minX = Infinity; private maxX = -Infinity; private minZ = Infinity; private maxZ = -Infinity;
   private inverseMass: number;
@@ -26,6 +29,7 @@ export class DeformablePanel {
   readonly colliders: PanelCollider[] = [];
   readonly surfaces: PanelSurface[] = [];
   contacts = 0;
+  collisionImpact?: { speed: number; impulse: number; point: Triple };
   impulseVersion = 0;
   resetVersion = 0;
   shapeVersion = 0;
@@ -49,6 +53,7 @@ export class DeformablePanel {
     this.positions = new Float64Array(count * 3); this.rest = new Float64Array(count * 3); this.velocities = new Float64Array(count * 3);
     this.previous = new Float64Array(count * 3); this.anchorLambda = new Float64Array(count * 3); this.anchorVelocities = new Float64Array(count * 3); this.inverseMass = count / options.mass;
     this.incoming = new Float64Array(count * 3);
+    this.ground = new Float64Array(count);
     for (let z = 0; z < this.nz; z++) for (let x = 0; x < this.nx; x++) {
       const px = this.minX + x / (this.nx - 1) * (this.maxX - this.minX), pz = this.minZ + z / (this.nz - 1) * (this.maxZ - this.minZ);
       let sum = 0, weight = 0;
@@ -104,6 +109,11 @@ export class DeformablePanel {
     }
   }
   get plasticBeams() { return this.beams.filter(b => Math.abs(b.rest - b.initial) > b.initial * 0.001).length; }
+  /** Permanent beam-length change, normalized to the solver's maximum plastic range. */
+  get permanentDamage() {
+    if (!this.beams.length) return 0;
+    return this.beams.reduce((sum, beam) => sum + Math.min(1, Math.abs(beam.rest - beam.initial) / (beam.initial * 0.5)), 0) / this.beams.length;
+  }
   reset() {
     this.resetVersion++;
     this.shapeVersion++;
@@ -111,6 +121,7 @@ export class DeformablePanel {
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
     this.contacts = 0;
+    this.collisionImpact = undefined;
   }
   bind(point: ArrayLike<number>): PanelBinding {
     if (point.length !== 3 || !Array.from(point).every(Number.isFinite)) throw new Error('Invalid skin point');
@@ -171,6 +182,7 @@ export class DeformablePanel {
     });
   }
   private step(dt: number) {
+    this.collisionImpact = undefined;
     const p = this.positions, inv = this.inverseMass, dt2 = dt * dt;
     this.previous.set(p); this.anchorLambda.fill(0);
     const attached = this.attached, damping = Math.exp(-(attached ? 2 : 0.25) * dt);
@@ -179,6 +191,10 @@ export class DeformablePanel {
       for (let axis = 0; axis < 3; axis++) { const target = attached ? this.anchorVelocities[i + axis] : 0; p[i + axis] += (target + (this.velocities[i + axis] - target) * damping) * dt; }
     }
     this.anchorVelocities.fill(0);
+    // Sample once per node/tick, rather than querying the map in every XPBD
+    // iteration. Use the previous height to select the reachable road/deck.
+    for (let i = 0; i < p.length; i += 3)
+      this.ground[i / 3] = this.groundHeight(p[i], p[i + 2], this.previous[i + 1]) + 0.015;
     const incoming = this.incoming, contacts = this.stepContacts; contacts.clear();
     for (let i = 0; i < p.length; i++) incoming[i] = (p[i] - this.previous[i]) / dt;
     const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
@@ -194,7 +210,7 @@ export class DeformablePanel {
         const i = n * 3 + axis, alpha = 1e-7 / dt2, dl = (-(p[i] - this.rest[i]) - alpha * this.anchorLambda[i]) / (inv + alpha);
         this.anchorLambda[i] += dl; p[i] += inv * dl;
       }
-      for (let i = 1; i < p.length; i += 3) p[i] = Math.max(0.015, p[i]);
+      for (let i = 1; i < p.length; i += 3) p[i] = Math.max(this.ground[(i - 1) / 3], p[i]);
       for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
       if (iteration === 0 || iteration === 4 || iteration === 8 || iteration === 11) surfaces();
     }
@@ -223,9 +239,11 @@ export class DeformablePanel {
       const length = Math.hypot(...tangent), friction = Math.min(1, (contact.friction ?? 0.4) * normalChange / Math.max(length, 1e-10));
       const impulse: Triple = [0, 0, 0];
       for (let axis = 0; axis < 3; axis++) { this.velocities[i + axis] += n[axis] * correction - tangent[axis] * friction; impulse[axis] = (n[axis] * normalChange - tangent[axis] * friction) / inv; }
+      if (contact.collider && before < -1.6 && (!this.collisionImpact || -before > this.collisionImpact.speed))
+        this.collisionImpact = { speed: -before, impulse: Math.hypot(...impulse), point: [...contact.point] };
       contact.impulse?.(impulse, contact.point);
     }
-    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= 0.015001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= this.ground[i / 3] + 0.000001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
     this.shapeVersion++;
   }
   private contactBox(i: number, box: PanelCollider) {
@@ -239,7 +257,7 @@ export class DeformablePanel {
       if (near >= enter) { enter = near; normal = axis; boundary = delta > 0 ? box.min[axis] : box.max[axis]; }
       exit = Math.min(exit, far); if (enter > exit) return;
     }
-    const result = (axis: number, face: number): PanelContact => { const n: Triple = [0, 0, 0]; n[axis] = face === box.min[axis] ? -1 : 1; return { normal: n, point: [p[i], p[i + 1], p[i + 2]], restitution: box.restitution, friction: box.friction }; };
+    const result = (axis: number, face: number): PanelContact => { const n: Triple = [0, 0, 0]; n[axis] = face === box.min[axis] ? -1 : 1; return { normal: n, point: [p[i], p[i + 1], p[i + 2]], restitution: box.restitution, friction: box.friction, collider: true }; };
     if (normal >= 0 && enter >= 0 && enter <= 1 && exit >= 0) { p[i + normal] = boundary; return result(normal, boundary); }
     if ([0, 1, 2].every(a => p[i + a] >= box.min[a] && p[i + a] <= box.max[a])) {
       let distance = Infinity, axis = 0, face = 0;

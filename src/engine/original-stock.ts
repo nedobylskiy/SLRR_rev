@@ -87,6 +87,22 @@ export class OriginalStock {
     } else for (const m of selected.matchAll(/\baddPart\s*\(\s*([\w.]+):0x([\da-f]+)r/ig)) result.push({ pack: m[1].replaceAll('.', '/') + '.rpk', id: parseInt(m[2], 16) });
     return result;
   }
+  /** Preserve the original corner indices of the chassis stock tyre list. */
+  async tyreEntries(def: PartDefinition, env: Record<string, string | number>): Promise<(ResourceKey | undefined)[]> {
+    const src = await this.source(def), start = /\bvoid\s+addStockParts\s*\([^)]*\)\s*\{/.exec(mask(src));
+    if (!start) return [];
+    const p = start.index + start[0].length - 1;
+    const selected = selectStockBranches(src.slice(p + 1, closing(mask(src), p)), env);
+    const result: (ResourceKey | undefined)[] = [];
+    for (const statement of selected.split(';')) {
+      if (!/stock_parts_list_RGear_tyres\s*\[\s*\d+\s*\]\s*=/.test(statement)) continue;
+      const ref = /([\w.]+):0x([\da-f]+)r/i.exec(statement);
+      if (!ref) continue;
+      for (const match of statement.matchAll(/stock_parts_list_RGear_tyres\s*\[\s*(\d+)\s*\]\s*=/g))
+        result[Number(match[1])] = { pack: ref[1].replaceAll('.', '/') + '.rpk', id: Number.parseInt(ref[2], 16) };
+    }
+    return result;
+  }
   async profile(def: PartDefinition): Promise<MechanicalProfile | undefined> {
     const source = await this.source(def); if (!source) return;
     const parent = /\bextends\s+(\w+)/.exec(source)?.[1] ?? '';

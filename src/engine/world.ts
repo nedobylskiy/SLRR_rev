@@ -1,16 +1,36 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Assets, normalizePath } from '../assets';
 import { entryProperties } from '../formats/rpk';
-import { parsePartConfig, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
+import { parsePartConfig, secondaryRenders, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { parseScx } from '../formats/scx';
 import { slotMatrix } from './slot-frames';
 import { SCX_TO_WORLD } from './model-transform';
 import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
+import { executeTyreSource } from '../runtime/tyre-java';
+import type { WheelRefState } from '../runtime/wheel-ref-native';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
+/** Resolved values of the chassis part arrays after its Java addStockParts ran. */
+export interface JavaStockSelection {
+  body: ResourceKey[];
+  mechanical: ResourceKey[];
+  tyres: (ResourceKey | undefined)[];
+  wheelRefs: (WheelRefState | undefined)[];
+  installed: JavaInstalledPart[];
+  rootPositions?: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
+}
+export interface JavaInstalledPart {
+  key: ResourceKey;
+  parentSlot: number;
+  ownSlot: number;
+  positions: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
+  render?: ResourceKey;
+  wear: number;
+  children: JavaInstalledPart[];
+}
 export interface PartDefinition {
   key: ResourceKey; alias: string; script?: string; cfgPath: string; config: PartConfig;
   model?: { path: string; textures: string[] };
@@ -25,7 +45,8 @@ export class EnginePart {
   readonly local = new Matrix4();
   readonly renderAdjustment = new Matrix4();
   readonly slotPositions = new Map<number, Triple>();
-  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id); return slotMatrix(this.definition.config, position ? { ...slot, position } : slot); }
+  readonly slotRotations = new Map<number, Triple>();
+  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id), rotation = this.slotRotations.get(slot.id); return slotMatrix(this.definition.config, position || rotation ? { ...slot, position: position ?? slot.position, rotation: rotation ?? slot.rotation } : slot); }
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
@@ -42,6 +63,7 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  wheelRefs: (WheelRefState | undefined)[] = [];
   create(definition: PartDefinition) {
     if (this.disposed) throw new Error('World disposed');
     if (this.parts.size >= 10000) throw new Error('World part limit');
@@ -50,8 +72,10 @@ export class EngineWorld {
   install(parent: EnginePart, parentSlot: number, child: EnginePart, ownSlot: number) {
     for (const part of [parent, child]) if (part.world !== this || this.parts.get(part.id) !== part || this.disposed) throw new Error('Part outside live world');
     for (let p: EnginePart | undefined = parent; p; p = p.parent) if (p === child) throw new Error('Attachment cycle');
-    if (child.parent || parent.children.has(parentSlot) || parent.ownSlot === parentSlot || child.children.has(ownSlot)) throw new Error('Occupied attachment');
-    const a = parent.definition.config.slots.find(s => s.id === parentSlot), b = child.definition.config.slots.find(s => s.id === ownSlot);
+    if (child.parent || parent.children.has(parentSlot) || child.children.has(ownSlot)) throw new Error('Occupied attachment');
+    // Original CFGs can reuse an ID for a suspension marker and a later mount.
+    const mountSlot = (slots: CfgSlot[], id: number) => slots.find(s => s.id === id && (s.attach.length || s.compatible.length)) ?? slots.find(s => s.id === id);
+    const a = mountSlot(parent.definition.config.slots, parentSlot), b = mountSlot(child.definition.config.slots, ownSlot);
     if (!a || !b) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
@@ -86,7 +110,7 @@ export class PartFactory {
         catch (error) { throw new Error(`${cfgPath}: ${String(error)}`); }
         const renderId = config.render ?? config.mesh;
         const model = renderId === undefined ? undefined : await this.assets.modelForResource(canonical.pack, renderId);
-        const extraRenders = config.render === config.renders[0]?.resource ? config.renders.slice(1) : [];
+        const extraRenders = secondaryRenders(config);
         const additionalModels = (await Promise.all(extraRenders.map(async render => {
           try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose }; }
           catch (error) {
@@ -140,6 +164,11 @@ export class PartFactory {
     }
     return false;
   }
+  async compatibleSlots(parent: ResourceKey, parentSlot: CfgSlot, child: ResourceKey, childSlot: CfgSlot): Promise<boolean> {
+    const [parentDefinition, childDefinition] = await Promise.all([this.definition(parent), this.definition(child)]);
+    return await this.pointsTo(parentDefinition, parentSlot, childDefinition, childSlot)
+      || await this.pointsTo(childDefinition, childSlot, parentDefinition, parentSlot);
+  }
   private async attachment(world: EngineWorld, child: PartDefinition) {
     for (const parent of world.parts.values()) for (const a of parent.definition.config.slots) {
       if (parent.children.has(a.id) || parent.ownSlot === a.id) continue;
@@ -148,13 +177,36 @@ export class PartFactory {
       }
     }
   }
-  /** Read ordered stockpart declarations; unresolved compatibility is reported, never guessed. */
-  async stock(key: ResourceKey, options: { mechanical?: boolean } = {}) {
+  /** Install the executed Java tree when provided; otherwise read CFG stock declarations. */
+  async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection } = {}) {
     const world = new EngineWorld(), warnings: string[] = [];
     try {
       const root = world.create(await this.definition(key));
-      const source = new OriginalStock(this.assets), env = options.mechanical ? await source.environment(root.definition) : {};
+      const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;
+      if (options.javaSelection) {
+        world.wheelRefs = [...options.javaSelection.wheelRefs];
+        for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
+          if (pose.position) root.slotPositions.set(slot, pose.position);
+          if (pose.rotation) root.slotRotations.set(slot, pose.rotation);
+        }
+        const installJava = async (parent: EnginePart, node: JavaInstalledPart): Promise<void> => {
+          let definition = await this.definition(node.key);
+          if (options.mechanical) definition = { ...definition, mechanics: await source.profile(definition) };
+          if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
+          const part = world.create(definition);
+          part.condition = Math.max(0, Math.min(1, node.wear));
+          for (const [slot, pose] of node.positions) {
+            if (pose.position) part.slotPositions.set(slot, pose.position);
+            if (pose.rotation) part.slotRotations.set(slot, pose.rotation);
+          }
+          try { world.install(parent, node.parentSlot, part, node.ownSlot); }
+          catch (error) { throw new Error(`Java install ${resourceKey(node.key)} at ${resourceKey(parent.definition.key)} slot ${node.parentSlot}:${node.ownSlot}: ${String(error)}`); }
+          for (const child of node.children) await installJava(part, child);
+        };
+        for (const child of options.javaSelection.installed) await installJava(root, child);
+      } else {
+      const env = options.mechanical ? await source.environment(root.definition) : {};
       const pending: PartDefinition[] = [];
       const enqueue = async (parent: PartDefinition) => {
         for (const id of parent.config.stock) {
@@ -164,6 +216,22 @@ export class PartFactory {
       };
       await enqueue(root.definition);
       if (options.mechanical) {
+        const tyreRefs = await source.tyreEntries(root.definition, env);
+        if (tyreRefs.length) {
+          const basePath = [...this.assets.byPath.keys()].find(path => path.endsWith('/reciprocatingrgearpart/src/tyre.java'));
+          if (!basePath) warnings.push('Original Tyre.java source missing; stock tyre parameters unavailable');
+          else {
+            const baseSource = new TextDecoder('windows-1252').decode(await this.assets.read(basePath));
+            for (const [index, ref] of tyreRefs.entries()) {
+              if (!ref) continue;
+              if (world.wheelRefs[index]) continue;
+              try {
+                const definition = await this.definition(ref), tyreSource = await source.source(definition);
+                world.wheelRefs[index] = executeTyreSource(baseSource, tyreSource, index);
+              } catch (error) { warnings.push(`Stock tyre ${index} parameters unavailable: ${String(error)}`); }
+            }
+          }
+        }
         for (const ref of await source.entries(root.definition, env, true)) {
           const definition = await this.definition(ref), mechanics = await source.profile(definition); pending.push({ ...definition, mechanics });
         }
@@ -191,7 +259,8 @@ export class PartFactory {
         if (!progress) break;
       }
       for (const part of pending) warnings.push(`Uninstalled stockpart ${resourceKey(part.key)} (${part.alias}): compatible slot not resolved`);
-      if (options.mechanical) for (const part of world.parts.values()) {
+      }
+      if (options.mechanical && !options.javaSelection) for (const part of world.parts.values()) {
         if (part.definition.mechanics?.kind !== 'suspension' || part.parent !== root) continue;
         const mount = root.definition.config.slots.find(s => s.id === part.parentSlot), type = mount?.type;
         if (type === undefined || type < 201 || type > 204) continue;

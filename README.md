@@ -2,7 +2,7 @@
 
 An independent TypeScript/WebGL 2 engine for Street Legal Racing: Redline assets. This is a **research prototype**, not a complete replacement for the game.
 
-The project reads original RPK and SCX v3/v4 assets and provides a resource inspector and WebGL scene. Its RPK/CFG factory assembles a Baiern from 33 base parts; mounts have also been checked on Einvagen, Duhen, Ninja, and Zed. The [driving prototype](docs/mounts-and-driving.md) and [Test Track loader](docs/maps.md) exercise the current physics and rendering systems. The separately published [SLRR-JVM package](https://github.com/nedobylskiy/SLRR-JVM) interprets selected original `.java` methods with host-provided imports and native functions; menu logic and `Part.save/load` use this source path. Existing TUFA parsing remains research code, but current runtime development focuses on Java source rather than `.class` execution. See [engine architecture](docs/engine-world.md) for the implemented boundaries; the full Java dialect, native game API, garage, and networked game loop remain open work.
+The project reads original RPK and SCX v3/v4 assets and provides a resource inspector and WebGL scene. Its RPK/CFG factory assembles a Baiern from 33 base parts; mounts have also been checked on Einvagen, Duhen, Ninja, and Zed. The [driving prototype](docs/mounts-and-driving.md) and [Test Track loader](docs/maps.md) exercise the current physics and rendering systems. The separately published [SLRR-JVM package](https://github.com/nedobylskiy/SLRR-JVM) interprets original `.java` methods with host-provided imports and native functions; the engine can use [SLRR-JVM Decompiler](https://github.com/nedobylskiy/SLRR-JVM-decompiler) to recover missing system sources from TUFA `.class` files. Neither runtime executes `.class` bytecode. See [engine architecture](docs/engine-world.md) for the implemented boundaries; the full Java dialect, native game API, garage, and networked game loop remain open work.
 
 ## Launch
 
@@ -19,7 +19,15 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). By default, resources are r
 C:\Program Files (x86)\Steam\steamapps\common\Street Legal Racing Redline
 ```
 
-Select the game installation with **Open game folder** if it is not at the default path. Use **Drive Test Track** to start a drive. The car starts in neutral: E selects first gear, Q reverse, and N neutral. W/S control throttle and reverse, A/D steer, Space brakes, Shift operates the clutch, and R returns to the start. Click the scene to give it keyboard focus; Esc minimizes the expanded driving view.
+After connecting to an installation, the app first loads and executes that installation's original `sl/Scripts/game/src/Init.java` through SLRR-JVM. For system classes it prefers `system/scripts/<package>/src/<Class>.java`, then `system/scripts/<package>/decompiled/<Class>.java`; if neither exists, it decompiles the matching TUFA file in memory. The **Java Console** shows startup calls, the failing expression's source line, and the first missing method or native capability; **Restart Java** reruns the source after changes. Startup services are explicit temporary host adapters. `GameType.createNativeInstance()` creates a host-side game-tree node linked to its Java object. `GarbageCollector` construction, `push`, and `flush` are temporary no-op host adapters. Constructors of sibling classes declared in the same Java file, such as `CareerGoal` in `GameLogic.java`, also execute from source. `Controller.controlFile` receives the path passed to `Input.initControllers`. The [Math bridge](docs/java-math.md) covers all `Math` calls present in the installed game Java sources. `java.render.Text` native creation and updates target the HTML OSD layer while Java constructors and `changeText()` remain interpreted. OSD `PhysicsRef.createBox()` creates a transparent HTML hit target whose click calls the associated Java `Button.click()` method. The installed `LoadingScreen.java` runs `show()`, `hide()`, and `userWait()` through the shared JVM; the host supplies a render-frame signal and the original Java dialog and timer logic. `Sound.changeMusicSet(int)` now selects the music player's matching original playlist. In the tested build, execution starts the Java time-refresher thread, reaches `MainMenu.enter()`, and stops at `GfxEngine.openVideo(String,int,int,int)`. The separate menu and driving prototype buttons remain developer tools while the Java game loop is implemented.
+
+To save decompiled system sources outside the original game's auto-compiled `src` folders, run `npm run decompile:system`. For example, `system/scripts/lang/Vector3.class` produces `system/scripts/lang/decompiled/Vector3.java`. Existing `.java` files are preserved by default; use `npm run decompile:system -- --overwrite` to regenerate them after updating the decompiler. Pass a game directory after `--` to use another installation. Generated game sources stay in that installation and are not committed to this repository.
+
+Select the game installation with **Open game folder** if it is not at the default path. Use **Drive Test Track** to start a drive. The car starts in neutral: E selects first gear, Q reverse, and N neutral. W/S control throttle and reverse, A/D steer, Space brakes, Shift operates the clutch, I restarts a stalled engine, and R returns to the start. A manual transmission can stall when the clutch is released against a stationary driveline; restart it in neutral or with Shift held. The prototype currently has only automatic and manual transmission modes, without a separate automatic-clutch setting. Click the scene to give it keyboard focus; Esc minimizes the expanded driving view. Open **Tire model** for live Magic Formula B/C/D/E tuning of longitudinal and lateral grip, or switch to the previous tire response for comparison. Open **Engine tuning** to adjust idle and redline RPM using the original `Block.java` slider ranges. Both sets of tuning are saved in the browser; **Copy parameters** exports the current tire values as JSON.
+
+The **Music** panel plays tracks from the selected game's `music/` folders. The interpreted original `MainMenu.java` selects its music set through `Sound.changeMusicSet`; the driving prototype currently selects the driving set itself. The panel shows the current track, file path, playback time, and volume, and can seek or skip tracks. Browsers can block automatic playback until you click **Play**. See [music integration](docs/music.md) for supported Java calls and the extended metadata API.
+
+Vehicle drives also play spatial audio from the installed assets: the selected engine block's Java `SfxTable` chooses engine and exhaust samples, while tire contact and speed control surface and wind sounds. Click the driving view or use a vehicle key to enable audio if the browser has blocked it.
 
 **Hood impact test** opens a [deformation prototype](docs/hood-prototype.md) using the original model. It demonstrates elastic response, permanent dents, mount failure, and a detached part falling to the ground. The solver's material and support constraints are generated by this project.
 
@@ -36,7 +44,7 @@ $env:SLRR_GAME_ROOT = 'D:\Games\SLRR'
 npm run dev
 ```
 
-You can also select the installation in the UI. Folder selection works in the static `dist/` build as well. Game assets stay in the browser or on the local development server; the original installation is read-only, and the original EXE and DLLs are not launched.
+You can also select the installation in the UI. Folder selection works in the static `dist/` build as well. Normal browsing reads game assets without changing them; `decompile:system` writes only the requested missing `.java` files. The original EXE and DLLs are not launched.
 
 ## Verification
 
@@ -44,6 +52,7 @@ You can also select the installation in the UI. Folder selection works in the st
 npm test
 npm run build
 npm run verify:game
+npm run verify:java-boot
 npm run verify:saves
 npm run verify:vm
 npm run verify:parts

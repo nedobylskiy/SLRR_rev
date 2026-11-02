@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { osdBounds, osdMotionInterval } from '../src/osd/osd-layer';
 import { MainMenuRuntime } from '../src/runtime/main-menu-runtime';
+import { SoundJavaBridge } from '../src/audio/sound-java';
+import type { MusicEngine } from '../src/audio/music-engine';
 
 test('OSD maps the original screen coordinates to the 16:9 stage', () => {
   assert.deepEqual(osdBounds(0, 0, 2, 2), { left: 0, top: 0, width: 100, height: 100 });
@@ -57,9 +59,10 @@ class Gates extends Dialog {
 test('parsed MainMenu.enter executes Gates.buildSlidingMenu and exit', () => {
   const runtime = new MainMenuRuntime(source);
   const built = runtime.enter();
-  assert.deepEqual(built, { selected: 1, layout: { spacing: Math.fround(0.475), y: 0, speed: 0.5 }, items: [
-    { label: 'NEW CAREER', active: { pack: 'frontend', id: 0xc107 }, disabled: { pack: 'frontend', id: 0xc207 }, command: 0xa006, width: Math.fround(0.2), height: Math.fround(0.35), depth: 2 },
-    { label: 'FREERIDE', active: { pack: 'frontend', id: 0xc104 }, disabled: { pack: 'frontend', id: 0xc204 }, command: 0xa008, width: Math.fround(0.2), height: Math.fround(0.35), depth: 2 },
+  // Build 940's literal conversion differs by one ULP from Math.fround for these values.
+  assert.deepEqual(built, { selected: 1, layout: { spacing: 0.4750000238418579, y: 0, speed: 0.5 }, items: [
+    { label: 'NEW CAREER', active: { pack: 'frontend', id: 0xc107 }, disabled: { pack: 'frontend', id: 0xc207 }, command: 0xa006, width: Math.fround(0.2), height: 0.3500000238418579, depth: 2 },
+    { label: 'FREERIDE', active: { pack: 'frontend', id: 0xc104 }, disabled: { pack: 'frontend', id: 0xc204 }, command: 0xa008, width: Math.fround(0.2), height: 0.3500000238418579, depth: 2 },
   ] });
   assert.deepEqual(runtime.trace, ['MainMenu.enter', 'Gates.buildSlidingMenu']);
   assert.deepEqual(runtime.primaryVisuals().map(motion => motion.target), ['center_line', 'slider', 'logo_streetlegal_resized', 'logo_redline_resized']);
@@ -69,6 +72,14 @@ test('parsed MainMenu.enter executes Gates.buildSlidingMenu and exit', () => {
   assert.deepEqual(runtime.dispatchMenuAction('right'), { selected: 1, command: undefined });
   runtime.exit();
   assert.deepEqual(runtime.trace, ['MainMenu.enter', 'Gates.buildSlidingMenu', 'Gates.showPrimaryVisuals', 'Gates.cleanup', 'Gates.osdCommand', 'Gates.osdCommand', 'Gates.osdCommand', 'MainMenu.exit']);
+});
+
+test('a Sound call in interpreted menu Java reaches the native music host', () => {
+  const sets: number[] = [];
+  const sound = new SoundJavaBridge({ changeMusicSet: (set: number) => sets.push(set) } as unknown as MusicEngine);
+  const edited = source.replace('public void buildSlidingMenu() {', 'public void buildSlidingMenu() { Sound.changeMusicSet(Sound.MUSIC_SET_MENU);');
+  new MainMenuRuntime(edited, undefined, sound).enter();
+  assert.deepEqual(sets, [1]);
 });
 
 test('game state and source edits change the executed menu', () => {

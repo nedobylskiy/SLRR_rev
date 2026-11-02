@@ -66,3 +66,118 @@ test('separate resolvers select different Java versions without changing the run
   assert.equal(await run(1), 1);
   assert.equal(await run(2), 2);
 });
+
+test('static field failures retain the declaring class and source line', async () => {
+  const source = `package game;
+class Main {
+  static Vector3 CENTER = new Vector3();
+}`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'game.Main' ? { path: 'Main.java', source } : null });
+  await jvm.loadClass('game.Main');
+  assert.throws(() => jvm.get(jv('class', 'game.Main'), 'CENTER'),
+    /Main\.<fields> \(source line 3\): Java constructor\/native missing: Vector3\(\)/);
+});
+
+test('an explicit super call reaches implicit java.lang.Object', async () => {
+  const source = 'package java.lang; class Native { Native() { super(); } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'java.lang.Native' ? { path: 'Native.java', source } : null });
+  await jvm.loadClass('java.lang.Native');
+  assert.equal(jvm.construct('java.lang.Native', []).type, 'Native');
+});
+
+test('a resource literal exposes its type ID to source constructors', async () => {
+  const source = 'package demo; class Main { int read() { ResourceRef ref = system:0x1br; return ref.typeID; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0x1b);
+});
+
+test('a resource literal assigned to an int retains its local resource ID', async () => {
+  const source = 'package demo; class Main { static int RESOURCEID = system:0x32r; int read() { return RESOURCEID; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0x32);
+});
+
+test('a missing native implementation is distinguished from a missing Java method', async () => {
+  const source = 'package demo; class Base { native void setFlags(int flags); } class Child extends Base { void run() { setFlags(1); } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['demo.Base', 'demo.Child'].includes(className) ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  assert.throws(() => jvm.invoke(jvm.construct('demo.Child', []), 'run'),
+    /Java native implementation missing: demo\.Base\.setFlags\(int\)/);
+});
+
+test('null can match a reference parameter in a registered native', async () => {
+  const source = 'package demo; import demo.Host; class Main { int run() { return Host.read(null); } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main' ? { path: 'Main.java', source } : null });
+  jvm.natives.register('demo.Host', 'read', ['String'], () => jv('int', 7));
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
+});
+
+test('a native reference parameter accepts an interpreted subclass instance', async () => {
+  const source = `package demo;
+class Base {}
+class Child extends Base {}
+class Host { static native int read(Base value); }
+class Main { int run() { return Host.read(new Child()); } }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  jvm.natives.register('demo.Host', 'read', ['Base'], () => jv('int', 7));
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'run').value, 7);
+});
+
+test('a class without constructors forwards constructor arguments to its parent', async () => {
+  const source = 'package demo; class Base { int value; Base(int n) { value = n; } } class Child extends Base { int extra = 4; }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  const child = jvm.construct('demo.Child', [jv('int', 27)]);
+  assert.equal(jvm.get(child, 'value').value, 27);
+  assert.equal(jvm.get(child, 'extra').value, 4);
+});
+
+test('the SLRR dialect permits an implicit no-argument constructor beside declared overloads', async () => {
+  const source = 'package demo; class Base { int marker = 3; } class Child extends Base { Child(int n) { marker = n; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  assert.equal(jvm.get(jvm.construct('demo.Child', []), 'marker').value, 3);
+});
+
+test('a source method outside the eager method set is parsed when called', async () => {
+  const source = 'package demo; class Main { int value; Main() { update(12); } void update(int n) { value = n; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'demo.Main'
+    ? { path: 'Main.java', source } : null, selectMethods: () => ['Main'] });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.get(jvm.construct('demo.Main', []), 'value').value, 12);
+});
+
+test('a resource literal matches an integer constructor argument', async () => {
+  const source = 'package demo; class Ref { int id; Ref(int value) { id = value; } } class Main { int read() { return new Ref(frontend:0xd7r).id; } }';
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'read').value, 0xd7);
+});
+
+test('numeric literals narrow to int while variables retain their declared type', async () => {
+  const source = `package demo;
+    class Counter { int value; Counter(int n) { value = n; } }
+    class Main {
+      int asConstructor() { return new Counter(0.5).value + new Counter(-2.9).value; }
+      int asMethod(int n) { return n; }
+      int choose(int n) { return 1; }
+      int choose(float n) { return 2; }
+      int direct() { return asMethod(8.0) + choose(8.0); }
+      int variable() { float n = 8.0; return new Counter(n).value; }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Numeric.java', source } : null });
+  await jvm.loadClass('demo.Main');
+  const main = jvm.construct('demo.Main', []);
+  assert.equal(jvm.invoke(main, 'asConstructor').value, -2);
+  assert.equal(jvm.invoke(main, 'direct').value, 10);
+  assert.throws(() => jvm.invoke(main, 'variable'), /Java constructor missing: demo.Counter\(1\)/);
+});

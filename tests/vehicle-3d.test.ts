@@ -8,7 +8,7 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
-function setup(mechanical = false) {
+function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4]) {
   const world = new EngineWorld(), slots = [101, 102, 103, 104].map((type, i) => `slot 0 0 0 0 0 0 ${20 + i}\nslottype ${type}`).join('\n');
   const wheels = [[-0.7, -1.3], [0.7, -1.3], [-0.7, 1.3], [0.7, 1.3]].map(([x, z], i) => `type 10 sphere 0.3\nspring 0.29 0.1 0.05\nwheel ${x} -0.6 ${z} 0 0 0 ${i < 2 ? 1 : 0} 0 1 0`).join('\n');
   const create = (id: number, file: string, cfg: string) => world.create({ key: { pack: 'test.rpk', id }, alias: file, cfgPath: file, config: parsePartConfig(cfg) });
@@ -39,7 +39,7 @@ function setup(mechanical = false) {
     crank.definition.mechanics = { kind: 'engine', source: 'crank.java', values: { stroke: 90 } }; world.install(block, 33, crank, 1);
   }
   const samples = [-0.7, 0.04, -0.7, 0.7, 0.04, -0.7, -0.7, 0.04, 0.7, 0.7, 0.04, 0.7];
-  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)));
+  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain);
   const box = (x: number, y: number, z: number) => { const a: number[] = []; for (const px of [-x, x]) for (const py of [-y, y]) for (const pz of [-z, z]) a.push(px, py, pz); return a; };
   demo.register(door, box(0.04, 0.4, 0.6), []); demo.register(lamp, box(0.15, 0.15, 0.15), []); demo.reset();
   if (mechanical) {
@@ -50,6 +50,71 @@ function setup(mechanical = false) {
   }
   return { world, root, hood, door, lamp, demo, struts, sway, block, crank };
 }
+
+test('driving and active body deformation are invariant to terrain elevation below zero', () => {
+  const createAt = (elevation: number) => {
+    const state = setup(false, { ramp: false, height: (_x, z) => elevation + z * 0.04, normal: () => new Vector3(0, 1, -0.04).normalize() });
+    const samples: number[] = [];
+    for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) samples.push(x, y, z);
+    state.demo.register(state.root, samples, []); state.demo.disableObstacle();
+    state.demo.placeAt(new Vector3(0, elevation, 0), 0); state.demo.body.velocity.z = -6;
+    state.demo.panel.hit(1); // Exercise XPBD as well as the sleeping/carry path.
+    return state;
+  };
+  const above = createAt(10), below = createAt(-10);
+  for (let tick = 0; tick < 480; tick++) {
+    above.demo.advance(1 / 240, neutral); below.demo.advance(1 / 240, neutral);
+    for (const [part, state] of above.demo.soft) {
+      const counterpart = [...below.demo.soft.values()].find(s => s.part.definition.alias === part.definition.alias)!;
+      assert.equal(!!counterpart.part.parent, !!part.parent, 'elevation cannot release mounts');
+      assert.ok(Math.abs(counterpart.part.condition - part.condition) < 1e-7);
+      for (let i = 0; i < state.panel.positions.length; i++)
+        assert.ok(Math.abs(state.panel.positions[i] - counterpart.panel.positions[i] - (i % 3 === 1 ? 20 : 0)) < 1e-5, `node ${i} at tick ${tick}`);
+    }
+  }
+  assert.ok(below.hood.parent && below.door.parent);
+  assert.ok(below.demo.body.position.y < 0);
+  above.world.dispose(); below.world.dispose();
+});
+
+test('a detached panel lands on the map surface below zero rather than an implicit zero plane', () => {
+  const { world, demo, hood } = setup(false, { ramp: false, height: () => -8, normal: () => new Vector3(0, 1, 0) });
+  demo.disableObstacle(); demo.placeAt(new Vector3(0, -8, 0), 0);
+  world.detach(hood); demo.panel.mounts.forEach(m => { m.broken = true; });
+  for (let i = 0; i < demo.panel.positions.length; i += 3) { demo.panel.positions[i] += 5; demo.panel.positions[i + 1] += 2; }
+  for (let tick = 0; tick < 4 * 240; tick++) demo.advance(1 / 240, neutral);
+  const center = demo.soft.get(hood)!.activity.motion().center;
+  assert.ok(center.y < -7.8 && center.y > -8, `panel landed at ${center.y}`);
+  world.dispose();
+});
+
+test('attached deformation defers whole-body collision skinning until a part comes loose', () => {
+  const { world, root, lamp, demo } = setup();
+  demo.disableObstacle();
+  const triangles = [-0.8, -0.5, -2, 0.8, -0.5, -2, 0.8, 0.6, 2];
+  const samples: number[] = [];
+  for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) samples.push(x, y, z);
+  demo.register(root, samples, triangles); demo.setBodyTriangles(triangles); demo.reset();
+  const panel = demo.soft.get(root)!.panel;
+  const collision = demo as unknown as { updateSurface(): void }, update = collision.updateSurface.bind(demo);
+  let rebuilds = 0;
+  collision.updateSurface = () => { rebuilds++; update(); };
+  let solves = 0;
+  for (let i = 0; i < 120; i++) {
+    for (const part of demo.soft.values()) part.activity.wake();
+    demo.advance(1 / 240, neutral); solves += demo.timings.activePanels;
+  }
+  assert.ok(solves >= 120, 'the real deformation solver remains active');
+  assert.ok([...demo.soft.values()].every(part => part.root || part.part.parent));
+  assert.equal(rebuilds, 0, 'attached panels do not consume the collision mesh');
+  lamp.condition = 0; demo.advance(1 / 240, neutral);
+  assert.equal(lamp.parent, undefined);
+  assert.ok(rebuilds > 0, 'release builds current deformed collision geometry immediately');
+  const atRelease = rebuilds;
+  for (let i = 0; i < 12; i++) { panel.impulseAt([0.01, 0, 0], [0, 1, 0]); demo.advance(1 / 240, neutral); }
+  assert.ok(rebuilds > atRelease, 'loose rigid parts keep receiving refreshed body geometry');
+  world.dispose();
+});
 
 test('suspension hardware follows wheel travel without wheel spin, while the anti-roll bar stays on the chassis', () => {
   const { world, root, demo, struts, sway } = setup(true);
@@ -135,8 +200,12 @@ test('a 15 km/h impact marks the chassis without tearing off healthy body panels
   for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
   demo.register(root, shell, []);
   demo.reset(15 / 3.6);
-  for (let i = 0; i < 2 * 240; i++) demo.advance(1 / 240, neutral);
+  let collisionCueSeen = false;
+  let firstCue = -1, firstPanel = -1;
+  for (let i = 0; i < 2 * 240; i++) { demo.advance(1 / 240, neutral); collisionCueSeen ||= !!demo.collisionCue; if (firstCue < 0 && demo.collisionCue) firstCue = i; if (firstPanel < 0 && [...demo.soft.values()].some(s => s.panel.contacts > 0)) firstPanel = i; }
+  assert.equal(firstCue, firstPanel, 'collision audio starts with the first panel contact');
   assert.ok(demo.impactSpeed > 3, 'the chassis reached the obstacle');
+  assert.ok(collisionCueSeen, 'a solid contact emits an audio collision cue');
   assert.ok(root.condition < 1 && root.condition > 0.9, `chassis condition ${root.condition}`);
   assert.ok(hood.condition > 0.6, `hood condition ${hood.condition}; mounts ${demo.panel.mounts.map(m => `${m.broken}:${Math.round(m.force)}`).join(',')}; root ${root.condition}; door ${door.condition}`);
   assert.ok(door.condition > 0.6, `door condition ${door.condition}`);

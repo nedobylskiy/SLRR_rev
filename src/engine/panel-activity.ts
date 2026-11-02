@@ -17,8 +17,11 @@ export class PanelActivity {
   /** Conservative swept cage bounds, used only to wake the exact node/contact solver. */
   threatened(nextFrame: Matrix4, obstacle: Box3) {
     const delta = nextFrame.clone().multiply(this.frame.clone().invert()), box = new Box3(), point = new Vector3(), p = this.panel.positions;
-    for (let i = 0; i < p.length; i += 3) { point.fromArray(p, i); box.expandByPoint(point); box.expandByPoint(point.applyMatrix4(delta)); }
-    return box.min.y < 0.025 || box.intersectsBox(obstacle);
+    for (let i = 0; i < p.length; i += 3) {
+      point.fromArray(p, i); box.expandByPoint(point); box.expandByPoint(point.applyMatrix4(delta));
+      if (Math.min(p[i + 1], point.y) < this.panel.groundHeight(point.x, point.z, p[i + 1]) + 0.025) return true;
+    }
+    return box.intersectsBox(obstacle);
   }
   carry(dt: number, frame: Matrix4, body: RigidBody3D) {
     const delta = frame.clone().multiply(this.frame.clone().invert());
