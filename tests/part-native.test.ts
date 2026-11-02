@@ -136,4 +136,21 @@ test('CFG slots connect parts through Java install commands and expose both side
   assert.equal(parts.partMass(engine), 50);
   assert.equal(parts.assemblyMass(car), 1080);
   assert.equal(jvm.natives.invoke('java.game.parts.bodypart.Chassis', 'getMass', car, [])?.value, 1080);
+  assert.deepEqual(parts.assemblyCenterOfMass(car).toArray(), [0, 0, 0]);
+  // Rotate an offset engine mount; nested masses must follow both mating frames.
+  parts.configure(car, parsePartConfig(`body 0 0 0 0 0 0 1000 box 1 1 1\nslot 2 0 0 ${Math.PI / 2} 0 0 401\nattach 0x000D003F 19`));
+  parts.configure(engine, parsePartConfig('body 2 0 0 0 0 0 50 box 1 1 1\nslot 1 0 0 0 0 0 19\nslot 0 0 0 0 0 0 8'));
+  const center = parts.assemblyCenterOfMass(car);
+  assert.ok(Math.abs(center.x - 160 / 1080) < 1e-10);
+  assert.ok(Math.abs(center.z + 20 / 1080) < 1e-10);
+  const nativeCenter = jvm.natives.invoke('java.game.parts.bodypart.Chassis', 'getCM', car, [])!;
+  assert.equal(jvm.get(nativeCenter, 'x').value, Math.fround(center.x));
+  assert.equal(jvm.get(nativeCenter, 'z').value, Math.fround(center.z));
+  const vector = jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+    [['x', jv('float', 4)], ['y', jv('float', 0)], ['z', jv('float', 0)]]) });
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
+  assert.ok(Math.abs(parts.assemblyCenterOfMass(car).x - 320 / 1080) < 1e-10);
+  // A separately created chassis without CFG masses has a deterministic zero center.
+  const empty = ref('java.game.parts.bodypart.Chassis'); create(empty, root, 0x159);
+  assert.deepEqual(parts.assemblyCenterOfMass(empty).toArray(), [0, 0, 0]);
 });

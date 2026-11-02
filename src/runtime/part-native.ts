@@ -2,6 +2,8 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
 import type { PartConfig, CfgSlot } from '../formats/cfg';
+import { Matrix4, Vector3 } from 'three';
+import { slotMatrix } from '../engine/slot-frames';
 
 interface InstalledSlot { child: ResourceObject; mate: number }
 interface PartSlots {
@@ -65,6 +67,12 @@ export class PartNative {
       jv('float', Math.fround(this.partMass(receiver))));
     jvm.natives.register('java.game.parts.bodypart.Chassis', 'getMass', [], ({ receiver }) =>
       jv('float', Math.fround(this.assemblyMass(receiver))));
+    jvm.natives.register('java.game.parts.bodypart.Chassis', 'getCM', [], ({ receiver }) => {
+      const center = this.assemblyCenterOfMass(receiver);
+      return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+        ['x', 'y', 'z'].map((axis, index) => [axis, jv('float', Math.fround(center.getComponent(index)))])
+      ) } satisfies JavaObject);
+    });
     jvm.natives.register(owner, 'getWheelID', [], ({ receiver }) => {
       const car = this.carNode(receiver);
       let node = this.gameTypes.getResource(receiver);
@@ -203,6 +211,42 @@ export class PartNative {
         sum + visit(installed.child), 0);
     };
     return visit(root);
+  }
+
+  /** CFG body centers transformed through installed slot frames, relative to the chassis. */
+  assemblyCenterOfMass(receiver: JavaValue): Vector3 {
+    const root = this.gameTypes.getResource(receiver), weighted = new Vector3();
+    if (!root) return weighted;
+    let mass = 0;
+    const visited = new Set<ResourceObject>();
+    const frame = (config: PartConfig, state: PartSlots, id: number): Matrix4 => {
+      const slot = state.slots.find(slot => slot.id === id);
+      if (!slot) throw new Error(`Missing installed part slot ${id} in center of mass calculation`);
+      const override = state.positions.get(id);
+      return slotMatrix(config, { ...slot, position: override?.position ?? slot.position,
+        rotation: override?.rotation ?? slot.rotation });
+    };
+    const visit = (node: ResourceObject, transform: Matrix4): void => {
+      if (visited.has(node)) throw new Error('Part installation cycle in center of mass calculation');
+      visited.add(node);
+      const handle = this.gameTypes.reference(node), config = this.configs.get(handle.value as JavaObject);
+      const state = this.partSlots(handle);
+      for (const body of config?.bodies ?? []) {
+        if (body.mass <= 0) continue;
+        weighted.addScaledVector(new Vector3(...body.position).applyMatrix4(transform), body.mass);
+        mass += body.mass;
+      }
+      for (const [id, installed] of state.installed) {
+        const childHandle = this.gameTypes.reference(installed.child);
+        const childConfig = this.configs.get(childHandle.value as JavaObject);
+        if (!config || !childConfig) throw new Error('Installed part CFG missing in center of mass calculation');
+        const childTransform = transform.clone().multiply(frame(config, state, id))
+          .multiply(frame(childConfig, this.partSlots(childHandle), installed.mate).invert());
+        visit(installed.child, childTransform);
+      }
+    };
+    visit(root, new Matrix4());
+    return mass > 0 ? weighted.divideScalar(mass) : weighted;
   }
 
   private partSlots(receiver: JavaValue): PartSlots {
