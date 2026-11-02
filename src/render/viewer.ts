@@ -803,7 +803,7 @@ export class Viewer {
           const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
           offset.y -= 1.1;
           if (this.inertialCameraEnabled)
-            inertialCamera.update(this.camera.position, this.controls.target, target, offset, seconds, 5, firstFrame || cameraWasInternal);
+            inertialCamera.update(this.camera.position, this.controls.target, target, offset.multiplyScalar(2 / 3), seconds, 5, firstFrame || cameraWasInternal);
           else followCamera.update(this.camera.position, this.controls.target, target, offset, seconds, mode === 1 ? 5 : 9, firstFrame);
           cameraWasInternal = false;
           this.camera.lookAt(this.controls.target);
