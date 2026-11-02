@@ -36,9 +36,19 @@ export class ChassisNative {
   private readonly sfxTableStates = new WeakMap<JavaObject, ScriptSfxTable>();
   private readonly exhaustMinVolume = new WeakMap<JavaObject, number>();
   private readonly steerWheel = new WeakMap<JavaObject, [number, number]>();
+  private readonly mileage = new WeakMap<JavaObject, number>();
 
   constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    jvm.natives.register(owner, 'getMileage', [], ({ receiver }) =>
+      jv('float', this.mileage.get(this.object(receiver)) ?? 0));
+    jvm.natives.register(owner, 'setMileage', ['float'], ({ receiver, args }) => {
+      const object = this.object(receiver), value = Math.fround(Number(args[0].value));
+      if (!Number.isFinite(value) || value < 0) throw new Error('Invalid chassis mileage');
+      // Original Java serializers and UI own unit conversion; retain the raw distance.
+      this.mileage.set(object, value);
+      return jv('void', undefined);
+    });
     jvm.natives.register(owner, 'getSfxTable', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id) || id < 0) return jv('SfxTable', null);
@@ -157,6 +167,12 @@ export class ChassisNative {
 
   updateState(receiver: JavaValue): ChassisUpdateState | undefined {
     return this.updates.get(receiver.value as JavaObject);
+  }
+
+  private object(receiver: JavaValue): JavaObject {
+    const object = receiver.value as JavaObject | null;
+    if (!object?.className || !(object.fields instanceof Map)) throw new Error('Chassis receiver is not a Java object');
+    return object;
   }
 
   scriptSfx(receiver: JavaValue, id: number): readonly ScriptSfxItem[] {

@@ -6,6 +6,47 @@ import { GameTypeNative } from '../src/runtime/game-type-native';
 import { PartNative } from '../src/runtime/part-native';
 import { parsePartConfig } from '../src/formats/cfg';
 import { ackermannSteerAngle } from '../src/engine/suspension-3d';
+import { FileNative } from '../src/runtime/file-native';
+import { MemoryKeyValue } from '../src/runtime/key-value';
+import { VirtualFileSystem } from '../src/runtime/virtual-file-system';
+
+test('CarMarket chassis mileage is per instance and survives Java File save/load', async () => {
+  const sources = new Map([
+    ['java.game.parts.bodypart.Chassis', `package java.game.parts.bodypart; import java.io.File;
+      class Chassis { native float getMileage(); native void setMileage(float distance);
+        void setupUsed(float wear) { setMileage((1-wear)*10000000f); }
+        void save(File file) { float distance = getMileage(); file.write(distance); }
+        void load(File file) { float distance = file.readFloat(); setMileage(distance); }
+      }`],
+    ['java.game.cars.Sample', `package java.game.cars; import java.game.parts.bodypart.Chassis; class Sample extends Chassis {}`],
+    ['java.io.File', `package java.io; class File { String name; File(String path) { name = path; } }`],
+  ]);
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => {
+    const source = sources.get(className); return source ? { path: `${className}.java`, source } : null;
+  } });
+  const resources = new GameTypeNative(jvm, () => {});
+  new ChassisNative(jvm, resources);
+  const backend = new MemoryKeyValue(), fs = await VirtualFileSystem.load(backend);
+  new FileNative(jvm, fs, resources);
+  await jvm.loadClass('java.game.cars.Sample'); await jvm.loadClass('java.io.File');
+  const chassis = jvm.construct('java.game.cars.Sample', []), other = jvm.construct('java.game.cars.Sample', []);
+  assert.equal(jvm.invoke(chassis, 'getMileage').value, 0);
+  await jvm.invokeAsync(chassis, 'setupUsed', [jv('float', 0.75)]);
+  assert.equal(jvm.invoke(chassis, 'getMileage').value, 2500000, 'keep game distance units without an extra km conversion');
+  assert.equal(jvm.invoke(other, 'getMileage').value, 0);
+  for (const invalid of [-1, NaN, Infinity])
+    assert.throws(() => jvm.invoke(chassis, 'setMileage', [jv('float', invalid)]), /Invalid chassis mileage/);
+  assert.equal(jvm.invoke(chassis, 'getMileage').value, 2500000);
+  const writer = jvm.construct('java.io.File', [jv('String', 'save/test/mileage')]);
+  jvm.invoke(writer, 'open', [jv('int', 1)]); await jvm.invokeAsync(chassis, 'save', [writer]); jvm.invoke(writer, 'close');
+  await fs.flush();
+  const stored = (await VirtualFileSystem.load(backend)).read('save/test/mileage')!;
+  assert.ok(stored);
+  fs.write('save/test/reloaded-mileage', stored);
+  const reader = jvm.construct('java.io.File', [jv('String', 'save/test/reloaded-mileage')]);
+  jvm.invoke(reader, 'open', [jv('int', 0)]); await jvm.invokeAsync(other, 'load', [reader]); jvm.invoke(reader, 'close');
+  assert.equal(jvm.invoke(other, 'getMileage').value, 2500000);
+});
 
 test('GII_RENDER reports the installed chassis camera count from its CFG', () => {
   const cfg = parsePartConfig(`camera -0.390 0.251 0.132 0 0 0
