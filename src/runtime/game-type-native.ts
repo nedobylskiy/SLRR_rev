@@ -332,7 +332,7 @@ export class GameTypeNative {
       const type = this.getResource(args[1]);
       if (type?.resourcePack && !type.resourceScript && this.loadResourcePack) {
         await this.loadResourcePack(type.resourcePack);
-        const resource = this.catalog?.resolve(type.resourcePack, type.typeId);
+        const resource = this.catalogResource(type.resourcePack, type.typeId);
         if (resource) {
           type.resourceType = resource.type;
           type.resourcePack = resource.pack;
@@ -355,8 +355,9 @@ export class GameTypeNative {
         const node = this.requireResource(receiver);
         node.resourcePack = type.resourcePack;
         node.resourceScript = type.resourceScript;
-        const cfgPath = this.catalog?.resolve(type.resourcePack, type.typeId)?.cfgPath;
-        if (this.catalog?.resolve(type.resourcePack, type.typeId)?.nativeType === 'camera') {
+        const definition = this.catalogResource(type.resourcePack, type.typeId);
+        const cfgPath = definition?.cfgPath;
+        if (definition?.nativeType === 'camera') {
           const pose = String(args[2].value ?? '').split(',').slice(0, 6).map(Number);
           if (pose.length === 6 && pose.every(Number.isFinite)) this.require(receiver).setMatrix(
             { x: pose[0], y: pose[1], z: pose[2] }, { y: pose[3], p: pose[4], r: pose[5] });
@@ -452,6 +453,13 @@ export class GameTypeNative {
   getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
   resolveResourceIdentity(id: number): ResourceIdentity | undefined {
     return this.savedResources.get(id) ?? this.resolvePackedResource?.(id);
+  }
+  /** Host IDs (including SDAT remounts) are not local RPK entry indices. */
+  catalogResource(pack: string, id: number) {
+    const identity = this.resolveResourceIdentity(id);
+    const local = identity && normalizeResourcePackPath(identity.pack) === normalizeResourcePackPath(pack)
+      ? identity.id : id;
+    return this.catalog?.resolve(pack, local);
   }
   /** Remount a saved RPK entry independently of the current source dependency slots. */
   remountSavedResource(pack: string, localId: number): JavaValue {

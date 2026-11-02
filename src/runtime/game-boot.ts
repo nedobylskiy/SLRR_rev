@@ -260,7 +260,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       if (pack && assets.byPath.has(normalizePath(pack)))
         sourcePacks.set(normalizePath(source.path), await assets.pack(pack));
       await jvm.loadClass(className);
-      const cfgPath = pack && resourceCatalog.resolve(pack, typeId)?.cfgPath;
+      const cfgPath = pack && gameTypes.catalogResource(pack, typeId)?.cfgPath;
       const cfg = cfgPath && assets.byPath.has(cfgPath)
         ? parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath))) : null;
       chassisNative.prepare(className, cfg?.maxSteer ?? 0.7, cfg?.ackermann ?? 2);
