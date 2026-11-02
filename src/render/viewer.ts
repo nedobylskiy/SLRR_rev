@@ -32,6 +32,7 @@ import type { EnvironmentMapSource } from './environment-map';
 import { FrameProfiler } from './frame-profiler';
 import { SceneLighting } from './scene-lighting';
 import { FollowCamera } from './follow-camera';
+import { InertialCamera } from './inertial-camera';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -66,6 +67,8 @@ export class Viewer {
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
+  private inertialCameraEnabled = false;
+  setInertialCameraEnabled(enabled: boolean) { this.inertialCameraEnabled = enabled; }
   private collisionMeshes = new Map<EnginePart, number[]>();
   private alphaModes = new Map<string, ReturnType<typeof textureAlphaMode>>();
   private skyFogUniforms = new Set<{ color: THREE.Color; enabled: { value: number } }>();
@@ -722,6 +725,9 @@ export class Viewer {
     this.model.position.set(0, 0, 0); this.model.scale.setScalar(1); this.syncWorld(softParts);
     const followed = demo.position.clone();
     const followCamera = new FollowCamera();
+    const inertialCamera = new InertialCamera();
+    let lastInertialCamera = this.inertialCameraEnabled;
+    let cameraWasInternal = false;
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
     this.camera.position.copy(this.controls.target).add(withCrash ? new THREE.Vector3(7, 4, -3) : new THREE.Vector3(5, 3, 7)); this.controls.update();
     if (java) this.controls.enabled = false;
@@ -751,11 +757,16 @@ export class Viewer {
         if (proxy) { helper.box.setFromObject(proxy); helper.updateMatrixWorld(true); }
       }
       if (java) {
+        if (lastInertialCamera !== this.inertialCameraEnabled) {
+          followCamera.reset(); inertialCamera.reset(); lastInertialCamera = this.inertialCameraEnabled;
+        }
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
         if (internalPose) {
+          cameraWasInternal = true;
           followCamera.reset();
+          inertialCamera.reset();
           const frame = root.matrix().multiply(poseMatrix(internalPose));
           frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
           this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
@@ -791,7 +802,10 @@ export class Viewer {
           offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
           const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
           offset.y -= 1.1;
-          followCamera.update(this.camera.position, this.controls.target, target, offset, seconds, mode === 1 ? 5 : 9, firstFrame);
+          if (this.inertialCameraEnabled)
+            inertialCamera.update(this.camera.position, this.controls.target, target, offset, seconds, 5, firstFrame || cameraWasInternal);
+          else followCamera.update(this.camera.position, this.controls.target, target, offset, seconds, mode === 1 ? 5 : 9, firstFrame);
+          cameraWasInternal = false;
           this.camera.lookAt(this.controls.target);
         }
       } else {
