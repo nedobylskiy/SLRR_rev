@@ -340,6 +340,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
       ...(viewer?.profiler.lines() ?? []),
+      ...(viewer?.streamInfo ? [viewer.streamInfo] : []),
       ...(viewer?.physicsWork ? [viewer.physicsWork] : []),
       ...(javaLoop ? [javaLoop()] : []),
       `Position (m) X ${state.position.x.toFixed(1)} · Y ${state.position.y.toFixed(1)} · Z ${state.position.z.toFixed(1)}`,

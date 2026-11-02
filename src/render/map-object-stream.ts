@@ -1,4 +1,4 @@
-import { Group, InstancedMesh, Matrix4, Mesh, Texture, Vector3 } from 'three';
+import { Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
 
 export interface StreamPlacement { matrix: Matrix4; position: Vector3; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
@@ -17,6 +17,10 @@ interface StreamType {
   slots: Map<number, number>;
   pending: number[];
   boundsDirty: boolean;
+  drawn: number[];
+  candidates: number[];
+  localBounds?: Sphere;
+  instanceBounds: Map<number, Sphere>;
   unusedSince?: number;
 }
 
@@ -26,19 +30,26 @@ export class MapObjectStream {
   private lastCell = '';
   private dirty = true;
   private disposed = false;
+  private readonly frustum = new Frustum();
+  private readonly projection = new Matrix4();
+  private readonly lastProjection = new Matrix4();
+  private readonly lastFocus = new Vector3(Infinity, Infinity, Infinity);
+  private hadView = false;
+  private viewDirty = true;
   constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
   setRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
-    this.distance = value; this.dirty = true;
+    this.distance = value; this.dirty = this.viewDirty = true;
   }
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
-    this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false });
+    this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
+      drawn: [], candidates: [], instanceBounds: new Map() });
     this.dirty = true;
   }
 
-  update(camera: Vector3) {
+  update(camera: Vector3, view?: Camera) {
     if (this.disposed) return;
     const cell = `${Math.floor(camera.x / 25)},${Math.floor(camera.z / 25)}`;
     if (cell !== this.lastCell || this.dirty) {
@@ -78,19 +89,46 @@ export class MapObjectStream {
         if (type.slots.has(index)) continue;
         const slot = type.active.length;
         type.active.push(index); type.slots.set(index, slot);
-        for (const mesh of type.meshes) { mesh.setMatrixAt(slot, type.placements[index].matrix); mesh.count = type.active.length; mesh.instanceMatrix.needsUpdate = true; }
         type.boundsDirty = true;
         remaining--;
       }
       if (!remaining) break;
     }
-    // InstancedMesh caches its aggregate sphere; setMatrixAt/count changes do not
-    // invalidate it. Refresh once per changed batch, including removals, so camera
-    // culling stays correct when streaming or teleporting into another area.
-    for (const type of this.types) if (type.boundsDirty && type.meshes) {
-      for (const mesh of type.meshes) { mesh.computeBoundingSphere(); mesh.visible = mesh.count > 0; }
-      type.boundsDirty = false;
+    let viewChanged = this.viewDirty || this.hadView !== !!view || !this.lastFocus.equals(camera);
+    if (view) {
+      view.updateWorldMatrix(true, false); this.parent.updateWorldMatrix(true, false);
+      this.projection.multiplyMatrices(view.projectionMatrix, view.matrixWorldInverse).multiply(this.parent.matrixWorld);
+      viewChanged ||= !this.projection.equals(this.lastProjection);
+      this.lastProjection.copy(this.projection);
+      this.frustum.setFromProjectionMatrix(this.projection);
     }
+    this.hadView = !!view; this.lastFocus.copy(camera); this.viewDirty = false;
+    // Residency and rendering are independent: keep nearby off-screen instances
+    // in RAM, but submit only the visible ones, even for a city-wide model type.
+    for (const type of this.types) if (type.meshes && (viewChanged || type.boundsDirty)) this.draw(type, camera, !!view);
+  }
+
+  private draw(type: StreamType, focus: Vector3, cull: boolean) {
+    const visible = type.candidates; visible.length = 0;
+    for (const index of type.active) {
+      if (distanceTo(type.placements[index], focus) > this.distance) continue;
+      if (cull) {
+        let bounds = type.instanceBounds.get(index);
+        if (!bounds) { bounds = type.localBounds!.clone().applyMatrix4(type.placements[index].matrix); type.instanceBounds.set(index, bounds); }
+        if (!this.frustum.intersectsSphere(bounds)) continue;
+      }
+      visible.push(index);
+    }
+    if (visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index)) {
+      for (const mesh of type.meshes!) {
+        for (let slot = 0; slot < visible.length; slot++) mesh.setMatrixAt(slot, type.placements[visible[slot]].matrix);
+        mesh.count = visible.length; mesh.instanceMatrix.needsUpdate = true;
+        // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
+        mesh.computeBoundingSphere(); mesh.visible = mesh.count > 0;
+      }
+      const old = type.drawn; type.drawn = visible; type.candidates = old;
+    }
+    type.boundsDirty = false;
   }
 
   private remove(type: StreamType, slot: number) {
@@ -98,9 +136,7 @@ export class MapObjectStream {
     type.slots.delete(index);
     if (slot < type.active.length) {
       type.active[slot] = last; type.slots.set(last, slot);
-      for (const mesh of type.meshes ?? []) { mesh.setMatrixAt(slot, type.placements[last].matrix); mesh.instanceMatrix.needsUpdate = true; }
     }
-    for (const mesh of type.meshes ?? []) mesh.count = type.active.length;
     type.boundsDirty = true;
   }
 
@@ -114,7 +150,10 @@ export class MapObjectStream {
         return;
       }
       if (!parts.length) { this.dirty = true; return; }
+      type.localBounds = new Sphere().makeEmpty();
       type.meshes = parts.map(part => {
+        if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere();
+        type.localBounds!.union(part.geometry.boundingSphere!);
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
         mesh.name = part.name; mesh.renderOrder = part.renderOrder;
         mesh.count = 0; mesh.visible = false;
@@ -129,6 +168,7 @@ export class MapObjectStream {
   }
 
   get active() { return this.types.reduce((sum, type) => sum + type.active.length, 0); }
+  get visible() { return this.types.reduce((sum, type) => sum + type.drawn.length, 0); }
   get total() { return this.types.reduce((sum, type) => sum + type.placements.length, 0); }
   private release(type: StreamType) {
     const geometries = new Set(), materials = new Set(), textures = new Set<Texture>();
@@ -142,7 +182,8 @@ export class MapObjectStream {
     }
     for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
     for (const texture of textures) texture.dispose();
-    type.meshes = undefined; type.unusedSince = undefined;
+    type.meshes = undefined; type.unusedSince = undefined; type.localBounds = undefined;
+    type.drawn.length = type.candidates.length = 0; type.instanceBounds.clear();
   }
   dispose() { this.disposed = true; for (const type of this.types) this.release(type); this.types = []; }
 }

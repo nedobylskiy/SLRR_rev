@@ -49,6 +49,7 @@ export class Viewer {
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
   get fps() { return Math.round(1000 / this.frameDuration); }
+  get streamInfo() { return this.mapStream ? `Map instances: submitted ${this.mapStream.visible} · resident ${this.mapStream.active} · indexed ${this.mapStream.total}` : ''; }
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
@@ -126,7 +127,7 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       this.controls.update();
-      this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position));
+      this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)

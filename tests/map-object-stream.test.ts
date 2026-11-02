@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 import { BoxGeometry, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
 
+test('instances of one model are culled independently without unloading and camera rotation reuses the model', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  const camera = new PerspectiveCamera(60, 1, 0.1, 200); camera.lookAt(0, 0, -1);
+  let loads = 0;
+  stream.add([-20, 20].map(z => ({ matrix: new Matrix4().makeTranslation(0, 0, z), position: new Vector3(0, 0, z) })), async () => {
+    loads++; return [new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial())];
+  });
+  stream.update(focus, camera); await Promise.resolve(); stream.update(focus, camera);
+  const mesh = parent.children[0] as InstancedMesh, matrix = new Matrix4();
+  assert.equal(stream.active, 2); assert.equal(stream.visible, 1); assert.equal(mesh.count, 1);
+  mesh.getMatrixAt(0, matrix); assert.equal(matrix.elements[14], -20);
+  const version = mesh.instanceMatrix.version;
+  stream.update(focus, camera); assert.equal(mesh.instanceMatrix.version, version, 'stationary view does not reupload matrices');
+  camera.lookAt(0, 0, 1); stream.update(focus, camera);
+  mesh.getMatrixAt(0, matrix); assert.equal(matrix.elements[14], 20);
+  assert.equal(stream.active, 2); assert.equal(loads, 1);
+  stream.setRange(10); stream.update(focus, camera);
+  assert.equal(stream.active, 2, 'hysteresis keeps models resident');
+  assert.equal(stream.visible, 0); assert.equal(mesh.visible, false, 'draw range changes immediately');
+  stream.setRange(100); stream.update(focus, camera);
+  assert.equal(stream.visible, 1); assert.equal(loads, 1);
+  stream.dispose();
+});
+
+test('instance frustum tests include parent transforms and mesh bounds away from their origin', async () => {
+  const parent = new Group(); parent.position.x = 100;
+  const stream = new MapObjectStream(parent, 100), focus = new Vector3();
+  const camera = new PerspectiveCamera(30, 1, 0.1, 200); camera.position.x = 100; camera.lookAt(125, 0, -10);
+  stream.add([{ matrix: new Matrix4().makeTranslation(0, 0, -10), position: new Vector3(0, 0, -10) }], async () => {
+    const geometry = new BoxGeometry(2, 2, 2); geometry.translate(25, 0, 0);
+    return [new Mesh(geometry, new MeshBasicMaterial())];
+  });
+  stream.update(focus, camera); await Promise.resolve(); stream.update(focus, camera);
+  assert.equal(stream.visible, 1);
+  camera.lookAt(75, 0, 10); stream.update(focus, camera); assert.equal(stream.visible, 0);
+  stream.dispose();
+});
+
 test('camera culling follows streamed instance bounds after additions, removals and teleport', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100, 1);
   stream.add([0, 30, 500].map(x => ({ matrix: new Matrix4().makeTranslation(x, 0, 0), position: new Vector3(x, 0, 0) })), async () => {
