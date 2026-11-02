@@ -3,6 +3,23 @@ import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
 import { InertialCamera } from '../src/render/inertial-camera';
 
+test('reducing inertial lag preserves resting distance and scales only extra separation during motion', () => {
+  const original = new InertialCamera(1), reduced = new InertialCamera();
+  const a = new Vector3(), b = new Vector3(), target = new Vector3(), focus = new Vector3(), offset = new Vector3(0, 2, 7);
+  original.update(a, target, focus, offset, 0, 5, true);
+  reduced.update(b, target, focus, offset, 0, 5, true);
+  assert.deepEqual(a, offset); assert.deepEqual(b, offset);
+  for (let i = 0; i < 180; i++) {
+    const dt = [0.01, 0.02, 0.07][i % 3];
+    if (i < 90) focus.addScaledVector(new Vector3(0, 0, -30), dt);
+    original.update(a, target, focus, offset, dt);
+    reduced.update(b, target, focus, offset, dt);
+    const desired = focus.clone().add(offset);
+    const expectedLag = a.clone().sub(desired).multiplyScalar(2 / 3);
+    assert.ok(b.clone().sub(desired).distanceTo(expectedLag) < 1e-10, 'extra separation is reduced by one third, including its peak and recovery');
+  }
+});
+
 test('inertial camera accelerates behind the car and keeps coasting when the car stops', () => {
   const rig = new InertialCamera(), position = new Vector3(), target = new Vector3(), focus = new Vector3(), offset = new Vector3(0, 2, 7);
   rig.update(position, target, focus, offset, 0, 5, true);
