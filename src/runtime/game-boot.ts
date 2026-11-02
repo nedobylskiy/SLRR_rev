@@ -124,6 +124,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       };
     },
     allowNumericNarrowing: true,
+    allowNumericStringArguments: true,
     resolveResourceId: (resource, path) => {
       const sourcePath = normalizePath(path);
       const owner = sourcePacks.get(sourcePath)

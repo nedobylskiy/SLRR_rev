@@ -19,6 +19,8 @@ export interface SlrrJvmOptions {
   floatMode?: FloatMode;
   /** Allow the SLRR source dialect to narrow a float variable when only an int overload exists. */
   allowNumericNarrowing?: boolean;
+  /** Compatibility for game sources passing numbers to interpreted String parameters. */
+  allowNumericStringArguments?: boolean;
   /** Resolve a resource literal to the integer used by the source file's owning RPK. */
   resolveResourceId?(resource: ResourceIdentity, sourcePath: string): number | undefined;
   budget?: number;
@@ -601,7 +603,7 @@ export class SlrrJvm implements JavaHost {
     finally { this.activeClasses.pop(); }
   }
 
-  private parameterScore(parameter: string, argument: JavaValue): number {
+  private parameterScore(parameter: string, argument: JavaValue, sourceCall = false): number {
     if (argument.value === null) return ['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long'].includes(parameter) ? Infinity : 5;
     if (parameter === 'int' && argument.type === 'ResourceRef' && typeof argument.value === 'object'
       && 'id' in argument.value && !('fields' in argument.value)) return 1;
@@ -613,6 +615,8 @@ export class SlrrJvm implements JavaHost {
     if (argument.type === 'float' && parameter === 'double') return 1;
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
     if (this.options.allowNumericNarrowing && parameter === 'int' && ['float', 'double'].includes(argument.type)) return 6;
+    if (sourceCall && this.options.allowNumericStringArguments && (parameter === 'String' || parameter === 'java.lang.String')
+      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 8;
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {
@@ -632,7 +636,7 @@ export class SlrrJvm implements JavaHost {
   private selectMethod(methods: SourceClass['methods'], args: JavaValue[], owner: string): SourceClass['methods'][number] | undefined {
     const ranked = methods.filter(method => method.parameters.length === args.length).map(method => ({
       method,
-      score: method.parameters.reduce((total, parameter, i) => total + this.parameterScore(parameter.type, args[i]), 0),
+      score: method.parameters.reduce((total, parameter, i) => total + this.parameterScore(parameter.type, args[i], true), 0),
     })).filter(candidate => Number.isFinite(candidate.score)).sort((a, b) => a.score - b.score);
     if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
       const tied = ranked.filter(candidate => candidate.score === ranked[0].score);

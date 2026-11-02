@@ -81,6 +81,8 @@ An SLRR resource literal assigned to an `int` retains its numeric ID in `value` 
 
 SLRR source calls can pass a floating numeric literal to an `int` parameter. The interpreter accepts that narrowing conversion during overload selection and truncates toward zero. By default a `float` variable or computed expression does not gain this implicit conversion. Set `allowNumericNarrowing: true` for game sources that pass a float variable to an int-only method, as `LoadingScreen.userWait()` does when calling `track(int)`. An exact `float` overload still wins when available.
 
+`allowNumericStringArguments: true` enables a source-call compatibility rule: an `int`, `float`, or `double` can match an interpreted `String` parameter and is converted to text. Numeric overloads still rank ahead of this conversion. The engine enables this for Garage's numeric `Slider.printValue(...)` calls, while the installed Slider source exposes `printValue(String)`. This is an explicit compatibility policy, not a confirmed general rule of the original compiler; it is disabled by default and does not loosen native method signatures.
+
 ## Current limits
 
 - The shared parser accepts the 3,453 `.java` files currently visible in one Build 940 installation (the original `MainMenu.java` is temporarily renamed for a separate compiler runtime test). It yields 3,499 classes and 5,952 method bodies. Parsing does not imply every method can execute with the current host bindings.
