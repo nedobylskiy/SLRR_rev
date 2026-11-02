@@ -111,9 +111,12 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
-      if (this.previousFrame !== undefined && now > this.previousFrame)
+      if (document.hidden) this.previousFrame = undefined;
+      if (this.previousFrame !== undefined && now > this.previousFrame) {
+        this.profiler.recordFrame(now - this.previousFrame);
         this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
-      this.previousFrame = now;
+      }
+      this.previousFrame = document.hidden ? undefined : now;
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       this.controls.update();
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position));

@@ -1,7 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
+import { BoxGeometry, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
+
+test('camera culling follows streamed instance bounds after additions, removals and teleport', async () => {
+  const parent = new Group(), stream = new MapObjectStream(parent, 100, 1);
+  stream.add([0, 30, 500].map(x => ({ matrix: new Matrix4().makeTranslation(x, 0, 0), position: new Vector3(x, 0, 0) })), async () => {
+    const part = new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial());
+    part.renderOrder = 1; return [part];
+  });
+  const camera = new PerspectiveCamera(60, 1, 0.1, 100), frustum = new Frustum();
+  const sees = (x: number, forward: number) => {
+    camera.position.set(x, 0, 10); camera.lookAt(x, 0, 10 + forward); camera.updateMatrixWorld(); parent.updateMatrixWorld();
+    frustum.setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    return frustum.intersectsObject(parent.children[0]);
+  };
+  stream.update(new Vector3()); await Promise.resolve(); stream.update(new Vector3());
+  const mesh = parent.children[0] as InstancedMesh;
+  assert.equal(mesh.frustumCulled, true); assert.equal(mesh.renderOrder, 1);
+  assert.equal(sees(0, -1), true); assert.equal(sees(0, 1), false, 'objects behind the camera can be culled');
+  stream.update(new Vector3());
+  assert.ok(mesh.boundingSphere!.containsPoint(new Vector3(30, 0, 0)), 'new active instance expands bounds');
+  stream.update(new Vector3(500, 0, 0));
+  assert.equal(mesh.count, 1);
+  assert.ok(mesh.boundingSphere!.containsPoint(new Vector3(500, 0, 0)));
+  assert.equal(mesh.boundingSphere!.containsPoint(new Vector3()), false, 'removed instances no longer inflate bounds');
+  assert.equal(sees(500, -1), true, 'teleported-to instance remains visible');
+  stream.update(new Vector3(1000, 0, 0)); assert.equal(mesh.visible, false);
+  stream.update(new Vector3(500, 0, 0)); assert.equal(mesh.visible, true);
+  assert.equal(sees(500, -1), true, 'empty batches can become visible again');
+  stream.dispose();
+});
 
 test('loading prioritizes nearby placements over resource-table order', () => {
   const stream = new MapObjectStream(new Group(), 1000), started: number[] = [];

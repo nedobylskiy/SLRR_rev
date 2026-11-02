@@ -8,6 +8,8 @@ export class FrameProfiler {
   private queries: WebGLQuery[] = [];
   private current?: WebGLQuery;
   private frames = 0;
+  private intervals: number[] = [];
+  private intervalSlot = 0;
   constructor(private renderer: WebGLRenderer) {
     this.gl = renderer.getContext() as WebGL2RenderingContext;
     this.timer = this.gl.getExtension('EXT_disjoint_timer_query_webgl2');
@@ -17,6 +19,11 @@ export class FrameProfiler {
     this.samples.set(name, { average: previous ? previous.average + (ms - previous.average) * 0.08 : ms,
       peak: previous && now - previous.since < 2000 ? Math.max(previous.peak, ms) : ms,
       since: previous && now - previous.since < 2000 ? previous.since : now });
+  }
+  recordFrame(ms: number) {
+    if (!Number.isFinite(ms) || ms <= 0) return;
+    this.intervals[this.intervalSlot] = ms;
+    this.intervalSlot = (this.intervalSlot + 1) % 180;
   }
   measure<T>(name: string, work: () => T): T {
     const start = performance.now();
@@ -42,6 +49,12 @@ export class FrameProfiler {
   }
   lines() {
     const rows = [...this.samples].map(([name, s]) => `${name}: ${s.average.toFixed(1)} ms (peak ${s.peak.toFixed(1)})`);
+    if (this.intervals.length) {
+      const sorted = [...this.intervals].sort((a, b) => a - b);
+      const percentile = (p: number) => sorted[Math.ceil(sorted.length * p) - 1].toFixed(1);
+      rows.unshift(`Frame interval: median ${percentile(0.5)} · p95 ${percentile(0.95)} · max ${percentile(1)} ms`,
+        `Frames over 50 ms: ${sorted.filter(ms => ms > 50).length}/${sorted.length}`);
+    }
     if (!this.timer) rows.push('GPU timer unavailable');
     const { render, memory } = this.renderer.info;
     rows.push(`Draw calls ${render.calls} · triangles ${render.triangles.toLocaleString('en-US')}`,

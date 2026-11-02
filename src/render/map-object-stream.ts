@@ -16,6 +16,7 @@ interface StreamType {
   active: number[];
   slots: Map<number, number>;
   pending: number[];
+  boundsDirty: boolean;
   unusedSince?: number;
 }
 
@@ -33,7 +34,7 @@ export class MapObjectStream {
   }
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
-    this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [] });
+    this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false });
     this.dirty = true;
   }
 
@@ -78,9 +79,17 @@ export class MapObjectStream {
         const slot = type.active.length;
         type.active.push(index); type.slots.set(index, slot);
         for (const mesh of type.meshes) { mesh.setMatrixAt(slot, type.placements[index].matrix); mesh.count = type.active.length; mesh.instanceMatrix.needsUpdate = true; }
+        type.boundsDirty = true;
         remaining--;
       }
       if (!remaining) break;
+    }
+    // InstancedMesh caches its aggregate sphere; setMatrixAt/count changes do not
+    // invalidate it. Refresh once per changed batch, including removals, so camera
+    // culling stays correct when streaming or teleporting into another area.
+    for (const type of this.types) if (type.boundsDirty && type.meshes) {
+      for (const mesh of type.meshes) { mesh.computeBoundingSphere(); mesh.visible = mesh.count > 0; }
+      type.boundsDirty = false;
     }
   }
 
@@ -92,6 +101,7 @@ export class MapObjectStream {
       for (const mesh of type.meshes ?? []) { mesh.setMatrixAt(slot, type.placements[last].matrix); mesh.instanceMatrix.needsUpdate = true; }
     }
     for (const mesh of type.meshes ?? []) mesh.count = type.active.length;
+    type.boundsDirty = true;
   }
 
   private load(type: StreamType) {
@@ -106,7 +116,12 @@ export class MapObjectStream {
       if (!parts.length) { this.dirty = true; return; }
       type.meshes = parts.map(part => {
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
-        mesh.name = part.name; mesh.count = 0; mesh.frustumCulled = false; this.parent.add(mesh); return mesh;
+        mesh.name = part.name; mesh.renderOrder = part.renderOrder;
+        mesh.count = 0; mesh.visible = false;
+        // Placements are baked into instance matrices; these map batches have no
+        // per-frame local transform to compose.
+        mesh.matrixAutoUpdate = false;
+        this.parent.add(mesh); return mesh;
       });
       type.loading = false;
       this.dirty = true;
