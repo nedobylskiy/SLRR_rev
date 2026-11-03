@@ -36,6 +36,8 @@ const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> =
 export class InputNative {
   private readonly axes = new Map<string, number>();
   private readonly pressedKeys: number[] = [];
+  private readonly cheatRing = new Uint8Array(16);
+  private cheatWrite = 0;
   private readonly hotkeys: HotkeyRegistration[] = [];
   private readonly pressedCodes = new Set<string>();
   private readonly cameraAliases = new Map<string, number>();
@@ -48,7 +50,37 @@ export class InputNative {
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'getAxis', ['int', 'int'], ({ args }) =>
       jv('float', this.physicalAxis(Number(args[0].value), Number(args[1].value))));
-    jvm.natives.register(owner, 'lastKey', [], () => jv('int', this.pressedKeys.shift() ?? 0));
+    jvm.natives.register(owner, 'lastKey', [], () => {
+      const key = this.pressedKeys.shift() ?? 0;
+      const character = (key >>> 16) & 0xff;
+      if (character) {
+        this.cheatRing[this.cheatWrite] = character;
+        this.cheatWrite = (this.cheatWrite + 1) % this.cheatRing.length;
+      }
+      return jv('int', key);
+    });
+    // Original native 0x0047CB50: ASCII+1 strings, reverse search, 16-byte
+    // history populated by lastKey (including Input.flushKeys).
+    jvm.natives.register('java.game.GameLogic', 'kismajomCheck', ['String[]'], ({ args }) => {
+      const codes = args[0].value;
+      if (!Array.isArray(codes)) return jv('int', -1);
+      for (let i = codes.length - 1; i >= 0; i--) {
+        const encoded = (codes[i] as JavaValue)?.value;
+        if (typeof encoded !== 'string') continue;
+        let matches = true;
+        for (let n = 0; n < encoded.length; n++) {
+          const index = (this.cheatWrite - 1 - n % 16 + 16) % 16;
+          if (((encoded.charCodeAt(encoded.length - 1 - n) - 1) & 255) !== this.cheatRing[index]) {
+            matches = false; break;
+          }
+        }
+        if (matches) {
+          this.cheatRing[(this.cheatWrite + 15) % 16] = 0;
+          return jv('int', i);
+        }
+      }
+      return jv('int', -1);
+    });
     jvm.natives.register(owner, 'createHotkey', ['int', 'int', 'Hotkey', 'GameRef', 'Osd', 'int'], ({ args }) => {
       const [axis, flags, hotkey, handler, osd, eventFilter] = args;
       this.createHotkey(Number(axis.value), Number(flags.value), hotkey, handler, osd, Number(eventFilter.value));

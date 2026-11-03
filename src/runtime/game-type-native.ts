@@ -62,7 +62,8 @@ export class GameTypeNative {
     private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined,
     private readonly renderRemoved?: (node: RenderObject) => void,
     private readonly configureUnscriptedResource?: (receiver: JavaValue, cfgPath: string) => Promise<void>,
-    private readonly resourceScriptIsA?: (script: string, pack: string | null, base: string) => Promise<boolean>) {
+    private readonly resourceScriptIsA?: (script: string, pack: string | null, base: string) => Promise<boolean>,
+    private readonly resourceSize?: (receiver: JavaValue) => Promise<number>) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -403,6 +404,7 @@ export class GameTypeNative {
         case 1: return jv('int', node.resourceId); // GII_BONE
         case 5: return jv('int', node.resourceId); // GII_ID
         case 6: return jv('int', node.typeId); // GII_TYPE
+        case 11: return jv('int', 100); // GII_SIZE: native fallback when no visual reader is attached.
         case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
         case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
         case 25: return jv('int', Math.round(this.axisReader?.(receiver, index) ?? 0)); // GII_AXIS
@@ -410,10 +412,13 @@ export class GameTypeNative {
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
     };
-    jvm.natives.register(gameRef, 'getInfo', ['int', 'int'], ({ receiver, args }) =>
-      getInfo(receiver, Number(args[0].value) | 0, Number(args[1].value) | 0));
-    jvm.natives.register(gameRef, 'getInfo', ['int', 'String'], ({ receiver, args }) =>
-      getInfo(receiver, Number(args[0].value) | 0));
+    for (const indexType of ['int', 'String']) {
+      if (this.resourceSize) jvm.natives.registerAsync(gameRef, 'getInfo', ['int', indexType], async ({ receiver, args }) =>
+        Number(args[0].value) === 11 ? jv('int', await this.resourceSize!(receiver))
+          : getInfo(receiver, Number(args[0].value) | 0, indexType === 'int' ? Number(args[1].value) | 0 : 0));
+      else jvm.natives.register(gameRef, 'getInfo', ['int', indexType], ({ receiver, args }) =>
+        getInfo(receiver, Number(args[0].value) | 0, indexType === 'int' ? Number(args[1].value) | 0 : 0));
+    }
     jvm.natives.register(gameRef, 'getFlags', [], ({ receiver }) => jv('int', this.require(receiver).flags));
     jvm.natives.register(gameRef, 'setFlags', ['int'], ({ receiver, args }) => {
       this.require(receiver).setFlags(Number(args[0].value) | 0); return voidValue();

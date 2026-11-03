@@ -5,6 +5,27 @@ import { InputNative } from '../src/runtime/input-native';
 import { ControllerNative } from '../src/runtime/controller-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 
+test('cheat check uses flushed key history, encoded Java codes and consumes matches', () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const events = new GameTypeNative(jvm, () => {});
+  const controllers = new ControllerNative(jvm, () => 0);
+  const input = new InputNative(jvm, controllers, events);
+  const codes = jv('String[]', ['begformoney', 'testme'].map(text => jv('String',
+    [...text].map(c => String.fromCharCode(c.charCodeAt(0) + 1)).join(''))));
+  const check = () => jvm.natives.invoke('java.game.GameLogic', 'kismajomCheck', jv('class', 'java.game.GameLogic'), [codes])!.value;
+  const type = (text: string) => { for (const c of text) {
+    input.setKeyboardCode(`Key${c.toUpperCase()}`, true, c.charCodeAt(0));
+    input.setKeyboardCode(`Key${c.toUpperCase()}`, false);
+    jvm.natives.invoke('java.io.Input', 'lastKey', jv('class', 'java.io.Input'), []);
+  } };
+  assert.equal(check(), -1);
+  type('xxxxxxxxxxxxxxxxxxxxxxxxbegformoney');
+  assert.equal(check(), 0); assert.equal(check(), -1);
+  type('testme'); assert.equal(check(), 1);
+  type('wrong'); assert.equal(check(), -1);
+  events.dispose();
+});
+
 test('Input.lastKey carries physical scans and typed UTF-16 characters without duplicating presses', () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const events = new GameTypeNative(jvm, () => {});
