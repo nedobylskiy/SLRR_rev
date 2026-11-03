@@ -3,6 +3,7 @@ import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
+import { JavaPartPreviews } from './render/java-part-previews';
 import { JavaMouse } from './render/java-mouse';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
@@ -116,6 +117,8 @@ async function runGameBoot() {
   } else if (viewer) {
     const javaControls = javaDrivingControls(result);
     const sceneVehicles = new JavaSceneVehicles(result, source, viewer, message => appendJavaEvent({ level: 'error', message }));
+    const partPreviews = new JavaPartPreviews(gameOsd.stage, result, source, viewer,
+      message => appendJavaEvent({ level: 'error', message }));
     let animating = false, loadingTrack = false;
     let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
@@ -257,6 +260,7 @@ async function runGameBoot() {
       mapDebugPanel.hidden = true;
       viewer?.setJavaSceneCamera(undefined);
       sceneVehicles.dispose();
+      partPreviews.dispose();
       window.clearInterval(animationTimer);
       window.clearInterval(trackPoll);
       window.removeEventListener('pointerdown', unlockMusic);

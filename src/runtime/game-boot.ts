@@ -411,6 +411,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
+  osdButtons.setCursorEvents((code, physics) => input.cursorEvent(code, {
+    id: 0, physicsId: gameTypes.getResource(physics)?.resourceId ?? 0, local: [0, 0, 0], world: [0, 0, 0],
+  }));
   gameTypes.setAxisReader((receiver, axis) => controllers.read(receiver, axis));
   jvm.natives.register('java.game.Vehicle', 'getSpeedSquare', [], ({ receiver }) => {
     const velocity = gameTypes.get(receiver)?.velocity;
@@ -547,7 +550,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {

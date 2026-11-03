@@ -18,6 +18,7 @@ export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
   nativeId?: number;
+  rootRender?: ResourceKey;
   powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
@@ -251,7 +252,12 @@ export class PartFactory {
   async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection } = {}) {
     const world = new EngineWorld(), warnings: string[] = [];
     try {
-      const root = world.create(await this.definition(key));
+      let definition = await this.definition(key);
+      if (options.javaSelection?.rootRender) {
+        const render = options.javaSelection.rootRender;
+        definition = { ...definition, model: await this.assets.modelForResource(render.pack, render.id) };
+      }
+      const root = world.create(definition);
       const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {

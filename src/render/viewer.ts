@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { previewMaterial } from './preview-material';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
@@ -13,6 +14,7 @@ import { DrivingDemo } from '../engine/driving-demo';
 import type { DrivingInput } from '../engine/driving-demo';
 import { HoodLab } from './hood-lab';
 import type { PartDefinition } from '../engine/world';
+import { previewScope } from '../runtime/preview-scope';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
@@ -250,7 +252,7 @@ export class Viewer {
     modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
-    if (isNavigatorOverlay || node.renderType?.sceneLightManaged) {
+    if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node)) {
       group.visible = false;
       modelGroup.clear();
       this.javaRenderTypes.delete(node.id);
@@ -470,6 +472,37 @@ export class Viewer {
       this.proxies.delete(part); this.collisionMeshes.delete(part);
     }
   }
+  /** Build an isolated inventory mesh tree; never publish its objects/lights into the world. */
+  async createPreviewWorld(world: EngineWorld, assets: Assets): Promise<THREE.Group> {
+    const root = new THREE.Group(), generation = this.generation;
+    try {
+      for (const part of world.parts.values()) {
+        const model = part.definition.model;
+        if (!model) continue;
+        const group = new THREE.Group(); group.matrixAutoUpdate = false;
+        group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); root.add(group);
+        await this.append(parseScx(await assets.read(model.path)), assets, model.textures, group, generation);
+        const pose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
+        for (const extra of part.definition.additionalModels ?? []) {
+          const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
+          sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
+          group.add(sub);
+          await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, sub, generation);
+        }
+      }
+      root.traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return;
+        const unlit = (source: THREE.MeshStandardMaterial) => {
+            const material = previewMaterial(source);
+          source.dispose(); return material;
+        };
+        object.material = Array.isArray(object.material) ? object.material.map(unlit) : unlit(object.material);
+        object.castShadow = object.receiveShadow = false;
+      });
+      return root;
+    } catch (error) { this.disposeGroup(root); throw error; }
+  }
+  disposePreviewWorld(group: THREE.Group): void { this.disposeGroup(group); }
   syncWorldVisuals(world: EngineWorld): void {
     for (const [part, group] of this.proxies) if (part.world === world) {
       if (world.parts.get(part.id) !== part) {

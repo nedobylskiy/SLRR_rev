@@ -19,6 +19,13 @@ export class OsdButtonNative {
   private readonly live = new Set<OsdElement>();
   private readonly activeBoxes = new Set<HitBox>();
   private worldPhysics?: PhysicsRefNative;
+  private cursorEvent?: (code: number, physics: JavaValue) => void;
+  private focusTimer?: ReturnType<typeof setInterval>;
+  private focused?: JavaObject;
+  private focusBusy = false;
+
+  setCursorEvents(dispatch: (code: number, physics: JavaValue) => void): void { this.cursorEvent = dispatch; }
+  private clearFocus(): void { clearInterval(this.focusTimer); this.focusTimer = undefined; this.focused = undefined; }
 
   setWorldPhysics(physics: PhysicsRefNative): void { this.worldPhysics = physics; }
 
@@ -118,9 +125,28 @@ export class OsdButtonNative {
     if (osd.fields.get('pointedGadget')?.value)
       await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
     await this.jvm.invokeAsync(jv('Osd', osd), 'activateText', [jv('Group', group), jv('Gadget', gadget)]);
+    this.cursorEvent?.(15, physics);
+    this.clearFocus();
+    const panel = this.object(osd.fields.get('globalHandler'));
+    if (panel && this.jvm.isInstance(jv(panel.className, panel), 'java.game.InventoryPanel')) {
+      const inventory = this.object(panel.fields.get('inv'));
+      // Mechanic/Painter own their spinner thread. A standalone catalog panel
+      // has no caller; drive its existing Java focusHook while HTML has focus.
+      if (!inventory?.fields.get('caller')?.value) {
+        this.focused = panel;
+        this.focusTimer = setInterval(() => {
+          if (this.focused !== panel || !this.visible(box)) { this.clearFocus(); return; }
+          if (this.focusBusy) return;
+          this.focusBusy = true;
+          void this.jvm.invokeAsync(jv(panel.className, panel), 'focusHook')
+            .catch(this.report).finally(() => { this.focusBusy = false; });
+        }, 20);
+      }
+    }
   }
 
   async leave(physics: JavaValue): Promise<void> {
+    this.clearFocus(); this.cursorEvent?.(16, physics);
     const box = this.boxes.get(this.requireObject(physics));
     if (!box) return;
     const gadget = await this.findGadget(box, physics);
@@ -174,6 +200,7 @@ export class OsdButtonNative {
   }
 
   dispose(): void {
+    this.clearFocus();
     for (const element of this.live) element.node.remove();
     this.live.clear();
     this.activeBoxes.clear();

@@ -51,6 +51,8 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   const worldPhysics = new PhysicsRefNative(jvm, resources);
   const bridge = new OsdButtonNative(jvm, surface, undefined, undefined, () => 4 / 3);
   bridge.setWorldPhysics(worldPhysics);
+  const cursorEvents: [number, JavaValue][] = [];
+  bridge.setCursorEvents((code, physics) => cursorEvents.push([code, physics]));
   const osd = object('java.render.Osd', {
     vpAspect: jv('float', 4 / 3), vpWidth: jv('float', 1), vpHeight: jv('float', 1), cam: jv('Camera', null),
   });
@@ -90,6 +92,8 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   await bridge.hover(physics);
   assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'hover').value, 1);
   await bridge.leave(physics);
+  assert.deepEqual(cursorEvents.map(([code]) => code), [15, 16]);
+  assert.equal(cursorEvents[0][1], physics, 'hover carries the native inventory panel hotspot');
   assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'leave').value, 1);
   assert.equal((await jvm.invokeAsync(vector, 'size')).value, 1);
   assert.equal(((await jvm.invokeAsync(vector, 'elementAt', [jv('int', 0)])).value as JavaValue).value, gadget.value);

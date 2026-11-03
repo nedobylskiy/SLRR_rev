@@ -240,6 +240,7 @@ export class PartNative {
   slotOverrides(receiver: JavaValue): ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }> {
     return this.partSlots(receiver).positions;
   }
+  renderTypeFor(receiver: JavaValue): number | undefined { return this.renderType.get(receiver.value as JavaObject); }
 
   installedTree(receiver: JavaValue): NativeInstalledPart[] {
     const root = this.gameTypes.getResource(receiver);

@@ -108,13 +108,13 @@ export class InputNative {
   }
 
   /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
-  cursorEvent(code: number, hit?: { id: number; local: number[]; world: number[] }): void {
+  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[] }): void {
     const cursor = this.mouseCursor();
     if (!cursor?.value) return;
     const native = this.jvm.get(cursor, 'cursor');
     if (!this.events.getResource(native)) return;
     const node = hit && this.events.getByResourceId(hit.id);
-    const suffix = hit ? code === 15 ? `${hit.id} 0` : code === 16 ? `${hit.id}` : `${hit.id} ${hit.local.join(' ')} ${hit.world.join(' ')}` : '';
+    const suffix = hit ? code === 15 ? `${hit.id} ${hit.physicsId ?? 0}` : code === 16 ? `${hit.id}` : `${hit.id} ${hit.local.join(' ')} ${hit.world.join(' ')}` : '';
     this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,
       jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`));
     this.events.dispatchQueuedEventsCooperative();
