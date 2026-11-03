@@ -173,4 +173,13 @@ test('CFG slots connect parts through Java install commands and expose both side
   assert.equal(call(crank, 'partOnSlot', 6), null);
   assert.equal(call(flywheel, 'getSlotID', -1), 0);
   assert.equal(parts.assemblyMass(car), 1070);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)}`)]);
+  assert.equal(call(crank, 'partOnSlot', 6), flywheel.value, 'inventory short command finds a nested mount');
+  assert.equal(parts.assemblyMass(car), 1080);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `remove 0 ${id(empty)}`)]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)} 0 0 0 -1.25 0.5 2`)]);
+  assert.equal(call(crank, 'partOnSlot', 6), flywheel.value, 'inventory drop command accepts signed fractional coordinates');
 });

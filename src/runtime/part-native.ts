@@ -371,15 +371,28 @@ export class PartNative {
       return;
     }
     if (words[0] !== 'install') return;
-    if (words.length !== 6 || words.slice(1).some(word => !/^\d+$/.test(word)))
+    if (![3, 6, 9].includes(words.length) || words.slice(1, 6).some(word => !/^-?\d+$/.test(word))
+      || words.slice(6).some(word => !Number.isFinite(Number(word))))
       throw new Error(`Invalid part install command: ${command}`);
     const child = this.gameTypes.getResource(receiver);
-    const parent = this.gameTypes.getById(Number(words[4]));
     const root = this.gameTypes.getById(Number(words[2]));
+    let parent = Number(words[4] ?? 0) ? this.gameTypes.getById(Number(words[4])) : root;
+    let requestedOwn = Number(words[3] ?? 0), requestedParent = Number(words[5] ?? 0);
+    // Inventory uses the short form, or appends a drop position with zero mount
+    // IDs. Resolve those through the same native query Java's installCheck used.
+    if (child && root && !Number(words[4] ?? 0)) {
+      const selectedParent = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+      const position = words.length === 9 ? jv('Vector3', { className: 'java.lang.Vector3',
+        fields: new Map(['x', 'y', 'z'].map((axis, index) => [axis, jv('float', Number(words[6 + index]))])) }) : jv('Vector3', null);
+      const selected = await this.jvm.natives.invokeAsync('java.game.parts.Part', 'install_OK', receiver,
+        [jv('GameRef', this.gameTypes.reference(root).value), jv('int', requestedOwn), selectedParent, jv('int', requestedParent), position]);
+      if (!selected?.value) return;
+      [requestedOwn, requestedParent] = selected.value as number[];
+      parent = this.gameTypes.getResource(selectedParent);
+    }
     if (!child || !parent || !root || child === parent) return;
     if (parent !== root && !this.isDescendant(parent, root)) return;
     const childState = this.partSlots(this.gameTypes.reference(child));
-    const requestedOwn = Number(words[3]), requestedParent = Number(words[5]);
     const candidates: ResourceObject[] = [];
     const seen = new Set<ResourceObject>();
     const visit = (node: ResourceObject): void => {
