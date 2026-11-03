@@ -134,6 +134,7 @@ async function runGameBoot() {
 
     const loadSelectedTrack = async (selected: NonNullable<ReturnType<typeof activeJavaTrack>>) => {
       sceneVehicles.update(null);
+      mapDebugPanel.hidden = true;
       sceneTerrain = undefined;
       const stopPrevious = activeTrackCleanup;
       activeTrackCleanup = undefined;
@@ -162,6 +163,7 @@ async function runGameBoot() {
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         sceneTerrain = map.terrain;
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
+        showMapDebugControls(map);
         if (built && selected.driving) {
           gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
           const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
@@ -194,7 +196,6 @@ async function runGameBoot() {
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
                   result.gameTypes.updateTriggerContacts(car);
                 } });
-            showMapDebugControls(map);
             showVehicleDebug(built.root, session, () => [...result.javaProfile].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 3)
               .map(([name, t]) => `JVM ${name}: ${t.averageMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / calls ${t.calls} / ${((performance.now() - t.lastAt) / 1000).toFixed(1)}s ago (wall)`).join('\n'));
             driveHud.hidden = true;
@@ -226,6 +227,7 @@ async function runGameBoot() {
       const selected = activeJavaTrack(result);
       if (!selected || !source.byPath.has(selected.mapPack)) {
         sceneVehicles.update(null);
+        mapDebugPanel.hidden = true;
         loadedTrackKey = '';
         pendingTrackKey = '';
         return;
@@ -252,6 +254,7 @@ async function runGameBoot() {
     };
     const trackPoll = window.setInterval(checkActiveTrack, 150);
     disposeJavaScene = () => {
+      mapDebugPanel.hidden = true;
       viewer?.setJavaSceneCamera(undefined);
       sceneVehicles.dispose();
       window.clearInterval(animationTimer);
@@ -295,7 +298,7 @@ const hoodButton = textElement('button', 'Hood impact test'); hoodButton.classNa
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
-mapDebugPanel.append(textElement('summary', 'Map collision frames'));
+mapDebugPanel.append(textElement('summary', 'Graphics / map debug'));
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
 const mapDebugChecks: HTMLInputElement[] = [];
