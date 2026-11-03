@@ -57,6 +57,7 @@ export class GameTypeNative {
   private driveTypeReader?: (receiver: JavaValue) => number;
   private removalReader?: (receiver: JavaValue) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
+  private readonly resourceDestroyListeners = new Set<(receiver: JavaValue) => void>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
@@ -240,6 +241,7 @@ export class GameTypeNative {
     jvm.natives.register(resourceRef, 'destroy', [], ({ receiver }) => {
       // A failed Track.enter may leave player.render null before Track.exit runs.
       if (receiver.value == null) return voidValue();
+      for (const listener of this.resourceDestroyListeners) listener(receiver);
       const node = this.getResource(receiver);
       if (!node) return voidValue();
       this.notifications.delete(this.object(receiver));
@@ -609,6 +611,7 @@ export class GameTypeNative {
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
   setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
+  addResourceDestroyListener(listener: (receiver: JavaValue) => void): void { this.resourceDestroyListeners.add(listener); }
   setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
   setRemovalReader(reader: (receiver: JavaValue) => number): void { this.removalReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {
@@ -763,6 +766,7 @@ export class GameTypeNative {
     this.callbacks.clear();
     this.savedResources.clear();
     this.savedResourceIds.clear();
+    this.resourceDestroyListeners.clear();
   }
 
   private cancelTimers(object: JavaObject): void {

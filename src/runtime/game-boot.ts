@@ -347,6 +347,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     return !!parentKey && !!childKey && await partFactory.compatibleSlots(parentKey, parentSlot, childKey, childSlot);
   });
   gameTypes.setRenderCountReader(receiver => partNative.cameraCount(receiver));
+  gameTypes.addResourceDestroyListener(receiver => osdText.removeRender(receiver));
   gameTypes.setRemovalReader(receiver => {
     const slot = jvm.natives.invoke('java.game.parts.Part', 'getSlotID', receiver, [jv('int', -1)]);
     return Number(slot?.value) > 0 ? 0 : -1;
