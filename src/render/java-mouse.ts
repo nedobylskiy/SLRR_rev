@@ -3,6 +3,7 @@ import type { BootResult } from '../runtime/game-boot';
 import { parseScx, type ScxMesh } from '../formats/scx';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { normalizePath } from '../assets';
+import { readExeCursor, stockCursorIndex } from '../formats/exe-cursor';
 
 /** Font glyph UVs select the original pointer artwork, including modded fonts. */
 export function pointerUv(mesh: ScxMesh, character: string) {
@@ -15,6 +16,8 @@ export function pointerUv(mesh: ScxMesh, character: string) {
 
 /** Browser transport for MouseCursor; Java still selects modes and camera bindings. */
 export class JavaMouse {
+  private hovered?: { id: number; local: number[]; world: number[] };
+  private pressed?: { id: number; x: number; y: number };
   private pointer?: number;
   private x = 0;
   private y = 0;
@@ -22,9 +25,11 @@ export class JavaMouse {
   private disposed = false;
   private key = '';
   private styles = new Map<string, Promise<string>>();
+  private exe?: Promise<Uint8Array>;
   private timer: ReturnType<typeof setInterval>;
   constructor(private readonly viewport: HTMLElement, private readonly result: BootResult,
-    private readonly assets: Assets, private readonly report: (message: string) => void) {
+    private readonly assets: Assets, private readonly report: (message: string) => void,
+    private readonly pick?: (x: number, y: number) => { id: number; local: number[]; world: number[] } | undefined) {
     viewport.addEventListener('pointerdown', this.down);
     viewport.addEventListener('pointermove', this.move);
     viewport.addEventListener('pointerup', this.up);
@@ -42,6 +47,11 @@ export class JavaMouse {
     return !!cursor?.value && !!this.result.jvm.get(cursor, 'controlledcam').value;
   }
   private down = (event: PointerEvent) => {
+    if (event.button === 0 && this.controlled() && event.target instanceof HTMLCanvasElement) {
+      const hit = this.pick?.(event.clientX, event.clientY);
+      if (hit) { this.pressed = { id: hit.id, x: event.clientX, y: event.clientY }; this.result.input.cursorEvent(1, hit); }
+      return;
+    }
     if (event.button !== 2 || !this.controlled() || !(event.target instanceof HTMLCanvasElement)) return;
     event.preventDefault();
     this.pointer = event.pointerId; this.x = event.clientX; this.y = event.clientY;
@@ -50,7 +60,15 @@ export class JavaMouse {
     this.result.input.cursorEvent(3);
   };
   private move = (event: PointerEvent) => {
-    if (event.pointerId !== this.pointer) return;
+    if (event.pointerId !== this.pointer) {
+      const hit = this.controlled() && event.target instanceof HTMLCanvasElement ? this.pick?.(event.clientX, event.clientY) : undefined;
+      if (hit?.id !== this.hovered?.id) {
+        if (this.hovered) this.result.input.cursorEvent(16, this.hovered);
+        if (hit) this.result.input.cursorEvent(15, hit);
+      }
+      this.hovered = hit;
+      return;
+    }
     const dx = event.clientX - this.x, dy = event.clientY - this.y;
     this.x = event.clientX; this.y = event.clientY;
     if (!dx && !dy) return;
@@ -59,8 +77,18 @@ export class JavaMouse {
     input.setPhysicalAxis(1, 0, Math.max(-1, Math.min(1, input.physicalAxis(1, 0) + dx * 0.01)));
     input.setPhysicalAxis(1, 1, Math.max(-1, Math.min(1, input.physicalAxis(1, 1) + dy * 0.01)));
   };
-  private up = (event: PointerEvent) => { if (event.pointerId === this.pointer && event.button === 2) this.cancel(); };
+  private up = (event: PointerEvent) => {
+    if (event.button === 0 && this.pressed) {
+      const pressed = this.pressed; this.pressed = undefined;
+      const hit = this.pick?.(event.clientX, event.clientY);
+      if (hit?.id === pressed.id && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 5) {
+        this.result.input.cursorEvent(2, hit); this.result.input.cursorEvent(5, hit);
+      }
+    }
+    if (event.pointerId === this.pointer && event.button === 2) this.cancel();
+  };
   private cancel = () => {
+    this.pressed = undefined;
     if (this.pointer === undefined) return;
     const id = this.pointer; this.pointer = undefined;
     if (this.dragged) this.result.input.cursorEvent(13);
@@ -97,6 +125,13 @@ export class JavaMouse {
     this.viewport.style.cursor = style;
   }
   private async load(id: number, character: string): Promise<string> {
+    if (this.assets.byPath.get('streetlegal_redline.exe')?.size) {
+      this.exe ??= this.assets.read('streetlegal_redline.exe');
+      const image = readExeCursor(await this.exe, stockCursorIndex(character));
+      const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+      canvas.getContext('2d')!.putImageData(new ImageData(image.rgba, image.width, image.height), 0, 0);
+      return `url("${canvas.toDataURL()}") ${image.hotspotX} ${image.hotspotY}, default`;
+    }
     const identity = this.result.resolveResourceIdentity(id);
     if (!identity) throw new Error(`Cursor font resource ${id} has no identity`);
     const model = await this.assets.modelForResource(identity.pack, identity.id);

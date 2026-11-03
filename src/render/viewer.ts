@@ -476,6 +476,19 @@ export class Viewer {
       group.matrixWorldNeedsUpdate = true;
     }
   }
+  pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1,
+      1 - (clientY - rect.top) / rect.height * 2), this.camera);
+    const groups = [...this.proxies].filter(([part, group]) => part.nativeId && group.visible);
+    this.scene.updateMatrixWorld(true);
+    const hit = ray.intersectObjects(groups.map(([, group]) => group), true)[0];
+    if (!hit) return;
+    const entry = groups.find(([, group]) => { for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) if (node === group) return true; return false; });
+    if (!entry) return;
+    return { id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
+  }
   async showWorld(world: EngineWorld, assets: Assets, keepScene = false, publishTogether = false): Promise<string[]> {
     if (!keepScene) this.clear();
     const generation = this.generation, warnings: string[] = [];

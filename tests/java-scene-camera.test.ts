@@ -80,6 +80,11 @@ test('scene camera input follows the Java cursor controller mappings and release
   jvm.set(jv('class', 'java.io.Input'), 'cursor', cursor);
   input.setPhysicalAxis(1, 0, 0.5);
   assert.deepEqual(input.sceneCameraMotion(camera), { x: 0, y: 0, zoom: 0 });
+  jvm.natives.invoke('java.io.Controller', 'user_Add', controller, [jv('int', 7), jv('int', 0), jv('int', 203),
+    ...[0, 1, 0, 0.01].map(n => jv('float', n))]);
+  input.setPhysicalAxis(0, 203, 1);
+  assert.ok(Math.abs(input.sceneCameraMotion(camera)!.x - 0.05) < 1e-7, 'keyboard camera speed is five times its original mapped increment');
+  input.setPhysicalAxis(0, 203, 0);
   assert.equal(input.physicalAxis(1, 0), 0.5, 'retain the first sample until the Java drag handler installs its mapping');
   for (const [axis, physical] of [[7, 0], [8, 1], [10, 2]])
     jvm.natives.invoke('java.io.Controller', 'user_Add', controller, [jv('int', axis), jv('int', 1), jv('int', physical),

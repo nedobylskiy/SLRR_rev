@@ -93,7 +93,7 @@ async function runGameBoot() {
   viewer?.setJavaSceneCamera(() => javaSceneCamera(result));
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const javaMouse = new JavaMouse(el('viewport'), result, source,
-    message => appendJavaEvent({ level: 'error', message }));
+    message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));
   const poll = window.setInterval(() => {
     try { result.input.pollCooperative(); }
     catch (reason) {

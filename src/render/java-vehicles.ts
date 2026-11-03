@@ -15,6 +15,7 @@ type BuiltVehicle = Awaited<ReturnType<PartFactory['stock']>>;
 /** Projects vehicles owned by the current Java map, including dealer stock, without driving them. */
 export class JavaSceneVehicles {
   private readonly models = new Map<GameObject, BuiltVehicle>();
+  private readonly assemblies = new WeakMap<BuiltVehicle, string>();
   private readonly failed = new WeakSet<GameObject>();
   private wanted = new Set<GameObject>();
   private loading = false;
@@ -63,7 +64,9 @@ export class JavaSceneVehicles {
     this.wanted = new Set(vehicles.keys());
     for (const [node, built] of this.models) {
       if (!this.wanted.has(node)) { this.release(built); this.models.delete(node); }
-      else this.sync(node, built, vehicles.get(node)!);
+      else if (this.assemblies.get(built) !== this.signature(vehicles.get(node)!)) {
+        this.release(built); this.models.delete(node);
+      } else this.sync(node, built, vehicles.get(node)!);
     }
     if (this.loading) return;
     const pending = [...vehicles].filter(([node]) => !this.models.has(node) && !this.failed.has(node));
@@ -113,7 +116,9 @@ export class JavaSceneVehicles {
       if (!pack) throw new Error('Java chassis has no resource pack');
       const key = { pack, id: identity?.id ?? native.typeId };
       const selection = await javaStockSelection(this.result, this.assets, pack, ref);
+      const signature = this.signature(ref);
       built = await this.factory.stock(key, { mechanical: true, javaSelection: selection });
+      this.assemblies.set(built, signature);
       if (this.disposed || !this.wanted.has(node)) { built.world.dispose(); return; }
       this.sync(node, built, ref);
       await this.viewer.showWorld(built.world, this.assets, true, true);
@@ -126,6 +131,12 @@ export class JavaSceneVehicles {
         this.report(`Java vehicle ${node.alias}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  }
+
+  private signature(ref: JavaValue): string {
+    const visit = (nodes: ReturnType<BootResult['parts']['installedTree']>): string => nodes.map(part =>
+      `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}[${visit(part.children)}]`).join(',');
+    return visit(this.result.parts.installedTree(this.result.jvm.get(ref, 'chassis')));
   }
 
   private release(built: BuiltVehicle): void { this.viewer.removeWorld(built.world); built.world.dispose(); }

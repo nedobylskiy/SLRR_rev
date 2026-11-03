@@ -53,6 +53,8 @@ export class GameTypeNative {
   private partCompatibilityReader?: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
   private renderCountReader?: (receiver: JavaValue) => number;
+  private driveTypeReader?: (receiver: JavaValue) => number;
+  private removalReader?: (receiver: JavaValue) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
@@ -445,6 +447,8 @@ export class GameTypeNative {
         case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
         case 25: return jv('int', Math.round(this.axisReader?.(receiver, index) ?? 0)); // GII_AXIS
         case 48: return jv('int', this.renderCountReader?.(receiver) ?? 0); // GII_RENDER: CFG camera count.
+        case 52: return jv('int', this.driveTypeReader?.(receiver) ?? 0); // GII_CAR_DRIVETYPE
+        case 41: return jv('int', this.removalReader?.(receiver) ?? -1); // GII_GETOUT_OK
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
     };
@@ -589,6 +593,8 @@ export class GameTypeNative {
   }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
+  setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
+  setRemovalReader(reader: (receiver: JavaValue) => number): void { this.removalReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {
     return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
   }
@@ -668,10 +674,10 @@ export class GameTypeNative {
     node.queueEvent({ sourceId: sourceNode?.id ?? null, type,
       payload: value.value == null ? null : String(value.value) });
     this.pendingEvents.push({ receiver, type, arguments: [source, jv('int', type), value] });
-    this.queueNotifications(receiver, type, value);
+    this.queueNotifications(receiver, type, value, type === 65536 && source.value != null ? source : undefined);
   }
 
-  private queueNotifications(emitter: JavaValue, type: number, payload: JavaValue): void {
+  private queueNotifications(emitter: JavaValue, type: number, payload: JavaValue, source?: JavaValue): void {
     const watched = this.getResource(emitter);
     if (!watched) return;
     for (const [key, subscriptions] of this.notifications) {
@@ -685,7 +691,7 @@ export class GameTypeNative {
         handler.queueEvent({ sourceId: watched.id, type: forwarded,
           payload: value.value == null ? null : typeof value.value === 'number' ? value.value : String(value.value) });
         this.pendingEvents.push({ receiver: subscription.handler, type: forwarded,
-          arguments: [this.handle(watched), jv('int', forwarded), value], method: subscription.method });
+          arguments: [source ?? this.handle(watched), jv('int', forwarded), value], method: subscription.method });
         if (subscription.type & 0x80000000) {
           const index = subscriptions.indexOf(subscription);
           if (index >= 0) subscriptions.splice(index, 1);

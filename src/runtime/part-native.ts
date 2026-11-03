@@ -347,6 +347,29 @@ export class PartNative {
 
   private async command(receiver: JavaValue, command: string): Promise<void> {
     const words = command.trim().split(/\s+/);
+    if (words[0] === 'remove') {
+      if (words.length !== 3 || words.slice(1).some(word => !/^\d+$/.test(word))) throw new Error(`Invalid part remove command: ${command}`);
+      const child = this.gameTypes.getResource(receiver);
+      if (!child) return;
+      const state = this.partSlots(receiver), parent = child.parent;
+      const car = this.carNode(receiver);
+      if (!parent || !state.parentSlot) return;
+      const handle = this.gameTypes.reference(child), object = handle.value as JavaObject;
+      if (object.fields.has('attachedParts')) await this.jvm.invokeAsync(handle, 'remove');
+      if (car && (this.gameTypes.reference(car).value as JavaObject).fields.has('attachedParts')) {
+        const notify = async (part: ResourceObject): Promise<void> => {
+          const ref = this.gameTypes.reference(part);
+          if ((ref.value as JavaObject).fields.has('attachedParts')) await this.jvm.invokeAsync(this.gameTypes.reference(car), 'rempart', [ref]);
+          for (const nested of part.children) await notify(nested);
+        };
+        await notify(child);
+      }
+      this.partSlots(this.gameTypes.reference(parent)).installed.delete(state.parentSlot);
+      state.parentSlot = state.ownSlot = 0;
+      const destination = this.gameTypes.getByResourceId(Number(words[2])) ?? this.gameTypes.getById(Number(words[2]));
+      child.setParent(destination ?? null);
+      return;
+    }
     if (words[0] !== 'install') return;
     if (words.length !== 6 || words.slice(1).some(word => !/^\d+$/.test(word)))
       throw new Error(`Invalid part install command: ${command}`);

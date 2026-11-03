@@ -108,13 +108,15 @@ export class InputNative {
   }
 
   /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
-  cursorEvent(code: number): void {
+  cursorEvent(code: number, hit?: { id: number; local: number[]; world: number[] }): void {
     const cursor = this.mouseCursor();
     if (!cursor?.value) return;
     const native = this.jvm.get(cursor, 'cursor');
     if (!this.events.getResource(native)) return;
-    this.events.queueStringEvent(native, native, 65536,
-      jv('String', `${code} ${this.events.getResource(native)!.resourceId}`));
+    const node = hit && this.events.getByResourceId(hit.id);
+    const suffix = hit ? code === 15 ? `${hit.id} 0` : code === 16 ? `${hit.id}` : `${hit.id} ${hit.local.join(' ')} ${hit.world.join(' ')}` : '';
+    this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,
+      jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`));
     this.events.dispatchQueuedEventsCooperative();
   }
 
@@ -124,7 +126,8 @@ export class InputNative {
     const controlled = this.jvm.get(cursor, 'controlledcam');
     if (!controlled.value || this.events.getResource(controlled) !== this.events.getResource(camera)) return null;
     const controller = this.jvm.get(cursor, 'controller');
-    const read = (axis: number) => controller.value ? this.controllers.read(controller, axis) : 0;
+    const read = (axis: number) => controller.value ? this.controllers.read(controller, axis)
+      + 4 * this.controllers.read(controller, axis, 0) : 0;
     const motion = { x: read(7), y: read(8), zoom: read(10) + read(11) };
     for (const axis of [0, 1, 2]) {
       // The cooperative Java RDRAGBEGIN handler may still be installing mappings

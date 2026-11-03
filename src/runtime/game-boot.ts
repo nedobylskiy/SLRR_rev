@@ -1,4 +1,4 @@
-import { SlrrJvm, jv, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
+import { SlrrJvm, jv, type JavaObject, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
 import { GameTypeNative } from './game-type-native';
@@ -340,6 +340,17 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     return !!parentKey && !!childKey && await partFactory.compatibleSlots(parentKey, parentSlot, childKey, childSlot);
   });
   gameTypes.setRenderCountReader(receiver => partNative.cameraCount(receiver));
+  gameTypes.setRemovalReader(receiver => {
+    const slot = jvm.natives.invoke('java.game.parts.Part', 'getSlotID', receiver, [jv('int', -1)]);
+    return Number(slot?.value) > 0 ? 0 : -1;
+  });
+  gameTypes.setDriveTypeReader(receiver => {
+    const chassis = (receiver.value as JavaObject)?.fields.get('chassis') ?? receiver;
+    const driven = Array.from({length:4}, (_, i) => (chassisNative.wheelState(chassis, i)?.drive ?? 0) > 0);
+    const front = driven[0] || driven[1], rear = driven[2] || driven[3];
+    if (front && rear) return driven.every(Boolean) ? 1 : 4;
+    return front ? 2 : rear ? 3 : 0;
+  });
   const dyno = new DynoNative(jvm, receiver => partNative.engineDyno(receiver));
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');

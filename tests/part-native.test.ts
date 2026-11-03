@@ -167,4 +167,10 @@ test('CFG slots connect parts through Java install commands and expose both side
   // A separately created chassis without CFG masses has a deterministic zero center.
   const empty = ref('java.game.parts.bodypart.Chassis'); create(empty, root, 0x159);
   assert.deepEqual(parts.assemblyCenterOfMass(empty).toArray(), [0, 0, 0]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `remove 0 ${id(empty)}`)]);
+  assert.equal(gameTypes.get(flywheel)!.parent, gameTypes.get(empty));
+  assert.equal(call(crank, 'partOnSlot', 6), null);
+  assert.equal(call(flywheel, 'getSlotID', -1), 0);
+  assert.equal(parts.assemblyMass(car), 1070);
 });

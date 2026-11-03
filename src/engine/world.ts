@@ -17,6 +17,7 @@ export { poseMatrix } from './transforms';
 export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
+  nativeId?: number;
   powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
@@ -26,6 +27,7 @@ export interface JavaStockSelection {
   rootPositions?: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
 }
 export interface JavaInstalledPart {
+  nativeId?: number;
   key: ResourceKey;
   parentSlot: number;
   ownSlot: number;
@@ -44,6 +46,7 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 
 /** Assets are shared; instances and slot occupancy belong exclusively to a world. */
 export class EnginePart {
+  nativeId?: number;
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
   readonly renderAdjustment = new Matrix4();
@@ -189,6 +192,7 @@ export class PartFactory {
       const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {
+        root.nativeId = options.javaSelection.nativeId;
         world.wheelRefs = [...options.javaSelection.wheelRefs];
         world.javaPowertrain = options.javaSelection.powertrain;
         for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
@@ -200,6 +204,7 @@ export class PartFactory {
           if (options.mechanical) definition = { ...definition, mechanics: await source.profile(definition) };
           if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
           const part = world.create(definition);
+          part.nativeId = node.nativeId;
           part.condition = Math.max(0, Math.min(1, node.wear));
           for (const [slot, pose] of node.positions) {
             if (pose.position) part.slotPositions.set(slot, pose.position);

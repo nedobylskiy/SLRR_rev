@@ -76,6 +76,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
     return { pack: packPath, id: localId };
   };
   const project = async (native: ReturnType<typeof result.parts.installedTree>[number]): Promise<JavaInstalledPart> => ({
+    nativeId: native.node.resourceId,
     key: await resolve(native.node.typeId, native.node.resourcePack ?? chassisPack),
     parentSlot: native.parentSlot, ownSlot: native.ownSlot,
     positions: native.positions,
@@ -107,7 +108,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
     get state() { return result.chassis.updateState(chassis); },
     get cooling() { return result.chassis.coolingSettings(chassis); },
   };
-  return { body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
+  return { nativeId: result.gameTypes.getResource(chassis)?.resourceId, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */
