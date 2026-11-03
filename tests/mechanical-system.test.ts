@@ -128,6 +128,14 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   }
   assert.ok(system.running && wheels[2]>0,'recovered exchange launches without instantly stalling the host engine');
   assert.ok(system.temperature>20);
+  // Recovered dyno curves include negative torque beyond their firing band.
+  // It must never become negative clutch grip (clutch > 1 in the native kernel).
+  world.javaPowertrain.curve!.torque[6] = -50;
+  world.javaPowertrain.curve!.torque[7] = -100;
+  system.manual = true; system.gear = 1; system.rpm = 6800;
+  const overrun = system.advance(1/240, { throttle: 1 }, wheels);
+  assert.ok(Number.isFinite(system.rpm));
+  assert.ok(overrun.torque.every(Number.isFinite));
   world.dispose();
 });
 

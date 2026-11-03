@@ -191,8 +191,10 @@ export class MechanicalSystem {
     const directionBrake = this.gear > 0 && throttle < 0 || this.gear < 0 && throttle > 0;
     const clutchOpen = !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power || !this.running && !this.manual;
     const launch = Math.max(0.65, Math.min(1, (this.rpm - idle) / (idle * 0.55) + gas * 0.28));
-    const stallCapacity = this.estimateFlywheelTorqueAt(limit * 0.6) * 1.8;
-    const manualCapacity = gas > 0 ? Math.min(stallCapacity * launch, this.estimateFlywheelTorqueAt(this.rpm) * (0.95 + gas * 0.2)) : 120;
+    // Dyno torque may be negative outside the combustion band. That is engine
+    // braking, not a negative friction capacity for the clutch.
+    const stallCapacity = Math.max(0, this.estimateFlywheelTorqueAt(limit * 0.6)) * 1.8;
+    const manualCapacity = gas > 0 ? Math.min(stallCapacity * launch, Math.max(0, this.estimateFlywheelTorqueAt(this.rpm)) * (0.95 + gas * 0.2)) : 120;
     const automaticCapacity = gas > 0 ? stallCapacity * launch : 90 * Math.min(1, Math.abs(shaftOmega) / Math.max(1, omega));
     const capacity = clutchOpen ? 0 : (this.manual ? manualCapacity : automaticCapacity) * (this.clutch ? this.health(this.clutch) : 1);
     const clutchTorque = Math.max(-capacity, Math.min(capacity, (omega - shaftOmega) * 9));
@@ -208,7 +210,7 @@ export class MechanicalSystem {
       const closed = clutchExchange(exchangeInput);
       const uncoupled = omega+exchangeInput.engineImpulse/engineInertia;
       const demand = Math.abs(closed.engineSpeed-uncoupled)*engineInertia/dt;
-      const grip = demand>0 ? Math.min(1,Math.min(capacity,nativeParameters?.ClutchF ?? capacity)/demand) : 1;
+      const grip = demand>0 ? Math.max(0,Math.min(1,Math.min(capacity,nativeParameters?.ClutchF ?? capacity)/demand)) : 1;
       const exchange = clutchExchange({...exchangeInput,clutch:1-grip});
       this.rpm = Math.max(0,exchange.engineSpeed*30/Math.PI);
       if (this.running && this.rpm < Math.max(250,idle*0.35)) this.running=false;
