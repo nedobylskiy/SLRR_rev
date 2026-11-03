@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
 import { OsdButtonNative, osdHitDepth } from '../src/runtime/osd-button-native';
 import type { OsdElement } from '../src/osd/osd-layer';
+import { GameTypeNative } from '../src/runtime/game-type-native';
+import { PhysicsRefNative } from '../src/runtime/physics-ref-native';
 
 const object = (className: string, fields: Record<string, JavaValue> = {}) =>
   jv(className.split('.').at(-1)!, { className, fields: new Map(Object.entries(fields)) });
@@ -45,7 +47,10 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
     return { node, setText() {}, setResource() {}, setBounds(_x, _y, _width, _height, nextDepth) { depth = nextDepth; },
       show() { visible = true; }, hide() { visible = false; } };
   } };
+  const resources = new GameTypeNative(jvm, () => {});
+  const worldPhysics = new PhysicsRefNative(jvm, resources);
   const bridge = new OsdButtonNative(jvm, surface, undefined, undefined, () => 4 / 3);
+  bridge.setWorldPhysics(worldPhysics);
   const osd = object('java.render.Osd', {
     vpAspect: jv('float', 4 / 3), vpWidth: jv('float', 1), vpHeight: jv('float', 1), cam: jv('Camera', null),
   });
@@ -54,9 +59,16 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   const vector = object('java.render.Vector', { elementData: jv('Object[]', [gadget]), elementCount: jv('int', 1) });
   const group = object('java.render.Group', { osd, gadget: vector, active: jv('int', 1) });
   const groupRef = jv('ResourceRef', group.value);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', group, []);
   const nil = jv('Ypr', null);
   jvm.natives.invoke('java.util.resource.PhysicsRef', 'createBox', physics,
     [groupRef, jv('float', 3.917), jv('float', 2.938), jv('float', 0.001), jv('String', ' ')]);
+  const second = object('java.util.resource.PhysicsRef');
+  jvm.natives.invoke('java.util.resource.PhysicsRef', 'createBox', second,
+    [groupRef, jv('float', 1), jv('float', 1), jv('float', 0.001), jv('String', ' ')]);
+  const id = (ref: JavaValue) => jvm.natives.invoke('java.util.resource.ResourceRef', 'id', ref, [])!.value;
+  assert.notEqual(id(physics), 0, 'OSD boxes must not match the world hover sentinel');
+  assert.notEqual(id(physics), id(second), 'inventory slots have distinct native hit IDs');
   const position = object('java.lang.Vector3', { x: jv('float', 0), y: jv('float', 0), z: jv('float', -0.002) });
   jvm.natives.invoke('java.util.resource.PhysicsRef', 'setMatrix', physics, [position, nil]);
   assert.equal(depth, osdHitDepth(-0.002, bounds[2], bounds[3]));

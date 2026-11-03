@@ -634,3 +634,22 @@ test('a modded source with duplicate signatures uses its last declaration', asyn
   await jvm.loadClass('demo.Main');
   assert.equal(jvm.invoke(jvm.construct('demo.Main', []), 'value').value, 2);
 });
+
+test('SLRR this chaining can select an inherited constructor beside child overloads', async () => {
+  const source = `package demo;
+    class Base { int value; Base(int n) { value = n; } }
+    class Child extends Base {
+      int initialized; int marker = ++initialized;
+      Child(int n, int extra) { this(n); value += extra; }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'Types.java', source } : null });
+  await jvm.loadClass('demo.Child');
+  for (const child of [jvm.construct('demo.Child', [jv('int', 20), jv('int', 7)]),
+    await jvm.constructAsync('demo.Child', [jv('int', 20), jv('int', 7)])]) {
+    assert.equal(jvm.get(child, 'value').value, 27);
+    assert.equal(jvm.get(child, 'initialized').value, 1);
+    assert.equal(jvm.get(child, 'marker').value, 1);
+  }
+  assert.throws(() => jvm.construct('demo.Child', [jv('String', 'invalid'), jv('int', 1)]));
+});

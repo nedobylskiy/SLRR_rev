@@ -38,6 +38,8 @@ export class OsdButtonNative {
       const box = {
         group, width: Number(args[1].value), height: Number(args[2].value), label: String(args[4].value ?? ''),
       };
+      if (!this.worldPhysics) throw new Error('PhysicsRef OSD backend is not connected');
+      this.worldPhysics.createReference(receiver, group, box.label);
       this.boxes.set(this.requireObject(receiver), box);
       this.activeBoxes.add(box);
       return nil();

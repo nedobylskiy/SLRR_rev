@@ -349,10 +349,10 @@ export class SlrrJvm implements JavaHost {
     throw new Error(`Native constructor missing: ${className}(${args.map(arg => arg.type).join(',')})`);
   }
 
-  /** Some SLRR decompilations call a grandparent's constructor through super(...). */
+  /** SLRR chained this/super calls may select a constructor declared by an ancestor. */
   private resolveSuperConstructor(entry: LoadedClass, target: 'super' | 'this', args: JavaValue[]):
     { selected: LoadedClass; skipped: LoadedClass[] } {
-    if (target !== 'super' || !args.length) return { selected: entry, skipped: [] };
+    if (!args.length) return { selected: entry, skipped: [] };
     const constructors = entry.parsed.methods.filter(method => method.name === entry.parsed.name);
     if (!constructors.length || this.selectMethod(constructors, args, entry.name))
       return { selected: entry, skipped: [] };
