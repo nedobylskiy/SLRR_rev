@@ -65,6 +65,25 @@ export class GameTypeNative {
     private readonly resourceScriptIsA?: (script: string, pack: string | null, base: string) => Promise<boolean>,
     private readonly resourceSize?: (receiver: JavaValue) => Promise<number>) {
     const resourceRef = 'java.util.resource.ResourceRef';
+    jvm.natives.registerAsync(resourceRef, 'load', [], async ({ receiver }) => {
+      if (receiver.value == null) return voidValue();
+      const node = this.requireResource(receiver);
+      const identity = this.resolveResourceIdentity(node.typeId);
+      const pack = node.resourcePack ?? identity?.pack;
+      if (pack) {
+        await this.loadResourcePack?.(pack);
+        const definition = this.catalogResource(pack, node.typeId);
+        if (!definition) throw new Error(`ResourceRef.load: resource 0x${(node.typeId >>> 0).toString(16)} missing in ${pack}`);
+        node.resourcePack = definition.pack;
+        node.resourceScript = definition.script ?? null;
+        if (!(node instanceof GameObject)) node.resourceType = definition.type;
+      }
+      // Render buffers/textures remain demand-loaded by the renderer. This call
+      // resolves the resource binding; it must not instantiate its Java script
+      // again or replace the existing native object and its children.
+      if (node instanceof RenderObject) this.notifyRenderChanged(node);
+      return voidValue();
+    });
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
     });
@@ -393,8 +412,19 @@ export class GameTypeNative {
     // Build 940 also passes ResourceRef[] elements to the GameRef-typed native factory.
     jvm.natives.registerAsync(gameRef, 'create', ['GameRef', 'ResourceRef', 'String', 'String'],
       ({ receiver, args }) => createFromResource(receiver, args));
-    jvm.natives.register(gameRef, 'create_native', ['GameRef', 'GameRef', 'String', 'String'], ({ receiver, args }) =>
-      this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]));
+    jvm.natives.registerAsync(gameRef, 'create_native', ['GameRef', 'GameRef', 'String', 'String'], async ({ receiver, args }) => {
+      const type = this.getResource(args[1]);
+      this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
+      const node = this.require(receiver);
+      node.resourcePack = type?.resourcePack ?? this.resolveResourceIdentity(node.typeId)?.pack ?? null;
+      if (node.resourcePack) {
+        await this.loadResourcePack?.(node.resourcePack);
+        const definition = this.catalogResource(node.resourcePack, node.typeId);
+        node.resourceScript = definition?.script ?? null;
+        if (definition?.cfgPath) await this.configureUnscriptedResource?.(receiver, definition.cfgPath);
+      }
+      return voidValue();
+    });
     const getInfo = (receiver: JavaValue, query: number, index = 0): JavaValue => {
       const node = this.require(receiver);
       switch (query) {
