@@ -61,7 +61,8 @@ export class GameTypeNative {
     private readonly loadResourcePack?: (pack: string) => Promise<void>,
     private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined,
     private readonly renderRemoved?: (node: RenderObject) => void,
-    private readonly configureUnscriptedResource?: (receiver: JavaValue, cfgPath: string) => Promise<void>) {
+    private readonly configureUnscriptedResource?: (receiver: JavaValue, cfgPath: string) => Promise<void>,
+    private readonly resourceScriptIsA?: (script: string, pack: string | null, base: string) => Promise<boolean>) {
     const resourceRef = 'java.util.resource.ResourceRef';
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
@@ -328,6 +329,26 @@ export class GameTypeNative {
     });
 
     const gameRef = 'java.util.resource.GameRef';
+    const isScripted = async (receiver: JavaValue, args: readonly JavaValue[]) => {
+      if (receiver.value == null) return jv('int', 0);
+      const node = this.requireResource(receiver);
+      if (!node.resourceScript && node.resourcePack && this.loadResourcePack) {
+        await this.loadResourcePack(node.resourcePack);
+        const definition = this.catalogResource(node.resourcePack, node.typeId);
+        node.resourceScript = definition?.script ?? null;
+      }
+      if (!node.resourceScript) return jv('int', 0);
+      if (args[0]?.value == null) return jv('int', 1);
+      const base = String(args[0].value);
+      if (!this.resourceScriptIsA) throw new Error('GameRef.isScripted requires a resource script class resolver');
+      return jv('int', await this.resourceScriptIsA(node.resourceScript, node.resourcePack, base) ? 1 : 0);
+    };
+    // Resource tree traversal returns ResourceRef handles; the original scripts
+    // also query their script type before creating a GameRef instance.
+    for (const owner of [resourceRef, gameRef]) {
+      jvm.natives.registerAsync(owner, 'isScripted', ['String'], ({ receiver, args }) => isScripted(receiver, args));
+      jvm.natives.registerAsync(owner, 'isScripted', [], ({ receiver }) => isScripted(receiver, []));
+    }
     const createFromResource = async (receiver: JavaValue, args: readonly JavaValue[]): Promise<JavaValue> => {
       const type = this.getResource(args[1]);
       if (type?.resourcePack && !type.resourceScript && this.loadResourcePack) {

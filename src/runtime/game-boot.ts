@@ -226,10 +226,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
-  const gameTypes = new GameTypeNative(jvm, report, node => {
-    if (!osdRectangles?.sync(node)) renderChanged?.(node);
-  }, resourceCatalog,
-    async (script, typeId, pack) => {
+  const readResourceScript = async (script: string, pack: string | null) => {
       const compiled = normalizePath(script);
       const sourcePath = compiled.endsWith('.class')
         ? compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java')
@@ -260,6 +257,23 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       if (pack && assets.byPath.has(normalizePath(pack)))
         sourcePacks.set(normalizePath(source.path), await assets.pack(pack));
       await jvm.loadClass(className);
+      return { className, simpleName, content };
+  };
+  const resourceScripts = new Map<string, ReturnType<typeof readResourceScript>>();
+  const loadResourceScript = (script: string, pack: string | null) => {
+    const key = `${pack ?? ''}|${script}`;
+    let loaded = resourceScripts.get(key);
+    if (!loaded) {
+      loaded = readResourceScript(script, pack); resourceScripts.set(key, loaded);
+      void loaded.catch(() => resourceScripts.delete(key));
+    }
+    return loaded;
+  };
+  const gameTypes = new GameTypeNative(jvm, report, node => {
+    if (!osdRectangles?.sync(node)) renderChanged?.(node);
+  }, resourceCatalog,
+    async (script, typeId, pack) => {
+      const { className, simpleName, content } = await loadResourceScript(script, pack);
       const cfgPath = pack && gameTypes.catalogResource(pack, typeId)?.cfgPath;
       const cfg = cfgPath && assets.byPath.has(cfgPath)
         ? parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath))) : null;
@@ -277,6 +291,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     async (receiver, cfgPath) => {
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);
+    }, async (script, pack, base) => {
+      const { className } = await loadResourceScript(script, pack);
+      return jvm.isInstance(jv(className, { className, fields: new Map() }), base);
     });
   const physicsRefs = new PhysicsRefNative(jvm, gameTypes);
   osdButtons.setWorldPhysics(physicsRefs);

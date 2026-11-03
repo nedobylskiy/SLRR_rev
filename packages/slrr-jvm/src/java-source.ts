@@ -185,6 +185,7 @@ export class JavaSourceMachine {
     const initializer: SourceMethod = { owner: cls.name, name: '<fields>', parameters: [], result: 'void', isStatic: false,
       body: { kind: 'block', statements: [] }, line: 0 };
     for (const field of cls.fields.filter(field => field.isStatic === staticOnly)) {
+      if (!staticOnly && !field.expr && (receiver.value as { fields?: Map<string, JavaValue> } | null)?.fields?.has(field.name)) continue;
       try {
         const value = field.expr ? await this.expressionAsync(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
         this.host.set(receiver, field.name, coerce(field.type, value));
@@ -204,6 +205,7 @@ export class JavaSourceMachine {
     const initializer: SourceMethod = { owner: cls.name, name: '<fields>', parameters: [], result: 'void', isStatic: false,
       body: { kind: 'block', statements: [] }, line: 0 };
     for (const field of cls.fields.filter(field => field.isStatic === staticOnly)) {
+      if (!staticOnly && !field.expr && (receiver.value as { fields?: Map<string, JavaValue> } | null)?.fields?.has(field.name)) continue;
       try {
         const value = field.expr ? this.expression(field.expr, scope, receiver, initializer) : jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null);
         this.host.set(receiver, field.name, coerce(field.type, value));

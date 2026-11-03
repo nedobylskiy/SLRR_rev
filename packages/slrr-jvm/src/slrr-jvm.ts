@@ -183,6 +183,7 @@ export class SlrrJvm implements JavaHost {
     }
     this.ensureInitialized(entry);
     const object: JavaObject = { className, fields: new Map() }, receiver = jv(entry.parsed.name, object);
+    this.allocateInstanceFields(entry, object);
     this.instanceInitialized.set(object, new Set());
     this.runConstructor(receiver, entry, args);
     return receiver;
@@ -200,9 +201,18 @@ export class SlrrJvm implements JavaHost {
     }
     await this.ensureInitializedAsync(entry);
     const object: JavaObject = { className, fields: new Map() }, receiver = jv(entry.parsed.name, object);
+    this.allocateInstanceFields(entry, object);
     this.instanceInitialized.set(object, new Set());
     await this.runConstructorAsync(receiver, entry, args);
     return receiver;
+  }
+
+  private allocateInstanceFields(entry: LoadedClass, object: JavaObject): void {
+    // All declared fields exist before any constructor can dispatch virtually.
+    // Explicit initializers still execute after their superclass constructor.
+    for (const cls of this.lineage(entry).reverse()) for (const field of cls.parsed.fields)
+      if (!field.isStatic) object.fields.set(field.name,
+        jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null));
   }
 
   private async runConstructorAsync(receiver: JavaValue, entry: LoadedClass, args: JavaValue[]): Promise<JavaValue> {
