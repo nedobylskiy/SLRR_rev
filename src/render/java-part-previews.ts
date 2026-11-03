@@ -38,7 +38,14 @@ export class JavaPartPreviews {
     for (const [node, preview] of this.views) if (!wanted.has(node)) {
       this.release(preview); this.views.delete(node); this.revision++;
     }
-    if (!cameras.length) { if (this.renderer) this.renderer.domElement.hidden = true; this.stamp = ''; return; }
+    if (!cameras.length) {
+      if (this.renderer && !this.renderer.domElement.hidden) {
+        // Clear the last composited image as well as hiding its DOM surface.
+        this.renderer.setScissorTest(false); this.renderer.clear();
+        this.renderer.domElement.hidden = true;
+      }
+      this.stamp = ''; return;
+    }
     if (!this.renderer) {
       this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));

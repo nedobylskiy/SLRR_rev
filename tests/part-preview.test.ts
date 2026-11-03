@@ -9,6 +9,21 @@ import { RenderObject } from '../src/runtime/render-object';
 import { javaPartPreviewCameras } from '../src/runtime/java-part-preview';
 import type { BootResult } from '../src/runtime/game-boot';
 import { jv, type JavaValue } from 'slrr-jvm';
+import { JavaPartPreviews } from '../src/render/java-part-previews';
+
+test('installing the last inventory item clears the old canvas once and hides it', () => {
+  const calls: unknown[] = [];
+  const canvas = { hidden: false };
+  const state = { result: { cameras: { entries: () => [] } }, views: new Map(), stamp: 'old thumbnail',
+    renderer: { domElement: canvas, setScissorTest: (value: boolean) => calls.push(value), clear: () => calls.push('clear') } };
+  const render = (JavaPartPreviews.prototype as unknown as { render: () => void }).render;
+  render.call(state);
+  assert.deepEqual(calls, [false, 'clear'], 'clear the full surface, including the previously occupied slot');
+  assert.equal(canvas.hidden, true);
+  assert.equal(state.stamp, '', 'a later removal must redraw even at the same camera pose');
+  render.call(state);
+  assert.equal(calls.length, 2, 'empty inventories do not submit repeated GPU clears');
+});
 
 test('paging keeps only the newest camera in a preview slot and ignores inactive viewports', () => {
   const viewport = { active: true }, viewport2 = { active: false };
