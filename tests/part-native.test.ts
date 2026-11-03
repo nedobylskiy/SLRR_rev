@@ -150,7 +150,20 @@ test('CFG slots connect parts through Java install commands and expose both side
   const vector = jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
     [['x', jv('float', 4)], ['y', jv('float', 0)], ['z', jv('float', 0)]]) });
   jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
-  assert.ok(Math.abs(parts.assemblyCenterOfMass(car).x - 320 / 1080) < 1e-10);
+  assert.ok(Math.abs(parts.assemblyCenterOfMass(car).x - 480 / 1080) < 1e-10);
+  // Reapplying saved drag offsets resets to the CFG mount instead of accumulating.
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
+  assert.ok(Math.abs(parts.assemblyCenterOfMass(car).x - 480 / 1080) < 1e-10);
+  for (const axis of ['x', 'y', 'z']) jvm.set(vector, axis, jv('float', 0));
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
+  assert.deepEqual(parts.slotOverrides(car).get(401)?.position, [2, 0, 0]);
+  assert.ok(parts.assemblyCenterOfMass(car).distanceTo(center) < 1e-10);
+  const zeroRotation = jv('Ypr', { className: 'java.lang.Ypr', fields: new Map(
+    ['y', 'p', 'r'].map(axis => [axis, jv('float', 0)])) });
+  // Original Part.load supplies a zero Ypr for an unadjusted part. Keep its CFG rotation.
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, zeroRotation]);
+  assert.ok(parts.assemblyCenterOfMass(car).distanceTo(center) < 1e-10);
+  assert.ok(Math.abs(parts.slotOverrides(car).get(401)!.rotation![0] - Math.PI / 2) < 1e-10);
   // A separately created chassis without CFG masses has a deterministic zero center.
   const empty = ref('java.game.parts.bodypart.Chassis'); create(empty, root, 0x159);
   assert.deepEqual(parts.assemblyCenterOfMass(empty).toArray(), [0, 0, 0]);

@@ -2,7 +2,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
 import type { PartConfig, CfgSlot } from '../formats/cfg';
-import { Matrix4, Vector3 } from 'three';
+import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { slotMatrix } from '../engine/slot-frames';
 
 interface InstalledSlot { child: ResourceObject; mate: number }
@@ -125,7 +125,16 @@ export class PartNative {
       const rotation = read(args[2], ['y', 'p', 'r']);
       if ([...(position ?? []), ...(rotation ?? [])].some(value => !Number.isFinite(value)))
         throw new Error('Invalid part slot position');
-      state.positions.set(id, { position, rotation });
+      const slot = state.slots.find(slot => slot.id === id);
+      // Part.load passes the saved drag offset, not an absolute CFG mount.
+      // Reset to the prototype on every call so repeated loads cannot accumulate it.
+      const adjustedRotation = slot && rotation ? new Euler().setFromQuaternion(
+        new Quaternion().setFromEuler(new Euler(slot.rotation[1], slot.rotation[0], slot.rotation[2], 'YXZ'))
+          .multiply(new Quaternion().setFromEuler(new Euler(rotation[1], rotation[0], rotation[2], 'YXZ'))), 'YXZ') : undefined;
+      if (slot) state.positions.set(id, {
+        position: position ? slot.position.map((base, axis) => base + position[axis]) as [number, number, number] : undefined,
+        rotation: adjustedRotation ? [adjustedRotation.y, adjustedRotation.x, adjustedRotation.z] : undefined,
+      });
       return jv('void', undefined);
     });
     // Some stock part resources have no script binding and GameRef.create returns a
