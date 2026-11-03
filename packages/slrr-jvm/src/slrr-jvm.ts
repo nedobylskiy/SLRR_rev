@@ -474,8 +474,7 @@ export class SlrrJvm implements JavaHost {
   }
 
   call(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): JavaValue {
-    const object = this.object(receiver);
-    const className = fromClass ? this.resolveName(fromClass) : object?.className ?? (receiver.type === 'class' ? this.resolveName(String(receiver.value)) : this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
+    const className = this.callClass(receiver, fromClass);
     if (!className) throw new Error(`Java call target unavailable: ${receiver.type}.${name}`);
     const argumentTypes = args.map(arg => arg.type);
     const visited = new Set<string>();
@@ -506,8 +505,7 @@ export class SlrrJvm implements JavaHost {
   }
 
   async callAsync(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): Promise<JavaValue> {
-    const object = this.object(receiver);
-    const className = fromClass ? this.resolveName(fromClass) : object?.className ?? (receiver.type === 'class' ? this.resolveName(String(receiver.value)) : this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
+    const className = this.callClass(receiver, fromClass);
     if (!className) throw new Error(`Java call target unavailable: ${receiver.type}.${name}`);
     const argumentTypes = args.map(arg => arg.type), visited = new Set<string>();
     for (let current: string | null = className; current; current = this.classes.has(current) ? this.parent(current) : null) {
@@ -542,6 +540,16 @@ export class SlrrJvm implements JavaHost {
       if (declared) throw new Error(`Java native implementation missing: ${current}.${name}(${argumentTypes.join(',')})`);
     }
     throw new Error(`Java method/native missing: ${className}.${name}(${argumentTypes.join(',')})`);
+  }
+
+  private callClass(receiver: JavaValue, fromClass?: string): string | undefined {
+    if (fromClass) return this.resolveName(fromClass);
+    if (receiver.type === 'class') return this.resolveName(String(receiver.value));
+    // String storage remains primitive even when a Java collection widens it
+    // to Object. Dispatch against its runtime class, as for boxed Java objects.
+    if (typeof receiver.value === 'string') return 'java.lang.String';
+    return this.object(receiver)?.className
+      ?? (this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
   }
 
   parent(name: string): string | null {

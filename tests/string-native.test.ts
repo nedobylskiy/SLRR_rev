@@ -27,7 +27,8 @@ test('Garage numeric slider labels execute the Java printValue(String) body and 
 test('recovered getParams/trim preserve ROC tokens returned as Object values by a Vector', async () => {
   const source = `package java.lang; import java.util.Vector;
     class String {
-      public native int length(); public native String token(int i, String separators);
+      public native int length(); public native String token(int i, String separators); public native int intValue();
+      public int decodeROC() { return scanf().lastElement().intValue(); }
       public static String getParams(Vector arg0) {
         String local1; int i = 0;
         while (i < arg0.size()) { if (arg0.elementAt(i) instanceof String) { local1 += arg0.elementAt(i); local1 += "\\t"; } i++; }
@@ -41,7 +42,8 @@ test('recovered getParams/trim preserve ROC tokens returned as Object values by 
       public String trim() { return trim(1); }
     }`;
   const vector = `package java.util; class Vector { Object[] data = new Object[8]; int count;
-    void addElement(Object v) { data[count++] = v; } int size() { return count; } Object elementAt(int i) { return data[i]; } }`;
+    void addElement(Object v) { data[count++] = v; } int size() { return count; } Object elementAt(int i) { return data[i]; }
+    Object lastElement() { return data[count - 1]; } }`;
   const repaired = repairDecompiledSource('system/scripts/lang/decompiled/String.java', source);
   assert.equal(repairDecompiledSource('mods/src/String.java', source), source, 'mod sources are not rewritten');
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'java.lang.String'
@@ -52,6 +54,9 @@ test('recovered getParams/trim preserve ROC tokens returned as Object values by 
   const params = await jvm.invokeAsync(jv('class', 'java.lang.String'), 'getParams', [values]);
   assert.equal(params.value, '3\t1\t2\t0\t');
   assert.equal((await jvm.invokeAsync(params, 'trim')).value, '3\t1\t2\t');
+  assert.equal((await jvm.invokeAsync(jv('String', '3\t1\t2\t42'), 'decodeROC')).value, 42);
+  assert.equal(jvm.invoke(jv('Object', '17'), 'intValue').value, 17);
+  assert.equal((await jvm.invokeAsync(jv('Object', '17'), 'intValue')).value, 17);
 });
 
 test('native String operations coexist with methods from the original Java source', async () => {
