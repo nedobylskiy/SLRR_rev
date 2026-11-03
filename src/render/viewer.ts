@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
+import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -504,6 +505,7 @@ export class Viewer {
         for (const extra of part.definition.additionalModels ?? []) {
           const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
           sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
+          sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
           group.add(sub);
           await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
         }
@@ -554,6 +556,7 @@ export class Viewer {
       group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       group.visible = !group.userData.partLoading && this.partVisible(part);
+      applyCfgRenderChannels(group, world.lightMask);
     }
   }
   pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
@@ -593,6 +596,7 @@ export class Viewer {
         const submodel = new THREE.Group();
         submodel.matrixAutoUpdate = false;
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
+        submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
         group.add(submodel);
         warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
         if (generation !== this.generation) return warnings;
@@ -771,6 +775,7 @@ export class Viewer {
   }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
+      applyCfgRenderChannels(group, part.world.lightMask);
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
       group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
@@ -951,6 +956,8 @@ export class Viewer {
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
         this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
+      root.world.lightMask = (root.world.lightMask & ~3) | (input.brake ? 1 : 0)
+        | (crash instanceof Vehicle3D && crash.suspension.mechanics?.gear === -1 ? 2 : 0);
       this.syncWorld(softParts);
       for (const [part, helper] of vehicleBounds) {
         if (!helper.visible) continue;
@@ -1042,6 +1049,7 @@ export class Viewer {
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
+      root.world.lightMask &= ~3;
       panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }

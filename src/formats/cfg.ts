@@ -12,7 +12,7 @@ export interface PartConfig {
   brakePower?: [number, number];
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -65,6 +65,10 @@ export function parsePartConfig(source: string): PartConfig {
         if (render === undefined) { render = resource; renderPose = poseValue; }
         break;
       }
+      case 'flags':
+        if (result.renders.length) result.renders.at(-1)!.flags = ((result.renders.at(-1)!.flags ?? 0) | integer(0)) & 0x1ff;
+        else result.unknown.push({ line, command, args });
+        break;
       case 'lod':
         if (result.renders.length) result.renders.at(-1)!.lod = [integer(0), integer(1)];
         else result.unknown.push({ line, command, args });

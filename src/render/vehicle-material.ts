@@ -5,10 +5,11 @@ export interface VehicleReflectionUniforms {
   environment: { value: Texture | null }; available: { value: number }; dynamic: { value: number };
 }
 /** Original authored diffuse mix and additive 2D reflection pass; no tinting of the whole car atlas. */
-export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBasicMaterial, mesh: Pick<ScxMesh, 'reflectionIndex' | 'reflectionStrength' | 'reflectionMap'>,
+export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBasicMaterial, mesh: Pick<ScxMesh, 'reflectionIndex' | 'reflectionStrength' | 'reflectionMap' | 'materialType'>,
   uniforms: VehicleReflectionUniforms, detail?: Texture, reflection?: Texture) {
   const previous = material.onBeforeCompile, key = material.customProgramCacheKey();
   const strength = 0.5 * Math.max(0, Math.min(1, Number.isFinite(mesh.reflectionStrength) ? mesh.reflectionStrength! : 0.5));
+  const masked = mesh.materialType === 0x15 && !!detail;
   const painted = !!material.userData.paintDefault;
   const reflected = mesh.reflectionIndex !== undefined || !!reflection || painted;
   if (reflected && 'roughness' in material) {
@@ -32,8 +33,10 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
       shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 slrrDetailUv; varying vec2 vSlrrDetailUv;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSlrrDetailUv = slrrDetailUv;');
       shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D slrrDetail; varying vec2 vSlrrDetailUv;')
-        .replace('#include <map_fragment>', '#include <map_fragment>\nvec4 slrrDetailColor = texture2D(slrrDetail, vSlrrDetailUv); diffuseColor.rgb = mix(diffuseColor.rgb, slrrDetailColor.rgb, slrrDetailColor.a);');
+        .replace('#include <map_fragment>', '#include <map_fragment>\nvec4 slrrDetailColor = texture2D(slrrDetail, vSlrrDetailUv);\nvec3 slrrPaintEncoded = sRGBTransferOETF(vec4(diffuseColor.rgb, 1.0)).rgb;\nvec3 slrrDetailEncoded = sRGBTransferOETF(vec4(slrrDetailColor.rgb, 1.0)).rgb;\ndiffuseColor.rgb = sRGBTransferEOTF(vec4(mix(slrrPaintEncoded, slrrDetailEncoded, slrrDetailColor.a), 1.0)).rgb;');
     }
+    if (masked) shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>',
+      '#include <lights_fragment_end>\nreflectedLight.indirectSpecular *= 1.0 - slrrDetailColor.a;');
     if (reflected) {
       const authored = !generated;
       if (authored) shader.vertexShader = shader.vertexShader
@@ -45,11 +48,11 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
           vec2 slrrEnvUv = ${authored ? 'vSlrrReflectionUv' : 'vec2(slrrRay.x * 0.5 - slrrYaw / 6.28318530718, -slrrRay.y * 0.5 + 0.5)'};
           slrrEnvUv = slrrEnvUv * slrrReflectionTransform.xy + slrrReflectionTransform.zw;
           vec3 slrrEnvironment = texture2D(slrrReflection, slrrEnvUv).rgb;
-          float slrrReflectionWeight = ${strength.toFixed(6)} * slrrReflectionAvailable * (1.0 - slrrRealReflections);
+          float slrrReflectionWeight = ${strength.toFixed(6)} * slrrReflectionAvailable * (1.0 - slrrRealReflections)${masked ? " * (1.0 - slrrDetailColor.a)" : ""};
           ${painted ? 'outgoingLight = mix(outgoingLight, slrrEnvironment, slrrReflectionWeight * 0.5);' : 'outgoingLight += slrrEnvironment * slrrReflectionWeight;'}
           #include <opaque_fragment>`);
     }
   };
-  material.customProgramCacheKey = () => `${key}|vehicle-layers:${!!detail}:${reflected}:${mesh.reflectionMap?.channel}:${!!reflection}:${painted}:${strength}`;
+  material.customProgramCacheKey = () => `${key}|vehicle-layers:${!!detail}:${reflected}:${mesh.reflectionMap?.channel}:${!!reflection}:${painted}:${masked}:${strength}`;
   material.needsUpdate = true;
 }

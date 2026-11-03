@@ -21,7 +21,9 @@ test('authored detail blends over paint while reflections remain an independent 
   configureVehicleMaterial(material, { reflectionIndex: 3, reflectionStrength: 0.35 }, uniforms, detail, reflection);
   const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <map_fragment>\n#include <opaque_fragment>' };
   material.onBeforeCompile(shader as any, {} as any);
-  assert.match(shader.fragmentShader, /mix\(diffuseColor.rgb, slrrDetailColor.rgb, slrrDetailColor.a\)/);
+  assert.match(shader.fragmentShader, /mix\(slrrPaintEncoded, slrrDetailEncoded, slrrDetailColor.a\)/);
+  assert.match(shader.fragmentShader, /sRGBTransferOETF/);
+  assert.match(shader.fragmentShader, /sRGBTransferEOTF/);
   assert.match(shader.fragmentShader, /0.175000/);
   assert.equal((shader.uniforms as any).slrrRealReflections, uniforms.dynamic);
   const preview = previewMaterial(material);
@@ -79,4 +81,16 @@ test('a bound reflection texture still uses its authored UVs on painted panels',
   const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <opaque_fragment>' };
   material.onBeforeCompile(shader as any, {} as any);
   assert.match(shader.vertexShader, /attribute vec2 slrrReflectionUv/);
+});
+
+
+test('stock masked paint material suppresses environment reflections on opaque detail regions', () => {
+  const material = new MeshStandardMaterial(); material.userData.paintDefault = 'default_white.png';
+  configureVehicleMaterial(material, { materialType: 0x15, reflectionIndex: 2, reflectionStrength: 0.3 },
+    { environment: { value: null }, available: { value: 1 }, dynamic: { value: 0 } }, new Texture());
+  const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>',
+    fragmentShader: '#include <common>\n#include <map_fragment>\n#include <lights_fragment_end>\n#include <opaque_fragment>' };
+  material.onBeforeCompile(shader as any, {} as any);
+  assert.match(shader.fragmentShader, /slrrRealReflections\) \* \(1.0 - slrrDetailColor.a\)/);
+  assert.match(shader.fragmentShader, /reflectedLight.indirectSpecular \*= 1.0 - slrrDetailColor.a/);
 });

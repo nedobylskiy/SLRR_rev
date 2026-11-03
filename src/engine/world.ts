@@ -42,7 +42,7 @@ export interface JavaInstalledPart {
 export interface PartDefinition {
   key: ResourceKey; alias: string; script?: string; cfgPath: string; config: PartConfig;
   model?: { path: string; textures: string[] };
-  additionalModels?: { model: { path: string; textures: string[] }; pose?: CfgPose }[];
+  additionalModels?: { model: { path: string; textures: string[] }; pose?: CfgPose; flags?: number }[];
   mechanics?: MechanicalProfile;
 }
 export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${key.id}`;
@@ -74,6 +74,8 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  /** Active CFG render channels: brake=1, reverse=2, running lights=4, indicators=16. */
+  lightMask = 0;
   javaPowertrain?: JavaStockSelection['powertrain'];
   wheelRefs: (WheelRefState | undefined)[] = [];
   create(definition: PartDefinition) {
@@ -189,7 +191,7 @@ export class PartFactory {
         const model = renderId === undefined ? undefined : await this.assets.modelForResource(canonical.pack, renderId);
         const extraRenders = secondaryRenders(config);
         const additionalModels = (await Promise.all(extraRenders.map(async render => {
-          try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose }; }
+          try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose, flags: render.flags }; }
           catch (error) {
             if (/has no external SCX\/render\/mesh/.test(String(error))) return undefined;
             throw error;
