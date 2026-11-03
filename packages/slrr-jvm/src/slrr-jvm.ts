@@ -622,7 +622,19 @@ export class SlrrJvm implements JavaHost {
   }
 
   private parameterScore(parameter: string, argument: JavaValue, sourceCall = false): number {
-    if (argument.value === null) return ['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long'].includes(parameter) ? Infinity : 5;
+    if (argument.value === null) {
+      if (['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long'].includes(parameter)) return Infinity;
+      if (argument.type === 'Object' || argument.type === 'java.lang.Object') return 5; // untyped null literal
+      const wanted = this.resolveName(parameter), declared = this.resolveName(argument.type);
+      if (wanted === declared) return 0;
+      if (parameter === 'Object' || wanted === 'java.lang.Object') return 20;
+      const entry = this.classes.get(declared);
+      if (!entry) return Infinity;
+      const lineage = this.lineage(entry);
+      const distance = lineage.findIndex(cls => cls.name === wanted);
+      if (distance >= 0) return distance;
+      return lineage.some(cls => this.implementsInterface(cls, wanted)) ? 1 : Infinity;
+    }
     if (parameter === 'int' && argument.type === 'ResourceRef' && typeof argument.value === 'object'
       && 'id' in argument.value && !('fields' in argument.value)) return 1;
     if (parameter === argument.type || this.resolveName(parameter) === this.resolveName(argument.type)) return 0;

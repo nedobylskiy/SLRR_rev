@@ -5,7 +5,7 @@ import { GameTypeNative } from '../src/runtime/game-type-native';
 import { PartNative } from '../src/runtime/part-native';
 import { parsePartConfig } from '../src/formats/cfg';
 
-test('native install reports engine and nested parts through Java addpart/getScriptInstance callbacks', async () => {
+for (const preassembled of [false, true]) test(`native install reports engine and nested parts through Java callbacks (${preassembled ? 'loaded assembly' : 'stock assembly'})`, async () => {
   const sources: Record<string, string> = {
     'java.game.parts.Part': `package java.game.parts; import java.util.resource.GameRef;
       class Part extends GameRef {
@@ -36,10 +36,11 @@ test('native install reports engine and nested parts through Java addpart/getScr
   parts.configure(chassis, parsePartConfig('slot 0 0 0 0 0 0 401\nattach 0x2 19'));
   parts.configure(engine, parsePartConfig('slot 0 0 0 0 0 0 19\nslot 0 0 0 0 0 0 40\nattach 0x3 1'));
   parts.configure(crank, parsePartConfig('slot 0 0 0 0 0 0 1'));
-  const install = (child: typeof engine, parent: typeof engine) => jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', child,
-    [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${resources.get(chassis)!.resourceId} 0 ${resources.get(parent)!.resourceId} 0`)]);
+  const install = (child: typeof engine, parent: typeof engine, root = chassis) => jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', child,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${resources.get(root)!.resourceId} 0 ${resources.get(parent)!.resourceId} 0`)]);
   assert.equal((await jvm.invokeAsync(chassis, 'hasEngine')).value, 0);
-  await install(engine, chassis); await install(crank, engine);
+  if (preassembled) { await install(crank, engine, engine); await install(engine, chassis); }
+  else { await install(engine, chassis); await install(crank, engine); }
   assert.equal((await jvm.invokeAsync(chassis, 'hasEngine')).value, 1);
   assert.equal(jvm.get(chassis, 'count').value, 2, 'the chassis tracks nested parts too');
   assert.equal(jvm.get(engine, 'installs').value, 1); assert.equal(jvm.get(crank, 'installs').value, 1);

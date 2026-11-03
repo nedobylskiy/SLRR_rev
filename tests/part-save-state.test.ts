@@ -1,0 +1,44 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { SlrrJvm, jv } from 'slrr-jvm';
+import { GameTypeNative } from '../src/runtime/game-type-native';
+import { PartNative } from '../src/runtime/part-native';
+import { ChassisNative } from '../src/runtime/chassis-native';
+import { FileNative } from '../src/runtime/file-native';
+import { MemoryKeyValue } from '../src/runtime/key-value';
+import { VirtualFileSystem } from '../src/runtime/virtual-file-system';
+import { parseSdat } from '../src/formats/sdat';
+
+test('part mesh identity and opaque damage data survive save-native access without affecting other parts', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {});
+  new PartNative(jvm, resources); new ChassisNative(jvm, resources);
+  const fs = await VirtualFileSystem.load(new MemoryKeyValue()); new FileNative(jvm, fs, resources);
+  const ref = () => jv('Part', { className: 'java.game.parts.Part', fields: new Map() });
+  const part = ref(), other = ref();
+  const call = (method: string, args: ReturnType<typeof jv>[] = [], target = part) =>
+    jvm.natives.invoke('java.game.parts.Part', method, target, args)!;
+  assert.equal(call('getMesh').value, 0);
+  const mesh = resources.remountSavedResource('parts/test.rpk', 0x55);
+  assert.equal(call('setMesh', [mesh]).value, 1);
+  assert.equal(call('getMesh').value, mesh.value);
+  assert.deepEqual(call('getMesh').resource, { pack: 'parts/test.rpk', id: 0x55 });
+  assert.equal(call('getMesh', [], other).value, 0);
+  assert.equal(call('getSlotDamage', [jv('int', 2)]).value, null);
+  call('setSlotDamage', [jv('int', 2), jv('String', 'opaque:slot-data')]);
+  assert.equal(call('getSlotDamage', [jv('int', 2)]).value, 'opaque:slot-data');
+  assert.equal(call('getSlotDamage', [jv('int', 2)], other).value, null);
+  call('setSlotDamage', [jv('int', 2), jv('String', null)]);
+  assert.equal(call('getSlotDamage', [jv('int', 2)]).value, null);
+  const chassisOwner = 'java.game.parts.bodypart.Chassis';
+  jvm.natives.invoke(chassisOwner, 'setWheelDamage', part, [jv('int', 3), jv('String', 'opaque:wheel-data')]);
+  assert.equal(jvm.natives.invoke(chassisOwner, 'getWheelDamage', part, [jv('int', 3)])!.value, 'opaque:wheel-data');
+  const resource = jv('ResourceRef', { className: 'java.util.resource.ResourceRef', fields: new Map() });
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', resource, [call('getMesh')]);
+  const file = jv('File', { className: 'java.io.File', fields: new Map([['name', jv('String', 'save/mesh')]]) });
+  jvm.natives.invoke('java.io.File', 'open', file, [jv('int', 1)]);
+  jvm.natives.invoke('java.io.File', 'write', file, [resource]);
+  jvm.natives.invoke('java.io.File', 'close', file, []);
+  assert.deepEqual([...parseSdat(fs.read('save/mesh')!).packs], [[1, 'parts/test.rpk']]);
+  resources.dispose();
+});

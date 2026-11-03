@@ -30,6 +30,8 @@ export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
   private readonly texture = new WeakMap<JavaObject, number>();
+  private readonly mesh = new WeakMap<JavaObject, JavaValue>();
+  private readonly slotDamage = new WeakMap<JavaObject, Map<number, string>>();
   private readonly renderType = new WeakMap<JavaObject, number>();
   private readonly slots = new WeakMap<ResourceObject, PartSlots>();
   private readonly configs = new WeakMap<JavaObject, PartConfig | null>();
@@ -123,6 +125,30 @@ export class PartNative {
     });
     jvm.natives.register(owner, 'getTexture', [], ({ receiver }) =>
       jv('int', this.texture.get(receiver.value as JavaObject) ?? 0));
+    // The mesh binding is seeded from the CFG's mesh directive and may be
+    // replaced per instance. It is distinct from the CFG render resource ID.
+    jvm.natives.register(owner, 'getMesh', [], ({ receiver }) =>
+      this.mesh.get(receiver.value as JavaObject) ?? jv('int', 0));
+    jvm.natives.register(owner, 'setMesh', ['int'], ({ receiver, args }) => {
+      const id = Number(args[0].value);
+      if (!Number.isInteger(id)) throw new Error('Invalid part mesh resource ID');
+      this.mesh.set(receiver.value as JavaObject, { ...args[0], type: 'int', value: id | 0 });
+      return jv('int', 1);
+    });
+    jvm.natives.register(owner, 'getSlotDamage', ['int'], ({ receiver, args }) =>
+      jv('String', this.slotDamage.get(receiver.value as JavaObject)?.get(Number(args[0].value)) ?? null));
+    jvm.natives.register(owner, 'setSlotDamage', ['int', 'String'], ({ receiver, args }) => {
+      const object = receiver.value as JavaObject;
+      const damage = this.slotDamage.get(object) ?? new Map<number, string>();
+      const index = Number(args[0].value);
+      if (!Number.isInteger(index) || index < 0) throw new Error('Invalid part slot damage index');
+      if (args[1].value == null) damage.delete(index);
+      else damage.set(index, String(args[1].value));
+      this.slotDamage.set(object, damage);
+      // Stored opaque data for original Part.save/load; applying slot damage
+      // to live physical attachment strength is not implemented yet.
+      return jv('void', undefined);
+    });
     jvm.natives.register(owner, 'setTexture', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part texture resource ID');
@@ -317,8 +343,17 @@ export class PartNative {
           const car = this.carNode(this.gameTypes.reference(child));
           if (car) {
             const carHandle = this.gameTypes.reference(car);
-            if ((carHandle.value as JavaObject)?.fields.has('attachedParts'))
-              await this.jvm.invokeAsync(carHandle, 'addpart', [this.gameTypes.reference(child)]);
+            if ((carHandle.value as JavaObject)?.fields.has('attachedParts')) {
+              const notify = async (installed: ResourceObject): Promise<void> => {
+                const handle = this.gameTypes.reference(installed);
+                if ((handle.value as JavaObject)?.fields.has('attachedParts'))
+                  await this.jvm.invokeAsync(carHandle, 'addpart', [handle]);
+                // Part.load builds a loose engine's children before installing
+                // the assembled engine onto the chassis.
+                for (const nested of installed.children) await notify(nested);
+              };
+              await notify(child);
+            }
           }
           const childHandle = this.gameTypes.reference(child);
           if ((childHandle.value as JavaObject)?.fields.has('attachedParts'))

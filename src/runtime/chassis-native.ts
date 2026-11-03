@@ -37,10 +37,23 @@ export class ChassisNative {
   private readonly exhaustMinVolume = new WeakMap<JavaObject, number>();
   private readonly steerWheel = new WeakMap<JavaObject, [number, number]>();
   private readonly mileage = new WeakMap<JavaObject, number>();
+  private readonly wheelDamage = new WeakMap<JavaObject, Map<number, string>>();
 
   constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative,
     readBounds?: ReturnType<typeof import('./resource-size').resourceBoundsReader>) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    jvm.natives.register(owner, 'getWheelDamage', ['int'], ({ receiver, args }) =>
+      jv('String', this.wheelDamage.get(receiver.value as JavaObject)?.get(Number(args[0].value)) ?? null));
+    jvm.natives.register(owner, 'setWheelDamage', ['int', 'String'], ({ receiver, args }) => {
+      const object = receiver.value as JavaObject, index = Number(args[0].value);
+      if (!Number.isInteger(index) || index < 0) throw new Error('Invalid chassis wheel damage index');
+      const damage = this.wheelDamage.get(object) ?? new Map<number, string>();
+      if (args[1].value == null) damage.delete(index);
+      else damage.set(index, String(args[1].value));
+      this.wheelDamage.set(object, damage);
+      // Preserve the save payload. Decoding it into suspension damage is pending.
+      return jv('void', undefined);
+    });
     for (const method of ['getMin', 'getMax'] as const) {
       jvm.natives.registerAsync(owner, method, [], async ({ receiver }) => {
         if (!readBounds) throw new Error(`Chassis.${method} requires a visual bounds reader`);

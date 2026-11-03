@@ -284,6 +284,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const takesId = constructors.some(match => /^\s*int\s+\w+\s*$/.test(match[1]));
       const instance = await jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);
       partNative.configure(instance, cfg);
+      if (pack && cfg?.mesh !== undefined) {
+        const mesh = await assets.resourceLocation(pack, cfg.mesh);
+        jvm.natives.invoke('java.game.parts.Part', 'setMesh', instance,
+          [gameTypes.remountSavedResource(mesh.packPath, mesh.id)]);
+      }
       return instance;
     }, async pack => {
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
@@ -293,6 +298,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     async (receiver, cfgPath) => {
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);
+      const pack = gameTypes.getResource(receiver)?.resourcePack;
+      if (pack && cfg.mesh !== undefined) {
+        const mesh = await assets.resourceLocation(pack, cfg.mesh);
+        jvm.natives.invoke('java.game.parts.Part', 'setMesh', receiver,
+          [gameTypes.remountSavedResource(mesh.packPath, mesh.id)]);
+      }
     }, async (script, pack, base) => {
       const { className } = await loadResourceScript(script, pack);
       return jvm.isInstance(jv(className, { className, fields: new Map() }), base);
