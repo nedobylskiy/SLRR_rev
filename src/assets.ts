@@ -26,6 +26,24 @@ export function normalizeResourcePackPath(pack: string) {
 export class Assets {
   readonly byPath = new Map<string, Asset>();
   private packs = new Map<string, Promise<RpkPack>>();
+  private readonly textureFiles = new Map<string, number>();
+  private readonly texturePack: RpkPack = { version: 0x200, dependencies: [], entries: [], warnings: [] };
+  /** Runtime textures share the ordinary resource/sourcefile path; pixels remain lazy. */
+  registerTexture(path: string): { pack: string; id: number } {
+    path = normalizePath(path);
+    if (!this.byPath.has(path)) throw new Error(`Texture asset missing: ${path}`);
+    let id = this.textureFiles.get(path);
+    if (id === undefined) {
+      id = this.textureFiles.size + 1;
+      if (id > 0xffff) throw new Error('Runtime texture resource space exhausted');
+      const data = new TextEncoder().encode(`sourcefile ${path}\n`);
+      this.texturePack.entries.push({ superId: 0, typeId: id, type: 7, flags: 0,
+        compatibility: 0, offset: 0, size: data.length, alias: path, data });
+      this.textureFiles.set(path, id);
+      this.packs.set('__runtime/textures.rpk', Promise.resolve(this.texturePack));
+    }
+    return { pack: '__runtime/textures.rpk', id };
+  }
   constructor(readonly files: Asset[], private reader: (path: string) => Promise<Uint8Array>) {
     for (const file of files) this.byPath.set(normalizePath(file.path), file);
   }

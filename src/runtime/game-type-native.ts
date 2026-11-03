@@ -519,6 +519,14 @@ export class GameTypeNative {
     return node instanceof GameObject ? node : undefined;
   }
   getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
+  /** File-created texture handles retain a stable RID when Java passes only id(). */
+  bindTexture(receiver: JavaValue, identity: ResourceIdentity): void {
+    const node = this.allocate(receiver), id = 0x60000000 + identity.id;
+    this.savedResources.set(id, identity);
+    node.resourceId = node.typeId = id;
+    node.resourcePack = identity.pack;
+    node.resourceType = 7;
+  }
   resolveResourceIdentity(id: number): ResourceIdentity | undefined {
     return this.savedResources.get(id) ?? this.resolvePackedResource?.(id);
   }

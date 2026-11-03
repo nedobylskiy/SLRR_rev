@@ -308,6 +308,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const { className } = await loadResourceScript(script, pack);
       return jvm.isInstance(jv(className, { className, fields: new Map() }), base);
     }, resourceSizeReader(assets, () => gameTypes, readResourceBounds));
+  jvm.natives.register('java.util.resource.ResourceRef', 'makeTexture', ['ResourceRef', 'String'], ({ receiver, args }) => {
+    const path = normalizePath(String(args[1].value ?? ''));
+    const identity = assets.registerTexture(path);
+    resourceCatalog.registerTexture(identity.pack, identity.id, path);
+    gameTypes.bindTexture(receiver, identity);
+    return jv('void', undefined);
+  });
   const physicsRefs = new PhysicsRefNative(jvm, gameTypes);
   osdButtons.setWorldPhysics(physicsRefs);
   jvm.natives.register('java.util.resource.GroundRef', 'setFog', ['int', 'float', 'float'], ({ receiver, args }) => {
