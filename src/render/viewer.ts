@@ -3,6 +3,7 @@ import { previewMaterial } from './preview-material';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
+import { createVehicleFlare } from './vehicle-flare';
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -228,6 +229,7 @@ export class Viewer {
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
     this.camera.near = 0.01; this.camera.far = 1000; this.camera.updateProjectionMatrix();
     this.model.traverse(obj => {
+      if (obj instanceof THREE.Sprite) { obj.material.map?.dispose(); obj.material.dispose(); return; }
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -600,6 +602,21 @@ export class Viewer {
         group.add(submodel);
         warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
         if (generation !== this.generation) return warnings;
+      }
+      for (const light of part.definition.lights ?? []) {
+        // A light is commonly placed at the lens centre, inside its SCX bounds.
+        // Clear that lens before depth testing, rather than drawing through walls.
+        let lensRadius = 0;
+        for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+          lensRadius = Math.max(lensRadius, Math.hypot(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]) * 0.01);
+        const flare = await createVehicleFlare(light.source, assets, Math.min(0.25, lensRadius));
+        if (generation !== this.generation || world.disposed) { flare.material.map?.dispose(); flare.material.dispose(); return warnings; }
+        const lamp = new THREE.Group(); lamp.name = 'CFG lamp flare'; lamp.matrixAutoUpdate = false;
+        // Cancel centimetre mesh scaling: RPK light positions are in metres.
+        lamp.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
+          .multiply(light.pose ? poseMatrix(light.pose) : new THREE.Matrix4());
+        lamp.userData.lightFlags = light.flags ?? 0; lamp.visible = cfgRenderVisible(light.flags, world.lightMask);
+        lamp.add(flare); group.add(lamp);
       }
     }
     if (generation === this.generation && !world.disposed) {
@@ -1087,6 +1104,7 @@ export class Viewer {
   }
   private disposeGroup(group: THREE.Group): void {
     group.traverse(object => {
+      if (object instanceof THREE.Sprite) { object.material.map?.dispose(); object.material.dispose(); return; }
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
