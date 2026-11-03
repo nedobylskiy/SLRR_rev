@@ -62,7 +62,9 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
       const config = parsePartConfig('category 2\nslot 0 0 0 0 0 0 101\nslottype 101');
       config.wheels.push({ position: [0, -0.4, 0], rotation: [0, 0, 0], radius: 0.3, parameters: [] });
       const root = world.create({ key, alias: 'test', cfgPath: 'test.cfg', config });
-      root.children.set(101, world.create({ key, alias: 'wheel', cfgPath: 'wheel.cfg', config: parsePartConfig('category 3') }));
+      const wheel = world.create({ key, alias: 'wheel', cfgPath: 'wheel.cfg', config: parsePartConfig('category 3\nslot 0 0 0 0 0 0 1') });
+      world.install(root, 101, wheel, 1);
+      config.wheels[0].parameters = [1];
       world.create({ key, alias: 'engine', cfgPath: 'engine.cfg', config: parsePartConfig('category 1') });
       const model = { world, root, warnings: [] as string[] }; built.push(model); return model;
     },
@@ -86,6 +88,24 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.equal(built[0].root.renderVisible, true);
   assert.equal(built[0].root.children.get(101)!.renderVisible, false, 'each category retains its own filter');
   await filter(3, 0);
+  const steer = async (value: string) => {
+    await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', vehicles[0].car,
+      [jv('ResourceRef', null), jv('int', 16), jv('String', `setsteer ${value}`)]);
+    renderer.update(map);
+  };
+  const wheel = built[0].root.children.get(101)!;
+  await steer('-0.7');
+  assert.equal(vehicles[0].node.steeringInput, -0.7);
+  assert.ok(Math.abs(wheel.local.elements[8]) > 0.1, 'Java command turns the displayed wheel');
+  const turned = wheel.local.clone();
+  renderer.update(map);
+  assert.deepEqual(wheel.local, turned, 'display updates must not accumulate steering');
+  await steer('0');
+  assert.equal(wheel.local.elements[8], 0, 'setsteer 0 restores the neutral slot frame');
+  await steer('2');
+  assert.equal(vehicles[0].node.steeringInput, 1);
+  await assert.rejects(() => steer('NaN'), /Invalid steering command/);
+  await steer('0');
   renderer.update(map, { height: () => 2 }); await settle();
   assert.ok(Math.abs(built[0].root.local.elements[13] - 2.7) < 1e-9, 'static wheel contact resolves floor penetration');
   renderer.update(map, { height: () => 5 });

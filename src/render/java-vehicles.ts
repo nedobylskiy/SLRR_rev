@@ -3,6 +3,7 @@ import type { Assets } from '../assets';
 import { normalizeResourcePackPath } from '../assets';
 import { PartFactory } from '../engine/world';
 import { poseMatrix } from '../engine/transforms';
+import { applyDisplaySteering } from '../engine/display-steering';
 import { Vector3 } from 'three';
 import type { MapTerrain } from '../engine/map-terrain';
 import type { BootResult } from '../runtime/game-boot';
@@ -131,6 +132,8 @@ export class JavaSceneVehicles {
       built.root.local.elements[13] += lift;
     }
     if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision });
+    const steering = node.steeringInput ?? chassis?.steeringInput;
+    if (steering !== undefined) applyDisplaySteering(built.root, steering);
     for (const part of built.world.parts.values()) {
       const category = part.definition.config.category ?? 0;
       part.renderVisible = (node.renderFilters.get(category) ?? chassis?.renderFilters.get(category) ?? 0) !== 2;

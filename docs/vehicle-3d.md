@@ -46,6 +46,8 @@ In the initial 33-part prototype, stiffness was `k = M g / (4 × sag)`, where `s
 
 Wheel meshes move along the actual suspension travel, spinning and turning through the original slot frames. The installed strut, spring, shock absorber and brake of each wheel follow its travel and rotation as a rigid group, but do not rotate with the tire. The stabilizer is fixed to the body. This visual scheme preserves the deformed mounts, but does not yet model the change in spring length and independent kinematics of the levers. The steering wheel is animated using the CFG steering frame.
 
+Parked Java vehicles also accept `GameRef.command("setsteer -0.7")`, as used by the original Garage, PaintBooth and CarMarket scripts. The command stores a normalized steering input clamped to [-1, 1]. Display wheels and hub/brake frames use the car's `maxsteer`, Ackermann length and each wheel's steering factor; nonsteering axles and suspension arms retain their mounting poses. The interior steering wheel follows its CFG steering frame. Updates rebuild the pose from the current slot transforms so repeated frames do not accumulate rotation, and `setsteer 0` restores neutral. Active driving continues to use the driving solver and ControlSet input.
+
 ## Chassis and collisions
 
 `RigidBody3D` stores the world position of the center of mass, quaternion, linear velocity and angular momentum. The center of mass is estimated by the CFG body positions of the installed parts, inertia is estimated by the size of the main mesh as a box. The contact impulse acts through the complete inverse inertia tensor in the world system. The vertical component is no longer discarded. Angular momentum is integrated into the world system, orientation is normalized.

@@ -515,6 +515,12 @@ export class GameTypeNative {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
             if (verb === 'render') node.cameraRendering = true;
             if (verb === 'hide') node.cameraRendering = false;
+            if (verb === 'setsteer') {
+              const words = args[2].value.trim().split(/\s+/);
+              const value = Number(words[1]);
+              if (words.length !== 2 || !Number.isFinite(value)) throw new Error(`Invalid steering command: ${args[2].value}`);
+              node.steeringInput = Math.max(-1, Math.min(1, value));
+            }
             if (verb === 'filter') {
               const match = /^filter\s+(\d+)\s+([012])\s*$/.exec(args[2].value.trim());
               if (!match) throw new Error(`Invalid render filter command: ${args[2].value}`);

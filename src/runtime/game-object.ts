@@ -16,6 +16,8 @@ export class GameObject extends ResourceObject {
   collisionEnabled = false;
   cameraRendering = false;
   readonly renderFilters = new Map<number, number>();
+  /** Normalized car steering command, used by parked display vehicles. */
+  steeringInput?: number;
   poseRevision = 0;
   position = zeroVector();
   orientation = zeroOrientation();
