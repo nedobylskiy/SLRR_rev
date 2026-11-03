@@ -444,7 +444,16 @@ export class GameTypeNative {
         // object's ID so Java camera commands can target its root transform.
         case 1: return jv('int', node.resourceId); // GII_BONE
         case 5: return jv('int', node.resourceId); // GII_ID
-        case 6: return jv('int', node.typeId); // GII_TYPE
+        case 6: { // GII_TYPE: catalog copies pass this int into new GameRef(id).
+          const value = jv('int', node.typeId);
+          if (node.resourcePack) {
+            const identity = this.resolveResourceIdentity(node.typeId);
+            value.resource = { pack: node.resourcePack, id: identity
+              && normalizeResourcePackPath(identity.pack) === normalizeResourcePackPath(node.resourcePack)
+              ? identity.id : node.typeId & 0xffff };
+          }
+          return value;
+        }
         case 11: return jv('int', 100); // GII_SIZE: native fallback when no visual reader is attached.
         case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
         case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
