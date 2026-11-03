@@ -2,6 +2,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
 import { createWheelRefState, registerWheelRefNatives, type WheelRefState } from './wheel-ref-native';
+import type { CfgWheel } from '../formats/cfg';
 
 const projectedFields = [
   'engine_inertia', 'engine_mass', 'engine_rpm_idle', 'maxRPM', 'RPM_limit',
@@ -25,7 +26,7 @@ interface ScriptSfxTable { items: ScriptSfxItem[] }
 
 /** Steering limits owned by each interpreted Chassis instance. */
 export class ChassisNative {
-  private readonly initialByClass = new Map<string, { maxSteer: number; ackermann: number }>();
+  private readonly initialByClass = new Map<string, { maxSteer: number; ackermann: number; wheels: readonly CfgWheel[] }>();
   private readonly maxSteer = new WeakMap<JavaObject, number>();
   private readonly ackermann = new WeakMap<JavaObject, number>();
   private readonly updates = new WeakMap<JavaObject, ChassisUpdateState>();
@@ -135,7 +136,17 @@ export class ChassisNative {
       const object = receiver.value as JavaObject;
       let states = this.wheels.get(object);
       if (!states) { states = []; this.wheels.set(object, states); }
-      const state = states[index] ??= createWheelRefState();
+      let state = states[index];
+      if (!state) {
+        state = createWheelRefState();
+        const cfg = this.initialByClass.get(object.className)?.wheels[index];
+        if (cfg) {
+          state.position = [...cfg.position];
+          state.orientation = [...cfg.rotation];
+          if (cfg.radius !== undefined) state.radius = cfg.radius;
+        }
+        states[index] = state;
+      }
       const wheel: JavaObject = { className: 'java.game.parts.WheelRef', fields: new Map() };
       this.wheelHandles.set(wheel, state);
       return jv('WheelRef', wheel);
@@ -241,8 +252,8 @@ export class ChassisNative {
   }
 
   /** Called immediately before the resource's Java constructor executes. */
-  prepare(className: string, maxSteer: number, ackermann = 2): void {
-    this.initialByClass.set(className, { maxSteer, ackermann });
+  prepare(className: string, maxSteer: number, ackermann = 2, wheels: readonly CfgWheel[] = []): void {
+    this.initialByClass.set(className, { maxSteer, ackermann, wheels });
   }
 
   getMaxSteer(receiver: JavaValue): number {

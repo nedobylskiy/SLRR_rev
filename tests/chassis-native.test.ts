@@ -172,11 +172,21 @@ test('Chassis indexes four wheels and each WheelRef wrapper shares its wheel sta
   await jvm.loadClass('java.game.parts.bodypart.Chassis');
   const car = jvm.construct('java.game.parts.bodypart.Chassis', []);
   jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', car, []);
+  native.prepare('java.game.parts.bodypart.Chassis', 0.7, 2, parsePartConfig(
+    'wheel -0.7 -0.6 -1.3 0 0 0\nwheel 0.7 -0.6 -1.3 0 0 0').wheels);
   assert.equal(jvm.invoke(car, 'getWheels').value, 4);
   assert.equal(jvm.invoke(car, 'getWheel', [jv('int', -1)]).value, null);
   assert.equal(jvm.invoke(car, 'getWheel', [jv('int', 4)]).value, null);
   const first = jvm.invoke(car, 'getWheel', [jv('int', 1)]);
   const again = jvm.invoke(car, 'getWheel', [jv('int', 1)]);
+  const pos = () => jvm.natives.invoke('java.game.parts.WheelRef', 'getPos', again, [])!;
+  assert.equal(jvm.get(pos(), 'x').value, 0.7);
+  assert.equal(jvm.get(pos(), 'z').value, -1.3, 'WheelRef starts at the original chassis CFG mount');
+  const moved = jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+    ['x', 'y', 'z'].map((axis, index) => [axis, jv('float', [0.8, -0.5, -1.2][index])])) });
+  jvm.natives.invoke('java.game.parts.WheelRef', 'setPos', first, [moved]);
+  jvm.invoke(car, 'getWheel', [jv('int', 1)]);
+  assert.equal(jvm.get(pos(), 'x').value, 0.8, 'later getWheel calls preserve Java adjustments');
   assert.notEqual(first.value, again.value);
   jvm.invoke(first, 'setDrive', [jv('float', 0.7)]);
   assert.equal(jvm.invoke(again, 'getDrive').value, Math.fround(0.7));

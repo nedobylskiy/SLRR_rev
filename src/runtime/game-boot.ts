@@ -279,7 +279,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const cfgPath = pack && gameTypes.catalogResource(pack, typeId)?.cfgPath;
       const cfg = cfgPath && assets.byPath.has(cfgPath)
         ? parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath))) : null;
-      chassisNative.prepare(className, cfg?.maxSteer ?? 0.7, cfg?.ackermann ?? 2);
+      chassisNative.prepare(className, cfg?.maxSteer ?? 0.7, cfg?.ackermann ?? 2, cfg?.wheels);
       const constructors = [...content.matchAll(new RegExp(`\\b${simpleName}\\s*\\(([^)]*)\\)`, 'g'))];
       const takesId = constructors.some(match => /^\s*int\s+\w+\s*$/.test(match[1]));
       const instance = await jvm.constructAsync(className, takesId ? [jv('int', typeId)] : []);
