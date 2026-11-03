@@ -63,6 +63,7 @@ test('viewer drops only removed proxies and does not reload meshes already on sc
   const proxies = new Map([[built.root, keptGroup], [removed, removedGroup]]), collisions = new Map([[removed, {}]]);
   const disposed: Group[] = [];
   const viewer = { generation: 0, proxies, collisionMeshes: collisions, disposeGroup: (group: Group) => disposed.push(group) } as unknown as Viewer;
+  Object.setPrototypeOf(viewer, Viewer.prototype);
   built.world.parts.delete(removed.id);
   Viewer.prototype.syncWorldVisuals.call(viewer, built.world);
   assert.deepEqual(disposed, [removedGroup]);
@@ -70,6 +71,10 @@ test('viewer drops only removed proxies and does not reload meshes already on sc
   assert.equal(removedGroup.parent, null);
   assert.equal(proxies.get(built.root), keptGroup);
   assert.equal(collisions.has(removed), false);
+  built.root.renderVisible = false;
+  Viewer.prototype.syncWorldVisuals.call(viewer, built.world);
+  assert.equal(keptGroup.visible, false, 'filtered parts also leave the raycast candidate set');
   await Viewer.prototype.showWorld.call(viewer, built.world, factory.assets, true, true);
   assert.equal(proxies.get(built.root), keptGroup);
+  assert.equal(keptGroup.visible, false, 'publishing new meshes must preserve Java visibility filters');
 });

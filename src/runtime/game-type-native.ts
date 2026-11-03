@@ -53,6 +53,7 @@ export class GameTypeNative {
   private partCompatibilityReader?: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
   private renderCountReader?: (receiver: JavaValue) => number;
+  private partCategoryReader?: (receiver: JavaValue) => number;
   private driveTypeReader?: (receiver: JavaValue) => number;
   private removalReader?: (receiver: JavaValue) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
@@ -448,6 +449,7 @@ export class GameTypeNative {
         case 25: return jv('int', Math.round(this.axisReader?.(receiver, index) ?? 0)); // GII_AXIS
         case 48: return jv('int', this.renderCountReader?.(receiver) ?? 0); // GII_RENDER: CFG camera count.
         case 52: return jv('int', this.driveTypeReader?.(receiver) ?? 0); // GII_CAR_DRIVETYPE
+        case 55: return jv('int', this.partCategoryReader?.(receiver) ?? 0); // GII_PART_CATEGORY: original CFG category.
         case 41: return jv('int', this.removalReader?.(receiver) ?? -1); // GII_GETOUT_OK
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
@@ -502,6 +504,11 @@ export class GameTypeNative {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
             if (verb === 'render') node.cameraRendering = true;
             if (verb === 'hide') node.cameraRendering = false;
+            if (verb === 'filter') {
+              const match = /^filter\s+(\d+)\s+([012])\s*$/.exec(args[2].value.trim());
+              if (!match) throw new Error(`Invalid render filter command: ${args[2].value}`);
+              node.renderFilters.set(Number(match[1]), Number(match[2]));
+            }
           }
         }
         await this.commandHandler?.(receiver, args[2].value);
@@ -601,6 +608,7 @@ export class GameTypeNative {
   }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
+  setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
   setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
   setRemovalReader(reader: (receiver: JavaValue) => number): void { this.removalReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {

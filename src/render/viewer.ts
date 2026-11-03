@@ -512,6 +512,7 @@ export class Viewer {
       }
       group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
+      group.visible = !group.userData.partLoading && this.partVisible(part);
     }
   }
   pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
@@ -539,7 +540,7 @@ export class Viewer {
       const collision = await loadPartCollision(assets, part.definition);
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
-      if (publishTogether) { group.visible = false; staged.push(group); }
+      if (publishTogether) { group.visible = false; group.userData.partLoading = true; staged.push(group); }
       group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
@@ -555,7 +556,10 @@ export class Viewer {
         if (generation !== this.generation) return warnings;
       }
     }
-    if (generation === this.generation && !world.disposed) for (const group of staged) group.visible = true;
+    if (generation === this.generation && !world.disposed) {
+      for (const group of staged) delete group.userData.partLoading;
+      this.syncWorldVisuals(world);
+    }
     if (generation === this.generation && !keepScene) this.fit();
     return warnings;
   }
@@ -717,10 +721,11 @@ export class Viewer {
   }
   showInternals(value: boolean) {
     this.internalView = value;
-    for (const [part, group] of this.proxies) {
-      const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
-      group.visible = !value || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200;
-    }
+    for (const [part, group] of this.proxies) group.visible = this.partVisible(part);
+  }
+  private partVisible(part: EnginePart): boolean {
+    const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
+    return part.renderVisible && (!this.internalView || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200);
   }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {

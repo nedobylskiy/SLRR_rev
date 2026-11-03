@@ -5,6 +5,20 @@ import { PartNative } from '../src/runtime/part-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { parsePartConfig } from '../src/formats/cfg';
 
+test('CFG categories reach the native query used by the Java mechanic inventory', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {}), parts = new PartNative(jvm, resources);
+  for (const category of [1, 2, 3]) {
+    const part = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', part, []);
+    const config = parsePartConfig(`category ${category}`);
+    assert.equal(config.category, category);
+    parts.configure(part, config);
+    const value = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', part, [jv('int', 55), jv('int', 0)]);
+    assert.equal(value?.value, category);
+  }
+});
+
 test('Java part wear and tear belong to each instance', async () => {
   const source = `package java.game.parts; class Part {
     native float getWear(); native float setWear(float value);

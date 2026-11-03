@@ -48,6 +48,7 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 /** Assets are shared; instances and slot occupancy belong exclusively to a world. */
 export class EnginePart {
   nativeId?: number;
+  renderVisible = true;
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
   readonly renderAdjustment = new Matrix4();

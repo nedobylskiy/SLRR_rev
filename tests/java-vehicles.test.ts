@@ -59,10 +59,11 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
     stock: async (key, options) => {
       assert.ok(options?.javaSelection, 'use installed Java tree even for incomplete cars');
       const world = new EngineWorld();
-      const config = parsePartConfig('slot 0 0 0 0 0 0 101\nslottype 101');
+      const config = parsePartConfig('category 2\nslot 0 0 0 0 0 0 101\nslottype 101');
       config.wheels.push({ position: [0, -0.4, 0], rotation: [0, 0, 0], radius: 0.3, parameters: [] });
       const root = world.create({ key, alias: 'test', cfgPath: 'test.cfg', config });
-      root.children.set(101, world.create({ key, alias: 'wheel', cfgPath: 'wheel.cfg', config: parsePartConfig('') }));
+      root.children.set(101, world.create({ key, alias: 'wheel', cfgPath: 'wheel.cfg', config: parsePartConfig('category 3') }));
+      world.create({ key, alias: 'engine', cfgPath: 'engine.cfg', config: parsePartConfig('category 1') });
       const model = { world, root, warnings: [] as string[] }; built.push(model); return model;
     },
   });
@@ -70,6 +71,21 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   renderer.update(map); await settle();
   assert.equal(shown.length, 1); assert.equal(built[0].root.definition.key.id, 1);
   assert.equal(built[0].root.local.elements[12], 10);
+  const filter = async (category: number, mode: number) => {
+    await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', vehicles[0].car,
+      [jv('ResourceRef', null), jv('int', 16), jv('String', `filter ${category} ${mode}`)]);
+    renderer.update(map);
+  };
+  await filter(2, 2);
+  assert.equal(built[0].root.renderVisible, false);
+  assert.equal(built[0].root.children.get(101)!.renderVisible, true);
+  await filter(3, 2);
+  assert.equal(built[0].root.children.get(101)!.renderVisible, false);
+  assert.equal([...built[0].world.parts.values()].find(part => part.definition.alias === 'engine')!.renderVisible, true);
+  await filter(2, 0);
+  assert.equal(built[0].root.renderVisible, true);
+  assert.equal(built[0].root.children.get(101)!.renderVisible, false, 'each category retains its own filter');
+  await filter(3, 0);
   renderer.update(map, { height: () => 2 }); await settle();
   assert.ok(Math.abs(built[0].root.local.elements[13] - 2.7) < 1e-9, 'static wheel contact resolves floor penetration');
   renderer.update(map, { height: () => 5 });

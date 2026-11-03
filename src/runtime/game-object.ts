@@ -15,6 +15,7 @@ export class GameObject extends ResourceObject {
   collisionActivationQueued = false;
   collisionEnabled = false;
   cameraRendering = false;
+  readonly renderFilters = new Map<number, number>();
   poseRevision = 0;
   position = zeroVector();
   orientation = zeroOrientation();

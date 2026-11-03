@@ -42,6 +42,12 @@ export class PartNative {
       child: ResourceObject, childSlot: CfgSlot) => Promise<boolean>) {
     const owner = 'java.game.parts.Part';
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
+    gameTypes.setPartCategoryReader(receiver => {
+      const node = gameTypes.getResource(receiver);
+      const canonical = node && gameTypes.reference(node);
+      return this.configs.get(receiver.value as JavaObject)?.category
+        ?? (canonical && this.configs.get(canonical.value as JavaObject)?.category) ?? 0;
+    });
     gameTypes.setPartCompatibilityReader((receiver, target, installable) => this.compatibility(receiver, target, installable));
     jvm.natives.registerAsync(owner, 'install_OK', ['GameRef','int','GameRef','int','Vector3'], async ({receiver,args}) => {
       const child = gameTypes.getResource(receiver), root = gameTypes.getResource(args[0]);

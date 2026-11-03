@@ -131,6 +131,10 @@ export class JavaSceneVehicles {
       built.root.local.elements[13] += lift;
     }
     if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision });
+    for (const part of built.world.parts.values()) {
+      const category = part.definition.config.category ?? 0;
+      part.renderVisible = (node.renderFilters.get(category) ?? chassis?.renderFilters.get(category) ?? 0) !== 2;
+    }
     this.viewer.syncWorldVisuals(built.world);
   }
 
