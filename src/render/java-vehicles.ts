@@ -4,7 +4,7 @@ import { normalizeResourcePackPath } from '../assets';
 import { PartFactory } from '../engine/world';
 import { poseMatrix } from '../engine/transforms';
 import { applyDisplaySteering } from '../engine/display-steering';
-import { Vector3 } from 'three';
+import { Euler, Quaternion, Vector3 } from 'three';
 import type { MapTerrain } from '../engine/map-terrain';
 import type { BootResult } from '../runtime/game-boot';
 import { GameObject } from '../runtime/game-object';
@@ -135,6 +135,17 @@ export class JavaSceneVehicles {
     const steering = node.steeringInput ?? chassis?.steeringInput;
     if (steering !== undefined) applyDisplaySteering(built.root, steering);
     for (const part of built.world.parts.values()) {
+      // Java camera look commands address the installed part, not its chassis.
+      // Publish the attachment transform without generating a new placement command.
+      const native = part !== built.root && part.nativeId !== undefined
+        ? this.result.gameTypes.getByResourceId(part.nativeId) : undefined;
+      if (native instanceof GameObject) {
+        const position = new Vector3(), rotation = new Quaternion(), scale = new Vector3();
+        part.matrix().decompose(position, rotation, scale);
+        const angles = new Euler().setFromQuaternion(rotation, 'YXZ');
+        native.position = { x: position.x, y: position.y, z: position.z };
+        native.orientation = { y: angles.y, p: angles.x, r: angles.z };
+      }
       const category = part.definition.config.category ?? 0;
       part.renderVisible = (node.renderFilters.get(category) ?? chassis?.renderFilters.get(category) ?? 0) !== 2;
     }

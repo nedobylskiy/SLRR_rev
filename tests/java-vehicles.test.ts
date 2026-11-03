@@ -63,6 +63,9 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
       config.wheels.push({ position: [0, -0.4, 0], rotation: [0, 0, 0], radius: 0.3, parameters: [] });
       const root = world.create({ key, alias: 'test', cfgPath: 'test.cfg', config });
       const wheel = world.create({ key, alias: 'wheel', cfgPath: 'wheel.cfg', config: parsePartConfig('category 3\nslot 0 0 0 0 0 0 1') });
+      const wheelRef = ref('java.game.parts.Part');
+      jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', wheelRef, []);
+      wheel.nativeId = gameTypes.getResource(wheelRef)!.resourceId;
       world.install(root, 101, wheel, 1);
       config.wheels[0].parameters = [1];
       world.create({ key, alias: 'engine', cfgPath: 'engine.cfg', config: parsePartConfig('category 1') });
@@ -73,6 +76,9 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   renderer.update(map); await settle();
   assert.equal(shown.length, 1); assert.equal(built[0].root.definition.key.id, 1);
   assert.equal(built[0].root.local.elements[12], 10);
+  assert.deepEqual(gameTypes.getByResourceId(built[0].root.children.get(101)!.nativeId!) instanceof GameObject, true);
+  assert.deepEqual((gameTypes.getByResourceId(built[0].root.children.get(101)!.nativeId!) as GameObject).position,
+    { x: 10, y: 0.6, z: 0 }, 'installed native part pose is available to the Java camera look command');
   const filter = async (category: number, mode: number) => {
     await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', vehicles[0].car,
       [jv('ResourceRef', null), jv('int', 16), jv('String', `filter ${category} ${mode}`)]);

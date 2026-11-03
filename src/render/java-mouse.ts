@@ -19,6 +19,7 @@ export class JavaMouse {
   private hovered?: { id: number; local: number[]; world: number[] };
   private pressed?: { id: number; x: number; y: number };
   private pointer?: number;
+  private rightOrigin?: { x: number; y: number; hit?: { id: number; local: number[]; world: number[] } };
   private x = 0;
   private y = 0;
   private dragged = false;
@@ -55,9 +56,10 @@ export class JavaMouse {
     if (event.button !== 2 || !this.controlled() || !(event.target instanceof HTMLCanvasElement)) return;
     event.preventDefault();
     this.pointer = event.pointerId; this.x = event.clientX; this.y = event.clientY;
+    this.rightOrigin = { x: event.clientX, y: event.clientY, hit: this.pick?.(event.clientX, event.clientY) };
     this.viewport.setPointerCapture(event.pointerId);
     this.result.input.setPhysicalAxis(1, 4, 1);
-    this.result.input.cursorEvent(3);
+    this.result.input.cursorEvent(3, this.rightOrigin.hit);
   };
   private move = (event: PointerEvent) => {
     if (event.pointerId !== this.pointer) {
@@ -70,8 +72,9 @@ export class JavaMouse {
       return;
     }
     const dx = event.clientX - this.x, dy = event.clientY - this.y;
-    this.x = event.clientX; this.y = event.clientY;
     if (!dx && !dy) return;
+    if (!this.dragged && Math.hypot(event.clientX - this.rightOrigin!.x, event.clientY - this.rightOrigin!.y) < 5) return;
+    this.x = event.clientX; this.y = event.clientY;
     if (!this.dragged) { this.dragged = true; this.result.input.cursorEvent(12); }
     const input = this.result.input;
     input.setPhysicalAxis(1, 0, Math.max(-1, Math.min(1, input.physicalAxis(1, 0) + dx * 0.01)));
@@ -85,12 +88,20 @@ export class JavaMouse {
         this.result.input.cursorEvent(2, hit); this.result.input.cursorEvent(5, hit);
       }
     }
-    if (event.pointerId === this.pointer && event.button === 2) this.cancel();
+    if (event.pointerId === this.pointer && event.button === 2) {
+      const origin = this.rightOrigin, dragged = this.dragged;
+      const hit = this.pick?.(event.clientX, event.clientY);
+      this.cancel();
+      if (!dragged && origin?.hit && hit?.id === origin.hit.id &&
+          Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 5)
+        this.result.input.cursorEvent(6, hit);
+    }
   };
   private cancel = () => {
     this.pressed = undefined;
     if (this.pointer === undefined) return;
     const id = this.pointer; this.pointer = undefined;
+    this.rightOrigin = undefined;
     if (this.dragged) this.result.input.cursorEvent(13);
     this.result.input.cursorEvent(4); this.dragged = false;
     for (const axis of [0, 1, 2, 4]) this.result.input.setPhysicalAxis(1, axis, 0);
