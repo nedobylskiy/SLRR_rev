@@ -6,15 +6,24 @@ import { previewScope } from './preview-scope';
 
 /** Enumerate only Java-created cameras whose isolated world contains a Part. */
 export function javaPartPreviewCameras(result: BootResult) {
+  // Native cameras at the same viewport/priority replace one another. During an
+  // async Java page update both handles can briefly remain alive.
   const views = [];
+  const latest = new Map<object, Map<number, number>>();
   for (const [ref, camera] of result.cameras.entries()) {
     const render = result.gameTypes.getRender(ref), scope = render && previewScope(render);
     const viewport = result.viewports.get(camera.viewport);
     if (!render || !scope || !viewport?.active) continue;
     const part = [...scope.children].find(node => result.jvm.isInstance(result.gameTypes.reference(node), 'java.game.parts.Part'));
-    if (part) views.push({ ref, camera, render, viewport, part });
+    if (part) {
+      let slots = latest.get(viewport);
+      if (!slots) { slots = new Map(); latest.set(viewport, slots); }
+      slots.set(camera.priority, views.length);
+      views.push({ ref, camera, render, viewport, part });
+    }
   }
-  return views;
+  return views.filter((view, index) => latest.get(view.viewport)?.get(view.camera.priority) === index)
+    .sort((a, b) => a.camera.priority - b.camera.priority);
 }
 
 export async function javaPartPreviewSelection(result: BootResult, assets: Assets, ref: JavaValue) {

@@ -9,6 +9,7 @@ import type { Viewer } from './viewer';
 
 interface Preview { signature: string; scene: THREE.Scene; camera: THREE.PerspectiveCamera;
   world?: EngineWorld; mesh?: THREE.Group; failed?: boolean }
+const PREVIEW_ZOOM = 2.25;
 
 /** One transparent, unlit WebGL surface, scissored into the viewports created by Java. */
 export class JavaPartPreviews {
@@ -59,6 +60,7 @@ export class JavaPartPreviews {
         if (preview) this.release(preview);
         preview = { signature, scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera() };
         this.views.set(view.render, preview);
+        this.revision++; // Clear the old thumbnail immediately, including while its replacement loads.
         void this.load(view.render, preview, ref);
       }
       const { position: p, orientation: o } = view.render, vp = view.viewport;
@@ -66,11 +68,12 @@ export class JavaPartPreviews {
       preview.camera.rotation.set(o.p, o.y, o.r, 'YXZ');
       preview.camera.aspect = vp.width * width / Math.max(1, vp.height * height);
       preview.camera.fov = view.camera.halfAov * 2;
+      preview.camera.zoom = PREVIEW_ZOOM;
       preview.camera.near = Math.max(0.0001, view.camera.near); preview.camera.far = view.camera.far;
       preview.camera.updateProjectionMatrix();
       stamps.push(`${view.render.id}:${p.x}:${p.y}:${p.z}:${o.y}:${o.p}:${o.r}:${vp.left}:${vp.top}:${vp.width}:${vp.height}:${view.camera.halfAov}`);
     }
-    const stamp = stamps.join('|');
+    const stamp = `${this.revision}|${stamps.join('|')}`;
     if (this.stamp === stamp || width <= 0 || height <= 0) return;
     this.stamp = stamp;
     renderer.setSize(width, height, false);
@@ -81,7 +84,7 @@ export class JavaPartPreviews {
       const vp = view.viewport, x = vp.left * width, y = (1 - vp.top - vp.height) * height;
       renderer.setViewport(x, y, vp.width * width, vp.height * height);
       renderer.setScissor(x, y, vp.width * width, vp.height * height);
-      renderer.clearDepth(); renderer.render(preview.scene, preview.camera);
+      renderer.clear(true, true, true); renderer.render(preview.scene, preview.camera);
     }
     renderer.setScissorTest(false);
   }

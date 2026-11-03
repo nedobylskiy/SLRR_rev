@@ -11,6 +11,9 @@ WebGL canvas uses scissor rectangles for the Java viewport bounds. Materials are
 unlit, retaining texture alpha, cutouts and glass. No preview lights or shadows
 affect the main scene. Static views redraw only when their contents, camera or
 viewport change; closing panels releases their scenes and geometry.
+Previews apply a 2.25x projection zoom inside the original viewport. Page changes
+clear the previous image before loading its replacement; only the latest camera
+at a given viewport and priority is submitted.
 
 HTML hotspot hover is forwarded as a native cursor event with the panel's physics
 handle. The original Mechanic/Painter thread then invokes `focusHook`. Standalone

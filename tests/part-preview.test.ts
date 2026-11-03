@@ -5,6 +5,31 @@ import { previewMaterial } from '../src/render/preview-material';
 import { previewScope } from '../src/runtime/preview-scope';
 import { GameObject } from '../src/runtime/game-object';
 import { ResourceObject } from '../src/runtime/resource-object';
+import { RenderObject } from '../src/runtime/render-object';
+import { javaPartPreviewCameras } from '../src/runtime/java-part-preview';
+import type { BootResult } from '../src/runtime/game-boot';
+import { jv, type JavaValue } from 'slrr-jvm';
+
+test('paging keeps only the newest camera in a preview slot and ignores inactive viewports', () => {
+  const viewport = { active: true }, viewport2 = { active: false };
+  const renders = new Map<JavaValue, RenderObject>();
+  const entries = [1, 2, 3].map(id => {
+    const root = new GameObject(id, 'java.util.resource.Dummy', 0, null, 'inventory'); root.setFlags(0x10);
+    new ResourceObject(id + 10, 'Part').setParent(root);
+    const render = new RenderObject(id + 20, 'Camera', null, 'preview'); render.setParent(root);
+    const ref = jv('Camera', id); renders.set(ref, render);
+    return [ref, { viewport: id === 3 ? viewport2 : viewport, priority: 1 }] as const;
+  });
+  const result = { cameras: { entries: () => entries },
+    gameTypes: { getRender: (ref: JavaValue) => renders.get(ref), reference: (part: ResourceObject) => part },
+    viewports: { get: (value: object) => value }, jvm: { isInstance: (part: ResourceObject) => part.className === 'Part' },
+  } as unknown as BootResult;
+  assert.deepEqual(javaPartPreviewCameras(result).map(view => view.ref), [entries[1][0]]);
+  entries.pop(); entries.pop();
+  assert.deepEqual(javaPartPreviewCameras(result).map(view => view.ref), [entries[0][0]]);
+  viewport.active = false;
+  assert.deepEqual(javaPartPreviewCameras(result), []);
+});
 
 test('inventory render worlds isolate lights and meshes at the nearest world root', () => {
   const garage = new GameObject(1, 'GroundRef', 0, null, 'garage'); garage.setFlags(0x10);
