@@ -2,7 +2,7 @@ import { SlrrJvm, jv, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
 import { GameTypeNative } from './game-type-native';
-import { resourceSizeReader } from './resource-size';
+import { resourceBoundsReader, resourceSizeReader } from './resource-size';
 import { MathNative } from './math-native';
 import { VectorNative } from './vector-native';
 import { ViewportNative, type ViewportSize } from './viewport-native';
@@ -270,6 +270,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     }
     return loaded;
   };
+  const readResourceBounds: ReturnType<typeof resourceBoundsReader> = resourceBoundsReader(assets, () => gameTypes);
   const gameTypes: GameTypeNative = new GameTypeNative(jvm, report, node => {
     if (!osdRectangles?.sync(node)) renderChanged?.(node);
   }, resourceCatalog,
@@ -295,7 +296,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     }, async (script, pack, base) => {
       const { className } = await loadResourceScript(script, pack);
       return jvm.isInstance(jv(className, { className, fields: new Map() }), base);
-    }, resourceSizeReader(assets, () => gameTypes));
+    }, resourceSizeReader(assets, () => gameTypes, readResourceBounds));
   const physicsRefs = new PhysicsRefNative(jvm, gameTypes);
   osdButtons.setWorldPhysics(physicsRefs);
   jvm.natives.register('java.util.resource.GroundRef', 'setFog', ['int', 'float', 'float'], ({ receiver, args }) => {
@@ -316,7 +317,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
     packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
-  chassisNative = new ChassisNative(jvm, gameTypes);
+  chassisNative = new ChassisNative(jvm, gameTypes, readResourceBounds);
   const partFactory = new PartFactory(assets);
   partNative = new PartNative(jvm, gameTypes, async (parent, parentSlot, child, childSlot) => {
     const key = (node: typeof parent) => {

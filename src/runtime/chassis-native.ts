@@ -38,8 +38,22 @@ export class ChassisNative {
   private readonly steerWheel = new WeakMap<JavaObject, [number, number]>();
   private readonly mileage = new WeakMap<JavaObject, number>();
 
-  constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
+  constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative,
+    readBounds?: ReturnType<typeof import('./resource-size').resourceBoundsReader>) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    for (const method of ['getMin', 'getMax'] as const) {
+      jvm.natives.registerAsync(owner, method, [], async ({ receiver }) => {
+        if (!readBounds) throw new Error(`Chassis.${method} requires a visual bounds reader`);
+        const bounds = await readBounds(receiver);
+        // CarInfo needs chassis-local metres, independent of its world pose.
+        // Until native scene-bound/parent-walk padding is reproduced, use the
+        // actual CFG-transformed chassis mesh bounds without guessed offsets.
+        const point = bounds?.[method === 'getMin' ? 'min' : 'max'];
+        return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+          (['x', 'y', 'z'] as const).map(axis => [axis, jv('float', Math.fround(point?.[axis] ?? 0))])
+        ) } satisfies JavaObject);
+      });
+    }
     jvm.natives.register(owner, 'getMileage', [], ({ receiver }) =>
       jv('float', this.mileage.get(this.object(receiver)) ?? 0));
     jvm.natives.register(owner, 'setMileage', ['float'], ({ receiver, args }) => {

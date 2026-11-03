@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Assets } from '../src/assets';
-import { resourceSizeReader } from '../src/runtime/resource-size';
+import { resourceBoundsReader, resourceSizeReader } from '../src/runtime/resource-size';
+import { ChassisNative } from '../src/runtime/chassis-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { SlrrJvm, jv } from 'slrr-jvm';
 
@@ -13,19 +14,30 @@ test('GII_SIZE measures centimetres from visual geometry lazily and caches only 
   data.setUint32(200, 1, true); data.setUint32(208, 1, true); data.setUint32(212, 2, true);
   let reads = 0;
   const assets = new Assets([{ path: 'mesh.scx', size: bytes.length }, { path: 'part.cfg', size: 10 }], async path => {
-    reads++; return path === 'part.cfg' ? new TextEncoder().encode('render 0x1') : bytes;
+    reads++; return path === 'part.cfg' ? new TextEncoder().encode('render 0x1 1 2 3 1.5707963267948966 0 0') : bytes;
   });
   assets.modelForResource = async () => ({ path: 'mesh.scx', textures: [] });
   const resource = { resourcePack: 'parts.rpk', typeId: 1 };
   const host = { getResource: () => resource, catalogResource: () => ({ cfgPath: 'part.cfg' }) } as unknown as GameTypeNative;
-  const read = resourceSizeReader(assets, () => host);
+  const bounds = resourceBoundsReader(assets, () => host);
+  const read = resourceSizeReader(assets, () => host, bounds);
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const native = new GameTypeNative(jvm, () => {}, undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, read);
+  new ChassisNative(jvm, native, bounds);
   const receiver = jv('GameRef', {});
   assert.equal(reads, 0);
   const query = () => jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', receiver, [jv('int', 11), jv('int', 0)]);
   assert.equal((await query())!.value, 250);
   assert.equal((await query())!.value, 250); assert.equal(reads, 2);
+  const vector = async (method: string) => {
+    const result = await jvm.natives.invokeAsync('java.game.parts.bodypart.Chassis', method, receiver, []);
+    return ['x', 'y', 'z'].map(axis => Number((result!.value as { fields: Map<string, { value: number }> }).fields.get(axis)!.value));
+  };
+  assert.deepEqual(await vector('getMin'), [1, 2, 0.5]);
+  assert.deepEqual(await vector('getMax'), [2, 2, 3]);
+  assert.equal(reads, 2, 'size and both bounds share one mesh read');
+  const copy = await bounds(receiver); copy!.min.set(99, 99, 99);
+  assert.deepEqual(await vector('getMin'), [1, 2, 0.5], 'callers cannot mutate cached bounds');
   native.dispose();
 });
