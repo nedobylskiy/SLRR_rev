@@ -25,7 +25,7 @@ export class JavaSceneVehicles {
   constructor(private readonly result: BootResult, private readonly assets: Assets,
     private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals'>,
     private readonly report: (message: string) => void,
-    private readonly factory: Pick<PartFactory, 'stock'> = new PartFactory(assets)) {}
+    private readonly factory: Pick<PartFactory, 'stock' | 'syncJavaAssembly'> = new PartFactory(assets)) {}
 
   update(map: JavaValue | null, terrain?: Pick<MapTerrain, 'height'>): void {
     if (this.disposed) return;
@@ -62,18 +62,47 @@ export class JavaSceneVehicles {
       if (player.value != null) consider(jvm.get(player, 'car'));
     } catch { /* No active Java section/player yet. */ }
     this.wanted = new Set(vehicles.keys());
+    const changed: [GameObject, JavaValue][] = [];
     for (const [node, built] of this.models) {
       if (!this.wanted.has(node)) { this.release(built); this.models.delete(node); }
-      else if (this.assemblies.get(built) !== this.signature(vehicles.get(node)!)) {
-        this.release(built); this.models.delete(node);
-      } else this.sync(node, built, vehicles.get(node)!);
+      else {
+        const ref = vehicles.get(node)!;
+        if (this.assemblies.get(built) !== this.signature(ref)) changed.push([node, ref]);
+        this.sync(node, built, ref);
+      }
     }
     if (this.loading) return;
+    const edit = changed.find(([node]) => node.resourceId === priority) ?? changed[0];
+    if (edit) {
+      this.loading = true;
+      void this.refresh(edit[0], edit[1], this.models.get(edit[0])!).finally(() => { this.loading = false; });
+      return;
+    }
     const pending = [...vehicles].filter(([node]) => !this.models.has(node) && !this.failed.has(node));
     const next = pending.find(([node]) => node.resourceId === priority) ?? pending[0];
     if (!next) return;
     this.loading = true;
     void this.load(...next).finally(() => { this.loading = false; });
+  }
+
+  private async refresh(node: GameObject, ref: JavaValue, built: BuiltVehicle): Promise<void> {
+    try {
+      const signature = this.signature(ref);
+      const selection = await javaStockSelection(this.result, this.assets, built.root.definition.key.pack, ref);
+      if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      await this.factory.syncJavaAssembly(built.root, selection);
+      if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      this.sync(node, built, ref);
+      // showWorld skips existing GPU proxies and publishes only new part meshes.
+      await this.viewer.showWorld(built.world, this.assets, true, true);
+      if (built.world.disposed) this.viewer.removeWorld(built.world);
+      else this.assemblies.set(built, signature);
+    } catch (error) {
+      if (!this.disposed && this.wanted.has(node)) {
+        this.assemblies.set(built, this.signature(ref));
+        this.report(`Java vehicle update ${node.alias}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   private sync(node: GameObject, built: BuiltVehicle, ref: JavaValue): void {

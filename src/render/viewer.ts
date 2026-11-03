@@ -472,6 +472,11 @@ export class Viewer {
   }
   syncWorldVisuals(world: EngineWorld): void {
     for (const [part, group] of this.proxies) if (part.world === world) {
+      if (world.parts.get(part.id) !== part) {
+        group.removeFromParent(); this.disposeGroup(group);
+        this.proxies.delete(part); this.collisionMeshes.delete(part);
+        continue;
+      }
       group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
     }
@@ -494,6 +499,7 @@ export class Viewer {
     const generation = this.generation, warnings: string[] = [];
     const staged: THREE.Group[] = [];
     for (const part of world.parts.values()) {
+      if (this.proxies.has(part)) continue;
       const model = part.definition.model;
       if (!model) continue;
       const parsed = parseScx(await assets.read(model.path));

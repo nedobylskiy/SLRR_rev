@@ -87,6 +87,15 @@ export class EngineWorld {
     child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
   }
+  refreshAttachment(child: EnginePart) {
+    const parent = child.parent;
+    if (!parent) return;
+    const find = (part: EnginePart, id: number) => part.definition.config.slots.find(slot =>
+      slot.id === id && (slot.attach.length || slot.compatible.length)) ?? part.definition.config.slots.find(slot => slot.id === id);
+    const mount = find(parent, child.parentSlot!), mate = find(child, child.ownSlot!);
+    if (!mount || !mate) throw new Error('Missing attachment slot');
+    child.local.copy(parent.slotFrame(mount)).multiply(child.slotFrame(mate).invert());
+  }
   detach(child: EnginePart) {
     if (this.parts.get(child.id) !== child || this.disposed) throw new Error('Part outside live world');
     const matrix = child.matrix();
@@ -102,6 +111,60 @@ export class PartFactory {
   private definitions = new Map<string, Promise<PartDefinition>>();
   private aliases = new Map<string, Promise<Set<string>>>();
   constructor(readonly assets: Assets) {}
+  /** Reconcile the interpreted tree without recreating unchanged part instances. */
+  async syncJavaAssembly(root: EnginePart, selection: JavaStockSelection): Promise<void> {
+    const world = root.world;
+    const existing = new Map([...world.parts.values()].filter(part => part !== root && part.nativeId !== undefined)
+      .map(part => [part.nativeId!, part]));
+    const desired: { node: JavaInstalledPart; parentId?: number }[] = [];
+    const visit = (nodes: JavaInstalledPart[], parentId?: number) => {
+      for (const node of nodes) {
+        if (node.nativeId === undefined) throw new Error('Installed Java part has no native ID');
+        desired.push({ node, parentId }); visit(node.children, node.nativeId);
+      }
+    };
+    visit(selection.installed);
+    const definitions = new Map<number, PartDefinition>(), source = new OriginalStock(this.assets);
+    // Resolve only new resources before changing the visible assembly.
+    for (const { node } of desired) if (!existing.has(node.nativeId!)) {
+      let definition = await this.definition(node.key);
+      if (world.mechanical) definition = { ...definition, mechanics: await source.profile(definition) };
+      if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
+      definitions.set(node.nativeId!, definition);
+    }
+    if (world.disposed) return;
+    const wanted = new Set(desired.map(({ node }) => node.nativeId!));
+    for (const [id, part] of existing) if (!wanted.has(id)) {
+      world.detach(part); world.parts.delete(part.id); existing.delete(id);
+    }
+    const added: EnginePart[] = [];
+    for (const [id, definition] of definitions) {
+      const part = world.create(definition); part.nativeId = id;
+      existing.set(id, part); added.push(part);
+    }
+    // Detach moved mounts first, allowing two parts to exchange occupied slots.
+    for (const { node, parentId } of desired) {
+      const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
+      if (part.parent && (part.parent !== parent || part.parentSlot !== node.parentSlot || part.ownSlot !== node.ownSlot)) world.detach(part);
+    }
+    const positions = (part: EnginePart, values: JavaStockSelection['rootPositions']) => {
+      part.slotPositions.clear(); part.slotRotations.clear();
+      for (const [id, pose] of values ?? []) {
+        if (pose.position) part.slotPositions.set(id, pose.position);
+        if (pose.rotation) part.slotRotations.set(id, pose.rotation);
+      }
+    };
+    positions(root, selection.rootPositions);
+    for (const { node } of desired) positions(existing.get(node.nativeId!)!, node.positions);
+    for (const { node, parentId } of desired) {
+      const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
+      part.condition = Math.max(0, Math.min(1, node.wear));
+      if (part.parent) world.refreshAttachment(part);
+      else world.install(parent, node.parentSlot, part, node.ownSlot);
+    }
+    world.wheelRefs = [...selection.wheelRefs]; world.javaPowertrain = selection.powertrain;
+    if (world.mechanical) await this.alignRunningGear(root, added);
+  }
   async definition(key: ResourceKey): Promise<PartDefinition> {
     const resolved = await this.assets.resource(key.pack, key.id);
     const canonical = { pack: normalizePath(resolved.packPath), id: resolved.entry.typeId }, cacheKey = resourceKey(canonical);
@@ -282,7 +345,12 @@ export class PartFactory {
           if (child && own) child.local.copy(root.slotFrame(slot)).multiply(child.slotFrame(own).invert());
         }
       }
-      if (options.mechanical) for (const part of world.parts.values()) {
+      if (options.mechanical) await this.alignRunningGear(root, world.parts.values());
+      return { world, root, warnings };
+    } catch (error) { world.dispose(); throw error; }
+  }
+  private async alignRunningGear(root: EnginePart, parts: Iterable<EnginePart>): Promise<void> {
+    for (const part of parts) {
         const kind = part.definition.mechanics?.kind;
         if (kind !== 'shock' && kind !== 'spring' || part.parent !== root) continue;
         const slot = root.definition.config.slots.find(s => s.id === part.parentSlot);
@@ -318,7 +386,5 @@ export class PartFactory {
           .multiply(new Matrix4().makeScale(1, length / (maxY - minY), 1))
           .multiply(new Matrix4().makeTranslation(-(minX + maxX) / 2, -minY, -(minZ + maxZ) / 2));
       }
-      return { world, root, warnings };
-    } catch (error) { world.dispose(); throw error; }
   }
 }

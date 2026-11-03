@@ -55,6 +55,7 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
     showWorld: async world => { shown.push(world); if (shown.length === 2) await new Promise<void>(resolve => { finishShow = resolve; }); return []; },
     removeWorld: world => { removed.push(world); }, syncWorldVisuals: () => {},
   }, message => assert.fail(message), {
+    syncJavaAssembly: async () => { assert.fail('unchanged vehicles must not refresh their assemblies'); },
     stock: async (key, options) => {
       assert.ok(options?.javaSelection, 'use installed Java tree even for incomplete cars');
       const world = new EngineWorld();
