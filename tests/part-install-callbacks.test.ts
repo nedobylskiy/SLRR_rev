@@ -38,9 +38,20 @@ for (const preassembled of [false, true]) test(`native install reports engine an
   parts.configure(crank, parsePartConfig('slot 0 0 0 0 0 0 1'));
   const install = (child: typeof engine, parent: typeof engine, root = chassis) => jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', child,
     [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${resources.get(root)!.resourceId} 0 ${resources.get(parent)!.resourceId} 0`)]);
+  const compatible = async (part: typeof engine, query: number, target = String(resources.get(chassis)!.resourceId)) =>
+    (await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', part,
+      [jv('int', query), jv('String', target)]))!.value;
+  assert.equal(await compatible(engine, 72), 1);
+  assert.equal(await compatible(engine, 71), 1);
+  assert.equal(await compatible(crank, 72), 0, 'a loose engine is not yet in the chassis tree');
+  assert.equal(await compatible(engine, 72, '999999'), 0);
+  assert.equal(await compatible(engine, 72, `${resources.get(chassis)!.resourceId} 999`), 0);
   assert.equal((await jvm.invokeAsync(chassis, 'hasEngine')).value, 0);
   if (preassembled) { await install(crank, engine, engine); await install(engine, chassis); }
   else { await install(engine, chassis); await install(crank, engine); }
+  assert.equal(await compatible(engine, 72), 1, 'occupied mount remains compatible');
+  assert.equal(await compatible(engine, 71), 0, 'occupied mount cannot install another engine');
+  assert.equal(await compatible(crank, 72), 1, 'compatibility traverses installed engine slots');
   assert.equal((await jvm.invokeAsync(chassis, 'hasEngine')).value, 1);
   assert.equal(jvm.get(chassis, 'count').value, 2, 'the chassis tracks nested parts too');
   assert.equal(jvm.get(engine, 'installs').value, 1); assert.equal(jvm.get(crank, 'installs').value, 1);

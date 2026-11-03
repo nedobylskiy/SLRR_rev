@@ -41,6 +41,7 @@ export class PartNative {
       child: ResourceObject, childSlot: CfgSlot) => Promise<boolean>) {
     const owner = 'java.game.parts.Part';
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
+    gameTypes.setPartCompatibilityReader((receiver, target, installable) => this.compatibility(receiver, target, installable));
     jvm.natives.register(owner, 'getSlots', [], ({ receiver }) =>
       jv('int', this.partSlots(receiver).slots.length));
     jvm.natives.register(owner, 'getSlotID', ['int'], ({ receiver, args }) => {
@@ -325,13 +326,7 @@ export class PartNative {
         if (parentState.installed.has(slot.id)) continue;
         for (const own of childState.slots) {
           if (requestedOwn && own.id !== requestedOwn) continue;
-          const parentAccepts = [...slot.attach, ...slot.compatible].some(ref =>
-            ref.slot === own.id && (ref.resource & 0xffff) === (child.typeId & 0xffff));
-          const childAccepts = [...own.attach, ...own.compatible].some(ref =>
-            ref.slot === slot.id && (ref.resource & 0xffff) === (candidate.typeId & 0xffff));
-          const compatible = this.compatibleSlots
-            ? await this.compatibleSlots(candidate, slot, child, own)
-            : parentAccepts || childAccepts;
+          const compatible = await this.matches(candidate, slot, child, own);
           if (!compatible) continue;
           child.setParent(candidate);
           parentState.installed.set(slot.id, { child, mate: own.id });
@@ -362,6 +357,35 @@ export class PartNative {
         }
       }
     }
+  }
+
+  private async matches(parent: ResourceObject, slot: CfgSlot, child: ResourceObject, own: CfgSlot): Promise<boolean> {
+    if (this.compatibleSlots) return this.compatibleSlots(parent, slot, child, own);
+    return [...slot.attach, ...slot.compatible].some(ref =>
+      ref.slot === own.id && (ref.resource & 0xffff) === (child.typeId & 0xffff))
+      || [...own.attach, ...own.compatible].some(ref =>
+        ref.slot === slot.id && (ref.resource & 0xffff) === (parent.typeId & 0xffff));
+  }
+
+  private async compatibility(receiver: JavaValue, target: JavaValue, installable: boolean): Promise<number> {
+    const [id, requestedSlot = 0] = String(target.value ?? '').trim().split(/\s+/).map(Number);
+    const root = this.gameTypes.getById(id), child = this.gameTypes.getResource(receiver);
+    if (!root || !child || root === child) return 0;
+    const ownSlots = this.partSlots(this.gameTypes.reference(child)).slots;
+    const visit = async (parent: ResourceObject): Promise<boolean> => {
+      if (parent === child) return false;
+      const state = this.partSlots(this.gameTypes.reference(parent));
+      for (const slot of state.slots) {
+        if (requestedSlot && slot.id !== requestedSlot) continue;
+        // Compatibility includes occupied mounts; installability needs a free,
+        // enabled mount. Neither query mutates the installed Java part tree.
+        if (installable && (state.disabled.has(slot.id) || state.installed.has(slot.id))) continue;
+        for (const own of ownSlots) if (await this.matches(parent, slot, child, own)) return true;
+      }
+      for (const nested of state.installed.values()) if (await visit(nested.child)) return true;
+      return false;
+    };
+    return await visit(root) ? 1 : 0;
   }
 
   private isDescendant(node: ResourceObject, ancestor: ResourceObject): boolean {

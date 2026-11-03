@@ -60,10 +60,10 @@ test('GameRef native calls update the same object created by GameType', async ()
   native('java.lang.GameType', 'createNativeInstance', child,
     [jv('GameRef', root.value), jv('int', 42), jv('String', '1,2,3'), jv('String', 'player car')]);
   assert.equal(host.get(child)?.parentId, host.get(root)?.resourceId);
-  assert.equal(native('java.util.resource.GameRef', 'getInfo', child, [jv('int', 24), jv('int', 0)]).value,
+  assert.equal((await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', child, [jv('int', 24), jv('int', 0)]))!.value,
     host.get(root)?.resourceId);
-  assert.equal(native('java.util.resource.GameRef', 'getInfo', child, [jv('int', 6), jv('int', 0)]).value, 42);
-  assert.equal(native('java.util.resource.GameRef', 'getInfo', child, [jv('int', 1), jv('int', 0)]).value,
+  assert.equal((await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', child, [jv('int', 6), jv('int', 0)]))!.value, 42);
+  assert.equal((await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', child, [jv('int', 1), jv('int', 0)]))!.value,
     host.get(child)?.resourceId);
   const byId = ref('java.util.resource.GameRef');
   native('java.util.resource.ResourceRef', 'set', byId, [jv('int', host.get(child)!.resourceId)]);

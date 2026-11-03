@@ -50,6 +50,7 @@ export class GameTypeNative {
   private animatingCallbacks = false;
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void | Promise<void>;
+  private partCompatibilityReader?: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
   private renderCountReader?: (receiver: JavaValue) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
@@ -448,11 +449,13 @@ export class GameTypeNative {
       }
     };
     for (const indexType of ['int', 'String']) {
-      if (this.resourceSize) jvm.natives.registerAsync(gameRef, 'getInfo', ['int', indexType], async ({ receiver, args }) =>
-        Number(args[0].value) === 11 ? jv('int', await this.resourceSize!(receiver))
-          : getInfo(receiver, Number(args[0].value) | 0, indexType === 'int' ? Number(args[1].value) | 0 : 0));
-      else jvm.natives.register(gameRef, 'getInfo', ['int', indexType], ({ receiver, args }) =>
-        getInfo(receiver, Number(args[0].value) | 0, indexType === 'int' ? Number(args[1].value) | 0 : 0));
+      jvm.natives.registerAsync(gameRef, 'getInfo', ['int', indexType], async ({ receiver, args }) => {
+        const query = Number(args[0].value) | 0;
+        if ((query === 71 || query === 72) && this.partCompatibilityReader)
+          return jv('int', await this.partCompatibilityReader(receiver, args[1], query === 71));
+        if (query === 11 && this.resourceSize) return jv('int', await this.resourceSize(receiver));
+        return getInfo(receiver, query, indexType === 'int' ? Number(args[1].value) | 0 : 0);
+      });
     }
     jvm.natives.register(gameRef, 'getFlags', [], ({ receiver }) => jv('int', this.require(receiver).flags));
     jvm.natives.register(gameRef, 'setFlags', ['int'], ({ receiver, args }) => {
@@ -579,6 +582,10 @@ export class GameTypeNative {
   reference(node: ResourceObject | null): JavaValue { return this.handle(node); }
   setCommandHandler(handler: (receiver: JavaValue, command: string) => void | Promise<void>): void {
     this.commandHandler = handler;
+  }
+
+  setPartCompatibilityReader(reader: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>): void {
+    this.partCompatibilityReader = reader;
   }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
