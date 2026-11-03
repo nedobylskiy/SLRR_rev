@@ -1,7 +1,9 @@
+import { STOCK_WHEEL_PARAMETERS } from '../engine/native-vehicle-physics';
 import { JavaNativeRegistry, jv, type JavaValue } from 'slrr-jvm';
 
 /** Values written by the original Tyre.java through WheelRef native methods. */
 export interface WheelRefState {
+  oppositeWheel: number;
   drive: number;
   brake: number;
   handBrake: number;
@@ -31,11 +33,11 @@ export interface WheelRefState {
 }
 
 export function createWheelRefState(): WheelRefState {
-  return { drive: 0, brake: 0, handBrake: 0, force: 0, damping: [0, 0], restLength: 0,
+  return { oppositeWheel: -1, drive: 0, brake: 0, handBrake: 0, force: 0, damping: [0, 0], restLength: 0,
     minLength: 0, maxLength: 0, steer: 0, position: [0, 0, 0], orientation: [0, 0, 0],
     arm: [], hub: [], instantCenter: [0, 0, 0, 0, 0, 0],
-    pacejka: Array(17).fill(0), sliction: 1, friction: 1, stiffness: 10,
-    maxLoad: 5000, frictionX: 1, loadSmooth: 0.5, radius: 0.32, width: 0.205,
+    pacejka: [...STOCK_WHEEL_PARAMETERS], sliction: 1.4, friction: 1.49, stiffness: 15.2,
+    maxLoad: 8000, frictionX: 1, loadSmooth: 0.4, radius: 0.32, width: 0.205,
     rollResistance: 0, bearing: 0, contactPatch: [0, 0, 0] };
 }
 
@@ -52,7 +54,7 @@ export function registerWheelRefNatives(registry: JavaNativeRegistry, owner = 'W
   one('setBrake', (w, x) => { w.brake = Math.fround(x); });
   one('setHBrake', (w, x) => { w.handBrake = Math.fround(x); });
   one('setForce', (w, x) => { w.force = Math.fround(x); });
-  one('setDamping', (w, x) => { w.damping = [Math.fround(x), Math.fround(x)]; });
+  one('setDamping', (w, x) => { w.damping = [Math.fround(x), Math.fround(x * 0.7)]; });
   one('setRestLen', (w, x) => { w.restLength = Math.fround(x); });
   one('setMinLen', (w, x) => { w.minLength = Math.fround(x); });
   one('setMaxLen', (w, x) => { w.maxLength = Math.fround(x); });
@@ -68,6 +70,9 @@ export function registerWheelRefNatives(registry: JavaNativeRegistry, owner = 'W
       stateFor(receiver)[field] = values.map(Math.fround);
       return jv('void', undefined);
     });
+  registry.register(owner, 'setOppWheel', ['int'], ({receiver,args}) => { stateFor(receiver).oppositeWheel = Number(args[0].value)|0; return jv('void',undefined); });
+  registry.register(owner, 'getBrake', [], ({receiver}) => jv('float',stateFor(receiver).brake));
+  registry.register(owner, 'getHBrake', [], ({receiver}) => jv('float',stateFor(receiver).handBrake));
   registry.register(owner, 'getDrive', [], ({ receiver }) => jv('float', stateFor(receiver).drive));
   registry.register(owner, 'getSteer', [], ({ receiver }) => jv('float', stateFor(receiver).steer));
   registry.register(owner, 'getRadius', [], ({ receiver }) => jv('float', stateFor(receiver).radius));
@@ -99,7 +104,7 @@ export function registerWheelRefNatives(registry: JavaNativeRegistry, owner = 'W
   one('setStiffness', (w, x) => { w.stiffness = x; w.pacejka[4] = x; });
   one('setMaxLoad', (w, x) => { w.maxLoad = x; w.pacejka[11] = x; });
   one('setFrictn_x', (w, x) => { w.frictionX = x; w.pacejka[12] = x; });
-  one('setLoadSmooth', (w, x) => { w.loadSmooth = x; w.pacejka[16] = x; });
+  one('setLoadSmooth', (w, x) => { w.loadSmooth = x; w.pacejka[14] = x; });
   one('setRadius', (w, x) => { w.radius = x; });
   one('setWidth', (w, x) => { w.width = x; });
   one('setRollRes', (w, x) => { w.rollResistance = x; });

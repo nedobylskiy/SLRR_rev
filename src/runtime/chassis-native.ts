@@ -38,10 +38,19 @@ export class ChassisNative {
   private readonly steerWheel = new WeakMap<JavaObject, [number, number]>();
   private readonly mileage = new WeakMap<JavaObject, number>();
   private readonly wheelDamage = new WeakMap<JavaObject, Map<number, string>>();
+  private readonly cooling = new WeakMap<JavaObject, [number,number,number]>();
 
   constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative,
     readBounds?: ReturnType<typeof import('./resource-size').resourceBoundsReader>) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    jvm.natives.register(owner,'setCooling',['float','float','float'],({receiver,args}) => {
+      const values=args.map(arg=>Number(arg.value));
+      if (values.some(value=>!Number.isFinite(value) || value<0)) throw new Error('Invalid chassis cooling parameters');
+      this.cooling.set(receiver.value as JavaObject,values as [number,number,number]);
+      return jv('void',undefined);
+    });
+    jvm.natives.register(owner,'getNitro',[],({receiver}) =>
+      jv('float',Math.max(0,Number((receiver.value as JavaObject).fields.get('tank_nitro')?.value ?? 0))));
     jvm.natives.register(owner, 'getWheelDamage', ['int'], ({ receiver, args }) =>
       jv('String', this.wheelDamage.get(receiver.value as JavaObject)?.get(Number(args[0].value)) ?? null));
     jvm.natives.register(owner, 'setWheelDamage', ['int', 'String'], ({ receiver, args }) => {
@@ -194,6 +203,10 @@ export class ChassisNative {
 
   updateState(receiver: JavaValue): ChassisUpdateState | undefined {
     return this.updates.get(receiver.value as JavaObject);
+  }
+
+  coolingSettings(receiver: JavaValue): readonly [number,number,number] {
+    return this.cooling.get(receiver.value as JavaObject) ?? [10,50,0.01];
   }
 
   private object(receiver: JavaValue): JavaObject {

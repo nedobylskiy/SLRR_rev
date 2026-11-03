@@ -9,12 +9,15 @@ import { SCX_TO_WORLD } from './model-transform';
 import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
 import { executeTyreSource } from '../runtime/tyre-java';
+import type { DynoCurve } from '../runtime/dyno-native';
+import type { ChassisUpdateState } from '../runtime/chassis-native';
 import type { WheelRefState } from '../runtime/wheel-ref-native';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
+  powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
   tyres: (ResourceKey | undefined)[];
@@ -63,6 +66,7 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  javaPowertrain?: JavaStockSelection['powertrain'];
   wheelRefs: (WheelRefState | undefined)[] = [];
   create(definition: PartDefinition) {
     if (this.disposed) throw new Error('World disposed');
@@ -186,6 +190,7 @@ export class PartFactory {
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {
         world.wheelRefs = [...options.javaSelection.wheelRefs];
+        world.javaPowertrain = options.javaSelection.powertrain;
         for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
           if (pose.position) root.slotPositions.set(slot, pose.position);
           if (pose.rotation) root.slotRotations.set(slot, pose.rotation);

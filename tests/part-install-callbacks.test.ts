@@ -46,6 +46,12 @@ for (const preassembled of [false, true]) test(`native install reports engine an
   assert.equal(await compatible(crank, 72), 0, 'a loose engine is not yet in the chassis tree');
   assert.equal(await compatible(engine, 72, '999999'), 0);
   assert.equal(await compatible(engine, 72, `${resources.get(chassis)!.resourceId} 999`), 0);
+  const out = jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()});
+  const mount = await jvm.natives.invokeAsync('java.game.parts.Part','install_OK',engine,
+    [jv('GameRef',chassis.value),jv('int',0),out,jv('int',0),jv('Vector3',null)]);
+  assert.deepEqual(mount!.value,[19,401]);
+  assert.equal(resources.getResource(out),resources.getResource(chassis));
+  assert.equal(parts.installedTree(chassis).length,0,'install_OK only discovers a mount');
   assert.equal((await jvm.invokeAsync(chassis, 'hasEngine')).value, 0);
   if (preassembled) { await install(crank, engine, engine); await install(engine, chassis); }
   else { await install(engine, chassis); await install(crank, engine); }

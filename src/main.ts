@@ -400,11 +400,12 @@ const tireSettings: TireModelSettings = structuredClone(DEFAULT_TIRE_MODEL);
 const tireStorageKey = 'slrr.tire-model.v1';
 let storedTires: Partial<TireModelSettings> | undefined;
 try { storedTires = JSON.parse(localStorage.getItem(tireStorageKey) ?? 'null') ?? undefined; } catch { /* Ignore invalid saved tuning. */ }
-if (storedTires?.model === 'legacy') tireSettings.model = 'legacy';
-const modelLabel = textElement('label', 'Magic Formula (Pacejka)'), modelCheck = document.createElement('input');
-modelCheck.type = 'checkbox'; modelCheck.checked = tireSettings.model === 'pacejka'; modelLabel.prepend(modelCheck); tireControls.append(modelLabel);
+if (storedTires?.model === 'legacy' || storedTires?.model === 'sl2') tireSettings.model = storedTires.model;
+const modelLabel = textElement('label', 'Tire solver'), modelCheck = document.createElement('select');
+for (const [value,label] of [['sl2','Original SL2 (Java WheelRef)'],['pacejka','Tunable Pacejka'],['legacy','Legacy']]) { const option=document.createElement('option'); option.value=value; option.textContent=label; modelCheck.append(option); }
+modelCheck.value=tireSettings.model; modelLabel.append(modelCheck); tireControls.append(modelLabel);
 const tireSliders: { input: HTMLInputElement; output: HTMLOutputElement; axis: 'longitudinal' | 'lateral'; parameter: 'B' | 'C' | 'D' | 'E' }[] = [];
-const updateTireModel = () => { tireSettings.model = modelCheck.checked ? 'pacejka' : 'legacy'; tirePanel.querySelector('summary')!.textContent = `Tire model · ${modelCheck.checked ? 'Pacejka' : 'legacy'}`; try { localStorage.setItem(tireStorageKey, JSON.stringify(tireSettings)); } catch { /* Live tuning still works without storage. */ } crashSession?.tireModel(tireSettings); };
+const updateTireModel = () => { tireSettings.model = modelCheck.value as TireModelSettings['model']; tirePanel.querySelector('summary')!.textContent = `Tire model · ${modelCheck.selectedOptions[0].textContent}`; try { localStorage.setItem(tireStorageKey, JSON.stringify(tireSettings)); } catch { /* Live tuning still works without storage. */ } crashSession?.tireModel(tireSettings); };
 modelCheck.onchange = updateTireModel;
 for (const [axis, title] of [['longitudinal', 'Longitudinal grip'], ['lateral', 'Lateral grip']] as const) {
   tireControls.append(textElement('strong', title));
@@ -425,7 +426,7 @@ for (const [axis, title] of [['longitudinal', 'Longitudinal grip'], ['lateral', 
   }
 }
 const resetTires = textElement('button', 'Reset tire parameters');
-resetTires.onclick = () => { Object.assign(tireSettings, structuredClone(DEFAULT_TIRE_MODEL)); modelCheck.checked = true; for (const { input, output, axis, parameter } of tireSliders) { input.value = String(tireSettings[axis][parameter]); output.value = Number(input.value).toFixed(2); } updateTireModel(); };
+resetTires.onclick = () => { Object.assign(tireSettings, structuredClone(DEFAULT_TIRE_MODEL)); modelCheck.value = DEFAULT_TIRE_MODEL.model; for (const { input, output, axis, parameter } of tireSliders) { input.value = String(tireSettings[axis][parameter]); output.value = Number(input.value).toFixed(2); } updateTireModel(); };
 const copyTires = textElement('button', 'Copy parameters');
 copyTires.onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(tireSettings, null, 2)); copyTires.textContent = 'Copied'; } catch { copyTires.textContent = 'Copy unavailable'; } setTimeout(() => { copyTires.textContent = 'Copy parameters'; }, 1800); };
 tireControls.append(resetTires, copyTires);

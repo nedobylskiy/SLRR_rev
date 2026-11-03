@@ -116,6 +116,18 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   assert.equal(system.gear, 0);
   assert.ok(system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]).torque.every(t => t === 0));
   system.reset(); assert.equal(system.gear, 0); assert.equal(system.boost, 0); assert.equal(system.manual, false);
+  world.javaPowertrain = {curve:{rpmStep:1000,torque:[0,100,200,220,210,180,100,0],watts:[],nitroTorque:[],nitroWatts:[]},
+    state:{revision:1,parameters:{engine_inertia:7,engine_mass:40,engine_rpm_idle:900,RPM_limit:6500,rearend_ratio:3,ClutchF:500},ratios:[0,3.5,2.1,1.4,0,0,0,-3],descendantPartIds:[]}};
+  assert.equal(system.estimateFlywheelTorqueAt(2500),210,'driving samples the executed Java engine table');
+  system.reset();
+  const wheels=[0,0,0,0];
+  for(let tick=0;tick<2400;tick++) {
+    const step=system.advance(1/240,{throttle:1,gearUp:tick===100},wheels);
+    step.torque.forEach((torque,index)=>{wheels[index]+=torque/1.6/240;});
+    assert.ok(Number.isFinite(system.rpm));
+  }
+  assert.ok(system.running && wheels[2]>0,'recovered exchange launches without instantly stalling the host engine');
+  assert.ok(system.temperature>20);
   world.dispose();
 });
 

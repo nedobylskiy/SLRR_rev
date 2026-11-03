@@ -32,8 +32,8 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
     return { car, chassis, node };
   });
   const result = { jvm, gameTypes, resolveResourceIdentity: () => undefined,
-    parts: { installedTree: () => [], slotOverrides: () => new Map() },
-    chassis: { wheelState: () => undefined } } as unknown as BootResult;
+    parts: { installedTree: () => [], slotOverrides: () => new Map(), engineDyno: () => undefined },
+    chassis: { wheelState: () => undefined, updateState: () => undefined, coolingSettings: () => [10,50,0.01] } } as unknown as BootResult;
   const state = ref('java.game.CarMarket');
   (state.value as JavaObject).fields.set('curcar', jv('int', 0));
   (state.value as JavaObject).fields.set('cars', jv('Vehicle[]', vehicles.map(vehicle => vehicle.car.value)));

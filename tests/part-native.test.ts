@@ -5,7 +5,7 @@ import { PartNative } from '../src/runtime/part-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { parsePartConfig } from '../src/formats/cfg';
 
-test('Java part wear belongs to each instance while tear remains pristine', async () => {
+test('Java part wear and tear belong to each instance', async () => {
   const source = `package java.game.parts; class Part {
     native float getWear(); native float setWear(float value);
     native float getTear(); native float setTear(float value);
@@ -24,8 +24,9 @@ test('Java part wear belongs to each instance while tear remains pristine', asyn
   assert.equal(jvm.invoke(worn, 'getWear').value, Math.fround(0.4));
   assert.equal(jvm.invoke(newPart, 'getWear').value, 1);
   assert.equal(jvm.invoke(worn, 'setTear', [jv('float', 0.2)]).value, Math.fround(0.2));
-  assert.equal(jvm.invoke(worn, 'getTear').value, 1);
-  assert.equal(jvm.invoke(worn, 'condition').value, Math.fround(0.4));
+  assert.equal(jvm.invoke(worn, 'getTear').value, Math.fround(0.2));
+  assert.equal(jvm.invoke(newPart, 'getTear').value, 1);
+  assert.ok(Math.abs(Number(jvm.invoke(worn, 'condition').value)-0.08)<1e-6);
   jvm.invoke(worn, 'setMaxWear', [jv('float', 500)]);
   assert.equal(native.wearLimit(worn), 500);
   assert.equal(jvm.invoke(worn, 'getTexture').value, 0);

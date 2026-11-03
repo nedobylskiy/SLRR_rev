@@ -5,6 +5,8 @@ export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; 
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
 export interface CfgCamera extends CfgPose { fov?: number }
 export interface PartConfig {
+  enginePower?: number[];
+  brakePower?: [number, number];
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
   wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
@@ -30,6 +32,10 @@ export function parsePartConfig(source: string): PartConfig {
     };
     const pose = (offset = 0): CfgPose => ({ position: [number(offset), number(offset + 1), number(offset + 2)], rotation: [number(offset + 3), number(offset + 4), number(offset + 5)] });
     switch (command.toLowerCase()) {
+      case 'enginepower':
+        result.enginePower = Array.from({length:6},(_,i)=>number(i)); break;
+      case 'brakepower':
+        result.brakePower = [number(0),number(1)]; break;
       case 'slot':
         slot = { ...pose(), id: integer(6), attach: [], compatible: [] };
         result.slots.push(slot); break;

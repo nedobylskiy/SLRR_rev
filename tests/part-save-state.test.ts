@@ -19,6 +19,9 @@ test('part mesh identity and opaque damage data survive save-native access witho
   const call = (method: string, args: ReturnType<typeof jv>[] = [], target = part) =>
     jvm.natives.invoke('java.game.parts.Part', method, target, args)!;
   assert.equal(call('getMesh').value, 0);
+  call('setTear',[jv('float',0.5)]);
+  assert.equal(call('getTear').value,0.5);
+  assert.equal(call('getTear',[],other).value,1);
   const mesh = resources.remountSavedResource('parts/test.rpk', 0x55);
   assert.equal(call('setMesh', [mesh]).value, 1);
   assert.equal(call('getMesh').value, mesh.value);

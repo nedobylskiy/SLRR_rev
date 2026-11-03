@@ -29,6 +29,7 @@ export interface NativeInstalledPart {
 export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
+  private readonly tear = new WeakMap<JavaObject, number>();
   private readonly texture = new WeakMap<JavaObject, number>();
   private readonly mesh = new WeakMap<JavaObject, JavaValue>();
   private readonly slotDamage = new WeakMap<JavaObject, Map<number, string>>();
@@ -42,6 +43,31 @@ export class PartNative {
     const owner = 'java.game.parts.Part';
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
     gameTypes.setPartCompatibilityReader((receiver, target, installable) => this.compatibility(receiver, target, installable));
+    jvm.natives.registerAsync(owner, 'install_OK', ['GameRef','int','GameRef','int','Vector3'], async ({receiver,args}) => {
+      const child = gameTypes.getResource(receiver), root = gameTypes.getResource(args[0]);
+      if (!child || !root || child === root) return jv('int[]',null);
+      const ownId = Number(args[1].value), targetId = Number(args[3].value);
+      const ownSlots = this.partSlots(gameTypes.reference(child)).slots;
+      const preferred = args[4].value == null ? undefined : new Vector3(...['x','y','z'].map(axis => Number(jvm.get(args[4],axis).value)) as [number,number,number]);
+      let best: {node: ResourceObject; own: number; slot: number; distance: number} | undefined;
+      const visit = async (parent: ResourceObject): Promise<void> => {
+        if (parent === child) return;
+        const state = this.partSlots(gameTypes.reference(parent));
+        for (const slot of state.slots) {
+          if (targetId && targetId !== slot.id || state.disabled.has(slot.id) || state.installed.has(slot.id)) continue;
+          for (const own of ownSlots) {
+            if (ownId && own.id !== ownId || !await this.matches(parent,slot,child,own)) continue;
+            const distance = preferred ? new Vector3(...slot.position).distanceToSquared(preferred) : 0;
+            if (!best || distance < best.distance) best = {node:parent,own:own.id,slot:slot.id,distance};
+          }
+        }
+        for (const nested of state.installed.values()) await visit(nested.child);
+      };
+      await visit(root);
+      if (!best) return jv('int[]',null);
+      if (args[2].value != null) jvm.natives.invoke('java.util.resource.ResourceRef','set',args[2],[jv('ResourceRef',gameTypes.reference(best.node).value)]);
+      return jv('int[]',[best.own,best.slot]);
+    });
     jvm.natives.register(owner, 'getSlots', [], ({ receiver }) =>
       jv('int', this.partSlots(receiver).slots.length));
     jvm.natives.register(owner, 'getSlotID', ['int'], ({ receiver, args }) => {
@@ -113,10 +139,14 @@ export class PartNative {
         this.wear.set(receiver.value as JavaObject, value);
         return jv('float', value);
       });
-      // Deformation is held at pristine condition until Java parts are linked to the physics bodies.
-      jvm.natives.register(conditionOwner, 'getTear', [], () => jv('float', 1));
-      jvm.natives.register(conditionOwner, 'setTear', ['float'], ({ args }) =>
-        jv('float', Math.fround(Number(args[0].value))));
+      jvm.natives.register(conditionOwner, 'getTear', [], ({receiver}) =>
+        jv('float',this.tear.get(receiver.value as JavaObject) ?? 1));
+      jvm.natives.register(conditionOwner, 'setTear', ['float'], ({receiver,args}) => {
+        const value=Math.fround(Number(args[0].value));
+        if (!Number.isFinite(value)) throw new Error('Invalid part tear');
+        this.tear.set(receiver.value as JavaObject,value);
+        return jv('float',value);
+      });
     }
     jvm.natives.register(owner, 'setMaxWear', ['float'], ({ receiver, args }) => {
       const limit = Number(args[0].value);
@@ -286,6 +316,16 @@ export class PartNative {
       this.slots.set(node, state);
     }
     return state;
+  }
+
+  /** The engine's native table is owned by the installed Java Block, not Chassis. */
+  engineDyno(receiver: JavaValue): JavaValue | undefined {
+    for (const installed of this.installedTree(receiver)) {
+      const handle = this.gameTypes.reference(installed.node);
+      if (this.jvm.isInstance(handle,'java.game.parts.enginepart.Block'))
+        return (handle.value as JavaObject).fields.get('dynodata');
+    }
+    return undefined;
   }
 
   private carNode(receiver: JavaValue): ResourceObject | null {

@@ -93,7 +93,21 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   if (requireRunningGear && (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4))
     throw new Error('Executed Java chassis did not select four wheels and four suspensions');
   const wheelRefs = Array.from({ length: 4 }, (_, index) => result.chassis.wheelState(chassis, index));
-  return { body, mechanical, tyres, wheelRefs, installed, rootPositions: result.parts.slotOverrides(chassis) };
+  let revision = -1, curve: ReturnType<typeof result.dyno.curve>;
+  const powertrain = {
+    get curve() {
+      const next = result.chassis.updateState(chassis)?.revision ?? 0;
+      if (next !== revision) {
+        revision = next;
+        const dyno = result.parts.engineDyno(chassis);
+        curve = dyno?.value ? result.dyno.curve(dyno) : undefined;
+      }
+      return curve;
+    },
+    get state() { return result.chassis.updateState(chassis); },
+    get cooling() { return result.chassis.coolingSettings(chassis); },
+  };
+  return { body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */

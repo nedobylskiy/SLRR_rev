@@ -340,7 +340,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     return !!parentKey && !!childKey && await partFactory.compatibleSlots(parentKey, parentSlot, childKey, childSlot);
   });
   gameTypes.setRenderCountReader(receiver => partNative.cameraCount(receiver));
-  const dyno = new DynoNative(jvm);
+  const dyno = new DynoNative(jvm, receiver => partNative.engineDyno(receiver));
   jvm.natives.registerAsync('java.lang.System', 'openLib', ['String'], async ({ args }) => {
     const path = String(args[0].value ?? '').replaceAll('\\', '/');
     const asset = assets.byPath.get(path.toLowerCase());
