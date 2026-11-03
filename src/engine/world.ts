@@ -9,6 +9,7 @@ import { SCX_TO_WORLD } from './model-transform';
 import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
 import { executeTyreSource } from '../runtime/tyre-java';
+import { linkedSuspensionAnchors } from './linked-suspension';
 import type { DynoCurve } from '../runtime/dyno-native';
 import type { ChassisUpdateState } from '../runtime/chassis-native';
 import type { WheelRefState } from '../runtime/wheel-ref-native';
@@ -144,10 +145,9 @@ export class PartFactory {
     for (const [id, part] of existing) if (!wanted.has(id)) {
       world.detach(part); world.parts.delete(part.id); existing.delete(id);
     }
-    const added: EnginePart[] = [];
     for (const [id, definition] of definitions) {
       const part = world.create(definition); part.nativeId = id;
-      existing.set(id, part); added.push(part);
+      existing.set(id, part);
     }
     // Detach moved mounts first, allowing two parts to exchange occupied slots.
     for (const { node, parentId } of desired) {
@@ -172,7 +172,7 @@ export class PartFactory {
       else world.install(parent, node.parentSlot, part, node.ownSlot);
     }
     world.wheelRefs = [...selection.wheelRefs]; world.javaPowertrain = selection.powertrain;
-    if (world.mechanical) await this.alignRunningGear(root, added);
+    if (world.mechanical) await this.alignRunningGear(root, world.parts.values());
   }
   async definition(key: ResourceKey): Promise<PartDefinition> {
     const resolved = await this.assets.resource(key.pack, key.id);
@@ -369,22 +369,11 @@ export class PartFactory {
     for (const part of parts) {
         const kind = part.definition.mechanics?.kind;
         if (kind !== 'shock' && kind !== 'spring' || part.parent !== root) continue;
-        const slot = root.definition.config.slots.find(s => s.id === part.parentSlot);
-        const type = slot?.type, model = part.definition.model;
-        if (!slot || type === undefined || !(type >= 201 && type <= 204 || type >= 301 && type <= 304) || !model) continue;
-        const corner = type % 100 - 1;
-        const linked = part.definition.config.links.find(link => link.length >= 2 &&
-          root.definition.config.slots.some(s => s.id === link[0] + corner && s.bonePosition) &&
-          root.definition.config.slots.some(s => s.id === link[1] + corner));
-        if (!linked) continue;
-        const lowerSlot = root.definition.config.slots.find(s => s.id === linked[0] + corner)!;
-        const wheel = root.definition.config.wheels[type % 100 - 1];
-        if (!wheel) continue;
+        const model = part.definition.model, anchors = linkedSuspensionAnchors(root, part);
+        if (!model || !anchors) continue;
         // linked identifies the two chassis anchors. A spring can mount at a separate
         // CFG slot while its mesh follows the damper's lower anchor.
-        const inverse = part.local.clone().invert();
-        const lower = new Vector3().setFromMatrixPosition(root.slotFrame(lowerSlot)).applyMatrix4(inverse);
-        const upper = new Vector3(...lowerSlot.bonePosition!).applyMatrix4(poseMatrix(wheel)).applyMatrix4(inverse);
+        const { lower, upper } = anchors;
         const axis = upper.sub(lower), length = axis.length();
         if (length < 0.01) continue;
         const geometry = parseScx(await this.assets.read(model.path)), renderPose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);

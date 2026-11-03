@@ -29,7 +29,7 @@ The Body Crush slider applies to subsequent collisions and does not recalculate 
 
 ## Original suspension data
 
-In `cars/racers/Baiern_data/scripts/_main_coupesport.cfg`, `type 10.000 sphere 0.315` and `spring 0.290 0.100 0.050` are written before each wheel. The parser stores the three spring values in the corresponding CfgWheel, regardless of the next type. Positions, radii, steering frames and slottype are used via regular CFG matrices. The original `setSlotPos` struts update the wheel and brake matrices; `bonepos/linked` and the SCX geometry range define the visible axis of the shock absorber. There are no amendments to the provisions under Baiern.
+In `cars/racers/Baiern_data/scripts/_main_coupesport.cfg`, `type 10.000 sphere 0.315` and `spring 0.290 0.100 0.050` are written before each wheel. The parser stores the three spring values in the corresponding CfgWheel, regardless of the next type. Positions, radii, steering frames and slottype are used via regular CFG matrices. The original `setSlotPos` struts update the wheel and brake matrices. For springs and dampers, `linked 301 501` selects both chassis slots with the corner suffix applied (303 and 503 at the rear left). Their current slot frames and the SCX geometry range define the visible axis; wheel `bonepos` is not a replacement for the second linked slot. Refreshing an installed assembly recalculates this alignment for existing parts too. No per-car position offsets are applied.
 
 |Wheel|CFG position, m|Radius, m| spring |
 |---|---|---:|---|
