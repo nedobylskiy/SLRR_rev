@@ -349,6 +349,11 @@ export class GameTypeNative {
     });
 
     const gameRef = 'java.util.resource.GameRef';
+    jvm.natives.register(gameRef, 'getScriptInstance', [], ({ receiver }) => {
+      const node = this.getResource(receiver);
+      const script = node instanceof GameObject ? this.handles.get(node) : undefined;
+      return jv('Object', script?.value ?? null);
+    });
     const isScripted = async (receiver: JavaValue, args: readonly JavaValue[]) => {
       if (receiver.value == null) return jv('int', 0);
       const node = this.requireResource(receiver);

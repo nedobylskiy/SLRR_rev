@@ -311,6 +311,18 @@ export class PartNative {
           parentState.installed.set(slot.id, { child, mate: own.id });
           childState.parentSlot = slot.id;
           childState.ownSlot = own.id;
+          // The native car installer notifies its chassis through the original
+          // Java callbacks. attachedParts is the car-wide script inventory,
+          // including nested engine/running-gear parts, not just direct slots.
+          const car = this.carNode(this.gameTypes.reference(child));
+          if (car) {
+            const carHandle = this.gameTypes.reference(car);
+            if ((carHandle.value as JavaObject)?.fields.has('attachedParts'))
+              await this.jvm.invokeAsync(carHandle, 'addpart', [this.gameTypes.reference(child)]);
+          }
+          const childHandle = this.gameTypes.reference(child);
+          if ((childHandle.value as JavaObject)?.fields.has('attachedParts'))
+            await this.jvm.invokeAsync(childHandle, 'install');
           return;
         }
       }
