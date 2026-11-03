@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
+import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
+import { normalizePath } from '../assets';
+import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
+import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
-import type { ScxModel } from '../formats/scx';
+import type { ScxModel, ScxMesh } from '../formats/scx';
 import type { Assets } from '../assets';
 import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
@@ -75,6 +79,14 @@ export class Viewer {
   private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
+  private readonly vehicleReflections = new VehicleReflections();
+  private readonly reflectionUniforms: VehicleReflectionUniforms = {
+    environment: { value: null }, available: { value: 0 }, dynamic: { value: 0 },
+  };
+  setRealReflectionsEnabled(enabled: boolean) {
+    this.vehicleReflections.enabled = enabled; this.reflectionUniforms.dynamic.value = enabled ? 1 : 0;
+    if (!enabled) this.vehicleReflections.reset();
+  }
   private inertialCameraEnabled = false;
   setInertialCameraEnabled(enabled: boolean) { this.inertialCameraEnabled = enabled; }
   private collisionMeshes = new Map<EnginePart, number[]>();
@@ -187,11 +199,14 @@ export class Viewer {
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.lighting.direction, 500);
       this.profiler.beginGpu();
+      this.profiler.measure('Reflections CPU', () => this.vehicleReflections.update(this.renderer, this.scene,
+        this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now));
       this.profiler.measure('Render CPU', () => this.renderer.render(this.scene, this.camera));
       this.profiler.endGpu();
     });
   }
   clear() {
+    this.vehicleReflections.reset();
     this.sunFlareRevision++;
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
     this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
@@ -215,7 +230,7 @@ export class Viewer {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(material => { material.map?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.dispose(); });
     });
     this.model.clear();
   }
@@ -429,6 +444,7 @@ export class Viewer {
   async setGlobalEnvmap(source: EnvironmentMapSource | null): Promise<void> {
     const revision = ++this.environmentRevision;
     if (!source) {
+      this.reflectionUniforms.environment.value = null; this.reflectionUniforms.available.value = 0;
       this.scene.environment = null;
       this.environmentTexture?.dispose(); this.environmentTexture = undefined;
       return;
@@ -444,6 +460,7 @@ export class Viewer {
     texture.needsUpdate = true;
     const previous = this.environmentTexture;
     this.environmentTexture = texture;
+    this.reflectionUniforms.environment.value = texture; this.reflectionUniforms.available.value = 1;
     this.scene.environment = texture;
     previous?.dispose();
   }
@@ -479,21 +496,23 @@ export class Viewer {
       for (const part of world.parts.values()) {
         const model = part.definition.model;
         if (!model) continue;
+        const paint = await partPaint(part, assets);
         const group = new THREE.Group(); group.matrixAutoUpdate = false;
         group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); root.add(group);
-        await this.append(parseScx(await assets.read(model.path)), assets, model.textures, group, generation);
+        await this.append(parseScx(await assets.read(model.path)), assets, model.textures, group, generation, false, () => true, undefined, paint);
         const pose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
         for (const extra of part.definition.additionalModels ?? []) {
           const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
           sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
           group.add(sub);
-          await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, sub, generation);
+          await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
         }
       }
       root.traverse(object => {
         if (!(object instanceof THREE.Mesh)) return;
         const unlit = (source: THREE.MeshStandardMaterial) => {
             const material = previewMaterial(source);
+          source.userData.reflectionTexture?.dispose();
           source.dispose(); return material;
         };
         object.material = Array.isArray(object.material) ? object.material.map(unlit) : unlit(object.material);
@@ -503,6 +522,28 @@ export class Viewer {
     } catch (error) { this.disposeGroup(root); throw error; }
   }
   disposePreviewWorld(group: THREE.Group): void { this.disposeGroup(group); }
+  private async updatePartPaint(part: EnginePart, assets: Assets): Promise<void> {
+    if (part.definition.config.texture === undefined) return;
+    const group = this.proxies.get(part);
+    if (!group) return;
+    const key = part.paintTexture ? `${part.paintTexture.pack}:${part.paintTexture.id}` : 'default';
+    if (group.userData.paintKey === key) return;
+    const paint = await partPaint(part, assets);
+    if (!paint) return;
+    const materials: THREE.MeshStandardMaterial[] = [];
+    group.traverse(object => { if (object instanceof THREE.Mesh) {
+      for (const material of Array.isArray(object.material) ? object.material : [object.material])
+        if (material.userData.paintDefault) materials.push(material);
+    } });
+    for (const material of materials) {
+      const texture = await this.texture(await assets.read(paint.to), paint.to);
+      if (part.world.disposed || this.proxies.get(part) !== group) { texture.dispose(); return; }
+      texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      if (material.map) { texture.repeat.copy(material.map.repeat); texture.offset.copy(material.map.offset); material.map.dispose(); }
+      material.map = texture; material.needsUpdate = true;
+    }
+    group.userData.paintKey = key;
+  }
   syncWorldVisuals(world: EngineWorld): void {
     for (const [part, group] of this.proxies) if (part.world === world) {
       if (world.parts.get(part.id) !== part) {
@@ -533,9 +574,10 @@ export class Viewer {
     const generation = this.generation, warnings: string[] = [];
     const staged: THREE.Group[] = [];
     for (const part of world.parts.values()) {
-      if (this.proxies.has(part)) continue;
+      if (this.proxies.has(part)) { await this.updatePartPaint(part, assets); continue; }
       const model = part.definition.model;
       if (!model) continue;
+      const paint = await partPaint(part, assets);
       const parsed = parseScx(await assets.read(model.path));
       const collision = await loadPartCollision(assets, part.definition);
       if (generation !== this.generation || world.disposed) return warnings;
@@ -544,7 +586,7 @@ export class Viewer {
       group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
-      warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
+      warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint));
       if (generation !== this.generation) return warnings;
       const primaryPose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
       for (const extra of part.definition.additionalModels ?? []) {
@@ -552,7 +594,7 @@ export class Viewer {
         submodel.matrixAutoUpdate = false;
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
         group.add(submodel);
-        warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation));
+        warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
         if (generation !== this.generation) return warnings;
       }
     }
@@ -1040,7 +1082,7 @@ export class Viewer {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach(material => { material.map?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.dispose(); });
     });
     group.clear();
   }
@@ -1066,7 +1108,8 @@ export class Viewer {
     material.depthWrite = false;
     material.needsUpdate = true;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number): Promise<string[]> {
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint): Promise<string[]> {
+    const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     for (const part of model.meshes) {
@@ -1088,7 +1131,9 @@ export class Viewer {
         part.paintMask ? paintColor === undefined ? material.color.clone() : new THREE.Color(paintColor & 0xffffff) : undefined);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
-      const file = textures[part.textureIndex];
+      const file = boundTextures[part.textureIndex];
+      if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === part.textureIndex)
+        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
       if (file) {
         try {
           const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
@@ -1142,6 +1187,37 @@ export class Viewer {
         } catch (e) { warnings.push(`Texture layer ${layerFile}: ${e}`); }
       }
       mesh.castShadow = !material.transparent;
+      if (!mapSurface) {
+        const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {
+          if (!path) return;
+          const texture = await this.texture(await assets.read(path), path);
+          texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+          if (map) { texture.repeat.set(map.scaleU, map.scaleV); texture.offset.set(map.offsetU, map.offsetV); }
+          return texture;
+        };
+        let detail: THREE.Texture | undefined, reflection: THREE.Texture | undefined;
+        try {
+          if (part.mixIndex !== undefined && part.mixIndex !== part.textureIndex) {
+            detail = await loadLayer(boundTextures[part.mixIndex], part.mixMap);
+            const channel = part.mixMap?.channel ?? 0;
+            const uv = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (detail && uv) {
+              const values = new Float32Array(uv.length);
+              for (let i = 0; i < uv.length; i++) values[i] = uv[i] * (i % 2 ? part.mixMap?.scaleV ?? 1 : part.mixMap?.scaleU ?? 1)
+                + (i % 2 ? part.mixMap?.offsetV ?? 0 : part.mixMap?.offsetU ?? 0);
+              geometry.setAttribute('slrrDetailUv', new THREE.BufferAttribute(values, 2));
+            } else { detail?.dispose(); detail = undefined; }
+          }
+          if (part.reflectionMap && part.reflectionMap.channel !== 0xfffffffe) {
+            const channel = part.reflectionMap.channel;
+            const uv = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (uv) geometry.setAttribute('slrrReflectionUv', new THREE.BufferAttribute(uv, 2));
+          }
+          reflection = await loadLayer(boundTextures[part.reflectionIndex ?? -1]);
+          if (detail || part.reflectionIndex !== undefined)
+            configureVehicleMaterial(material, part, this.reflectionUniforms, detail, reflection);
+        } catch (error) { detail?.dispose(); reflection?.dispose(); warnings.push(`SCX material layers ${part.name}: ${String(error)}`); }
+      }
       if (generation !== this.generation) return warnings;
     }
     return warnings;

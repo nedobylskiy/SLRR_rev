@@ -325,6 +325,10 @@ const shadowsLabel = textElement('label', 'Shadow maps'), shadowsCheck = documen
 shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
 shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
+const reflectionsLabel = textElement('label', 'Real reflections'), reflectionsCheck = document.createElement('input');
+reflectionsCheck.type = 'checkbox'; reflectionsLabel.prepend(reflectionsCheck); mapDebugOptions.append(reflectionsLabel);
+reflectionsLabel.title = 'Local 128px cubemap around the car, refreshed four times per second (additional GPU cost)';
+reflectionsCheck.onchange = () => viewer?.setRealReflectionsEnabled(reflectionsCheck.checked);
 const lightingLabel = textElement('label', 'Dynamic lighting'), lightingCheck = document.createElement('input');
 lightingCheck.type = 'checkbox'; lightingCheck.checked = true; lightingLabel.prepend(lightingCheck); mapDebugOptions.append(lightingLabel);
 lightingLabel.title = 'Sun and ambient illumination; disable to inspect original texture colors';

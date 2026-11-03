@@ -39,11 +39,14 @@ export async function javaPartPreviewSelection(result: BootResult, assets: Asset
     nativeId: part.node.resourceId, key: await resolve(part.node.typeId, part.node.resourcePack ?? native.resourcePack!),
     parentSlot: part.parentSlot, ownSlot: part.ownSlot, positions: part.positions, wear: part.wear,
     render: part.renderType ? await resolve(part.renderType, part.node.resourcePack ?? native.resourcePack!) : undefined,
+    texture: part.texture?.value ? part.texture.resource ?? await resolve(Number(part.texture.value), part.node.resourcePack ?? native.resourcePack!) : undefined,
     children: await Promise.all(part.children.map(project)),
   });
   const render = result.parts.renderTypeFor(ref);
+  const texture = result.parts.textureFor(ref);
   const selection: JavaStockSelection = {
     nativeId: native.resourceId, rootRender: render ? await resolve(render, native.resourcePack) : undefined,
+    rootTexture: texture?.value ? texture.resource ?? await resolve(Number(texture.value), native.resourcePack) : undefined,
     body: [], mechanical: [], tyres: [], wheelRefs: [], rootPositions: result.parts.slotOverrides(ref),
     installed: await Promise.all(result.parts.installedTree(ref).map(project)),
   };

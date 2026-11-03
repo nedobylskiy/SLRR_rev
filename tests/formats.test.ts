@@ -124,7 +124,11 @@ test('SCX v4 preserves diffuse UV channel and atlas scale/offset across a vertex
     [scaleU, scaleV, offsetU, offsetV].forEach((value, i) => bytes.writeFloatLE(value, 16 + i * 4));
     return bytes;
   };
-  const material = Buffer.concat([u32(0, 0, 2),
+  const reflectionStrength = Buffer.alloc(8);
+  reflectionStrength.writeUInt32LE(0x01000001); reflectionStrength.writeFloatLE(0.375, 4);
+  const material = Buffer.concat([u32(0x11, 0, 4),
+    reflectionStrength,
+    textureProperty(0x06000003, 4, 0xfffffffe, 1, 1, 0, 0),
     textureProperty(0x06000001, 3, 0, 1, 1, 0, 0),
     textureProperty(0x06000000, 1, 1, 1, 0.125, 0, 0.5)]);
   const vertex = Buffer.alloc(48);
@@ -135,6 +139,11 @@ test('SCX v4 preserves diffuse UV channel and atlas scale/offset across a vertex
   let offset = 12 + chunks.length * 8;
   const directory = chunks.map((part, i) => { const entry = u32([0, 4, 5][i], offset); offset += part.length; return entry; });
   const mesh = parseScx(Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks])).meshes[0];
+  assert.equal(mesh.materialType, 0x11);
+  assert.equal(mesh.reflectionIndex, 4);
+  assert.equal(mesh.reflectionStrength, 0.375);
+  assert.equal(mesh.reflectionMap?.channel, 0xfffffffe);
+  assert.equal(mesh.mixIndex, 3);
   assert.equal(mesh.textureIndex, 1);
   assert.deepEqual(mesh.textureMap, { channel: 1, tiling: 3, scaleU: 1, scaleV: 0.125, offsetU: 0, offsetV: 0.5 });
   assert.deepEqual(Array.from(mesh.uv).map(x => Number(x.toFixed(3))), [0.1, 0.2]);

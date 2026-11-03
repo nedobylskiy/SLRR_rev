@@ -6,6 +6,12 @@ export interface ScxMesh {
   /** Packed diffuse RGB decoded as D3DCOLOR (ARGB). Alpha semantics remain unverified. */
   colors?: Uint8Array;
   paintMask?: boolean;
+  materialType?: number;
+  reflectionIndex?: number;
+  reflectionStrength?: number;
+  reflectionMap?: ScxMesh['textureMap'];
+  mixIndex?: number;
+  mixMap?: ScxMesh['textureMap'];
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
   layer2Index?: number; materialFlags?: number; textureChannel?: number; layer2Channel?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
@@ -46,11 +52,12 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       if (![56, 104, 136].includes(size)) throw new Error(`SCX v3: unsupported material size ${size}`);
       r.require(size - 4);
       const diffuse = Array.from({ length: 4 }, () => r.f32());
+      r.seek(start + 32); const specularStrength = r.f32();
       r.seek(start + 40);
       const materialFlags = r.u32();
       r.seek(start + 44);
       const textureIndex = r.u16();
-      r.skip(6);
+      r.skip(4); const reflectionIndex = r.u16();
       const layer2Index = r.u16();
       let textureChannel = 0, layer2Channel = 0;
       if (size > 56) { r.seek(start + 70); textureChannel = r.u16(); layer2Channel = r.u16(); }
@@ -73,7 +80,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const triangles = r.count(r.u32(), 12);
       const indices = Uint32Array.from({ length: triangles * 3 }, () => r.u32());
       const mesh = { name, positions, normals, uv, uv2, uv3, colors, indices, diffuse,
-        textureIndex, layer2Index, materialFlags, textureChannel, layer2Channel };
+        textureIndex, layer2Index, materialFlags, textureChannel, layer2Channel,
+        reflectionIndex: reflectionIndex === 0xffff ? undefined : reflectionIndex,
+        reflectionStrength: Number.isFinite(specularStrength) ? Math.max(0, Math.min(1, specularStrength)) : 0.5 };
       validate(mesh); meshes.push(mesh);
     }
     if (r.remaining > 0 && r.remaining < 4) throw new Error('SCX v3: truncated tail');
@@ -92,6 +101,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
         materialFlags: current.materialFlags,
+        materialType: current.materialType, reflectionIndex: current.reflectionIndex,
+        reflectionStrength: current.reflectionStrength, reflectionMap: current.reflectionMap,
+        mixIndex: current.mixIndex, mixMap: current.mixMap,
         indices: current.indices, diffuse: current.diffuse ?? [0.6, 0.65, 0.7, 1], textureIndex: current.textureIndex ?? 0xffff };
       validate(mesh); meshes.push(mesh);
     };
@@ -105,12 +117,14 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       if (item.type === 0 || (item.type === 1 && physicsOnly)) {
         finish(); current = {};
         if (item.type === 0) {
-          r.skip(4); current.materialFlags = r.u32();
+          current.materialType = r.u32(); current.materialFlags = r.u32();
           const n = r.count(r.u32(), 4);
           for (let j = 0; j < n; j++) {
             const type = r.u32();
             if (type <= 2) { const color = Array.from({ length: 4 }, () => r.u8() / 255); if (type === 0) current.diffuse = color; }
-            else if (type >= 0x01000000 && type <= 0x01000002) r.skip(4);
+            else if (type >= 0x01000000 && type <= 0x01000002) {
+              const value = r.f32(); if (type === 0x01000001) current.reflectionStrength = value;
+            }
             else if (type === 0x05000000 || type === 0x07000000) {
               r.skip(4); warnings.push(`Material property 0x${type.toString(16)}: value read, shading semantics not implemented`);
             }
@@ -127,6 +141,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
               }
               if (type === 0x06000004) { current.lightmapIndex = index; current.lightmapMap = map; }
               if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
+              if (type === 0x06000001) { current.mixIndex = index; current.mixMap = map; }
+              if (type === 0x06000003) { current.reflectionIndex = index; current.reflectionMap = map; }
             }
             else if (type === 0x08000000) current.name = r.cstring(32);
             else throw new Error(`SCX v4: unknown material entry 0x${type.toString(16)}`);
@@ -136,7 +152,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
           const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags } = current;
-          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags };
+          const { materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap } = current;
+          finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags,
+            materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);

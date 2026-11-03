@@ -21,6 +21,7 @@ export interface NativeInstalledPart {
   ownSlot: number;
   positions: ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }>;
   renderType?: number;
+  texture?: JavaValue;
   wear: number;
   children: NativeInstalledPart[];
 }
@@ -30,7 +31,7 @@ export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
   private readonly tear = new WeakMap<JavaObject, number>();
-  private readonly texture = new WeakMap<JavaObject, number>();
+  private readonly texture = new WeakMap<JavaObject, JavaValue>();
   private readonly mesh = new WeakMap<JavaObject, JavaValue>();
   private readonly slotDamage = new WeakMap<JavaObject, Map<number, string>>();
   private readonly renderType = new WeakMap<JavaObject, number>();
@@ -170,7 +171,7 @@ export class PartNative {
       return jv('void', undefined);
     });
     jvm.natives.register(owner, 'getTexture', [], ({ receiver }) =>
-      jv('int', this.texture.get(receiver.value as JavaObject) ?? 0));
+      this.texture.get(receiver.value as JavaObject) ?? jv('int', 0));
     // The mesh binding is seeded from the CFG's mesh directive and may be
     // replaced per instance. It is distinct from the CFG render resource ID.
     jvm.natives.register(owner, 'getMesh', [], ({ receiver }) =>
@@ -198,7 +199,7 @@ export class PartNative {
     jvm.natives.register(owner, 'setTexture', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part texture resource ID');
-      this.texture.set(receiver.value as JavaObject, id | 0);
+      this.texture.set(receiver.value as JavaObject, { ...args[0], type: 'int', value: id | 0 });
       // The original native reports success even when no render object is bound yet.
       return jv('int', 1);
     });
@@ -247,6 +248,7 @@ export class PartNative {
     return this.partSlots(receiver).positions;
   }
   renderTypeFor(receiver: JavaValue): number | undefined { return this.renderType.get(receiver.value as JavaObject); }
+  textureFor(receiver: JavaValue): JavaValue | undefined { return this.texture.get(receiver.value as JavaObject); }
 
   installedTree(receiver: JavaValue): NativeInstalledPart[] {
     const root = this.gameTypes.getResource(receiver);
@@ -260,7 +262,7 @@ export class PartNative {
         const handle = this.gameTypes.reference(child), object = handle.value as JavaObject;
         const childState = this.partSlots(handle);
         return { node: child, parentSlot, ownSlot: mate, positions: childState.positions,
-          renderType: this.renderType.get(object), wear: this.wear.get(object) ?? 1,
+          renderType: this.renderType.get(object), texture: this.texture.get(object), wear: this.wear.get(object) ?? 1,
           children: children(child) };
       });
     };

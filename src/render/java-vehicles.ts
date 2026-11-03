@@ -168,8 +168,9 @@ export class JavaSceneVehicles {
 
   private signature(ref: JavaValue): string {
     const visit = (nodes: ReturnType<BootResult['parts']['installedTree']>): string => nodes.map(part =>
-      `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}[${visit(part.children)}]`).join(',');
-    return visit(this.result.parts.installedTree(this.result.jvm.get(ref, 'chassis')));
+      `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}:${part.texture?.value}[${visit(part.children)}]`).join(',');
+    const chassis = this.result.jvm.get(ref, 'chassis');
+    return `${this.result.parts.textureFor?.(chassis)?.value}|${visit(this.result.parts.installedTree(chassis))}`;
   }
 
   private release(built: BuiltVehicle): void { this.viewer.removeWorld(built.world); built.world.dispose(); }

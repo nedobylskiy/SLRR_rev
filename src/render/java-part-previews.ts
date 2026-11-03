@@ -60,8 +60,8 @@ export class JavaPartPreviews {
     for (const view of cameras) {
       const ref = this.result.gameTypes.reference(view.part);
       const tree = (nodes: ReturnType<BootResult['parts']['installedTree']>): string => nodes.map(part =>
-        `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}:${part.renderType}[${tree(part.children)}]`).join(',');
-      const signature = `${view.part.resourceId}:${this.result.parts.renderTypeFor(ref)}[${tree(this.result.parts.installedTree(ref))}]`;
+        `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}:${part.renderType}:${part.texture?.value}[${tree(part.children)}]`).join(',');
+      const signature = `${view.part.resourceId}:${this.result.parts.renderTypeFor(ref)}:${this.result.parts.textureFor(ref)?.value}[${tree(this.result.parts.installedTree(ref))}]`;
       let preview = this.views.get(view.render);
       if (preview?.signature !== signature) {
         if (preview) this.release(preview);

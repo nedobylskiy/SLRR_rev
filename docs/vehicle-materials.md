@@ -1,0 +1,9 @@
+# Vehicle paint and reflections
+
+The Java-installed part tree carries `Part.setTexture()` resource identities to each rendered part. The CFG `texture` directive identifies the replaceable paint texture; only the first matching link in that model's material texture table is replaced. Other links, UV coordinates, glass and interior atlases remain independent. Changes update the material map without reconstructing the car geometry.
+
+SCX texture slots retain the base map, secondary authored mix and reflection map. The renderer alpha-blends the secondary map over the base and applies a separate additive legacy environment pass with the authored reflection strength. The MixTASpheremap pass follows `scene_raster3d.cpp` in the reverse; other layered material variants currently use this shared approximation. Reflection maps use their authored UV channel, or view-dependent spherical coordinates for channel `0xfffffffe`; missing generated-map links fall back to the Java-selected global environment. Missing authored-UV reflection links contribute no legacy reflection. This is not full parity with every original material class.
+
+This preserves the texture-layer structure needed for painted and decorated body panels. It does not implement the remaining native decal-painting/compositing operations.
+
+The **Real reflections** checkbox enables an experimental local cubemap in both garage and driving graphics controls. It captures six 128-pixel faces around the active focus at most four times per second, hides the vehicles during capture to avoid feedback, and supplies the result to reflective vehicle materials. It replaces the legacy additive reflection pass while enabled. One probe is shared by the vehicles; other cars and self-reflections are not captured. It costs additional GPU work and is disabled by default. Disabling it restores the previous environment and releases the cubemap.

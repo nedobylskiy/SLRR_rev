@@ -19,6 +19,7 @@ export interface ResourceKey { pack: string; id: number }
 export interface JavaStockSelection {
   nativeId?: number;
   rootRender?: ResourceKey;
+  rootTexture?: ResourceKey;
   powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
@@ -34,6 +35,7 @@ export interface JavaInstalledPart {
   ownSlot: number;
   positions: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
   render?: ResourceKey;
+  texture?: ResourceKey;
   wear: number;
   children: JavaInstalledPart[];
 }
@@ -49,6 +51,7 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 export class EnginePart {
   nativeId?: number;
   renderVisible = true;
+  paintTexture?: ResourceKey;
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
   readonly renderAdjustment = new Matrix4();
@@ -157,10 +160,12 @@ export class PartFactory {
       }
     };
     positions(root, selection.rootPositions);
+    root.paintTexture = selection.rootTexture;
     for (const { node } of desired) positions(existing.get(node.nativeId!)!, node.positions);
     for (const { node, parentId } of desired) {
       const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
       part.condition = Math.max(0, Math.min(1, node.wear));
+      part.paintTexture = node.texture;
       if (part.parent) world.refreshAttachment(part);
       else world.install(parent, node.parentSlot, part, node.ownSlot);
     }
@@ -263,6 +268,7 @@ export class PartFactory {
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {
         root.nativeId = options.javaSelection.nativeId;
+        root.paintTexture = options.javaSelection.rootTexture;
         world.wheelRefs = [...options.javaSelection.wheelRefs];
         world.javaPowertrain = options.javaSelection.powertrain;
         for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
@@ -275,6 +281,7 @@ export class PartFactory {
           if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
           const part = world.create(definition);
           part.nativeId = node.nativeId;
+          part.paintTexture = node.texture;
           part.condition = Math.max(0, Math.min(1, node.wear));
           for (const [slot, pose] of node.positions) {
             if (pose.position) part.slotPositions.set(slot, pose.position);
