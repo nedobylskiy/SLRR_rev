@@ -8,7 +8,7 @@ export interface VehicleReflectionUniforms {
 export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBasicMaterial, mesh: Pick<ScxMesh, 'reflectionIndex' | 'reflectionStrength' | 'reflectionMap'>,
   uniforms: VehicleReflectionUniforms, detail?: Texture, reflection?: Texture) {
   const previous = material.onBeforeCompile, key = material.customProgramCacheKey();
-  const strength = Math.max(0, Math.min(1, Number.isFinite(mesh.reflectionStrength) ? mesh.reflectionStrength! : 0.5));
+  const strength = 0.5 * Math.max(0, Math.min(1, Number.isFinite(mesh.reflectionStrength) ? mesh.reflectionStrength! : 0.5));
   const reflected = mesh.reflectionIndex !== undefined || !!reflection;
   if (reflected && 'roughness' in material) {
     material.userData.vehicleReflective = true;

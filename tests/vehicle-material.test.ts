@@ -22,7 +22,7 @@ test('authored detail blends over paint while reflections remain an independent 
   const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <map_fragment>\n#include <opaque_fragment>' };
   material.onBeforeCompile(shader as any, {} as any);
   assert.match(shader.fragmentShader, /mix\(diffuseColor.rgb, slrrDetailColor.rgb, slrrDetailColor.a\)/);
-  assert.match(shader.fragmentShader, /0.350000/);
+  assert.match(shader.fragmentShader, /0.175000/);
   assert.equal((shader.uniforms as any).slrrRealReflections, uniforms.dynamic);
   const preview = previewMaterial(material);
   assert.equal(preview.userData.detailTexture, detail);
