@@ -103,6 +103,39 @@ export class InputNative {
 
   physicalAxis(device: number, axis: number): number { return this.axes.get(`${device}:${axis}`) ?? 0; }
 
+  mouseCursor(): JavaValue | undefined {
+    try { return this.jvm.get(jv('class', 'java.io.Input'), 'cursor'); } catch { return undefined; }
+  }
+
+  /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
+  cursorEvent(code: number): void {
+    const cursor = this.mouseCursor();
+    if (!cursor?.value) return;
+    const native = this.jvm.get(cursor, 'cursor');
+    if (!this.events.getResource(native)) return;
+    this.events.queueStringEvent(native, native, 65536,
+      jv('String', `${code} ${this.events.getResource(native)!.resourceId}`));
+    this.events.dispatchQueuedEventsCooperative();
+  }
+
+  sceneCameraMotion(camera: JavaValue): { x: number; y: number; zoom: number } | null {
+    const cursor = this.mouseCursor();
+    if (!cursor?.value) return null;
+    const controlled = this.jvm.get(cursor, 'controlledcam');
+    if (!controlled.value || this.events.getResource(controlled) !== this.events.getResource(camera)) return null;
+    const controller = this.jvm.get(cursor, 'controller');
+    const read = (axis: number) => controller.value ? this.controllers.read(controller, axis) : 0;
+    const motion = { x: read(7), y: read(8), zoom: read(10) + read(11) };
+    for (const axis of [0, 1, 2]) {
+      // The cooperative Java RDRAGBEGIN handler may still be installing mappings
+      // on the first frame. Retain that sample until the receiving axis exists.
+      if (controller.value && this.controllers.bindings(controller).some(binding => binding.device === 1
+        && binding.physicalAxis === axis && [7, 8, 10, 11].includes(binding.virtualAxis)))
+        this.setPhysicalAxis(1, axis, 0);
+    }
+    return motion;
+  }
+
   setPhysicalAxis(device: number, axis: number, value: number, character = 0): void {
     if (!Number.isFinite(value)) throw new Error('Input axis value must be finite');
     const key = `${device}:${axis}`;

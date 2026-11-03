@@ -562,3 +562,5 @@ button:disabled{opacity:.45;cursor:default}
 .java-log-info { color: #bce8d7; }
 .workspace.viewport-expanded .java-console { display: none; }
  .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }
+
+#viewport[data-game-cursor] * { cursor: inherit !important; }

@@ -3,6 +3,7 @@ import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
+import { JavaMouse } from './render/java-mouse';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
 import { parseRpk, entryProperties } from './formats/rpk';
@@ -91,6 +92,8 @@ async function runGameBoot() {
   disposeGameBoot = () => result.dispose();
   viewer?.setJavaSceneCamera(() => javaSceneCamera(result));
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
+  const javaMouse = new JavaMouse(el('viewport'), result, source,
+    message => appendJavaEvent({ level: 'error', message }));
   const poll = window.setInterval(() => {
     try { result.input.pollCooperative(); }
     catch (reason) {
@@ -98,7 +101,7 @@ async function runGameBoot() {
       appendJavaEvent({ level: 'error', message: `Java input: ${reason instanceof Error ? reason.message : String(reason)}` });
     }
   }, 50);
-  disposeJavaInput = () => { detachKeyboard(); window.clearInterval(poll); };
+  disposeJavaInput = () => { javaMouse.dispose(); detachKeyboard(); window.clearInterval(poll); };
   el<HTMLButtonElement>('java-retry').disabled = false;
   el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
   el('details').textContent = result.error

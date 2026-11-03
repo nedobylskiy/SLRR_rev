@@ -7,6 +7,7 @@ export interface JavaSceneCamera {
   id: number; position: Vector3; target: Vector3;
   fov: number; near: number; far: number; smoothing: number;
 }
+const controlledPoses = new WeakMap<GameObject, { revision: number; commands: string; offset: Vector3 }>();
 
 /** Native camera command adapter for non-driving Java sections; no menu-specific camera presets. */
 export function javaSceneCamera(result: BootResult): JavaSceneCamera | null {
@@ -48,8 +49,40 @@ export function javaSceneCamera(result: BootResult): JavaSceneCamera | null {
     position.copy(follow).add(offset);
     position.y = follow.y + number('height', Math.max(0.1, camera.position.y - follow.y));
   }
-  const target = targetOf('look') ?? position.clone().add(new Vector3(0, 0, -1).applyEuler(
+  const lookTarget = targetOf('look');
+  const target = lookTarget ?? position.clone().add(new Vector3(0, 0, -1).applyEuler(
     new Euler(camera.orientation.p, camera.orientation.y, camera.orientation.r, 'YXZ')));
+  const poseCommands = ['move', 'look', 'dist', 'height'].map(name => gameTypes.lastCommand(ref, name)).join('|');
+  const controlledPose = controlledPoses.get(camera);
+  if (lookTarget && controlledPose?.revision === camera.poseRevision && controlledPose.commands === poseCommands)
+    position.copy(target).add(controlledPose.offset);
+  const motion = result.input?.sceneCameraMotion(ref);
+  if (motion && (motion.x || motion.y || motion.zoom)) {
+    // Native camera control consumes the mappings installed by MouseCursor's
+    // Java drag handler. Preserve the script's target and distance constraints.
+    if (!lookTarget) {
+      const orientation = { y: camera.orientation.y - motion.x * 0.3,
+        p: Math.max(-1.4, Math.min(1.4, camera.orientation.p - motion.y * 0.3)), r: camera.orientation.r };
+      const forward = new Vector3(0, 0, -1).applyEuler(new Euler(orientation.p, orientation.y, orientation.r, 'YXZ'));
+      position.addScaledVector(forward, -motion.zoom * 0.5);
+      target.copy(position).add(forward);
+      camera.setMatrix({ x: position.x, y: position.y, z: position.z }, orientation);
+    } else {
+    const offset = position.clone().sub(target), radius = Math.max(0.1, offset.length());
+    const azimuth = Math.atan2(offset.x, offset.z) - motion.x * 0.3;
+    const elevation = Math.max(-1.4, Math.min(1.4, Math.asin(offset.y / radius) + motion.y * 0.3));
+    const range = command('dist').slice(0, 2).map(Number);
+    const minimum = range[0] > 0 ? range[0] : 0.5;
+    const maximum = range[1] >= minimum ? range[1] : Infinity;
+    const distance = Math.max(minimum, Math.min(maximum, radius + motion.zoom * 0.5));
+    offset.set(Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation));
+    position.copy(target).addScaledVector(offset, distance);
+    camera.setMatrix({ x: position.x, y: position.y, z: position.z }, {
+      y: azimuth, p: -elevation, r: 0,
+    });
+    controlledPoses.set(camera, { revision: camera.poseRevision, commands: poseCommands, offset: position.clone().sub(target) });
+    }
+  }
   const fov = number('zoom', 60), near = Math.max(0.001, number('nearplane', 0.05)), far = number('farplane', 1000);
   return { id: camera.resourceId, position, target, fov: Math.max(1, Math.min(179, fov)),
     near, far: Math.max(near + 1, far), smoothing: Math.max(0, number('smooth', 0)) };
