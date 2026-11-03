@@ -1,6 +1,11 @@
 import { entryProperties, parseProperties, type RpkEntry, type RpkPack } from '../formats/rpk';
 import type { CfgPose } from '../formats/cfg';
 
+/** A direct mesh can also be the root of an outdoor map's render tree. */
+export function groundRenderHasChildren(pack: RpkPack, renderId: number): boolean {
+  return pack.entries.some(entry => entry.type === 14 && entry.superId === renderId);
+}
+
 /** Ground instances retain their script payload in a length-prefixed trailing RSD chunk. */
 export function groundRenderDefinition(entry: RpkEntry): { gameType: number; renderId: number; pose: CfgPose } | undefined {
   if (entry.type !== 1) return;

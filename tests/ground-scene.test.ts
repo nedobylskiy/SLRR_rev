@@ -1,11 +1,26 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
-import { groundRenderDefinition } from '../src/engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, mapRenderIds } from '../src/engine/map';
 import type { RpkEntry } from '../src/formats/rpk';
 import { activeJavaTrack } from '../src/runtime/java-scene';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import type { BootResult } from '../src/runtime/game-boot';
+
+test('a direct ground mesh with child renders keeps the outdoor map loading path', () => {
+  const entry = (typeId: number, superId: number, type: number, text = ''): RpkEntry => ({
+    typeId, superId, type, flags: 0, compatibility: 1, offset: 0, size: text.length,
+    alias: '', data: new TextEncoder().encode(text),
+  });
+  const pack = { version: 0x200, dependencies: [], warnings: [], entries: [
+    entry(20, 0x40003, 14, 'mesh 0x15'), entry(21, 0, 5),
+    entry(51, 20, 14, 'mesh 0x32'), entry(50, 0, 5),
+    entry(5, 0x10003, 14, 'mesh 0x6'), entry(6, 0, 5),
+  ] };
+  assert.equal(groundRenderHasChildren(pack, 20), true, 'TestTrack root owns other map pieces');
+  assert.deepEqual(mapRenderIds(pack), [20, 51]);
+  assert.equal(groundRenderHasChildren(pack, 5), false, 'a garage room remains isolated');
+});
 
 test('compiled GroundRef RSD chooses its own room mesh and pose, not all rooms in the pack', () => {
   for (const [id, renderId] of [[0x7a, 5], [6, 11], [0xc7, 40], [0x2f, 73]]) {

@@ -16,7 +16,7 @@ import type { PartDefinition } from '../engine/world';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
-import { groundRenderDefinition, mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, mapRenderIds } from '../engine/map';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
@@ -517,9 +517,11 @@ export class Viewer {
     if (ground) {
       const gameType = await assets.resource(packPath, ground.gameType);
       const render = await assets.resource(packPath, ground.renderId);
-      // Direct ground meshes are interiors; large outdoor maps retain their existing chunk/continuation path.
+      // TestTrack also names a direct ground mesh, but its child renders form
+      // the rest of the map. Only leaf meshes use the isolated room path.
       if (entryProperties(gameType.entry).some(property => property.key === 'native' && property.value === 'ground')
-        && render.entry.type === 14 && entryProperties(render.entry).some(property => property.key === 'mesh')) room = ground;
+        && render.entry.type === 14 && entryProperties(render.entry).some(property => property.key === 'mesh')
+        && !groundRenderHasChildren(pack, ground.renderId)) room = ground;
     }
     const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
     // A map can declare a sibling map package as a continuation (for example City → City2).
