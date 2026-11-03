@@ -5,6 +5,7 @@ import type { Triple } from '../formats/cfg';
 export interface VehicleLight {
   texture: string; color: Triple; alpha: number;
   position: Triple; direction: Triple; cone: number; size: number; offset: number;
+  textureMode?: number;
 }
 
 /** Type 13 lamp resources are lights, not external SCX meshes. Colors are A,R,G,B. */
@@ -25,5 +26,6 @@ export async function vehicleLight(assets: Assets, pack: string, id: number): Pr
       [...color, ...position, ...direction, alpha, size, offset, cone].some(value => !Number.isFinite(value)))
     throw new Error(`Invalid vehicle light ${resource.packPath}:${id}`);
   return { texture: path, color: color as Triple, alpha, position: position as Triple,
+    ...(fields.has('lf_texturemode') ? { textureMode: Number(fields.get('lf_texturemode')) } : {}),
     direction: direction as Triple, cone, size, offset };
 }

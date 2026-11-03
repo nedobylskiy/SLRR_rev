@@ -10,7 +10,18 @@ async function glowImage(assets: Assets, path: string): Promise<HTMLCanvasElemen
   if (!pending) {
     pending = (async () => {
       const bytes = await assets.read(path);
-      if (!/\.ptx$/i.test(path) || bytes.length < 36) throw new Error(`Unsupported lamp flare texture: ${path}`);
+      if (!/\.ptx$/i.test(path)) {
+        const image = await createImageBitmap(new Blob([Uint8Array.from(bytes)]));
+        try {
+          // Ordinary PNG/WebP/etc. already carry their alpha channel. Preserve
+          // the whole image; only the original PTX atlas needs tile extraction.
+          const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+          const context = canvas.getContext('2d');
+          if (!context) throw new Error('Lamp flare canvas unavailable');
+          context.drawImage(image, 0, 0); return canvas;
+        } finally { image.close(); }
+      }
+      if (bytes.length < 36) throw new Error(`Invalid lamp flare PTX: ${path}`);
       const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const colorSize = header.getUint32(20, true), alphaSize = header.getUint32(24, true);
       if (!colorSize || !alphaSize || 36 + colorSize + alphaSize > bytes.length) throw new Error(`Invalid lamp flare PTX: ${path}`);
@@ -36,6 +47,11 @@ async function glowImage(assets: Assets, path: string): Promise<HTMLCanvasElemen
 /** A depth-tested, additive halo. Lamp resources provide its color and viewing cone. */
 export async function createVehicleFlare(source: VehicleLight, assets: Assets, lensRadius = 0): Promise<Sprite> {
   const map = new CanvasTexture(await glowImage(assets, source.texture)); map.colorSpace = SRGBColorSpace;
+  // The original mode-2 flare sheet places the main glow in its upper-left quadrant.
+  // PNG replacements can contain the same atlas as PTX rather than a single glow.
+  if (source.textureMode === 2 && !/\.ptx$/i.test(source.texture)) {
+    map.repeat.set(0.5, 0.5); map.offset.set(0, 0.5);
+  }
   const material = new SpriteMaterial({ map, color: new Color(...source.color), blending: AdditiveBlending,
     transparent: true, depthWrite: false, depthTest: true, toneMapped: false, fog: true });
   const sprite = new Sprite(material);
