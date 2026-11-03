@@ -43,9 +43,40 @@ test('local reflections throttle capture, hide vehicles only during capture and 
     system.enabled = true;
     for (const now of [0, 100, 250]) system.update({} as any, new Scene(), new Vector3(), [group], now);
     assert.equal(captures, 2); assert.equal(group.visible, true); assert.notEqual(material.envMap, original);
+    assert.equal(material.envMapIntensity, 0.5);
     system.reset(); assert.equal(material.envMap, original); assert.equal(material.envMapIntensity, 0.4);
     CubeCamera.prototype.update = function () { throw new Error('capture failed'); };
     assert.throws(() => system.update({} as any, new Scene(), new Vector3(), [group], 500), /capture failed/);
     assert.equal(group.visible, true);
   } finally { system.reset(); CubeCamera.prototype.update = update; }
+});
+
+
+test('painted door and fender use the same subdued global reflection when their SCX slot is unbound', () => {
+  const global = new Texture();
+  const uniforms = { environment: { value: global }, available: { value: 1 }, dynamic: { value: 0 } };
+  const fragments: string[] = [];
+  for (const channel of [0xfffffffe, 0]) {
+    const material = new MeshStandardMaterial(); material.userData.paintDefault = 'default_white.png';
+    configureVehicleMaterial(material, { reflectionIndex: 2, reflectionStrength: 0.3,
+      reflectionMap: { channel, tiling: 3, scaleU: 1, scaleV: 1, offsetU: 0, offsetV: 0 } }, uniforms);
+    const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <opaque_fragment>' };
+    material.onBeforeCompile(shader as any, {} as any);
+    assert.equal((shader.uniforms as any).slrrReflectionAvailable, uniforms.available);
+    assert.doesNotMatch(shader.vertexShader, /attribute vec2 slrrReflectionUv/);
+    assert.match(shader.fragmentShader, /mix\(outgoingLight, slrrEnvironment, slrrReflectionWeight \* 0.5\)/);
+    assert.equal(material.envMapIntensity, 0); // No second PBR environment contribution.
+    fragments.push(shader.fragmentShader);
+  }
+  assert.equal(fragments[0], fragments[1]);
+});
+
+test('a bound reflection texture still uses its authored UVs on painted panels', () => {
+  const material = new MeshStandardMaterial(); material.userData.paintDefault = 'default_white.png';
+  configureVehicleMaterial(material, { reflectionIndex: 2,
+    reflectionMap: { channel: 1, tiling: 3, scaleU: 1, scaleV: 1, offsetU: 0, offsetV: 0 } },
+    { environment: { value: null }, available: { value: 0 }, dynamic: { value: 0 } }, undefined, new Texture());
+  const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\n#include <opaque_fragment>' };
+  material.onBeforeCompile(shader as any, {} as any);
+  assert.match(shader.vertexShader, /attribute vec2 slrrReflectionUv/);
 });

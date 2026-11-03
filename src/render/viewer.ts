@@ -1214,7 +1214,7 @@ export class Viewer {
             if (uv) geometry.setAttribute('slrrReflectionUv', new THREE.BufferAttribute(uv, 2));
           }
           reflection = await loadLayer(boundTextures[part.reflectionIndex ?? -1]);
-          if (detail || part.reflectionIndex !== undefined)
+          if (detail || part.reflectionIndex !== undefined || material.userData.paintDefault)
             configureVehicleMaterial(material, part, this.reflectionUniforms, detail, reflection);
         } catch (error) { detail?.dispose(); reflection?.dispose(); warnings.push(`SCX material layers ${part.name}: ${String(error)}`); }
       }

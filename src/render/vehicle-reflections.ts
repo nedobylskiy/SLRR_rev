@@ -26,7 +26,7 @@ export class VehicleReflections {
         live.add(material);
         if (!this.originals.has(material)) this.originals.set(material, { map: material.envMap, intensity: material.envMapIntensity });
         if (material.envMap !== this.target!.texture) {
-          material.envMap = this.target!.texture; material.envMapIntensity = 1; material.needsUpdate = true;
+          material.envMap = this.target!.texture; material.envMapIntensity = 0.5; material.needsUpdate = true;
         }
       }
     });

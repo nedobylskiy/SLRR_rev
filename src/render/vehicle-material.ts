@@ -9,7 +9,8 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
   uniforms: VehicleReflectionUniforms, detail?: Texture, reflection?: Texture) {
   const previous = material.onBeforeCompile, key = material.customProgramCacheKey();
   const strength = 0.5 * Math.max(0, Math.min(1, Number.isFinite(mesh.reflectionStrength) ? mesh.reflectionStrength! : 0.5));
-  const reflected = mesh.reflectionIndex !== undefined || !!reflection;
+  const painted = !!material.userData.paintDefault;
+  const reflected = mesh.reflectionIndex !== undefined || !!reflection || painted;
   if (reflected && 'roughness' in material) {
     material.userData.vehicleReflective = true;
     material.roughness = 0.24; material.metalness = 0.25; material.envMapIntensity = 0;
@@ -20,7 +21,9 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
     previous.call(material, shader, renderer);
     shader.uniforms.slrrDetail = { value: detail ?? null };
     shader.uniforms.slrrReflection = reflection ? { value: reflection } : uniforms.environment;
-    const generated = !mesh.reflectionMap || mesh.reflectionMap.channel === 0xfffffffe;
+    // Painted panels can reserve an unbound reflection slot with ordinary UVs.
+    // The shared environment fallback needs generated coordinates, not the panel atlas UVs.
+    const generated = !mesh.reflectionMap || mesh.reflectionMap.channel === 0xfffffffe || painted && !reflection;
     shader.uniforms.slrrReflectionAvailable = reflection ? { value: 1 } : generated ? uniforms.available : { value: 0 };
     shader.uniforms.slrrRealReflections = uniforms.dynamic;
     const map = mesh.reflectionMap;
@@ -32,7 +35,7 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
         .replace('#include <map_fragment>', '#include <map_fragment>\nvec4 slrrDetailColor = texture2D(slrrDetail, vSlrrDetailUv); diffuseColor.rgb = mix(diffuseColor.rgb, slrrDetailColor.rgb, slrrDetailColor.a);');
     }
     if (reflected) {
-      const authored = mesh.reflectionMap && mesh.reflectionMap.channel !== 0xfffffffe;
+      const authored = !generated;
       if (authored) shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nattribute vec2 slrrReflectionUv; varying vec2 vSlrrReflectionUv;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSlrrReflectionUv = slrrReflectionUv;');
@@ -41,10 +44,12 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
           float slrrYaw = atan(viewMatrix[0][2], viewMatrix[2][2]);
           vec2 slrrEnvUv = ${authored ? 'vSlrrReflectionUv' : 'vec2(slrrRay.x * 0.5 - slrrYaw / 6.28318530718, -slrrRay.y * 0.5 + 0.5)'};
           slrrEnvUv = slrrEnvUv * slrrReflectionTransform.xy + slrrReflectionTransform.zw;
-          outgoingLight += texture2D(slrrReflection, slrrEnvUv).rgb * ${strength.toFixed(6)} * slrrReflectionAvailable * (1.0 - slrrRealReflections);
+          vec3 slrrEnvironment = texture2D(slrrReflection, slrrEnvUv).rgb;
+          float slrrReflectionWeight = ${strength.toFixed(6)} * slrrReflectionAvailable * (1.0 - slrrRealReflections);
+          ${painted ? 'outgoingLight = mix(outgoingLight, slrrEnvironment, slrrReflectionWeight * 0.5);' : 'outgoingLight += slrrEnvironment * slrrReflectionWeight;'}
           #include <opaque_fragment>`);
     }
   };
-  material.customProgramCacheKey = () => `${key}|vehicle-layers:${!!detail}:${reflected}:${mesh.reflectionMap?.channel}:${strength}`;
+  material.customProgramCacheKey = () => `${key}|vehicle-layers:${!!detail}:${reflected}:${mesh.reflectionMap?.channel}:${!!reflection}:${painted}:${strength}`;
   material.needsUpdate = true;
 }
