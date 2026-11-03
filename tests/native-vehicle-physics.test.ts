@@ -67,4 +67,9 @@ test('native cooling responds to road speed and each car retains its engine/brak
   assert.ok(engineTemperatureStep(105,20,800000,150,50,[10,50,0.01],0.1)<hot);
   const cfg=parsePartConfig('enginepower 100 4 0.00006 0.003 700 32\nbrakepower 1000 2000');
   assert.deepEqual(cfg.enginePower,[100,4,0.00006,0.003,700,32]);assert.deepEqual(cfg.brakePower,[1000,2000]);
+  assert.deepEqual(parsePartConfig('enginepower 100 4 0.00006 0.003').enginePower,
+    [100,4,0.00006,0.003,1000,50], 'short stock CFG retains the native inertia defaults');
+  assert.deepEqual(parsePartConfig('enginepower 100 4 0.00006 0.003 700 32\nenginepower 110 5').enginePower,
+    [110,5,0.00006,0.003,700,32], 'subsequent partial directives preserve previous fields');
+  assert.throws(() => parsePartConfig('enginepower 100 invalid'), /invalid enginepower/);
 });

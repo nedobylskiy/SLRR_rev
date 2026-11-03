@@ -4,6 +4,8 @@ export interface SlotReference { resource: number; slot: number }
 export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
 export interface CfgCamera extends CfgPose { fov?: number }
+/** Original car config defaults; enginepower only overwrites supplied fields (00443f90). */
+export const DEFAULT_ENGINE_POWER = [200, 10, 0.0001, 0.03, 1000, 50] as const;
 export interface PartConfig {
   enginePower?: number[];
   brakePower?: [number, number];
@@ -32,8 +34,12 @@ export function parsePartConfig(source: string): PartConfig {
     };
     const pose = (offset = 0): CfgPose => ({ position: [number(offset), number(offset + 1), number(offset + 2)], rotation: [number(offset + 3), number(offset + 4), number(offset + 5)] });
     switch (command.toLowerCase()) {
-      case 'enginepower':
-        result.enginePower = Array.from({length:6},(_,i)=>number(i)); break;
+      case 'enginepower': {
+        const values = [...(result.enginePower ?? DEFAULT_ENGINE_POWER)];
+        for (let i = 0; i < Math.min(args.length, 6); i++) values[i] = number(i);
+        result.enginePower = values;
+        break;
+      }
       case 'brakepower':
         result.brakePower = [number(0),number(1)]; break;
       case 'slot':
