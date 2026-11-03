@@ -8,6 +8,7 @@ import type { BootResult } from '../src/runtime/game-boot';
 import type { Assets } from '../src/assets';
 import { EngineWorld, type PartFactory } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
+import { javaStockSelection } from '../src/runtime/java-scene';
 
 test('scene vehicles use each Java chassis, follow poses and release removed or pending models', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'GameLogic.java',
@@ -34,6 +35,12 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   const result = { jvm, gameTypes, resolveResourceIdentity: () => undefined,
     parts: { installedTree: () => [], slotOverrides: () => new Map(), engineDyno: () => undefined },
     chassis: { wheelState: () => undefined, updateState: () => undefined, coolingSettings: () => [10,50,0.01] } } as unknown as BootResult;
+  // Driving and display projections must both accept loaded cars with empty stock
+  // recipes, without inventing replacements for missing installed components.
+  const loadedSelection = await javaStockSelection(result, {} as Assets, 'cars/test.rpk', vehicles[0].car);
+  assert.deepEqual(loadedSelection.installed, []);
+  assert.deepEqual(loadedSelection.mechanical, []);
+  assert.equal(loadedSelection.wheelRefs.length, 4);
   const state = ref('java.game.CarMarket');
   (state.value as JavaObject).fields.set('curcar', jv('int', 0));
   (state.value as JavaObject).fields.set('cars', jv('Vehicle[]', vehicles.map(vehicle => vehicle.car.value)));

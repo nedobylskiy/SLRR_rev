@@ -55,9 +55,9 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
     ready: !driving || car?.value == null || attached };
 }
 
-/** Read the lists selected by the executed chassis Java, including kit branches. */
+/** Project the installed Java assembly; stock lists only describe the factory recipe. */
 export async function javaStockSelection(result: BootResult, assets: Assets, chassisPack: string,
-  vehicle?: JavaValue, requireRunningGear = true): Promise<JavaStockSelection> {
+  vehicle?: JavaValue): Promise<JavaStockSelection> {
   const { jvm } = result;
   const car = vehicle ?? jvm.get(jvm.get(jv('class', 'java.game.GameLogic'), 'player'), 'car');
   const chassis = jvm.get(car, 'chassis');
@@ -90,8 +90,8 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   const mechanical = await Promise.all(mechanicalLists.flatMap(name => values(`parts_list_RGear_${name}`)).map(id => resolve(id)));
   const tyreIds = values('parts_list_RGear_tyres');
   const tyres = await Promise.all(tyreIds.map(id => resolve(id)));
-  if (requireRunningGear && (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4))
-    throw new Error('Executed Java chassis did not select four wheels and four suspensions');
+  // A loaded/rebuilt car need not retain its stock-parts recipe. Its actual
+  // attachments above (and WheelRefs below) are authoritative, including missing parts.
   const wheelRefs = Array.from({ length: 4 }, (_, index) => result.chassis.wheelState(chassis, index));
   let revision = -1, curve: ReturnType<typeof result.dyno.curve>;
   const powertrain = {

@@ -112,7 +112,7 @@ export class JavaSceneVehicles {
       const pack = normalizeResourcePackPath(identity?.pack ?? native.resourcePack ?? '');
       if (!pack) throw new Error('Java chassis has no resource pack');
       const key = { pack, id: identity?.id ?? native.typeId };
-      const selection = await javaStockSelection(this.result, this.assets, pack, ref, false);
+      const selection = await javaStockSelection(this.result, this.assets, pack, ref);
       built = await this.factory.stock(key, { mechanical: true, javaSelection: selection });
       if (this.disposed || !this.wanted.has(node)) { built.world.dispose(); return; }
       this.sync(node, built, ref);
