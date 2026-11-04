@@ -13,9 +13,13 @@ dynamic lighting. For a diffuse-times-bake inspection, enable baked maps and
 disable dynamic lighting. Combining lighting sources can darken the result;
 the switches deliberately do not change each other.
 
-SCX v3 extended materials store a signed texture index at material offset `0x38`.
-Negative values mean absent; v3 always uses UV channel 1 (the second channel).
-The 56-byte header has no baked-map field. V4 uses map property `0x06000007`,
+SCX v3 extended materials store a signed **self-illumination** texture index at
+material offset `0x38`, not a multiplicative baked lightmap. City facades bind
+`F_light.dds` / `N_light.dds` window emission masks here; their black background
+must not darken the diffuse surface. The parser retains this as `selfIllumIndex`.
+Rendering these window masks with the game's time-of-day rules remains separate
+work. Neither extended v3 headers nor the 56-byte header currently expose an
+identified baked-map field in this parser. V4 uses map property `0x06000007`,
 with its authored UV channel and centred scale/offset transform. `0x06000004`
 is not a lightmap. Missing UVs or texture files do not substitute diffuse UVs.
 
@@ -56,8 +60,9 @@ The cached projection was also rendered with all eight switch combinations, and
 an actual TestTrack browser scene showed changed ground pixels with dynamic
 lighting and dynamic shadows disabled. Unit tests verify cache reuse/invalidation,
 vehicle exclusion, cutout handling, state restoration and resource cleanup.
-The original city/city2 render resources resolved all 577 mapped material
-references with no missing baked UV channels. A browser render of the original
-`Wall_123.scx` bound eight baked materials without warnings and changed pixels
-when toggled. This count covers external SCX render resources, not embedded
-ground POLY data; a separate POLY decoder is outside this change.
+The earlier city/city2 audit counted 577 illumination-mask references as baked
+maps. That classification was incorrect: the mapped facade meshes have zeroed
+second UVs, and sampling the black corner erased their diffuse textures. City
+v3 surfaces now use the cached static-shadow fallback instead. This does not
+decode original embedded ground POLY lighting; a separate POLY decoder remains
+outside this change.

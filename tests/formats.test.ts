@@ -121,15 +121,15 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
   assert.equal(night.selfIllumIndex, 4);
 });
 
-test('SCX v3 baked-map slot is signed, extended-header-only, and selects the second UV channel', () => {
+test('SCX v3 window illumination slot is signed and never becomes a multiplicative lightmap', () => {
   for (const size of [56,104,136]) for (const index of [0,5,0x8000,0xffff]) {
     const material = Buffer.alloc(size);
     material.writeUInt32LE(size);
     if (size > 56) material.writeUInt16LE(index,56);
     const mesh = parseScx(Buffer.concat([Buffer.from('INVO'),u32(3),material,u32(0,0,0)])).meshes[0];
-    assert.equal(mesh.lightmapIndex, size > 56 && index < 0x8000 ? index : undefined);
-    if (mesh.lightmapIndex !== undefined) assert.deepEqual(mesh.lightmapMap,
-      {channel:1,tiling:0,scaleU:1,scaleV:1,offsetU:0,offsetV:0});
+    assert.equal(mesh.selfIllumIndex, size > 56 && index < 0x8000 ? index : undefined);
+    assert.equal(mesh.lightmapIndex, undefined, 'black-backed emission masks must not blacken city facades');
+    assert.equal(mesh.lightmapMap, undefined);
   }
 });
 test('SCX v4 preserves diffuse UV channel and atlas scale/offset across a vertex group', () => {

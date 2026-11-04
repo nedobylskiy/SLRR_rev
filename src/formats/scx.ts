@@ -59,12 +59,13 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const textureIndex = r.u16();
       r.skip(4); const reflectionIndex = r.u16();
       const layer2Index = r.u16();
-      let lightmapIndex: number | undefined;
+      let selfIllumIndex: number | undefined;
       let textureChannel = 0, layer2Channel = 0;
       if (size > 56) {
         r.seek(start + 56); const index = r.u16();
-        // Signed int16: every negative value means no baked map.
-        if (index < 0x8000) lightmapIndex = index;
+        // SCX3 illuminationMapIndex, not a multiplicative shadow/light map.
+        // City facades bind black-backed window emission masks here (F/N_light).
+        if (index < 0x8000) selfIllumIndex = index;
         r.seek(start + 70); textureChannel = r.u16(); layer2Channel = r.u16();
       }
       r.seek(start + 104 <= start + size ? start + 104 : start + size);
@@ -87,8 +88,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const indices = Uint32Array.from({ length: triangles * 3 }, () => r.u32());
       const mesh = { name, positions, normals, uv, uv2, uv3, colors, indices, diffuse,
         textureIndex, layer2Index, materialFlags, textureChannel, layer2Channel,
-        lightmapIndex, lightmapMap: lightmapIndex === undefined ? undefined
-          : { channel: 1, tiling: 0, scaleU: 1, scaleV: 1, offsetU: 0, offsetV: 0 },
+        selfIllumIndex,
         reflectionIndex: reflectionIndex === 0xffff ? undefined : reflectionIndex,
         reflectionStrength: Number.isFinite(specularStrength) ? Math.max(0, Math.min(1, specularStrength)) : 0.5 };
       validate(mesh); meshes.push(mesh);
