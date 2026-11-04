@@ -1,4 +1,4 @@
-import { JavaSourceMachine, coerce, jv, parseSourceClass, type JavaHost, type JavaValue, type ResourceIdentity, type SourceClass } from './java-source.js';
+import { JavaSourceMachine, coerce, jv, parseSourceClass, type JavaHost, type JavaContinuation, type JavaValue, type ResourceIdentity, type SourceClass } from './java-source.js';
 import { JavaNativeRegistry } from './native.js';
 import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
 import type { Expr as ParsedExpr, FloatMode, SourceClass as ParsedClass, Stmt as ParsedStmt } from 'slrr-jvm-compiler';
@@ -504,7 +504,7 @@ export class SlrrJvm implements JavaHost {
     throw new Error(`Java method/native missing: ${className}.${name}(${argumentTypes.join(',')})`);
   }
 
-  async callAsync(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): Promise<JavaValue> {
+  async callAsync(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string, continuation?: JavaContinuation): Promise<JavaValue> {
     const className = this.callClass(receiver, fromClass);
     if (!className) throw new Error(`Java call target unavailable: ${receiver.type}.${name}`);
     const argumentTypes = args.map(arg => arg.type), visited = new Set<string>();
@@ -527,10 +527,10 @@ export class SlrrJvm implements JavaHost {
           entry.hintedMethods.add(name);
         }
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
-        if (method) return this.invokeSourceAsync(entry, method, receiver, args);
+        if (method) return this.invokeSourceAsync(entry, method, receiver, args, continuation);
       }
       const native = await this.natives.invokeAsync(current, name, receiver, args,
-        (parameter, argument) => this.parameterScore(parameter, argument));
+        (parameter, argument) => this.parameterScore(parameter, argument), continuation);
       if (native) return native;
     }
     for (const current of visited) {
@@ -697,10 +697,10 @@ export class SlrrJvm implements JavaHost {
   }
 
   private async invokeSourceAsync(entry: LoadedClass, method: SourceClass['methods'][number], receiver: JavaValue,
-    args: JavaValue[]): Promise<JavaValue> {
+    args: JavaValue[], continuation?: JavaContinuation): Promise<JavaValue> {
     const completed = this.options.observeSourceCall?.(entry.name, method.name);
     this.activeClasses.push(entry.name);
-    try { return await this.machine.invokeAsync(method, receiver, args); }
+    try { return await this.machine.invokeAsync(method, receiver, args, continuation); }
     finally { this.activeClasses.pop(); completed?.(); }
   }
 

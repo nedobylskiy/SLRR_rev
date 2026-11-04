@@ -92,3 +92,9 @@ SLRR source calls can pass a floating numeric literal to an `int` parameter. The
 - The runtime is **source-only**. TUFA `.class` parsing and bytecode execution are not part of this package.
 
 `npm run build` produces ESM JavaScript and TypeScript declarations in `dist/`. `npm pack --dry-run` shows the files included in a package archive. The package has not been published to the npm registry.
+
+### Cooperative thread startup
+
+Async native callbacks receive an optional `continuation`. Its `ready` promise resolves when the calling Java method returns or explicitly yields. A thread host can schedule its first `run()` after this promise instead of guessing a startup delay. Ordinary asynchronous asset I/O does not release it.
+
+Blocking thread primitives such as `sleep` and `wait` should call `continuation?.yield()` before awaiting their host timer or notification. This releases deferred work in the current caller chain, allowing child threads to run while their parent sleeps. Continuations are per invocation, so unrelated suspended Java calls do not share a global startup barrier.
