@@ -136,6 +136,23 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   const overrun = system.advance(1/240, { throttle: 1 }, wheels);
   assert.ok(Number.isFinite(system.rpm));
   assert.ok(overrun.torque.every(Number.isFinite));
+  for (const native of [true, false]) {
+    if (!native) world.javaPowertrain = undefined;
+    for (const manual of [false, true]) {
+      system.reset(); system.gear = -1; system.manual = manual;
+      const reversing = [0, 0, 0, 0];
+      for (let tick = 0; tick < 240; tick++) {
+        const step = system.advance(1 / 240, { throttle: 1, throttleMode: 'pedal' }, reversing);
+        assert.equal(system.gear, -1, 'accelerator pedal must keep the selected reverse gear');
+        assert.equal(step.directionBrake, false, 'reverse accelerator must not apply the brakes');
+        step.torque.forEach((torque, index) => { reversing[index] += torque / 1.6 / 240; });
+      }
+      assert.ok(reversing[2] < -1, `reverse must drive the wheels backwards (native=${native}, manual=${manual})`);
+    }
+    system.reset(); system.gear = -1; system.manual = true;
+    assert.equal(system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]).directionBrake, true,
+      'legacy signed input retains direction braking');
+  }
   world.dispose();
 });
 

@@ -128,7 +128,7 @@ export function javaDrivingControls(result: BootResult): { sample(): DrivingInpu
       const current = controller();
       const axis = (id: number) => current?.value == null ? 0 : controllers.read(current, id);
       const gear = axis(50);
-      return { throttle: Math.max(0, axis(28)), steer: Math.max(-1, Math.min(1, axis(1))),
+      return { throttle: Math.max(0, axis(28)), throttleMode: 'pedal', steer: Math.max(-1, Math.min(1, axis(1))),
         brake: axis(29) > 0.2 || axis(48) > 0.2, clutch: axis(49) > 0.2,
         gearUp: gear > 0.2, gearDown: gear < -0.2 };
     },

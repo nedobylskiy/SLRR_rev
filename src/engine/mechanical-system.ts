@@ -130,7 +130,7 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
+  advance(dt: number, input: { throttle: number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
     if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = this.idleRpm, limit = this.redlineRpm;
@@ -155,8 +155,8 @@ export class MechanicalSystem {
     const mean = shares.reduce((sum, share, i) => sum + wheelOmega[i] * share, 0);
     const roadMean = shares.reduce((sum, share, i) => sum + roadOmega[i] * share, 0);
     if (this.running && !this.manual && this.shiftTimer === 0) {
-      if (this.gear > 0 && throttle < 0 && mean < 1.5) this.gear = -1;
-      else if (this.gear < 0 && throttle > 0 && mean > -1.5) this.gear = 1;
+      if (input.throttleMode !== 'pedal' && this.gear > 0 && throttle < 0 && mean < 1.5) this.gear = -1;
+      else if (input.throttleMode !== 'pedal' && this.gear < 0 && throttle > 0 && mean > -1.5) this.gear = 1;
       if (this.gear > 0 && !input.clutch && mean > 2) {
         const current = ratios[this.gear - 1] ?? 0, next = ratios[this.gear] ?? 0;
         const engagedRpm = Math.abs(roadMean * current * final) * 60 / (2 * Math.PI);
@@ -188,7 +188,9 @@ export class MechanicalSystem {
       Math.max(0.01,nativeParameters?.engine_mass ?? 100)*8000,this.estimateFlywheelTorqueAt(this.rpm)*gas,
       roadSpeedMps,this.root.world.javaPowertrain.cooling ?? [10,50,0.01],dt);
     const drag = 14 + Math.max(0, this.rpm - idle) * 0.012;
-    const directionBrake = this.gear > 0 && throttle < 0 || this.gear < 0 && throttle > 0;
+    // Java supplies an accelerator pedal, independent of the selected gear.
+    // Only the playground's signed forward/reverse input requests direction braking.
+    const directionBrake = input.throttleMode !== 'pedal' && (this.gear > 0 && throttle < 0 || this.gear < 0 && throttle > 0);
     const clutchOpen = !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power || !this.running && !this.manual;
     const launch = Math.max(0.65, Math.min(1, (this.rpm - idle) / (idle * 0.55) + gas * 0.28));
     // Dyno torque may be negative outside the combustion band. That is engine
