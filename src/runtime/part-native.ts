@@ -59,6 +59,13 @@ export class PartNative {
         ?? (canonical && this.configs.get(canonical.value as JavaObject)?.category) ?? 0;
     });
     gameTypes.setPartCompatibilityReader((receiver, target, installable) => this.compatibility(receiver, target, installable));
+    gameTypes.setRemovalReader(receiver => {
+      const child = gameTypes.getResource(receiver);
+      if (!child?.parent) return -1;
+      const state = this.partSlots(gameTypes.reference(child));
+      const parent = this.partSlots(gameTypes.reference(child.parent));
+      return state.parentSlot && !parent.disabled.has(state.parentSlot) ? 0 : -1;
+    });
     jvm.natives.registerAsync(owner, 'install_OK', ['GameRef','int','GameRef','int','Vector3'], async ({receiver,args}) => {
       const child = gameTypes.getResource(receiver), root = gameTypes.getResource(args[0]);
       if (!child || !root || child === root) return jv('int[]',null);
@@ -365,6 +372,17 @@ export class PartNative {
 
   private async command(receiver: JavaValue, command: string): Promise<void> {
     const words = command.trim().split(/\s+/);
+    // Vehicle.wakeUp and the garage lift's reset follow inventory edits. Run
+    // Java's recalculation here so disableSlot reflects the current assembly,
+    // rather than the assembly it had when the vehicle was first created.
+    if (words[0] === 'wakeup' || words[0] === 'reset') {
+      const root = this.gameTypes.getResource(receiver);
+      const car = this.carNode(receiver) ?? [...root?.children ?? []].find(node =>
+        this.carNode(this.gameTypes.reference(node)) === node);
+      if (car) await this.jvm.natives.invokeAsync('java.game.parts.bodypart.Chassis', 'forceUpdate',
+        this.gameTypes.reference(car), []);
+      return;
+    }
     if (words[0] === 'remove') {
       if (words.length !== 3 || words.slice(1).some(word => !/^\d+$/.test(word))) throw new Error(`Invalid part remove command: ${command}`);
       const child = this.gameTypes.getResource(receiver);

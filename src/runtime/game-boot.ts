@@ -348,10 +348,6 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   });
   gameTypes.setRenderCountReader(receiver => partNative.cameraCount(receiver));
   gameTypes.addResourceDestroyListener(receiver => osdText.removeRender(receiver));
-  gameTypes.setRemovalReader(receiver => {
-    const slot = jvm.natives.invoke('java.game.parts.Part', 'getSlotID', receiver, [jv('int', -1)]);
-    return Number(slot?.value) > 0 ? 0 : -1;
-  });
   gameTypes.setDriveTypeReader(receiver => {
     const chassis = (receiver.value as JavaObject)?.fields.get('chassis') ?? receiver;
     const driven = Array.from({length:4}, (_, i) => (chassisNative.wheelState(chassis, i)?.drive ?? 0) > 0);
