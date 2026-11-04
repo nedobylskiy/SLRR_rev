@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
 import { ptxTexture } from './ptx-texture';
+import { TextureSourceCache } from './texture-source-cache';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
@@ -176,6 +177,7 @@ export class Viewer {
   }
   private generation = 0;
   private mapStream?: MapObjectStream;
+  private mapTextures = new TextureSourceCache();
   private mapStreamRange = 500;
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
@@ -286,6 +288,8 @@ export class Viewer {
     });
   }
   clear() {
+    // Loads from a previous scene retain their own pool until their clones dispose.
+    this.mapTextures = new TextureSourceCache();
     this.staticMapShadows.reset();this.staticMapRoot=undefined;this.staticMapDirection=undefined;
     this.vehicleReflections.reset();
     this.sunFlareRevision++;
@@ -1234,6 +1238,10 @@ export class Viewer {
     const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
+    const mapTextures = this.mapTextures;
+    const loadTexture = (bytes: Uint8Array, path: string) => mapSurface
+      ? mapTextures.acquire(normalizePath(path), () => this.texture(bytes, path))
+      : this.texture(bytes, path);
     for (const part of model.meshes) {
       if (!wanted()) break;
       const geometry = new THREE.BufferGeometry();
@@ -1260,7 +1268,7 @@ export class Viewer {
       if (file) {
         try {
           const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
-          const texture = await this.texture(selected.bytes, selected.path);
+          const texture = await loadTexture(selected.bytes, selected.path);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           if (part.textureMap) {
             texture.repeat.set(part.textureMap.scaleU, part.textureMap.scaleV);
@@ -1283,7 +1291,7 @@ export class Viewer {
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
       if (layerFile) {
         try {
-          const bytes = await assets.read(layerFile), texture = await this.texture(bytes, layerFile);
+          const bytes = await assets.read(layerFile), texture = await loadTexture(bytes, layerFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -1321,7 +1329,7 @@ export class Viewer {
         try {
           const uv = bakedLightmapUvs(part);
           if (!uv) throw new Error(`UV channel ${part.lightmapMap?.channel ?? 1} missing`);
-          const texture = await this.texture(await assets.read(bakedFile), bakedFile);
+          const texture = await loadTexture(await assets.read(bakedFile), bakedFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           configureBakedLightmap(material, geometry, uv, texture, this.bakedLightmaps);
           // A transparent second diffuse pass belongs to the same surface.
