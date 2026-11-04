@@ -224,7 +224,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   let osdRectangles: OsdRectangleNative | undefined;
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
-  const resourceCatalog = new ResourceCatalog(await Promise.all(['system.rpk', 'cars.rpk']
+  // Native resource trees include part/car descendants before their scripts
+  // instantiate. Index their RPK metadata up front; meshes/textures stay lazy.
+  const catalogPacks = new Set(['system.rpk','cars.rpk','parts.rpk',...assets.files
+    .map(asset => normalizePath(asset.path)).filter(path => /^(?:cars|parts)\/.+\.rpk$/.test(path))]);
+  const resourceCatalog = new ResourceCatalog(await Promise.all([...catalogPacks]
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
   const readResourceScript = async (script: string, pack: string | null) => {

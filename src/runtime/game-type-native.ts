@@ -42,6 +42,7 @@ export class GameTypeNative {
   private readonly trackPackSlots = new Map<string, number>();
   private readonly savedResources = new Map<number, ResourceIdentity>();
   private readonly savedResourceIds = new Map<string, number>();
+  private readonly savedResourcePackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly notifications = new Map<JavaObject, Notification[]>();
   private readonly triggerContacts = new Map<ResourceObject, boolean>();
@@ -214,7 +215,7 @@ export class GameTypeNative {
       const node = this.requireResource(receiver), value = jv('int', node.resourceId);
       // Java stores mapStack[j].id() in an int. Keep its pack so a later
       // new GameRef(id) can resolve the right track script.
-      if (node.resourcePack && !(node instanceof GameObject)) value.resource = { pack: node.resourcePack, id: node.typeId };
+      if (node.resourcePack && !(node instanceof GameObject)) value.resource = this.resolveRenderResource(node) ?? undefined;
       return value;
     });
     jvm.natives.register(resourceRef, 'type', [], ({ receiver }) =>
@@ -447,14 +448,13 @@ export class GameTypeNative {
         case 7: return jv('int', this.objectCategoryReader?.(receiver) ?? 0); // GII_CATEGORY, distinct from CFG part category.
         case 5: return jv('int', node.resourceId); // GII_ID
         case 6: { // GII_TYPE: catalog copies pass this int into new GameRef(id).
-          const value = jv('int', node.typeId);
           if (node.resourcePack) {
             const identity = this.resolveResourceIdentity(node.typeId);
-            value.resource = { pack: node.resourcePack, id: identity
+            return this.remountSavedResource(node.resourcePack, identity
               && normalizeResourcePackPath(identity.pack) === normalizeResourcePackPath(node.resourcePack)
-              ? identity.id : node.typeId & 0xffff };
+              ? identity.id : node.typeId & 0xffff);
           }
-          return value;
+          return jv('int', node.typeId);
         }
         case 11: return jv('int', 100); // GII_SIZE: native fallback when no visual reader is attached.
         case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
@@ -569,8 +569,15 @@ export class GameTypeNative {
     const key = `${identity.pack}:${identity.id}`;
     let id = this.savedResourceIds.get(key);
     if (id === undefined) {
-      if (this.savedResources.size >= 0x10000000) throw new Error('Saved resource ID space exhausted');
-      id = 0x50000000 + this.savedResources.size;
+      let slot = this.savedResourcePackSlots.get(identity.pack);
+      if (slot === undefined) {
+        slot = this.savedResourcePackSlots.size;
+        if (slot >= 0x1000) throw new Error('Saved resource pack ID space exhausted');
+        this.savedResourcePackSlots.set(identity.pack,slot);
+      }
+      // Java catalog filters compare id() >> 16 with GII_TYPE >> 16. Keep
+      // one namespace per pack and preserve the local entry in the low word.
+      id = 0x50000000 + slot * 0x10000 + identity.id;
       this.savedResourceIds.set(key, id);
       this.savedResources.set(id, identity);
     }
@@ -784,6 +791,7 @@ export class GameTypeNative {
     this.callbacks.clear();
     this.savedResources.clear();
     this.savedResourceIds.clear();
+    this.savedResourcePackSlots.clear();
     this.resourceDestroyListeners.clear();
   }
 
@@ -825,7 +833,7 @@ export class GameTypeNative {
     this.catalogChildrenLoaded.add(parent);
     for (const child of this.catalog.childrenOf(parent.resourcePack, parent.resourceId)) {
       const receiver = this.jvm.construct('java.util.resource.ResourceRef',
-        [jv('ResourceRef', { pack: child.pack, id: child.id })]);
+        [this.remountSavedResource(child.pack,child.id)]);
       const node = this.requireResource(receiver);
       node.resourceType = child.type;
       node.resourceScript = child.script ?? null;
