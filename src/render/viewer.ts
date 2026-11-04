@@ -609,7 +609,7 @@ export class Viewer {
         let lensRadius = 0;
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
           lensRadius = Math.max(lensRadius, Math.hypot(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]) * 0.01);
-        const flare = await createVehicleFlare(light.source, assets, Math.min(0.25, lensRadius));
+        const flare = await createVehicleFlare(light.source, assets, Math.min(0.25, lensRadius), light.flags);
         if (generation !== this.generation || world.disposed) { flare.material.map?.dispose(); flare.material.dispose(); return warnings; }
         const lamp = new THREE.Group(); lamp.name = 'CFG lamp flare'; lamp.matrixAutoUpdate = false;
         // Cancel centimetre mesh scaling: RPK light positions are in metres.
