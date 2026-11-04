@@ -328,7 +328,7 @@ shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
 const bakedLightmapsLabel = textElement('label', 'Baked lightmaps'), bakedLightmapsCheck = document.createElement('input');
 bakedLightmapsCheck.type = 'checkbox'; bakedLightmapsLabel.prepend(bakedLightmapsCheck); mapDebugOptions.append(bakedLightmapsLabel);
-bakedLightmapsLabel.title = 'Original SCX baked lighting and shadows; can be combined with dynamic lighting and shadows';
+bakedLightmapsLabel.title = 'Authored SCX lighting; surfaces without a lightmap use cached static-map shadows. Independent of dynamic shadows.';
 bakedLightmapsCheck.onchange = () => viewer?.setBakedLightmapsEnabled(bakedLightmapsCheck.checked);
 const reflectionsLabel = textElement('label', 'Real reflections'), reflectionsCheck = document.createElement('input');
 reflectionsCheck.type = 'checkbox'; reflectionsLabel.prepend(reflectionsCheck); mapDebugOptions.append(reflectionsLabel);

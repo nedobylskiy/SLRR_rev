@@ -26,6 +26,7 @@ interface StreamType {
 
 /** Keeps map-object geometry near the camera and uploads a bounded number of new instances per frame. */
 export class MapObjectStream {
+  revision = 0;
   private types: StreamType[] = [];
   private ordered: StreamType[] = [];
   private lastCell = '';
@@ -130,6 +131,7 @@ export class MapObjectStream {
       visible.push(index);
     }
     if (visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index)) {
+      this.revision++;
       for (const mesh of type.meshes!) {
         for (let slot = 0; slot < visible.length; slot++) {
           const placement = type.placements[visible[slot]];
@@ -199,6 +201,7 @@ export class MapObjectStream {
   get visible() { return this.types.reduce((sum, type) => sum + type.drawn.length, 0); }
   get total() { return this.types.reduce((sum, type) => sum + type.placements.length, 0); }
   private release(type: StreamType) {
+    if (type.meshes?.length) this.revision++;
     const geometries = new Set(), materials = new Set(), textures = new Set<Texture>();
     for (const mesh of type.meshes ?? []) {
       mesh.removeFromParent(); mesh.dispose(); geometries.add(mesh.geometry);

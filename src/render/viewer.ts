@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
 import { ptxTexture } from './ptx-texture';
 import { diffuseTextureIndex } from './diffuse-texture';
+import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
@@ -191,12 +192,18 @@ export class Viewer {
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
   private lighting = new SceneLighting();
   private bakedLightmaps = { value: 0 };
-  setBakedLightmapsEnabled(enabled: boolean) { this.bakedLightmaps.value = enabled ? 1 : 0; }
+  private staticMapShadows = new StaticMapShadows();
+  private staticMapRoot?: THREE.Group;
+  private staticMapDirection?: THREE.Vector3;
+  setBakedLightmapsEnabled(enabled: boolean) {
+    this.bakedLightmaps.value = this.staticMapShadows.enabled.value = enabled ? 1 : 0;
+    this.mapStream?.setShadowRange(enabled || this.lighting.shadows ? 150 : 0);
+  }
   setShadowMapsEnabled(enabled: boolean) {
     this.lighting.shadows = enabled;
     this.renderer.shadowMap.enabled = enabled;
     this.sunLight.castShadow = enabled;
-    this.mapStream?.setShadowRange(enabled ? 150 : 0);
+    this.mapStream?.setShadowRange(enabled || this.bakedLightmaps.value ? 150 : 0);
     this.scene.traverse(object => {
       if (object instanceof THREE.Mesh) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -270,6 +277,8 @@ export class Viewer {
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.lighting.direction, 500);
       this.profiler.beginGpu();
+      this.profiler.measure('Static shadow bake CPU', () => this.staticMapShadows.update(this.renderer,this.staticMapRoot,
+        this.mapStreamFocus ?? this.controls.target,this.staticMapDirection ?? this.lighting.direction,this.mapStream?.revision ?? 0,now));
       this.profiler.measure('Reflections CPU', () => this.vehicleReflections.update(this.renderer, this.scene,
         this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now));
       this.profiler.measure('Render CPU', () => this.renderer.render(this.scene, this.camera));
@@ -277,6 +286,7 @@ export class Viewer {
     });
   }
   clear() {
+    this.staticMapShadows.reset();this.staticMapRoot=undefined;this.staticMapDirection=undefined;
     this.vehicleReflections.reset();
     this.sunFlareRevision++;
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
@@ -705,6 +715,10 @@ export class Viewer {
     options?: { groundId?: number; preserveCamera?: boolean }) {
     if (!keepWorld) this.clear(); const generation = this.generation;
     const pack = await assets.pack(packPath), warnings: string[] = [];
+    const staticSun = pack.entries.find(entry => entry.type===13
+      && entryProperties(entry).some(property => property.key==='type' && property.value==='directional'));
+    const staticLight = staticSun && parseResourceLight(staticSun);
+    this.staticMapDirection = staticLight ? new THREE.Vector3(...staticLight.direction).normalize().negate() : undefined;
     const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
     const ground = groundEntry && groundRenderDefinition(groundEntry);
     let room: typeof ground;
@@ -748,8 +762,10 @@ export class Viewer {
       this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     }
     let loaded = 0, triangles = 0;
-    const stream = new MapObjectStream(this.model, this.mapStreamRange);
-    stream.setShadowRange(this.lighting.shadows ? 150 : 0);
+    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
+    this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
+    const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
+    stream.setShadowRange(this.lighting.shadows || this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
@@ -1297,6 +1313,10 @@ export class Viewer {
       }
       mesh.castShadow = !material.transparent;
       const bakedFile = textures[part.lightmapIndex ?? -1];
+      if (mapSurface && !bakedFile) {
+        this.staticMapShadows.configure(material);
+        if (secondLayer) this.staticMapShadows.configure(secondLayer.material);
+      }
       if (bakedFile) {
         try {
           const uv = bakedLightmapUvs(part);
