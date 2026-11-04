@@ -17,6 +17,8 @@ test('slider knob and rail send Java values across nested viewports, capture dra
         Osd osd; float a; float b; float value; float x0; float x1; int ticks; int disabled;
         void setValue(float f) { int n = (int)((f+50.0)/100.0); value = n*100.0; }
         void sendMessage() { osd.sliderValue=value; osd.messages++; }
+        void increase() { setValue(value+100.0); sendMessage(); }
+        void decrease() { setValue(value-100.0); sendMessage(); }
       }`,
   };
   const jvm=new SlrrJvm({resolveImport:({className})=>sources[className]?{path:className+'.java',source:sources[className]}:null});
@@ -58,6 +60,14 @@ test('slider knob and rail send Java values across nested viewports, capture dra
     listeners.get(nodes[1])!.get('pointerup')!(event(600));assert.equal(captured,undefined);
     await new Promise(resolve=>setTimeout(resolve,20));
     assert.equal(jvm.get(osd,'sliderValue').value,1500,'last drag position must survive coalescing');
+    let keyStopped=0;
+    const key=(name:string)=>({key:name,preventDefault(){},stopPropagation(){keyStopped++;}});
+    listeners.get(nodes[1])!.get('keydown')!(key('ArrowLeft'));
+    listeners.get(nodes[1])!.get('keydown')!(key('ArrowLeft'));
+    listeners.get(nodes[1])!.get('keydown')!(key('ArrowRight'));
+    await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(jvm.get(osd,'sliderValue').value,1400,'keyboard repeats keep each Java step');
+    assert.equal(keyStopped,3,'slider keys do not also reach game controls');
     let stopped=false;listeners.get(nodes[1])!.get('click')!({preventDefault(){},stopImmediatePropagation(){stopped=true;}});assert.ok(stopped);
     jvm.set(slider,'disabled',jv('int',1));assert.equal(await bridge.setSliderPosition(knob,0),false);
     jvm.set(slider,'disabled',jv('int',0));jvm.set(slider,'a',jv('float',1500));jvm.set(slider,'b',jv('float',500));

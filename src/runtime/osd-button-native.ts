@@ -27,6 +27,7 @@ export class OsdButtonNative {
   private pendingSlider?: { physics: JavaValue; x: number };
   private sliderBusy = false;
   private disposed = false;
+  private sliderKeys: Promise<void> = Promise.resolve();
 
   setCursorEvents(dispatch: (code: number, physics: JavaValue) => void): void { this.cursorEvent = dispatch; }
   private clearFocus(): void { clearInterval(this.focusTimer); this.focusTimer = undefined; this.focused = undefined; }
@@ -154,6 +155,23 @@ export class OsdButtonNative {
   private bindSliderPointer(box: HitBox,node: HTMLElement) {
     if (!node.addEventListener) return;
     node.style.touchAction='none';
+    node.addEventListener('keydown',event => {
+      if (!['ArrowLeft','ArrowRight'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey
+        || this.disposed || !this.visible(box) || !this.slider(box)) return;
+      event.preventDefault();event.stopPropagation();
+      const method = event.key==='ArrowRight' ? 'increase' : 'decrease';
+      // Keep every repeated key step, and let Java own ticks, clamping and commands.
+      this.sliderKeys=this.sliderKeys.then(async()=>{
+        if (this.disposed || !this.visible(box)) return;
+        const slider=this.slider(box);
+        if (slider) await this.jvm.invokeAsync(jv(slider.className,slider),method);
+      }).catch(this.report);
+    });
+    node.addEventListener('keyup',event=>{
+      if (['ArrowLeft','ArrowRight'].includes(event.key) && this.slider(box)) {
+        event.preventDefault();event.stopPropagation();
+      }
+    });
     const position = (event: PointerEvent) => {
       const stage = node.closest('.osd-stage') ?? node.parentElement;
       const bounds = stage?.getBoundingClientRect();
