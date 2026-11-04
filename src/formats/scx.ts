@@ -59,8 +59,14 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const textureIndex = r.u16();
       r.skip(4); const reflectionIndex = r.u16();
       const layer2Index = r.u16();
+      let lightmapIndex: number | undefined;
       let textureChannel = 0, layer2Channel = 0;
-      if (size > 56) { r.seek(start + 70); textureChannel = r.u16(); layer2Channel = r.u16(); }
+      if (size > 56) {
+        r.seek(start + 56); const index = r.u16();
+        // Signed int16: every negative value means no baked map.
+        if (index < 0x8000) lightmapIndex = index;
+        r.seek(start + 70); textureChannel = r.u16(); layer2Channel = r.u16();
+      }
       r.seek(start + 104 <= start + size ? start + 104 : start + size);
       const name = size === 136 ? r.cstring(32) : `material_${meshes.length}`;
       r.seek(start + size);
@@ -81,6 +87,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const indices = Uint32Array.from({ length: triangles * 3 }, () => r.u32());
       const mesh = { name, positions, normals, uv, uv2, uv3, colors, indices, diffuse,
         textureIndex, layer2Index, materialFlags, textureChannel, layer2Channel,
+        lightmapIndex, lightmapMap: lightmapIndex === undefined ? undefined
+          : { channel: 1, tiling: 0, scaleU: 1, scaleV: 1, offsetU: 0, offsetV: 0 },
         reflectionIndex: reflectionIndex === 0xffff ? undefined : reflectionIndex,
         reflectionStrength: Number.isFinite(specularStrength) ? Math.max(0, Math.min(1, specularStrength)) : 0.5 };
       validate(mesh); meshes.push(mesh);
@@ -128,7 +136,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
             else if (type === 0x05000000 || type === 0x07000000) {
               r.skip(4); warnings.push(`Material property 0x${type.toString(16)}: value read, shading semantics not implemented`);
             }
-            else if (type >= 0x06000000 && type <= 0x06000005) {
+            else if (type >= 0x06000000 && type <= 0x06000007) {
               const index = r.u32();
               const map = { channel: r.u32(), tiling: r.u32(), scaleU: r.f32(), scaleV: r.f32(), offsetU: r.f32(), offsetV: r.f32() };
               // Some v4 materials (including Test Track containers) contain only DiffuseMixSecond.
@@ -139,7 +147,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
                 // facades, but bit 29 makes alpha surface coverage instead of paint.
                 current.paintMask = type === 0x06000001 && !(current.materialFlags! & 0x20000000);
               }
-              if (type === 0x06000004) { current.lightmapIndex = index; current.lightmapMap = map; }
+              if (type === 0x06000007 && index !== 0xffffffff) { current.lightmapIndex = index; current.lightmapMap = map; }
               if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
               if (type === 0x06000001) { current.mixIndex = index; current.mixMap = map; }
               if (type === 0x06000003) { current.reflectionIndex = index; current.reflectionMap = map; }

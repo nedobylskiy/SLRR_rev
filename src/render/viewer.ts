@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
+import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
@@ -187,6 +188,8 @@ export class Viewer {
   private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
   private lighting = new SceneLighting();
+  private bakedLightmaps = { value: 0 };
+  setBakedLightmapsEnabled(enabled: boolean) { this.bakedLightmaps.value = enabled ? 1 : 0; }
   setShadowMapsEnabled(enabled: boolean) {
     this.lighting.shadows = enabled;
     this.renderer.shadowMap.enabled = enabled;
@@ -297,7 +300,7 @@ export class Viewer {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
     });
     this.model.clear();
   }
@@ -1183,7 +1186,7 @@ export class Viewer {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
     });
     group.clear();
   }
@@ -1257,6 +1260,7 @@ export class Viewer {
           else if (alphaEnabled && alpha === 'blend' && (!mapSurface || opacity < 1)) { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
       }
+      let secondLayer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
       if (layerFile) {
         try {
@@ -1279,6 +1283,7 @@ export class Viewer {
               roughness: 0.85, metalness: 0, side: THREE.DoubleSide, transparent: true,
               depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
             const layer = new THREE.Mesh(layerGeometry, layerMaterial);
+            secondLayer = layer;
             this.lighting.configureMaterial(layerMaterial, !!part.colors);
             layer.receiveShadow = true;
             layer.name = `${part.name} / layer2`;
@@ -1288,6 +1293,18 @@ export class Viewer {
         } catch (e) { warnings.push(`Texture layer ${layerFile}: ${e}`); }
       }
       mesh.castShadow = !material.transparent;
+      const bakedFile = textures[part.lightmapIndex ?? -1];
+      if (bakedFile) {
+        try {
+          const uv = bakedLightmapUvs(part);
+          if (!uv) throw new Error(`UV channel ${part.lightmapMap?.channel ?? 1} missing`);
+          const texture = await this.texture(await assets.read(bakedFile), bakedFile);
+          if (generation !== this.generation) { texture.dispose(); return warnings; }
+          configureBakedLightmap(material, geometry, uv, texture, this.bakedLightmaps);
+          // A transparent second diffuse pass belongs to the same surface.
+          if (secondLayer) configureBakedLightmap(secondLayer.material, secondLayer.geometry, uv, texture, this.bakedLightmaps);
+        } catch (error) { warnings.push(`Baked lightmap ${bakedFile}: ${String(error)}`); }
+      }
       if (!mapSurface) {
         const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {
           if (!path) return;

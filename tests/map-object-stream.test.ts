@@ -1,7 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Texture, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
+
+for (const cancelled of [false,true]) test(`stream releases shared baked maps once (${cancelled ? 'cancelled load' : 'loaded model'})`, async () => {
+  const stream = new MapObjectStream(new Group(),100), texture = new Texture();
+  let disposals = 0;
+  texture.addEventListener('dispose', () => disposals++);
+  stream.add([{position:new Vector3(),matrix:new Matrix4()}],async () => [0,1].map(() => {
+    const material = new MeshBasicMaterial();material.userData.bakedLightmapTexture = texture;
+    return new Mesh(new BoxGeometry(),material);
+  }));
+  stream.update(new Vector3());
+  if (cancelled) stream.dispose();
+  await Promise.resolve();
+  if (!cancelled) { stream.update(new Vector3()); stream.dispose(); }
+  assert.equal(disposals,1);
+});
 
 test('finishing a model load does not rescan distant placements until the focus changes', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();

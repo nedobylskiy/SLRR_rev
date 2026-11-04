@@ -322,10 +322,14 @@ inertialCameraLabel.title = 'Experimental external camera with its own velocity 
 inertialCameraCheck.onchange = () => viewer?.setInertialCameraEnabled(inertialCameraCheck.checked);
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
-const shadowsLabel = textElement('label', 'Shadow maps'), shadowsCheck = document.createElement('input');
+const shadowsLabel = textElement('label', 'Dynamic shadows'), shadowsCheck = document.createElement('input');
 shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
 shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
+const bakedLightmapsLabel = textElement('label', 'Baked lightmaps'), bakedLightmapsCheck = document.createElement('input');
+bakedLightmapsCheck.type = 'checkbox'; bakedLightmapsLabel.prepend(bakedLightmapsCheck); mapDebugOptions.append(bakedLightmapsLabel);
+bakedLightmapsLabel.title = 'Original SCX baked lighting and shadows; can be combined with dynamic lighting and shadows';
+bakedLightmapsCheck.onchange = () => viewer?.setBakedLightmapsEnabled(bakedLightmapsCheck.checked);
 const reflectionsLabel = textElement('label', 'Real reflections'), reflectionsCheck = document.createElement('input');
 reflectionsCheck.type = 'checkbox'; reflectionsLabel.prepend(reflectionsCheck); mapDebugOptions.append(reflectionsLabel);
 reflectionsLabel.title = 'Local 128px cubemap around the car, refreshed four times per second (additional GPU cost)';

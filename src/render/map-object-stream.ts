@@ -161,7 +161,17 @@ export class MapObjectStream {
     void type.load(wanted).then(parts => {
       type.loading = false;
       if (!wanted()) {
-        for (const part of parts) { part.geometry.dispose(); const materials = Array.isArray(part.material) ? part.material : [part.material]; materials.forEach(material => { const map = 'map' in material ? material.map : undefined; if (map instanceof Texture) map.dispose(); material.dispose(); }); }
+        const textures = new Set<Texture>();
+        for (const part of parts) {
+          part.geometry.dispose();
+          for (const material of Array.isArray(part.material) ? part.material : [part.material]) {
+            const map = 'map' in material ? material.map : undefined;
+            if (map instanceof Texture) textures.add(map);
+            if (material.userData.bakedLightmapTexture instanceof Texture) textures.add(material.userData.bakedLightmapTexture);
+            material.dispose();
+          }
+        }
+        for (const texture of textures) texture.dispose();
         return;
       }
       if (!parts.length) { this.dirty = true; return; }
@@ -196,6 +206,7 @@ export class MapObjectStream {
     }
     for (const material of materials as Set<import('three').Material>) {
       for (const value of Object.values(material)) if (value instanceof Texture) textures.add(value);
+      if (material.userData.bakedLightmapTexture instanceof Texture) textures.add(material.userData.bakedLightmapTexture);
       material.dispose();
     }
     for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
