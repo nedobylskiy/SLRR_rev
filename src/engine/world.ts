@@ -52,6 +52,8 @@ export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${k
 
 /** Assets are shared; instances and slot occupancy belong exclusively to a world. */
 export class EnginePart {
+  /** Shared placement calibration for wheel/hub/strut frames, in chassis meters. */
+  wheelFrameOffsetY = 0;
   nativeId?: number;
   renderVisible = true;
   paintTexture?: ResourceKey;
@@ -60,7 +62,7 @@ export class EnginePart {
   readonly renderAdjustment = new Matrix4();
   readonly slotPositions = new Map<number, Triple>();
   readonly slotRotations = new Map<number, Triple>();
-  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id), rotation = this.slotRotations.get(slot.id); return slotMatrix(this.definition.config, position || rotation ? { ...slot, position: position ?? slot.position, rotation: rotation ?? slot.rotation } : slot); }
+  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id), rotation = this.slotRotations.get(slot.id); return slotMatrix(this.definition.config, position || rotation ? { ...slot, position: position ?? slot.position, rotation: rotation ?? slot.rotation } : slot, this.wheelFrameOffsetY); }
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
@@ -262,7 +264,7 @@ export class PartFactory {
     }
   }
   /** Install the executed Java tree when provided; otherwise read CFG stock declarations. */
-  async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection } = {}) {
+  async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection; suspensionMountOffsetY?: number } = {}) {
     const world = new EngineWorld(), warnings: string[] = [];
     try {
       let definition = await this.definition(key);
@@ -271,6 +273,9 @@ export class PartFactory {
         definition = { ...definition, model: await this.assets.modelForResource(render.pack, render.id) };
       }
       const root = world.create(definition);
+      // User-measured placement correction, shared by installation, linked
+      // anchors and the physical suspension. Debug sliders remain additional.
+      if (definition.config.wheels.length) root.wheelFrameOffsetY = options.suspensionMountOffsetY ?? 0.165;
       const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {

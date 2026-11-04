@@ -361,7 +361,7 @@ softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.va
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 const suspensionDebugPanel = document.createElement('details');
 suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
-suspensionDebugPanel.append(textElement('p', 'Attachment offsets: chassis axes, meters. Arm offsets: mesh axes, meters. Left/right arm controls are independent and mirrored: positive X moves outward; equal rotations mirror across X. Degrees, XYZ order. Physics and saves are unchanged.'));
+suspensionDebugPanel.append(textElement('p', 'Vehicle assembly includes +0.165 m suspension placement. Sliders add visual offsets on top (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
 const suspensionSettings = defaultSuspensionDebug();
 const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
 const suspensionValues = document.createElement('textarea'); suspensionValues.readOnly = true; suspensionValues.rows = 8;
@@ -398,9 +398,9 @@ for (const [key, title] of [
   }
 }
 const suspensionReset = textElement('button', 'Reset suspension alignment');
-const suspensionHeightPreset = textElement('button', 'Load height calibration (+0.165 m)');
+const suspensionHeightPreset = textElement('button', 'Use base height (+0.165 m)');
 suspensionHeightPreset.onclick = () => {
-  suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0.165;
+  suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0;
   for (const { key, axis, range, number } of suspensionInputs)
     range.value = number.value = String(suspensionSettings[key][axis]);
   updateSuspensionDebug();

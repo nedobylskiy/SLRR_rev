@@ -12,7 +12,7 @@ const assets = new Assets((await walk(gameRoot)).map(path => ({ path: relativeGa
 const factory = new PartFactory(assets);
 let single = 0, dual = 0, springDamper = 0, missing = 0;
 for (const [pack, id] of [['cars/racers/einvagen.rpk', 6], ['cars/racers/baiern.rpk', 6]] as const) {
-  const { world, root } = await factory.stock({ pack, id }, { mechanical: true });
+  const { world, root } = await factory.stock({ pack, id }, { mechanical: true, suspensionMountOffsetY: 0 });
   try {
     for (const part of world.parts.values()) if (part.definition.mechanics?.kind === 'spring' || part.definition.mechanics?.kind === 'shock') {
       const anchors = linkedSuspensionAnchors(root, part);

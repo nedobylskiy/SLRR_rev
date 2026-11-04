@@ -60,7 +60,7 @@ export class Suspension3D {
       if (index >= 0) this.movingParts[index].push({ part, base: part.local.clone() });
     }
     const slot = cfg.slots.find(s => s.type === 11), part = slot && root.children.get(slot.id);
-    if (slot && part) this.steering = { part, frame: slotMatrix(cfg, slot), inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert() };
+    if (slot && part) this.steering = { part, frame: root.slotFrame(slot), inverseOwn: part.slotFrame(part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert() };
   }
   reset() { this.steer = 0; this.mechanics?.reset(); this.wheels.forEach(w => { w.nativeSlip = {longitudinal:0,angle:0}; w.spin = w.omega = w.slip = w.slipSpeed = w.lateralSpeed = 0; w.length = w.rest; w.force = 0; w.contact = false; w.damage.identity(); w.mountCondition = 1; w.supportHeight = undefined; w.supportX = w.supportZ = 0; w.hardpoint.copy(w.originalHardpoint); }); this.movingParts.flat().forEach(m => m.base.copy(m.part.local)); }
   /** A bent chassis moves the rest seat; the wheel travel is applied on top of it. */

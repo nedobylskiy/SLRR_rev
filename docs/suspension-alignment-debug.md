@@ -23,8 +23,16 @@ independent wheel, suspension, and strut branches selected by CFG slot types
 
 The numeric inputs allow exact values. The read-only JSON field can be copied
 to report a calibration; **Reset suspension alignment** restores zero values.
-**Load height calibration (+0.165 m)** restores the user's measured front/rear Y
-offset without changing rotation values.
+Vehicle assembly now includes the user's measured +0.165 m Y correction in
+the chassis wheel/hub/strut slot frames. Installation, parked settling, linked
+anchors and physical suspension hardpoints all use those same frames. Original
+CFG data is unchanged; rebuilding from a save reapplies the correction once.
+`PartFactory.stock` accepts `suspensionMountOffsetY: 0` for an uncalibrated audit.
+This is an explicit measured calibration, not a recovered original-game formula.
+
+**Use base height (+0.165 m)** clears the extra visual Y offsets. Zero sliders
+therefore keep the corrected assembly height; setting +0.165 again would add it
+a second time visually.
 Settings last for the page session and apply to displayed vehicle instances,
 not inventory thumbnails. These are render-only diagnostics: Java slot data,
 physics, ground contact, and saved cars remain unchanged. Use them to identify

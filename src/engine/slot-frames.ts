@@ -3,7 +3,7 @@ import type { CfgSlot, PartConfig } from '../formats/cfg';
 import { poseMatrix } from './transforms';
 
 /** Native slottype selects a frame, independently of the user-defined slot ID. */
-export function slotMatrix(config: PartConfig, slot: CfgSlot) {
+export function slotMatrix(config: PartConfig, slot: CfgSlot, wheelFrameOffsetY = 0) {
   const type = slot.type ?? 0;
   let frame = new Matrix4();
   if (type === 11) {
@@ -13,6 +13,7 @@ export function slotMatrix(config: PartConfig, slot: CfgSlot) {
     const wheel = config.wheels[(type % 100) - 1];
     if (!wheel) throw new Error(`slottype ${type}: wheel frame missing`);
     frame = poseMatrix(wheel);
+    frame.elements[13] += wheelFrameOffsetY;
   } else if (type !== 0) throw new Error(`Unsupported slot frame type ${type}`);
   return frame.multiply(poseMatrix(slot));
 }
