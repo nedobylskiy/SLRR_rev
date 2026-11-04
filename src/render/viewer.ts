@@ -4,6 +4,7 @@ import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
+import { linkedRenderPose } from '../engine/linked-render';
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -56,6 +57,25 @@ function transmissionCondition(part?: EnginePart) {
 }
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
+function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model: ScxModel, pose?: import('../formats/cfg').CfgPose) {
+  if (!links || links.length < 2) return;
+  const bounds = new THREE.Box3(), renderPose = pose ? poseMatrix(pose) : new THREE.Matrix4();
+  const point = new THREE.Vector3();
+  for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+    bounds.expandByPoint(point.fromArray(mesh.positions, i).multiplyScalar(0.01).applyMatrix4(renderPose));
+  group.userData.linkedRender = { links, bounds, renderPose };
+}
+function syncLinkedRenders(part: EnginePart, group: THREE.Group) {
+  for (const child of group.children) {
+    const binding = child.userData.linkedRender;
+    if (!binding) continue;
+    const pose = linkedRenderPose(part, binding.links, binding.bounds);
+    if (!pose) continue;
+    child.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
+      .multiply(pose).multiply(binding.renderPose).multiply(new THREE.Matrix4().makeScale(0.01, 0.01, 0.01));
+    child.matrixWorldNeedsUpdate = true;
+  }
+}
 
 export class Viewer {
   readonly profiler: FrameProfiler;
@@ -509,8 +529,11 @@ export class Viewer {
           sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
           sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
           group.add(sub);
-          await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
+          const extraModel = parseScx(await assets.read(extra.model.path));
+          bindLinkedRender(sub, extra.links, extraModel, extra.pose);
+          await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
         }
+        syncLinkedRenders(part, group);
       }
       root.traverse(object => {
         if (!(object instanceof THREE.Mesh)) return;
@@ -559,6 +582,7 @@ export class Viewer {
       group.matrixWorldNeedsUpdate = true;
       group.visible = !group.userData.partLoading && this.partVisible(part);
       applyCfgRenderChannels(group, world.lightMask);
+      syncLinkedRenders(part, group);
     }
   }
   pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
@@ -600,7 +624,9 @@ export class Viewer {
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
         submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
         group.add(submodel);
-        warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
+        const extraModel = parseScx(await assets.read(extra.model.path));
+        bindLinkedRender(submodel, extra.links, extraModel, extra.pose);
+        warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
         if (generation !== this.generation) return warnings;
       }
       for (const light of part.definition.lights ?? []) {
@@ -793,6 +819,7 @@ export class Viewer {
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
       applyCfgRenderChannels(group, part.world.lightMask);
+      syncLinkedRenders(part, group);
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
       group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;

@@ -12,7 +12,7 @@ export interface PartConfig {
   brakePower?: [number, number];
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; links?: number[]; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -57,7 +57,12 @@ export function parsePartConfig(source: string): PartConfig {
       case 'bonepos':
         if (!slot) throw new Error(`CFG line ${line}: bonepos before slot`);
         slot.bonePosition = [number(0), number(1), number(2)]; break;
-      case 'linked': result.links.push(args.map((_, i) => integer(i))); break;
+      case 'linked': {
+        const links = args.map((_, i) => integer(i));
+        result.links.push(links);
+        if (result.renders.length) result.renders.at(-1)!.links = links;
+        break;
+      }
       case 'stockpart': result.stock.push(rid()); break;
       case 'render': {
         const resource = rid(), poseValue = args.length === 4 ? { position: [number(1), number(2), number(3)] as Triple, rotation: [0, 0, 0] as Triple } : args.length > 1 ? pose(1) : undefined;
