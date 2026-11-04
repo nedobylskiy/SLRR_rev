@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
+import { ptxTexture } from './ptx-texture';
+import { diffuseTextureIndex } from './diffuse-texture';
 import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
@@ -1235,8 +1237,9 @@ export class Viewer {
         part.paintMask ? paintColor === undefined ? material.color.clone() : new THREE.Color(paintColor & 0xffffff) : undefined);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
-      const file = boundTextures[part.textureIndex];
-      if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === part.textureIndex)
+      const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
+      const file = boundTextures[diffuseIndex];
+      if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
         { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
       if (file) {
         try {
@@ -1349,6 +1352,7 @@ export class Viewer {
     this.controls.target.set(0, 0, 0); this.camera.position.set(6, 3.5, 6); this.controls.update();
   }
   private async texture(bytes: Uint8Array, path: string): Promise<THREE.Texture> {
+    if (/\.ptx$/i.test(path)) return ptxTexture(bytes);
     const buffer = bytes.slice().buffer;
     const url = URL.createObjectURL(new Blob([buffer]));
     try {

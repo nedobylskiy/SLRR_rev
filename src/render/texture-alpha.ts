@@ -3,6 +3,7 @@ export type AlphaMode = 'opaque' | 'cutout' | 'blend';
 /** Classify DDS source blocks or decoded PNG/TGA pixels before selecting a material pass. */
 export function textureAlphaMode(bytes: Uint8Array, path: string, decodedImage?: unknown): AlphaMode {
   const suffix = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  if (suffix === 'ptx') return decodedAlphaMode(decodedImage) ?? 'opaque';
   if (suffix === 'png') {
     if (bytes.length < 26 || ascii(bytes, 1, 3) !== 'PNG') return 'opaque';
     const colorType = bytes[25];
