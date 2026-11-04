@@ -92,7 +92,7 @@ export class Viewer {
   }
   setSuspensionDebug(settings: SuspensionDebugSettings) {
     this.suspensionDebug = structuredClone(settings);
-    this.suspensionDebugActive = Object.values(settings).some(values => values.some(value => value !== 0));
+    this.suspensionDebugActive = Object.values(settings).some((values: number[]) => values.some(value => value !== 0));
     for (const [part, group] of this.proxies) {
       group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
