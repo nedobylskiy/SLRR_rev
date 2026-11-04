@@ -5,7 +5,7 @@ import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
 import { linkedRenderPose } from '../engine/linked-render';
-import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugRotation, type SuspensionDebugSettings } from './suspension-debug';
+import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugRotation, rearArmAdjustment, type SuspensionDebugSettings } from './suspension-debug';
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -79,8 +79,10 @@ function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: Suspens
       child.matrix.copy(binding.baseMatrix);
       if (debug && (suspensionCorner(part) ?? -1) >= 2) {
         const center = binding.meshCenter;
-        child.matrix.multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
-          .multiply(debugRotation(debug.rearRotation))
+        const adjustment = rearArmAdjustment(debug, suspensionCorner(part)!);
+        child.matrix.multiply(new THREE.Matrix4().makeTranslation(...adjustment.offset.map(value => value * 100) as [number, number, number]))
+          .multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
+          .multiply(debugRotation(adjustment.rotation))
           .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
       }
       child.matrixWorldNeedsUpdate = true;

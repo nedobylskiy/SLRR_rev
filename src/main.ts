@@ -361,7 +361,7 @@ softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.va
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 const suspensionDebugPanel = document.createElement('details');
 suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
-suspensionDebugPanel.append(textElement('p', 'Offsets in chassis axes (meters). Rotations in local axes (degrees, XYZ). Both sides use the same values. Physics and saves are unchanged.'));
+suspensionDebugPanel.append(textElement('p', 'Attachment offsets: chassis axes, meters. Arm offsets: mesh axes, meters. Left/right arm controls are independent and mirrored: positive X moves outward; equal rotations mirror across X. Degrees, XYZ order. Physics and saves are unchanged.'));
 const suspensionSettings = defaultSuspensionDebug();
 const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
 const suspensionValues = document.createElement('textarea'); suspensionValues.readOnly = true; suspensionValues.rows = 8;
@@ -373,6 +373,8 @@ const updateSuspensionDebug = () => {
 for (const [key, title] of [
   ['frontOffset', 'Front attachment offset'], ['rearOffset', 'Rear attachment offset'],
   ['rearRotation', 'Rear control arm rotation'], ['rearShaftRotation', 'Rear CV shaft rotation'],
+  ['rearLeftArmOffset', 'Left rear arm offset'], ['rearLeftArmRotation', 'Left rear arm rotation'],
+  ['rearRightArmOffset', 'Right rear arm offset'], ['rearRightArmRotation', 'Right rear arm rotation'],
 ] as const) {
   suspensionDebugPanel.append(textElement('strong', title));
   const rotation = key.includes('Rotation');

@@ -7,10 +7,24 @@ export interface SuspensionDebugSettings {
   rearOffset: DebugTriple;
   rearRotation: DebugTriple;
   rearShaftRotation: DebugTriple;
+  rearLeftArmOffset: DebugTriple;
+  rearRightArmOffset: DebugTriple;
+  rearLeftArmRotation: DebugTriple;
+  rearRightArmRotation: DebugTriple;
 }
 export const defaultSuspensionDebug = (): SuspensionDebugSettings => ({
   frontOffset: [0, 0, 0], rearOffset: [0, 0, 0], rearRotation: [0, 0, 0], rearShaftRotation: [0, 0, 0],
+  rearLeftArmOffset: [0, 0, 0], rearRightArmOffset: [0, 0, 0],
+  rearLeftArmRotation: [0, 0, 0], rearRightArmRotation: [0, 0, 0],
 });
+/** Reflect the right-side adjustment across X for the left arm. Positive X is outward. */
+export function rearArmAdjustment(settings: SuspensionDebugSettings, corner: number) {
+  const left = corner === 2, offset = left ? settings.rearLeftArmOffset : settings.rearRightArmOffset;
+  const rotation = left ? settings.rearLeftArmRotation : settings.rearRightArmRotation;
+  const sign = left ? -1 : 1;
+  return { offset: [sign * offset[0], offset[1], offset[2]] as DebugTriple,
+    rotation: rotation.map((value, axis) => settings.rearRotation[axis] + value * (axis === 0 ? 1 : sign)) as DebugTriple };
+}
 export function suspensionCorner(part: EnginePart): number | undefined {
   const type = part.parent?.definition.config.slots.find(slot => slot.id === part.parentSlot)?.type;
   return type !== undefined && (type >= 101 && type <= 104 || type >= 201 && type <= 204 || type >= 301 && type <= 304) ? type % 100 - 1 : undefined;

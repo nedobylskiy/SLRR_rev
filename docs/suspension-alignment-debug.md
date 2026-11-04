@@ -11,7 +11,13 @@ rebuilding the vehicle.
 - Rear CV shaft rotation: separate adjustment of two-anchor linked renders,
   around the authored mesh bounds center, before their attachment transform.
 
-Both left and right corners use the same values. Offset changes include the
+The left and right rear arms have independent offset and rotation controls.
+Positive arm X offset moves outward (left X is negated); Y/Z offsets have the
+same sign. Matching rotation values mirror across X (left Y/Z angles are
+negated). These adjustments use mesh-local axes, around the mesh bounds center.
+The earlier `rearRotation` remains a shared, unmirrored rotation adjustment.
+
+Both left and right corners use the same attachment offset values. Offset changes include the
 independent wheel, suspension, and strut branches selected by CFG slot types
 101–104, 201–204, and 301–304. Descendants inherit the adjustment once.
 

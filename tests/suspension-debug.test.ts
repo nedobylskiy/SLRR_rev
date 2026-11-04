@@ -3,7 +3,17 @@ import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
 import { EngineWorld, type PartDefinition } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
-import { defaultSuspensionDebug, suspensionDebugMatrix } from '../src/render/suspension-debug';
+import { defaultSuspensionDebug, suspensionDebugMatrix, rearArmAdjustment } from '../src/render/suspension-debug';
+
+test('rear arm controls are independent and mirror translation and rotation across X', () => {
+  const settings = defaultSuspensionDebug();
+  settings.rearLeftArmOffset = settings.rearRightArmOffset = [0.1, 0.2, 0.3];
+  settings.rearLeftArmRotation = settings.rearRightArmRotation = [10, 20, 30];
+  assert.deepEqual(rearArmAdjustment(settings, 2), { offset: [-0.1, 0.2, 0.3], rotation: [10, -20, -30] });
+  assert.deepEqual(rearArmAdjustment(settings, 3), { offset: [0.1, 0.2, 0.3], rotation: [10, 20, 30] });
+  settings.rearLeftArmOffset = [0.4, 0, 0];
+  assert.deepEqual(rearArmAdjustment(settings, 3).offset, [0.1, 0.2, 0.3]);
+});
 
 test('visual suspension tuning moves independent wheel and hub branches, inherits to children and leaves native poses unchanged', () => {
   const definition = (id: number, cfg: string): PartDefinition => ({ key: { pack: 'test.rpk', id }, alias: String(id), cfgPath: '', config: parsePartConfig('wheel 0 0 0 0 0 0 0 0 1 1\n'.repeat(4) + cfg) });
