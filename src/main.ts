@@ -365,7 +365,7 @@ softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.va
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 const suspensionDebugPanel = document.createElement('details');
 suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
-suspensionDebugPanel.append(textElement('p', 'Vehicle assembly includes +0.165 m suspension placement. Sliders add visual offsets on top (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
+suspensionDebugPanel.append(textElement('p', 'Base suspension: height +0.165 m; front attachments 0.055 m inward, rear 0.075 m outward. Sliders add visual offsets (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
 const suspensionSettings = defaultSuspensionDebug();
 let suspensionSteer: number | undefined;
 const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];

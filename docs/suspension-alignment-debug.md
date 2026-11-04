@@ -34,10 +34,15 @@ independent wheel, suspension, and strut branches selected by CFG slot types
 The numeric inputs allow exact values. The read-only JSON field can be copied
 to report a calibration; **Reset suspension alignment** restores zero values.
 Vehicle assembly now includes the user's measured +0.165 m Y correction in
-the chassis wheel/hub/strut slot frames. Installation, parked settling, linked
+the chassis wheel/hub/strut slot frames, plus the shared per-corner attachment
+offsets: FL `[0.055,0,0]`, FR `[-0.055,0,0]`, RL `[-0.075,0,0]`,
+RR `[0.075,0,0]`. Front attachments move 0.055 m inward and rear attachments
+0.075 m outward, independently of the model. Installation, parked settling, linked
 anchors and physical suspension hardpoints all use those same frames. Original
 CFG data is unchanged; rebuilding from a save reapplies the correction once.
-`PartFactory.stock` accepts `suspensionMountOffsetY: 0` for an uncalibrated audit.
+`PartFactory.stock` accepts `suspensionMountOffsetY: 0, suspensionMountOffsets: []`
+for an uncalibrated audit. Steering uses the same corrected carrier as the hub
+and wheel. Sliders stay at zero so calibration is not applied a second time.
 This is an explicit measured calibration, not a recovered original-game formula.
 
 **Use base height (+0.165 m)** clears the extra visual Y offsets. Zero sliders

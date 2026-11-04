@@ -16,12 +16,13 @@ export function settleParkedSuspension(root: EnginePart): boolean {
   const config = root.definition.config;
   if (config.wheels.length !== 4 || root.world.wheelRefs.filter(wheel => wheel && wheel.force > 0 && wheel.restLength > 0).length !== 4) return false;
   const mass = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);
-  const frontZ = (config.wheels[0].position[2] + config.wheels[1].position[2]) / 2;
-  const rearZ = (config.wheels[2].position[2] + config.wheels[3].position[2]) / 2;
+  const frames = config.wheels.map((_, index) => root.wheelFrame(index));
+  const frontZ = (frames[0].elements[14] + frames[1].elements[14]) / 2;
+  const rearZ = (frames[2].elements[14] + frames[3].elements[14]) / 2;
   const frontShare = Math.abs(rearZ - frontZ) > 1e-6 ? Math.max(0, Math.min(1, (rearZ - center.z) / (rearZ - frontZ))) : 0.5;
   const shifts = config.wheels.map((wheel, index) => {
     const axle = index < 2 ? 0 : 2;
-    const left = config.wheels[axle].position[0], right = config.wheels[axle + 1].position[0];
+    const left = frames[axle].elements[12], right = frames[axle + 1].elements[12];
     const leftShare = Math.abs(right - left) > 1e-6 ? Math.max(0, Math.min(1, (right - center.x) / (right - left))) : 0.5;
     const load = mass * (index < 2 ? frontShare : 1 - frontShare) * (index % 2 ? 1 - leftShare : leftShare);
     return suspensionAnchorLength(wheel) - parkedSpringLength(root.world.wheelRefs[index]!, load)!;

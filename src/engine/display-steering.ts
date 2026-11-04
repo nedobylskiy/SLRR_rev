@@ -1,7 +1,6 @@
 import { Matrix4 } from 'three';
 import type { EnginePart } from './world';
 import { ackermannSteerAngle } from './suspension-3d';
-import { poseMatrix } from './transforms';
 
 /** Pose parked cars from their own CFG frames; never accumulate render rotations. */
 export function applyDisplaySteering(root: EnginePart, input: number): void {
@@ -23,8 +22,7 @@ export function applyDisplaySteering(root: EnginePart, input: number): void {
     const frame = root.slotFrame(slot);
     // A hub slot may be offset from the rim's slot. Rotate both around the
     // shared WheelRef carrier, not around each individual attachment origin.
-    const carrier = poseMatrix(wheel);
-    carrier.elements[13] += root.wheelFrameOffsetY;
+    const carrier = root.wheelFrame(type % 100 - 1);
     const steer = ackermannSteerAngle(angle, carrier.elements[12], config.ackermann ?? 2, wheel.parameters[0] ?? 0);
     const delta = steer === 0 ? new Matrix4() : carrier.clone().multiply(new Matrix4().makeRotationY(steer)).multiply(carrier.clone().invert());
     part.local.copy(delta).multiply(frame).multiply(part.slotFrame(own).invert());

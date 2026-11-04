@@ -23,6 +23,7 @@ slottype 201
 slot -0.118 0.04 0.03 0 0 0 122
 slottype 202`));
   root.wheelFrameOffsetY = 0.165;
+  root.wheelFrameOffsets = [[0.055,0,0],[-0.055,0,0]];
   for (const [index, slot] of [101, 102, 121, 122].entries()) {
     const part = world.create(definition(index + 2, 'slot 0.02 0 0 0 0 0 1'));
     world.install(root, slot, part, 1);
