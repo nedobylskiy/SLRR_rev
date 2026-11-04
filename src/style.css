@@ -304,6 +304,10 @@ body.viewport-expanded{overflow:hidden}
   width:min(320px,calc(100% - 24px));
   background:#101a20de
 }
+.workspace.viewport-expanded .map-debug-panel[open] { max-height: 75vh; overflow-y: auto; }
+.suspension-debug-axis { display: grid; grid-template-columns: 30px minmax(60px, 1fr) 75px; gap: 6px; align-items: center; margin: 6px 0; }
+.suspension-debug-axis input { width: 100%; min-width: 0; margin: 0; }
+.map-debug-panel textarea { width: 100%; margin-top: 8px; font: 11px monospace; }
 .workspace.viewport-expanded .vehicle-debug-panel{
   position:absolute;
   top:12px;

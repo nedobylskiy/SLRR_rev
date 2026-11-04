@@ -5,6 +5,7 @@ import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
 import { linkedRenderPose } from '../engine/linked-render';
+import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugRotation, type SuspensionDebugSettings } from './suspension-debug';
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -65,12 +66,18 @@ function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model
     bounds.expandByPoint(point.fromArray(mesh.positions, i).multiplyScalar(0.01).applyMatrix4(renderPose));
   group.userData.linkedRender = { links, bounds, renderPose };
 }
-function syncLinkedRenders(part: EnginePart, group: THREE.Group) {
+function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: SuspensionDebugSettings) {
   for (const child of group.children) {
     const binding = child.userData.linkedRender;
     if (!binding) continue;
     const pose = linkedRenderPose(part, binding.links, binding.bounds);
     if (!pose) continue;
+    if (debug && debug.rearShaftRotation.some(value => value !== 0) && (suspensionCorner(part) ?? -1) >= 2) {
+      const center = binding.bounds.getCenter(new THREE.Vector3());
+      pose.multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
+        .multiply(debugRotation(debug.rearShaftRotation))
+        .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+    }
     child.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
       .multiply(pose).multiply(binding.renderPose).multiply(new THREE.Matrix4().makeScale(0.01, 0.01, 0.01));
     child.matrixWorldNeedsUpdate = true;
@@ -78,6 +85,20 @@ function syncLinkedRenders(part: EnginePart, group: THREE.Group) {
 }
 
 export class Viewer {
+  private suspensionDebug = defaultSuspensionDebug();
+  private suspensionDebugActive = false;
+  private visualPartMatrix(part: EnginePart) {
+    return this.suspensionDebugActive ? suspensionDebugMatrix(part, this.suspensionDebug) : part.matrix();
+  }
+  setSuspensionDebug(settings: SuspensionDebugSettings) {
+    this.suspensionDebug = structuredClone(settings);
+    this.suspensionDebugActive = Object.values(settings).some(values => values.some(value => value !== 0));
+    for (const [part, group] of this.proxies) {
+      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      group.matrixWorldNeedsUpdate = true;
+      syncLinkedRenders(part, group, this.suspensionDebug);
+    }
+  }
   readonly profiler: FrameProfiler;
   physicsWork = '';
   private frameDuration = 1000 / 60;
@@ -578,11 +599,11 @@ export class Viewer {
         this.proxies.delete(part); this.collisionMeshes.delete(part);
         continue;
       }
-      group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
+      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       group.visible = !group.userData.partLoading && this.partVisible(part);
       applyCfgRenderChannels(group, world.lightMask);
-      syncLinkedRenders(part, group);
+      syncLinkedRenders(part, group, this.suspensionDebug);
     }
   }
   pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
@@ -612,7 +633,7 @@ export class Viewer {
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
       if (publishTogether) { group.visible = false; group.userData.partLoading = true; staged.push(group); }
-      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); this.model.add(group);
+      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint));
@@ -823,9 +844,9 @@ export class Viewer {
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
       applyCfgRenderChannels(group, part.world.lightMask);
-      syncLinkedRenders(part, group);
+      syncLinkedRenders(part, group, this.suspensionDebug);
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
-      group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
+      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
     }
   }

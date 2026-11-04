@@ -12,6 +12,7 @@ import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
+import { defaultSuspensionDebug, type SuspensionDebugSettings } from './render/suspension-debug';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
@@ -358,6 +359,50 @@ for (const [value, title] of [['auto', 'Auto (prefer C++ / WASM)'], ['ts', 'Type
 }
 softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.value as SoftBodyBackend; };
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
+const suspensionDebugPanel = document.createElement('details');
+suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
+suspensionDebugPanel.append(textElement('p', 'Offsets in chassis axes (meters). Rotations in local axes (degrees, XYZ). Both sides use the same values. Physics and saves are unchanged.'));
+const suspensionSettings = defaultSuspensionDebug();
+const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
+const suspensionValues = document.createElement('textarea'); suspensionValues.readOnly = true; suspensionValues.rows = 8;
+suspensionValues.setAttribute('aria-label', 'Suspension debug values to share');
+const updateSuspensionDebug = () => {
+  viewer?.setSuspensionDebug(suspensionSettings);
+  suspensionValues.value = JSON.stringify(suspensionSettings, null, 2);
+};
+for (const [key, title] of [
+  ['frontOffset', 'Front attachment offset'], ['rearOffset', 'Rear attachment offset'],
+  ['rearRotation', 'Rear assembly rotation'], ['rearShaftRotation', 'Rear CV shaft rotation'],
+] as const) {
+  suspensionDebugPanel.append(textElement('strong', title));
+  const rotation = key.includes('Rotation');
+  for (let axis = 0; axis < 3; axis++) {
+    const label = document.createElement('label'); label.className = 'suspension-debug-axis';
+    const range = document.createElement('input'), number = document.createElement('input');
+    range.type = 'range'; number.type = 'number';
+    for (const input of [range, number]) {
+      input.min = rotation ? '-180' : '-0.5'; input.max = rotation ? '180' : '0.5';
+      input.step = rotation ? '1' : '0.005'; input.value = '0';
+      input.setAttribute('aria-label', `${title} ${'XYZ'[axis]} (${rotation ? 'degrees' : 'meters'})`);
+    }
+    const change = (input: HTMLInputElement) => {
+      if (input.value === '' || !Number.isFinite(input.valueAsNumber)) return;
+      const value = Math.max(Number(input.min), Math.min(Number(input.max), input.valueAsNumber));
+      suspensionSettings[key][axis] = value; range.value = number.value = String(value); updateSuspensionDebug();
+    };
+    range.oninput = () => change(range); number.oninput = () => change(number);
+    label.append(textElement('span', `${'XYZ'[axis]} ${rotation ? '°' : 'm'}`), range, number);
+    suspensionDebugPanel.append(label); suspensionInputs.push({ key, axis, range, number });
+  }
+}
+const suspensionReset = textElement('button', 'Reset suspension alignment');
+suspensionReset.onclick = () => {
+  Object.assign(suspensionSettings, defaultSuspensionDebug());
+  for (const { range, number } of suspensionInputs) range.value = number.value = '0';
+  updateSuspensionDebug();
+};
+suspensionDebugPanel.append(suspensionReset, suspensionValues); mapDebugPanel.append(suspensionDebugPanel);
+updateSuspensionDebug();
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
 bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);
