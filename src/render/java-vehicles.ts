@@ -4,6 +4,7 @@ import { normalizeResourcePackPath } from '../assets';
 import { PartFactory } from '../engine/world';
 import { poseMatrix } from '../engine/transforms';
 import { applyDisplaySteering } from '../engine/display-steering';
+import { resetParkedRunningGear, settleParkedSuspension } from '../engine/parked-suspension';
 import { Euler, Quaternion, Vector3 } from 'three';
 import type { MapTerrain } from '../engine/map-terrain';
 import type { BootResult } from '../runtime/game-boot';
@@ -93,6 +94,7 @@ export class JavaSceneVehicles {
       if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
       await this.factory.syncJavaAssembly(built.root, selection);
       if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      this.settled.delete(built);
       this.sync(node, built, ref);
       // showWorld skips existing GPU proxies and publishes only new part meshes.
       await this.viewer.showWorld(built.world, this.assets, true, true);
@@ -112,28 +114,33 @@ export class JavaSceneVehicles {
     const pose = chassis && chassis.poseRevision > node.poseRevision ? chassis : node;
     built.root.local.copy(poseMatrix({ position: [pose.position.x, pose.position.y, pose.position.z],
       rotation: [pose.orientation.y, pose.orientation.p, pose.orientation.r] }));
+    resetParkedRunningGear(built.root);
+    const steering = node.steeringInput ?? chassis?.steeringInput;
+    if (steering !== undefined) applyDisplaySteering(built.root, steering);
+    const suspended = settleParkedSuspension(built.root);
     // Native physics normally resolves a freshly placed car out of the floor.
     // Static displays have no driving solver, so resolve wheel penetration here.
-    let lift = 0;
+    let lift = suspended ? -Infinity : 0;
     const settled = this.settled.get(built);
     const needsContact = this.terrain && (settled?.pose !== pose || settled.revision !== pose.poseRevision);
     if (needsContact) for (const slot of built.root.definition.config.slots) {
       if (slot.type === undefined || slot.type < 101 || slot.type > 199 || !built.root.children.has(slot.id)) continue;
       const wheel = built.root.definition.config.wheels[slot.type - 101];
       if (!wheel?.radius) continue;
-      const center = new Vector3().setFromMatrixPosition(built.root.slotFrame(slot)).applyMatrix4(built.root.local);
+      const part = built.root.children.get(slot.id)!;
+      const own = part.definition.config.slots.find(own => own.id === part.ownSlot);
+      const frame = own ? part.local.clone().multiply(part.slotFrame(own)) : built.root.slotFrame(slot);
+      const center = new Vector3().setFromMatrixPosition(frame).applyMatrix4(built.root.local);
       const radius = wheel.radius * (built.world.wheelRefs[slot.type - 101]?.radius ?? 0.32865) / 0.32865;
       // Search the placement's floor, not furniture/ceilings above its origin.
       const ground = this.terrain!.height(center.x, center.z, pose.position.y);
       if (Number.isFinite(ground) && ground > -999) lift = Math.max(lift, ground - (center.y - radius));
     }
-    if (lift > 0.001) {
+    if (Number.isFinite(lift) && Math.abs(lift) > 0.001) {
       pose.setMatrix({ ...pose.position, y: pose.position.y + lift }, pose.orientation);
       built.root.local.elements[13] += lift;
     }
     if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision });
-    const steering = node.steeringInput ?? chassis?.steeringInput;
-    if (steering !== undefined) applyDisplaySteering(built.root, steering);
     for (const part of built.world.parts.values()) {
       // Java camera look commands address the installed part, not its chassis.
       // Publish the attachment transform without generating a new placement command.
