@@ -43,6 +43,15 @@ export class PartNative {
       child: ResourceObject, childSlot: CfgSlot) => Promise<boolean>) {
     const owner = 'java.game.parts.Part';
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
+    gameTypes.setObjectCategoryReader(receiver => {
+      const node = gameTypes.getResource(receiver);
+      const canonical = node && gameTypes.reference(node);
+      const config = this.configs.get(receiver.value as JavaObject)
+        ?? (canonical && this.configs.get(canonical.value as JavaObject));
+      // Native car bodies own the wheel definitions. Other configured parts
+      // remain GIR_CAT_PART regardless of their body/engine/running-gear filter.
+      return config ? config.wheels.length ? 5 : 9 : 0;
+    });
     gameTypes.setPartCategoryReader(receiver => {
       const node = gameTypes.getResource(receiver);
       const canonical = node && gameTypes.reference(node);

@@ -53,6 +53,7 @@ export class GameTypeNative {
   private partCompatibilityReader?: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
   private renderCountReader?: (receiver: JavaValue) => number;
+  private objectCategoryReader?: (receiver: JavaValue) => number;
   private partCategoryReader?: (receiver: JavaValue) => number;
   private driveTypeReader?: (receiver: JavaValue) => number;
   private removalReader?: (receiver: JavaValue) => number;
@@ -443,6 +444,7 @@ export class GameTypeNative {
         // MOCK: The host has no separate animated bone node yet. Use the live
         // object's ID so Java camera commands can target its root transform.
         case 1: return jv('int', node.resourceId); // GII_BONE
+        case 7: return jv('int', this.objectCategoryReader?.(receiver) ?? 0); // GII_CATEGORY, distinct from CFG part category.
         case 5: return jv('int', node.resourceId); // GII_ID
         case 6: { // GII_TYPE: catalog copies pass this int into new GameRef(id).
           const value = jv('int', node.typeId);
@@ -625,6 +627,7 @@ export class GameTypeNative {
   }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
+  setObjectCategoryReader(reader: (receiver: JavaValue) => number): void { this.objectCategoryReader = reader; }
   setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
   addResourceDestroyListener(listener: (receiver: JavaValue) => void): void { this.resourceDestroyListeners.add(listener); }
   setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }

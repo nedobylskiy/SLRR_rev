@@ -19,6 +19,21 @@ test('CFG categories reach the native query used by the Java mechanic inventory'
   }
 });
 
+test('garage right click reads native object category through an aliased GameRef', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {}), parts = new PartNative(jvm, resources);
+  for (const [source, expected] of [['category 1', 9], ['category 2', 9], ['category 3', 9],
+    ['wheel 0 0 0 0 0 0 0 0 1 1', 5]] as const) {
+    const part = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', part, []);
+    parts.configure(part, parsePartConfig(source));
+    const alias = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.util.resource.ResourceRef', 'set', alias, [jv('int', resources.getResource(part)!.resourceId)]);
+    const value = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', alias, [jv('int', 7), jv('int', 0)]);
+    assert.equal(value?.value, expected);
+  }
+});
+
 test('Java part wear and tear belong to each instance', async () => {
   const source = `package java.game.parts; class Part {
     native float getWear(); native float setWear(float value);
