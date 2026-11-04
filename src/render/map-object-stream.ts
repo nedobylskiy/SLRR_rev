@@ -1,4 +1,5 @@
 import { Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
+import { MapMaterialPool } from './map-material-pool';
 
 export interface StreamPlacement { matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
@@ -40,6 +41,7 @@ export class MapObjectStream {
   private viewDirty = true;
   private shadowRange = 0;
   private readonly instanceColor = new Color();
+  private readonly materials = new MapMaterialPool();
   constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
   setRange(value: number) {
@@ -177,6 +179,7 @@ export class MapObjectStream {
         return;
       }
       if (!parts.length) { this.dirty = true; return; }
+      this.materials.acquire(parts);
       type.localBounds = new Sphere().makeEmpty();
       type.meshes = parts.map(part => {
         if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere();
@@ -208,6 +211,7 @@ export class MapObjectStream {
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(material);
     }
     for (const material of materials as Set<import('three').Material>) {
+      if (this.materials.release(material)) continue;
       for (const value of Object.values(material)) if (value instanceof Texture) textures.add(value);
       if (material.userData.bakedLightmapTexture instanceof Texture) textures.add(material.userData.bakedLightmapTexture);
       material.dispose();

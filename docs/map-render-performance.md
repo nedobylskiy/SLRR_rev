@@ -26,6 +26,15 @@ compatible material sections and reducing distant foliage work are separate
 optimizations. Do not infer a specific FPS improvement from resource counts or
 from headless software rendering.
 
+Equal opaque map surfaces also share a material, across model types. Previously
+every SCX section had a distinct material ID, so Three's opaque sort and material
+refresh path treated equal shader/texture state as different. The pool compares
+shader variants, primitive material settings, colors, texture Sources, sampling
+state and UV transforms. Transparent surfaces and materials holding separate
+baked textures remain independent. A streamed model holds one reference per
+distinct shared material; only its last owner disposes textures/material.
+Lighting and both shadow paths keep their existing independent switches.
+
 A fixed original city scene at focus `(-291, 10, 1034)` and range 850 m was
 fully loaded before rendering, with shadows and baked lighting disabled. Both
 versions submitted 1577 draws / 530711 triangles / 1437 GPU geometries. The
@@ -33,3 +42,10 @@ uncached version allocated 1430 GPU textures; shared Sources allocated 136.
 The captured viewport pixels were identical. This validates resource sharing,
 not the user's hardware frame rate. Unit tests also cover concurrent acquisition,
 independent UV transforms, repeated disposal, last-user eviction and load retries.
+
+In the same scene material pooling reduced resident materials from 3049 to 575,
+with the same 1577 draws and triangle count. Instrumenting the second, warmed
+render counted `uniform3f` calls decreasing from 178 to 16 and `uniformMatrix3fv`
+from 96 to 65. These are individual API counters, not total render-time savings.
+Viewport comparison differed at 73 of 370540 pixels in one small ground patch;
+material sorting changes the order of coplanar surfaces. No geometry was removed.
