@@ -25,7 +25,7 @@ export class JavaSceneVehicles {
   private terrain?: Pick<MapTerrain, 'height'>;
   private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
-    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals'>,
+    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>,
     private readonly report: (message: string) => void,
     private readonly factory: Pick<PartFactory, 'stock' | 'syncJavaAssembly'> = new PartFactory(assets)) {}
 
@@ -115,7 +115,7 @@ export class JavaSceneVehicles {
     built.root.local.copy(poseMatrix({ position: [pose.position.x, pose.position.y, pose.position.z],
       rotation: [pose.orientation.y, pose.orientation.p, pose.orientation.r] }));
     resetParkedRunningGear(built.root);
-    const steering = node.steeringInput ?? chassis?.steeringInput;
+    const steering = this.viewer.calibrationSteering ?? node.steeringInput ?? chassis?.steeringInput;
     if (steering !== undefined) applyDisplaySteering(built.root, steering);
     const suspended = settleParkedSuspension(built.root);
     // Native physics normally resolves a freshly placed car out of the floor.

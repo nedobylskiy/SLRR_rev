@@ -15,6 +15,26 @@ test('rear arm controls are independent and mirror translation and rotation acro
   assert.deepEqual(rearArmAdjustment(settings, 3).offset, [0.1, 0.2, 0.3]);
 });
 
+test('individual corner placement affects its wheel and hub, while wheel-only offset does not move the hub or steering column', () => {
+  const world = new EngineWorld();
+  const definition = (id: number, cfg: string): PartDefinition => ({ key: { pack: 'test.rpk', id }, alias: String(id), cfgPath: '',
+    config: parsePartConfig('wheel 0 0 0 0 0 0 0 0 1 1\n'.repeat(4) + cfg) });
+  const root = world.create(definition(1, 'steering 0 0 0 0 0 0\nslot 0 0 0 0 0 0 101\nslottype 101\nslot 0 0 0 0 0 0 102\nslottype 102\nslot 0 0 0 0 0 0 121\nslottype 201\nslot 0 0 0 0 0 0 11\nslottype 11'));
+  const make = (id: number) => world.create(definition(id, 'slot 0 0 0 0 0 0 1'));
+  const left = make(2), right = make(3), hub = make(4), steering = make(5);
+  world.install(root, 101, left, 1); world.install(root, 102, right, 1);
+  world.install(root, 121, hub, 1); world.install(root, 11, steering, 1);
+  const settings = defaultSuspensionDebug();
+  settings.frontLeftAttachmentOffset = [0.1, 0.2, 0.3];
+  settings.frontLeftWheelOffset = [0.05, 0, 0];
+  const pos = (part: typeof root) => new Vector3().setFromMatrixPosition(suspensionDebugMatrix(part, settings));
+  assert.ok(pos(left).distanceTo(new Vector3(0.15, 0.2, 0.3)) < 1e-9);
+  assert.ok(pos(hub).distanceTo(new Vector3(0.1, 0.2, 0.3)) < 1e-9);
+  assert.ok(pos(right).length() < 1e-9);
+  assert.ok(pos(steering).length() < 1e-9);
+  assert.equal(left.local.elements[13], 0, 'calibration must not accumulate into native placement');
+});
+
 test('visual suspension tuning moves independent wheel and hub branches, inherits to children and leaves native poses unchanged', () => {
   const definition = (id: number, cfg: string): PartDefinition => ({ key: { pack: 'test.rpk', id }, alias: String(id), cfgPath: '', config: parsePartConfig('wheel 0 0 0 0 0 0 0 0 1 1\n'.repeat(4) + cfg) });
   const world = new EngineWorld();

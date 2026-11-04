@@ -51,7 +51,9 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   gameTypes.reference = node => vehicles.find(vehicle => vehicle.node === node)?.chassis ?? reference(node);
   const shown: EngineWorld[] = [], removed: EngineWorld[] = [], built: Awaited<ReturnType<PartFactory['stock']>>[] = [];
   let finishShow: (() => void) | undefined;
+  const calibration = { value: undefined as number | undefined };
   const renderer = new JavaSceneVehicles(result, {} as Assets, {
+    get calibrationSteering() { return calibration.value; },
     showWorld: async world => { shown.push(world); if (shown.length === 2) await new Promise<void>(resolve => { finishShow = resolve; }); return []; },
     removeWorld: world => { removed.push(world); }, syncWorldVisuals: () => {},
   }, message => assert.fail(message), {
@@ -108,6 +110,13 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.deepEqual(wheel.local, turned, 'display updates must not accumulate steering');
   await steer('0');
   assert.equal(wheel.local.elements[8], 0, 'setsteer 0 restores the neutral slot frame');
+  calibration.value = 0.5;
+  renderer.update(map);
+  assert.ok(wheel.local.elements[8] > 0.1, 'garage alignment slider turns the vehicle wheels');
+  assert.equal(vehicles[0].node.steeringInput, 0, 'alignment does not replace the script steering value');
+  calibration.value = undefined;
+  renderer.update(map);
+  assert.equal(wheel.local.elements[8], 0, 'clearing the override restores Java steering');
   await steer('2');
   assert.equal(vehicles[0].node.steeringInput, 1);
   await assert.rejects(() => steer('NaN'), /Invalid steering command/);

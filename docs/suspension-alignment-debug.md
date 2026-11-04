@@ -4,7 +4,15 @@ Open **Graphics / map debug → Suspension alignment (visual debug)** in the gar
 or a driving scene. Controls update existing meshes immediately, without
 rebuilding the vehicle.
 
-- Front and rear attachment offsets: chassis X/Y/Z axes, meters, ±0.5 m.
+- Four independent attachment offsets (FL/FR/RL/RR): chassis X/Y/Z axes,
+  meters, ±0.5 m. They move the selected corner's wheel/hub/strut branches.
+- Four independent wheel-only offsets: chassis X/Y/Z axes, meters, ±0.5 m.
+  They move the rim/tire branch and its descendants without moving the hub.
+- **Garage steering**: normalized vehicle steering input from -1 to +1.
+  It uses the existing CFG/Ackermann display steering path, so wheels and hubs
+  turn together. Zero centers them. **Restore script steering** releases the
+  alignment override and restores Java `setsteer` control. This control does
+  not relocate the cockpit steering wheel and does not override driving input.
 - Rear control arm rotation (`rearRotation`): single-anchor additional renders,
   around their mesh bounds center, local X/Y/Z axes, degrees, XYZ Euler order.
   This does not rotate the wheel/hub or the two-anchor CV shaft.
@@ -17,7 +25,9 @@ same sign. Matching rotation values mirror across X (left Y/Z angles are
 negated). These adjustments use mesh-local axes, around the mesh bounds center.
 The earlier `rearRotation` remains a shared, unmirrored rotation adjustment.
 
-Both left and right corners use the same attachment offset values. Offset changes include the
+Legacy JSON fields `frontOffset` / `rearOffset` remain shared additive values,
+defaulting to zero; the UI exposes independent per-corner fields instead.
+Attachment offset changes include the
 independent wheel, suspension, and strut branches selected by CFG slot types
 101–104, 201–204, and 301–304. Descendants inherit the adjustment once.
 

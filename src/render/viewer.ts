@@ -106,6 +106,8 @@ function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: Suspens
 }
 
 export class Viewer {
+  /** Optional garage alignment override; normal Java setsteer resumes when cleared. */
+  calibrationSteering?: number;
   private suspensionDebug = defaultSuspensionDebug();
   private suspensionDebugActive = false;
   private visualPartMatrix(part: EnginePart) {

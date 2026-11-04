@@ -363,18 +363,23 @@ const suspensionDebugPanel = document.createElement('details');
 suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
 suspensionDebugPanel.append(textElement('p', 'Vehicle assembly includes +0.165 m suspension placement. Sliders add visual offsets on top (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
 const suspensionSettings = defaultSuspensionDebug();
+let suspensionSteer: number | undefined;
 const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
 const suspensionValues = document.createElement('textarea'); suspensionValues.readOnly = true; suspensionValues.rows = 8;
 suspensionValues.setAttribute('aria-label', 'Suspension debug values to share');
 const updateSuspensionDebug = () => {
   viewer?.setSuspensionDebug(suspensionSettings);
-  suspensionValues.value = JSON.stringify(suspensionSettings, null, 2);
+  if (viewer) viewer.calibrationSteering = suspensionSteer;
+  suspensionValues.value = JSON.stringify({ ...suspensionSettings, steeringInput: suspensionSteer ?? null }, null, 2);
 };
 for (const [key, title] of [
-  ['frontOffset', 'Front attachment offset'], ['rearOffset', 'Rear attachment offset'],
+  ['frontLeftAttachmentOffset', 'Front left attachment offset'], ['frontRightAttachmentOffset', 'Front right attachment offset'],
+  ['rearLeftAttachmentOffset', 'Rear left attachment offset'], ['rearRightAttachmentOffset', 'Rear right attachment offset'],
   ['rearRotation', 'Rear control arm rotation'], ['rearShaftRotation', 'Rear CV shaft rotation'],
   ['rearLeftArmOffset', 'Left rear arm offset'], ['rearLeftArmRotation', 'Left rear arm rotation'],
   ['rearRightArmOffset', 'Right rear arm offset'], ['rearRightArmRotation', 'Right rear arm rotation'],
+  ['frontLeftWheelOffset', 'Front left wheel offset'], ['frontRightWheelOffset', 'Front right wheel offset'],
+  ['rearLeftWheelOffset', 'Rear left wheel offset'], ['rearRightWheelOffset', 'Rear right wheel offset'],
 ] as const) {
   suspensionDebugPanel.append(textElement('strong', title));
   const rotation = key.includes('Rotation');
@@ -397,16 +402,34 @@ for (const [key, title] of [
     suspensionDebugPanel.append(label); suspensionInputs.push({ key, axis, range, number });
   }
 }
+const steeringLabel = document.createElement('label'); steeringLabel.className = 'map-stream-range';
+const steeringReadout = textElement('span', 'Garage steering: script controlled');
+const steeringRange = document.createElement('input'); steeringRange.type = 'range';
+steeringRange.min = '-1'; steeringRange.max = '1'; steeringRange.step = '0.01'; steeringRange.value = '0';
+steeringRange.setAttribute('aria-label', 'Garage vehicle steering');
+steeringRange.oninput = () => {
+  suspensionSteer = Number(steeringRange.value);
+  steeringReadout.textContent = `Garage steering: ${suspensionSteer.toFixed(2)}`;
+  updateSuspensionDebug();
+};
+const steeringRestore = textElement('button', 'Restore script steering');
+steeringRestore.onclick = () => {
+  suspensionSteer = undefined; steeringRange.value = '0'; steeringReadout.textContent = 'Garage steering: script controlled'; updateSuspensionDebug();
+};
+steeringLabel.append(steeringReadout, steeringRange, steeringRestore); suspensionDebugPanel.append(steeringLabel);
 const suspensionReset = textElement('button', 'Reset suspension alignment');
 const suspensionHeightPreset = textElement('button', 'Use base height (+0.165 m)');
 suspensionHeightPreset.onclick = () => {
   suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0;
+  for (const offset of [suspensionSettings.frontLeftAttachmentOffset, suspensionSettings.frontRightAttachmentOffset,
+    suspensionSettings.rearLeftAttachmentOffset, suspensionSettings.rearRightAttachmentOffset]) offset[1] = 0;
   for (const { key, axis, range, number } of suspensionInputs)
     range.value = number.value = String(suspensionSettings[key][axis]);
   updateSuspensionDebug();
 };
 suspensionReset.onclick = () => {
   Object.assign(suspensionSettings, defaultSuspensionDebug());
+  suspensionSteer = undefined; steeringRange.value = '0'; steeringReadout.textContent = 'Garage steering: script controlled';
   for (const { range, number } of suspensionInputs) range.value = number.value = '0';
   updateSuspensionDebug();
 };
