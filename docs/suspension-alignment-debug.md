@@ -9,8 +9,8 @@ rebuilding the vehicle.
 - Four independent wheel-only offsets: chassis X/Y/Z axes, meters, ±0.5 m.
   They move the rim/tire branch and its descendants without moving the hub.
 - **Garage steering**: normalized vehicle steering input from -1 to +1.
-  It uses the existing CFG/Ackermann display steering path, so wheels and hubs
-  turn together. Zero centers them. **Restore script steering** releases the
+  It uses the existing CFG/Ackermann display steering path, so wheels, hubs and
+  spring/strut seats turn around the same carrier. Zero centers them. **Restore script steering** releases the
   alignment override and restores Java `setsteer` control. This control does
   not relocate the cockpit steering wheel and does not override driving input.
 - Rear control arm rotation (`rearRotation`): single-anchor additional renders,

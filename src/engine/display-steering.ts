@@ -15,8 +15,9 @@ export function applyDisplaySteering(root: EnginePart, input: number): void {
       part.local.copy(root.slotFrame(slot)).multiply(new Matrix4().makeRotationZ(angle * 14)).multiply(part.slotFrame(own).invert());
       continue;
     }
-    // Tire/rim and steerable hub/brake frames turn; control arms and springs do not.
-    if (!(type >= 101 && type <= 104 || type >= 201 && type <= 204)) continue;
+    // WheelRef-mounted rims, hubs and spring/strut seats share steering.
+    // Additional linked arm geometry still follows its own CFG anchors.
+    if (!(type >= 101 && type <= 104 || type >= 201 && type <= 204 || type >= 301 && type <= 304)) continue;
     const wheel = config.wheels[type % 100 - 1];
     if (!wheel) continue;
     const frame = root.slotFrame(slot);
