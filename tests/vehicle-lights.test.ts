@@ -20,6 +20,11 @@ test('RPK lamp render resolves its own flare texture and ARGB settings instead o
   assert.deepEqual(source, { texture: 'maps/skydome/lensflare/Flares.ptx', alpha: 1, color: [1, 0, 0],
     position: [0, 0, 0], direction: [0, -0.85, -1], cone: 2.65, size: 10, offset: 4 });
   assert.equal(await vehicleLight(assets, 'cars/racers.rpk', 256), undefined);
+  pack.entries[0].data = encoder.encode('type fakespot\nlf_texture 0x100\nlf_glow_color 1 1 0 0\nlf_glow_colortype 2\ndiffuse 1 0.699 0.699 0.699');
+  const reversing = await vehicleLight(assets, 'cars/racers.rpk', 15);
+  assert.deepEqual(reversing!.color, [0.699, 0.699, 0.699], 'type 2 reverse light uses diffuse white despite the unused red glow color');
+  pack.entries[0].data = encoder.encode('type spot\nlf_texture 0x100\nlf_glow_color 1 1 0 0\nlf_glow_colortype 2\ndiffuse 1 0.95 0 0');
+  assert.deepEqual((await vehicleLight(assets, 'cars/racers.rpk', 15))!.color, [0.95, 0, 0], 'brake light remains red in the same mode');
 });
 
 test('CFG associates repeated activation flags with their own lamp render, without flagging the base lens', () => {

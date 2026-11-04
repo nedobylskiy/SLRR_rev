@@ -19,7 +19,11 @@ export async function vehicleLight(assets: Assets, pack: string, id: number): Pr
   const path = entryProperties(texture.entry).find(property => property.key === 'sourcefile')?.value;
   if (!path) return;
   const numbers = (name: string, fallback: number[]) => fields.has(name) ? fields.get(name)!.split(/\s+/).map(Number) : fallback;
-  const [alpha, ...color] = numbers('lf_glow_color', [1, 1, 1, 1]);
+  // Stock reverse lamps retain a red lf_glow_color but select color type 2:
+  // their halo follows the light's diffuse color (white for reversing lamps).
+  const colorType = numbers('lf_glow_colortype', [0])[0];
+  const [alpha, ...color] = colorType === 2
+    ? numbers('diffuse', [1, 1, 1, 1]) : numbers('lf_glow_color', [1, 1, 1, 1]);
   const position = numbers('position', [0, 0, 0]), direction = numbers('direction', [0, 0, -1]);
   const size = numbers('lf_glow_maxsize', [10])[0], offset = numbers('lf_glow_offset', [0])[0], cone = numbers('phi', [Math.PI])[0];
   if (color.length !== 3 || position.length !== 3 || direction.length !== 3 ||
