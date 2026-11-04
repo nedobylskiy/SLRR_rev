@@ -26,7 +26,6 @@ export function suspensionDebugMatrix(part: EnginePart, settings: SuspensionDebu
   if (corner !== undefined && !inherited) {
     const offset = corner < 2 ? settings.frontOffset : settings.rearOffset;
     local.premultiply(new Matrix4().makeTranslation(...offset));
-    if (corner >= 2) local.multiply(debugRotation(settings.rearRotation));
   }
   return part.parent ? suspensionDebugMatrix(part.parent, settings).multiply(local) : local;
 }

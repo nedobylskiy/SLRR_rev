@@ -59,17 +59,33 @@ function transmissionCondition(part?: EnginePart) {
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
 function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model: ScxModel, pose?: import('../formats/cfg').CfgPose) {
-  if (!links || links.length < 2) return;
+  if (!links?.length) return;
   const bounds = new THREE.Box3(), renderPose = pose ? poseMatrix(pose) : new THREE.Matrix4();
   const point = new THREE.Vector3();
   for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
     bounds.expandByPoint(point.fromArray(mesh.positions, i).multiplyScalar(0.01).applyMatrix4(renderPose));
-  group.userData.linkedRender = { links, bounds, renderPose };
+  const meshBounds = new THREE.Box3();
+  for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+    meshBounds.expandByPoint(point.fromArray(mesh.positions, i));
+  group.userData.linkedRender = { links, bounds, renderPose, baseMatrix: group.matrix.clone(), meshCenter: meshBounds.getCenter(new THREE.Vector3()) };
 }
 function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: SuspensionDebugSettings) {
   for (const child of group.children) {
     const binding = child.userData.linkedRender;
     if (!binding) continue;
+    // Single-anchor additional renders are the control arms; the CV shaft has
+    // two anchors and must retain its independent rotation controls.
+    if (binding.links.length === 1) {
+      child.matrix.copy(binding.baseMatrix);
+      if (debug && (suspensionCorner(part) ?? -1) >= 2) {
+        const center = binding.meshCenter;
+        child.matrix.multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
+          .multiply(debugRotation(debug.rearRotation))
+          .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+      }
+      child.matrixWorldNeedsUpdate = true;
+      continue;
+    }
     const pose = linkedRenderPose(part, binding.links, binding.bounds);
     if (!pose) continue;
     if (debug && debug.rearShaftRotation.some(value => value !== 0) && (suspensionCorner(part) ?? -1) >= 2) {

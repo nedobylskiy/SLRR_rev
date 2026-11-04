@@ -21,7 +21,7 @@ test('visual suspension tuning moves independent wheel and hub branches, inherit
   const position = (part: typeof hub) => new Vector3().setFromMatrixPosition(suspensionDebugMatrix(part, settings));
   assert.ok(position(wheel).distanceTo(new Vector3(-1, 0.2, 2)) < 1e-9);
   assert.ok(position(hub).distanceTo(position(wheel)) < 1e-9);
-  assert.ok(position(child).distanceTo(new Vector3(-2, 0.2, 2)) < 1e-9);
+  assert.ok(position(child).distanceTo(new Vector3(-1, 1.2, 2)) < 1e-9, 'arm-only rotation must not rotate the wheel/hub branch');
   assert.ok(position(front).distanceTo(new Vector3(-1, 0, -2)) < 1e-9);
   assert.deepEqual(child.matrix().elements, base.elements);
 });

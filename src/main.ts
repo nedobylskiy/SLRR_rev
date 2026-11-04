@@ -372,7 +372,7 @@ const updateSuspensionDebug = () => {
 };
 for (const [key, title] of [
   ['frontOffset', 'Front attachment offset'], ['rearOffset', 'Rear attachment offset'],
-  ['rearRotation', 'Rear assembly rotation'], ['rearShaftRotation', 'Rear CV shaft rotation'],
+  ['rearRotation', 'Rear control arm rotation'], ['rearShaftRotation', 'Rear CV shaft rotation'],
 ] as const) {
   suspensionDebugPanel.append(textElement('strong', title));
   const rotation = key.includes('Rotation');
@@ -396,12 +396,19 @@ for (const [key, title] of [
   }
 }
 const suspensionReset = textElement('button', 'Reset suspension alignment');
+const suspensionHeightPreset = textElement('button', 'Load height calibration (+0.165 m)');
+suspensionHeightPreset.onclick = () => {
+  suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0.165;
+  for (const { key, axis, range, number } of suspensionInputs)
+    range.value = number.value = String(suspensionSettings[key][axis]);
+  updateSuspensionDebug();
+};
 suspensionReset.onclick = () => {
   Object.assign(suspensionSettings, defaultSuspensionDebug());
   for (const { range, number } of suspensionInputs) range.value = number.value = '0';
   updateSuspensionDebug();
 };
-suspensionDebugPanel.append(suspensionReset, suspensionValues); mapDebugPanel.append(suspensionDebugPanel);
+suspensionDebugPanel.append(suspensionHeightPreset, suspensionReset, suspensionValues); mapDebugPanel.append(suspensionDebugPanel);
 updateSuspensionDebug();
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);

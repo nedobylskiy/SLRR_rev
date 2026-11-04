@@ -5,7 +5,9 @@ or a driving scene. Controls update existing meshes immediately, without
 rebuilding the vehicle.
 
 - Front and rear attachment offsets: chassis X/Y/Z axes, meters, ±0.5 m.
-- Rear assembly rotation: local X/Y/Z axes, degrees, XYZ Euler order.
+- Rear control arm rotation (`rearRotation`): single-anchor additional renders,
+  around their mesh bounds center, local X/Y/Z axes, degrees, XYZ Euler order.
+  This does not rotate the wheel/hub or the two-anchor CV shaft.
 - Rear CV shaft rotation: separate adjustment of two-anchor linked renders,
   around the authored mesh bounds center, before their attachment transform.
 
@@ -15,6 +17,8 @@ independent wheel, suspension, and strut branches selected by CFG slot types
 
 The numeric inputs allow exact values. The read-only JSON field can be copied
 to report a calibration; **Reset suspension alignment** restores zero values.
+**Load height calibration (+0.165 m)** restores the user's measured front/rear Y
+offset without changing rotation values.
 Settings last for the page session and apply to displayed vehicle instances,
 not inventory thumbnails. These are render-only diagnostics: Java slot data,
 physics, ground contact, and saved cars remain unchanged. Use them to identify
