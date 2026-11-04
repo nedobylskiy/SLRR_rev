@@ -1,22 +1,22 @@
 import { Vector3 } from 'three';
 import type { EnginePart } from './world';
+import { linkedSlotFrame, selectLinkedRule } from './linked-slots';
 
 /** linked slot IDs are corner-relative chassis anchors, not wheel bone positions. */
 export function linkedSuspensionAnchors(root: EnginePart, part: EnginePart) {
-  const mount = root.definition.config.slots.find(slot => slot.id === part.parentSlot);
-  const type = mount?.type;
-  if (part.parent !== root || type === undefined ||
-      !(type >= 201 && type <= 204 || type >= 301 && type <= 304)) return;
-  const corner = type % 100 - 1;
-  for (const link of part.definition.config.links) {
-    if (link.length < 2) continue;
-    const lower = root.definition.config.slots.find(slot => slot.id === link[0] + corner);
-    const upper = root.definition.config.slots.find(slot => slot.id === link[1] + corner);
+  let ancestor = part.parent;
+  while (ancestor && ancestor !== root) ancestor = ancestor.parent;
+  if (!ancestor) return;
+  const renders = part.definition.config.renders;
+  const rules = renders.length ? renders.map(render => selectLinkedRule(part, render.linkRules ?? (render.links ? [render.links] : []))) : part.definition.config.links;
+  for (const link of rules) {
+    if (!link?.[1] || link[2] && link[2] !== part.parentSlot) continue;
+    const lower = linkedSlotFrame(part, link[0]);
+    const upper = linkedSlotFrame(part, link[1]);
     if (!lower || !upper) continue;
-    const inverse = part.local.clone().invert();
     return {
-      lower: new Vector3().setFromMatrixPosition(root.slotFrame(lower)).applyMatrix4(inverse),
-      upper: new Vector3().setFromMatrixPosition(root.slotFrame(upper)).applyMatrix4(inverse),
+      lower: new Vector3().setFromMatrixPosition(lower),
+      upper: new Vector3().setFromMatrixPosition(upper),
     };
   }
 }

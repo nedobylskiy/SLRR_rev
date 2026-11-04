@@ -5,6 +5,7 @@ import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
 import { linkedRenderPose } from '../engine/linked-render';
+import { selectLinkedRule } from '../engine/linked-slots';
 import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugRotation, rearArmAdjustment, type SuspensionDebugSettings } from './suspension-debug';
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
@@ -58,7 +59,7 @@ function transmissionCondition(part?: EnginePart) {
 }
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
-function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model: ScxModel, pose?: import('../formats/cfg').CfgPose) {
+function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model: ScxModel, pose?: import('../formats/cfg').CfgPose, rules?: number[][]) {
   if (!links?.length) return;
   const bounds = new THREE.Box3(), renderPose = pose ? poseMatrix(pose) : new THREE.Matrix4();
   const point = new THREE.Vector3();
@@ -67,16 +68,20 @@ function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model
   const meshBounds = new THREE.Box3();
   for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
     meshBounds.expandByPoint(point.fromArray(mesh.positions, i));
-  group.userData.linkedRender = { links, bounds, renderPose, baseMatrix: group.matrix.clone(), meshCenter: meshBounds.getCenter(new THREE.Vector3()) };
+  group.userData.linkedRender = { links, rules: rules ?? [links], bounds, renderPose, baseMatrix: group.matrix.clone(), meshCenter: meshBounds.getCenter(new THREE.Vector3()) };
 }
 function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: SuspensionDebugSettings) {
   for (const child of group.children) {
     const binding = child.userData.linkedRender;
     if (!binding) continue;
+    const links = selectLinkedRule(part, binding.rules);
+    const pose = links && linkedRenderPose(part, links, binding.bounds);
+    if (!pose) { child.matrix.copy(binding.baseMatrix); child.matrixWorldNeedsUpdate = true; continue; }
     // Single-anchor additional renders are the control arms; the CV shaft has
     // two anchors and must retain its independent rotation controls.
-    if (binding.links.length === 1) {
-      child.matrix.copy(binding.baseMatrix);
+    if (!links![1]) {
+      child.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
+        .multiply(pose).multiply(binding.renderPose).multiply(new THREE.Matrix4().makeScale(0.01, 0.01, 0.01));
       if (debug && (suspensionCorner(part) ?? -1) >= 2) {
         const center = binding.meshCenter;
         const adjustment = rearArmAdjustment(debug, suspensionCorner(part)!);
@@ -88,8 +93,6 @@ function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: Suspens
       child.matrixWorldNeedsUpdate = true;
       continue;
     }
-    const pose = linkedRenderPose(part, binding.links, binding.bounds);
-    if (!pose) continue;
     if (debug && debug.rearShaftRotation.some(value => value !== 0) && (suspensionCorner(part) ?? -1) >= 2) {
       const center = binding.bounds.getCenter(new THREE.Vector3());
       pose.multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
@@ -569,7 +572,7 @@ export class Viewer {
           sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
           group.add(sub);
           const extraModel = parseScx(await assets.read(extra.model.path));
-          bindLinkedRender(sub, extra.links, extraModel, extra.pose);
+          bindLinkedRender(sub, extra.links, extraModel, extra.pose, extra.linkRules);
           await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
         }
         syncLinkedRenders(part, group);
@@ -664,7 +667,7 @@ export class Viewer {
         submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
         group.add(submodel);
         const extraModel = parseScx(await assets.read(extra.model.path));
-        bindLinkedRender(submodel, extra.links, extraModel, extra.pose);
+        bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
         warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
         if (generation !== this.generation) return warnings;
       }
