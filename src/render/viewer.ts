@@ -25,7 +25,7 @@ import { previewScope } from '../runtime/preview-scope';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
-import { groundRenderDefinition, groundRenderHasChildren, mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, mapRenderIds } from '../engine/map';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
@@ -666,7 +666,11 @@ export class Viewer {
       // the rest of the map. Only leaf meshes use the isolated room path.
       if (entryProperties(gameType.entry).some(property => property.key === 'native' && property.value === 'ground')
         && render.entry.type === 14 && entryProperties(render.entry).some(property => property.key === 'mesh')
-        && !groundRenderHasChildren(pack, ground.renderId)) room = ground;
+        && !groundRenderHasChildren(pack, ground.renderId)) {
+        const resource = await assets.modelForResource(packPath, ground.renderId);
+        const model = parseScx(await assets.read(resource.path));
+        if (groundRenderIsRoom(pack, ground.renderId, model)) room = ground;
+      }
     }
     const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
     // A map can declare a sibling map package as a continuation (for example City → City2).
