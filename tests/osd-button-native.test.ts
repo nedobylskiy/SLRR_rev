@@ -117,3 +117,50 @@ test('small arrow hitboxes outrank the central ghost area on the same Java depth
   assert.ok(osdHitDepth(3, 0.11, 0.11) > osdHitDepth(3, 1.15, 0.21));
   assert.ok(osdHitDepth(3, 1.15, 0.21) > osdHitDepth(-0.002, 2, 2));
 });
+
+
+test('OSD drops call Java Button overloads only on enabled visible drop targets', async () => {
+  const source = `package java.render;
+    class GameRef {}
+    class Gadget {}
+    class Button extends Gadget {
+      Osd osd;
+      void drop(GameRef value) { osd.dropObject = value; osd.objectDrops++; osd.dropObject = null; }
+      void drop(Gadget value) { osd.dropGadget = value; osd.gadgetDrops++; osd.dropGadget = null; }
+    }
+    class Group {}
+    class Osd { GameRef dropObject; Gadget dropGadget; int objectDrops; int gadgetDrops; }
+    class Vector { Object[] elements; int size() { return elements.length; } Object elementAt(int i) { return elements[i]; } }
+  `;
+  const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'Button.java', source }) });
+  await jvm.loadClass('java.render.Button'); await jvm.loadClass('java.render.Vector');
+  const resources = new GameTypeNative(jvm, () => {}), physics = new PhysicsRefNative(jvm, resources);
+  const bridge = new OsdButtonNative(jvm); bridge.setWorldPhysics(physics);
+  const osd = object('java.render.Osd', { cam: object('java.render.Camera'), objectDrops: jv('int',0), gadgetDrops: jv('int',0),
+    dropObject: jv('GameRef',null), dropGadget: jv('Gadget',null) });
+  const hotspot = (enabled: number) => {
+    const phy = object('java.util.resource.PhysicsRef');
+    const button = object('java.render.Button', { osd, phy, disabled: jv('int',0), dropEnabled: jv('int',enabled) });
+    const group = object('java.render.Group', { osd, active: jv('int',1),
+      gadget: object('java.render.Vector', { elements: jv('Object[]',[button]) }) });
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',group,[]);
+    jvm.natives.invoke('java.util.resource.PhysicsRef','createBox',phy,[jv('ResourceRef',group.value),jv('float',1),jv('float',1),jv('float',0.01),jv('String','drop')]);
+    return {phy,button,group};
+  };
+  try {
+    const target = hotspot(1), inventory = hotspot(1), closed = hotspot(0);
+    assert.equal(await bridge.dropOn(target.phy,{object:object('java.render.GameRef')}),true);
+    assert.equal(jvm.get(osd,'objectDrops').value,1);
+    assert.equal(await bridge.dropOn(target.phy,{physics:inventory.phy}),true);
+    assert.equal(jvm.get(osd,'gadgetDrops').value,1);
+    assert.equal(jvm.get(osd,'dropObject').value,null);
+    assert.equal(jvm.get(osd,'dropGadget').value,null);
+    assert.equal(await bridge.dropOn(closed.phy,{physics:inventory.phy}),false);
+    assert.equal(await bridge.dropOn(target.phy,{physics:target.phy}),false);
+    jvm.set(target.button,'disabled',jv('int',1));
+    assert.equal(await bridge.dropOn(target.phy,{physics:inventory.phy}),false);
+    jvm.set(target.button,'disabled',jv('int',0)); jvm.set(target.group,'active',jv('int',0));
+    assert.equal(await bridge.dropOn(target.phy,{physics:inventory.phy}),false);
+    assert.equal(jvm.get(osd,'gadgetDrops').value,1);
+  } finally { bridge.dispose(); resources.dispose(); }
+});

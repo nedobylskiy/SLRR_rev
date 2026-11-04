@@ -1,3 +1,4 @@
+import type { JavaValue } from 'slrr-jvm';
 import type { Assets } from '../assets';
 import type { BootResult } from '../runtime/game-boot';
 import { parseScx, type ScxMesh } from '../formats/scx';
@@ -17,7 +18,8 @@ export function pointerUv(mesh: ScxMesh, character: string) {
 /** Browser transport for MouseCursor; Java still selects modes and camera bindings. */
 export class JavaMouse {
   private hovered?: { id: number; local: number[]; world: number[] };
-  private pressed?: { id: number; x: number; y: number };
+  private pressed?: { hit?: { id: number; local: number[]; world: number[] }; physics?: JavaValue; pointer: number; x: number; y: number; dragged: boolean };
+  private suppressClick = false;
   private pointer?: number;
   private rightOrigin?: { x: number; y: number; hit?: { id: number; local: number[]; world: number[] } };
   private x = 0;
@@ -32,6 +34,7 @@ export class JavaMouse {
     private readonly assets: Assets, private readonly report: (message: string) => void,
     private readonly pick?: (x: number, y: number) => { id: number; local: number[]; world: number[] } | undefined) {
     viewport.addEventListener('pointerdown', this.down);
+    viewport.addEventListener('click', this.click, true);
     viewport.addEventListener('pointermove', this.move);
     viewport.addEventListener('pointerup', this.up);
     viewport.addEventListener('pointercancel', this.cancel);
@@ -48,9 +51,16 @@ export class JavaMouse {
     return !!cursor?.value && !!this.result.jvm.get(cursor, 'controlledcam').value;
   }
   private down = (event: PointerEvent) => {
-    if (event.button === 0 && this.controlled() && event.target instanceof HTMLCanvasElement) {
-      const hit = this.pick?.(event.clientX, event.clientY);
-      if (hit) { this.pressed = { id: hit.id, x: event.clientX, y: event.clientY }; this.result.input.cursorEvent(1, hit); }
+    if (event.button === 0 && this.controlled()) {
+      this.suppressClick = false;
+      const physics = this.result.osdButtons?.physicsAt(event.clientX, event.clientY);
+      const hit = !physics && event.target instanceof HTMLCanvasElement ? this.pick?.(event.clientX, event.clientY) : undefined;
+      if (hit || physics) {
+        this.pressed = { hit, physics, pointer: event.pointerId, x: event.clientX, y: event.clientY, dragged: false };
+        // Capturing OSD buttons on press would swallow their normal browser click.
+        // Capture only once movement actually becomes a drag.
+        if (hit) this.result.input.cursorEvent(1, hit);
+      }
       return;
     }
     if (event.button !== 2 || !this.controlled() || !(event.target instanceof HTMLCanvasElement)) return;
@@ -62,6 +72,15 @@ export class JavaMouse {
     this.result.input.cursorEvent(3, this.rightOrigin.hit);
   };
   private move = (event: PointerEvent) => {
+    const pressed = this.pressed;
+    if (pressed && pressed.pointer === event.pointerId) {
+      if (!pressed.dragged && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= 5) {
+        pressed.dragged = true; this.suppressClick = true;
+        this.viewport.setPointerCapture(event.pointerId);
+        if (pressed.hit) this.result.input.cursorEvent(9, pressed.hit);
+      }
+      if (pressed.dragged) { event.preventDefault(); return; }
+    }
     if (event.pointerId !== this.pointer) {
       const hit = this.controlled() && event.target instanceof HTMLCanvasElement ? this.pick?.(event.clientX, event.clientY) : undefined;
       if (hit?.id !== this.hovered?.id) {
@@ -81,11 +100,24 @@ export class JavaMouse {
     input.setPhysicalAxis(1, 1, Math.max(-1, Math.min(1, input.physicalAxis(1, 1) + dy * 0.01)));
   };
   private up = (event: PointerEvent) => {
-    if (event.button === 0 && this.pressed) {
+    if (event.button === 0 && this.pressed && event.pointerId === this.pressed.pointer) {
       const pressed = this.pressed; this.pressed = undefined;
-      const hit = this.pick?.(event.clientX, event.clientY);
-      if (hit?.id === pressed.id && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 5) {
-        this.result.input.cursorEvent(2, hit); this.result.input.cursorEvent(5, hit);
+      if (pressed.dragged) {
+        event.preventDefault();
+        const target = this.result.osdButtons?.physicsAt(event.clientX, event.clientY);
+        if (pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
+        if (target) {
+          const node = pressed.hit && this.result.gameTypes.getByResourceId(pressed.hit.id);
+          const source = pressed.physics ? { physics: pressed.physics }
+            : node ? { object: this.result.gameTypes.reference(node) } : undefined;
+          if (source) void this.result.osdButtons.dropOn(target, source).catch(error => this.report(`Java drop: ${error instanceof Error ? error.message : String(error)}`));
+        }
+        if (this.viewport.hasPointerCapture(pressed.pointer)) this.viewport.releasePointerCapture(pressed.pointer);
+      } else if (pressed.hit) {
+        const hit = event.target instanceof HTMLCanvasElement ? this.pick?.(event.clientX, event.clientY) : undefined;
+        this.result.input.cursorEvent(2, hit ?? pressed.hit);
+        if (hit?.id === pressed.hit.id && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 5)
+          this.result.input.cursorEvent(5, hit);
       }
     }
     if (event.pointerId === this.pointer && event.button === 2) {
@@ -97,8 +129,16 @@ export class JavaMouse {
         this.result.input.cursorEvent(6, hit);
     }
   };
+  private click = (event: MouseEvent) => {
+    if (!this.suppressClick) return;
+    this.suppressClick = false; event.preventDefault(); event.stopImmediatePropagation();
+  };
   private cancel = () => {
-    this.pressed = undefined;
+    const pressed = this.pressed; this.pressed = undefined;
+    if (pressed?.dragged) {
+      if (pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
+      if (this.viewport.hasPointerCapture(pressed.pointer)) this.viewport.releasePointerCapture(pressed.pointer);
+    }
     if (this.pointer === undefined) return;
     const id = this.pointer; this.pointer = undefined;
     this.rightOrigin = undefined;
@@ -176,6 +216,7 @@ export class JavaMouse {
   dispose() {
     this.cancel(); this.disposed = true; clearInterval(this.timer);
     this.viewport.removeEventListener('pointerdown', this.down);
+    this.viewport.removeEventListener('click', this.click, true);
     this.viewport.removeEventListener('pointermove', this.move);
     this.viewport.removeEventListener('pointerup', this.up);
     this.viewport.removeEventListener('pointercancel', this.cancel);

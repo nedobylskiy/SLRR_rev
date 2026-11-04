@@ -3,7 +3,7 @@ import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
 import type { PhysicsRefNative } from './physics-ref-native';
 
-interface HitBox { group: JavaValue; width: number; height: number; label: string;
+interface HitBox { physics: JavaValue; group: JavaValue; width: number; height: number; label: string;
   position?: { x: number; y: number; z: number }; element?: OsdElement }
 
 /** At equal Java depth, a small control wins over a broad dialog shield or ghost area. */
@@ -43,7 +43,7 @@ export class OsdButtonNative {
         return this.worldPhysics.createBox(receiver, args);
       }
       const box = {
-        group, width: Number(args[1].value), height: Number(args[2].value), label: String(args[4].value ?? ''),
+        physics: receiver, group, width: Number(args[1].value), height: Number(args[2].value), label: String(args[4].value ?? ''),
       };
       if (!this.worldPhysics) throw new Error('PhysicsRef OSD backend is not connected');
       this.worldPhysics.createReference(receiver, group, box.label);
@@ -97,6 +97,33 @@ export class OsdButtonNative {
       return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(Object.entries(position)
         .map(([axis, value]) => [axis, jv('float', value)])) });
     });
+  }
+
+  /** Resolve the top HTML hit target even while the viewport owns pointer capture. */
+  physicsAt(x: number, y: number): JavaValue | undefined {
+    const element = document.elementFromPoint(x, y);
+    if (!element) return;
+    for (const box of this.activeBoxes)
+      if (box.element && this.visible(box) && box.element.node.contains(element)) return box.physics;
+  }
+
+  /** Use the original Button.drop overloads and its Java command handler. */
+  async dropOn(target: JavaValue, source: { physics: JavaValue } | { object: JavaValue }): Promise<boolean> {
+    const box = this.boxes.get(this.requireObject(target));
+    if (!box || !this.visible(box)) return false;
+    const gadget = await this.findGadget(box, target);
+    if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0) || !Number(gadget.fields.get('dropEnabled')?.value ?? 0)) return false;
+    let dropped: JavaValue;
+    if ('physics' in source) {
+      if (source.physics.value === target.value) return false;
+      const origin = this.boxes.get(this.requireObject(source.physics));
+      if (!origin || !this.visible(origin)) return false;
+      const sourceGadget = await this.findGadget(origin, source.physics);
+      if (!sourceGadget || Number(sourceGadget.fields.get('disabled')?.value ?? 0)) return false;
+      dropped = jv('Gadget', sourceGadget);
+    } else dropped = source.object;
+    await this.jvm.invokeAsync(jv(gadget.className, gadget), 'drop', [dropped]);
+    return true;
   }
 
   async activate(physics: JavaValue): Promise<void> {
