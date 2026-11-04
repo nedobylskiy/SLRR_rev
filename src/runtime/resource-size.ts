@@ -24,6 +24,10 @@ export function resourceBoundsReader(assets: Assets, resources: () => GameTypeNa
         if (cfg.render === undefined) return null;
         const bounds = new Box3(), point = new Vector3();
         for (const render of [{ resource: cfg.render, pose: cfg.renderPose }, ...secondaryRenders(cfg)]) {
+          // CFG render lists also contain lamp/flare resources. Their glow is
+          // not solid geometry and must not affect the inventory camera size.
+          const resource = await assets.resource(pack, render.resource);
+          if (resource.entry.type === 13) continue;
           const source = await assets.modelForResource(pack, render.resource);
           const model = parseScx(await assets.read(normalizePath(source.path)));
           const transform = render.pose && poseMatrix(render.pose);
