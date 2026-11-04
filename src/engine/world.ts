@@ -61,6 +61,8 @@ export class EnginePart {
   paintTexture?: ResourceKey;
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
+  /** Steering in parent axes, separate from suspension travel for linked arms. */
+  readonly steeringTransform = new Matrix4();
   readonly renderAdjustment = new Matrix4();
   readonly slotPositions = new Map<number, Triple>();
   readonly slotRotations = new Map<number, Triple>();
@@ -99,6 +101,7 @@ export class EngineWorld {
     const a = mountSlot(parent.definition.config.slots, parentSlot), b = mountSlot(child.definition.config.slots, ownSlot);
     if (!a || !b) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
+    child.steeringTransform.identity();
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
   }
   refreshAttachment(child: EnginePart) {
@@ -109,6 +112,7 @@ export class EngineWorld {
     const mount = find(parent, child.parentSlot!), mate = find(child, child.ownSlot!);
     if (!mount || !mate) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(mount)).multiply(child.slotFrame(mate).invert());
+    child.steeringTransform.identity();
   }
   detach(child: EnginePart) {
     if (this.parts.get(child.id) !== child || this.disposed) throw new Error('Part outside live world');

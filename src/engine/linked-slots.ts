@@ -15,7 +15,7 @@ export function selectLinkedRule(part: EnginePart, rules: readonly (readonly num
 }
 
 /** Search self then installed-on ancestors, preserving full anchor orientation. */
-export function linkedSlotFrame(part: EnginePart, baseId: number): Matrix4 | undefined {
+export function linkedSlotFrame(part: EnginePart, baseId: number, followSteering = true): Matrix4 | undefined {
   if (!baseId) return;
   const id = baseId + (linkedMountGroup(part) ?? 0);
   for (let owner: EnginePart | undefined = part; owner; owner = owner.parent) {
@@ -30,7 +30,9 @@ export function linkedSlotFrame(part: EnginePart, baseId: number): Matrix4 | und
       if (carrier) {
         const mount = owner.definition.config.slots.find(mount => mount.id === carrier.parentSlot)!;
         const own = carrier.definition.config.slots.find(own => own.id === carrier.ownSlot)!;
-        frame.premultiply(carrier.local.clone().multiply(carrier.slotFrame(own)).multiply(owner.slotFrame(mount).invert()));
+        const local = carrier.local.clone();
+        if (!followSteering) local.premultiply(carrier.steeringTransform.clone().invert());
+        frame.premultiply(local.multiply(carrier.slotFrame(own)).multiply(owner.slotFrame(mount).invert()));
       }
     }
     return part.matrix().invert().multiply(owner.matrix()).multiply(frame);

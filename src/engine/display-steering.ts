@@ -27,5 +27,6 @@ export function applyDisplaySteering(root: EnginePart, input: number): void {
     const steer = ackermannSteerAngle(angle, carrier.elements[12], config.ackermann ?? 2, wheel.parameters[0] ?? 0);
     const delta = steer === 0 ? new Matrix4() : carrier.clone().multiply(new Matrix4().makeRotationY(steer)).multiply(carrier.clone().invert());
     part.local.copy(delta).multiply(frame).multiply(part.slotFrame(own).invert());
+    part.steeringTransform.copy(delta);
   }
 }

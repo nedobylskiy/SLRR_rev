@@ -13,6 +13,10 @@ rebuilding the vehicle.
   spring/strut seats turn around the same carrier. Zero centers them. **Restore script steering** releases the
   alignment override and restores Java `setsteer` control. This control does
   not relocate the cockpit steering wheel and does not override driving input.
+  Single-anchor control-arm renders follow suspension travel while excluding
+  carrier steering; their chassis-facing plane stays fixed. Two-anchor CV
+  shafts still follow the steered hub endpoint. The same separation is used
+  during physical driving, and attachment refresh clears stale steering state.
 - Rear control arm rotation (`rearRotation`): single-anchor additional renders,
   around their mesh bounds center, local X/Y/Z axes, degrees, XYZ Euler order.
   This does not rotate the wheel/hub or the two-anchor CV shaft.

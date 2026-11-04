@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Box3, Vector3 } from 'three';
+import { Box3, Matrix4, Vector3 } from 'three';
+import { applyDisplaySteering } from '../src/engine/display-steering';
 import { EngineWorld, type PartDefinition } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
 import { linkedMountGroup, linkedSlotFrame, selectLinkedRule } from '../src/engine/linked-slots';
@@ -22,6 +23,40 @@ test('linker inherits root WheelRef group, searches self before parents and appl
   child.definition.config.slots.push({ id: 553, position: [4, 5, 6], rotation: [0, 0, 0], attach: [], compatible: [] });
   assert.ok(new Vector3().setFromMatrixPosition(linkedSlotFrame(child, 551)!).distanceTo(new Vector3(4, 5, 6)) < 1e-9);
   assert.equal(linkedSlotFrame(child, 999), undefined);
+});
+
+test('linked control arms keep their chassis plane while spring seats steer, and still follow suspension travel', () => {
+  const world = new EngineWorld();
+  const root = world.create(definition(1, `maxsteer 0.6 2.7
+slot 0 0 0 0 0 0 101
+slottype 101
+slot 0.1 0 0 0 0 0 121
+slottype 201
+slot 0.3 0 0 0 0 0 311
+slottype 301
+slot -0.5 -0.2 0.2 0 0 0 351
+slottype 301`));
+  root.definition.config.wheels[0].parameters[0]=1;
+  root.wheelFrameOffsetY=0.165;root.wheelFrameOffsets=[[0.055,0,0]];
+  const strut = world.create(definition(2,'slot 0 0 0 0 0 0 1'));
+  const spring = world.create(definition(3,'slot 0 -0.4 0 0 0 0 1'));
+  world.install(root,121,strut,1);world.install(root,311,spring,1);
+  const armFrame = () => strut.matrix().multiply(linkedRenderPose(strut,[351],new Box3())!);
+  const near = (a:Matrix4,b:Matrix4) => a.elements.every((value,i)=>Math.abs(value-b.elements[i])<1e-9);
+  const arm = armFrame(), neutralSpring = spring.local.clone();
+  for (const input of [-1,-0.5,0.5,1,1,0]) {
+    applyDisplaySteering(root,input);
+    assert.ok(near(armFrame(),arm),`control arm cannot yaw with the spring at ${input}`);
+    if(input) assert.ok(!near(spring.local,neutralSpring),'the spring must continue steering');
+  }
+  applyDisplaySteering(root,0.7);
+  const travel = new Matrix4().makeTranslation(0,0.08,0);
+  // Physical sync applies steering after travel in parent coordinates.
+  spring.local.copy(spring.steeringTransform).multiply(travel).multiply(neutralSpring);
+  assert.ok(near(armFrame(),travel.clone().multiply(arm)),'removing steering must retain vertical travel');
+  world.refreshAttachment(spring);
+  assert.ok(near(spring.steeringTransform,new Matrix4()),'attachment refresh clears stale steering metadata');
+  world.dispose();
 });
 
 test('CFG retains ordered linked alternatives and selects the parent attachment slot, not the own slot', () => {
