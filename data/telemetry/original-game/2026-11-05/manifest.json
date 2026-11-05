@@ -1,0 +1,368 @@
+{
+  "schema": 1,
+  "capture_date": "2026-11-05",
+  "snapshot_timezone": "Europe/Madrid",
+  "format": "SLRR_PHYSICS v2 short-field records",
+  "executable_sha256": "f44fb88a4335c657e20701cdb84afb8d1d85f7c3aceb93d30113e6e6e44fefc2",
+  "executable_identity_note": "Read-only hash of the experimental game copy executable checked when packaging; not embedded in each original log.",
+  "map_note": "User selected standard TestTrack as the capture protocol; map identity/coordinates are not recorded by this logger.",
+  "source_log_name": "system.log",
+  "source_note": "telemetry.txt is a byte-preserving snapshot; no original game source/binary/assets included.",
+  "superseded_snapshot": {
+    "snapshot": "20261105-234903",
+    "reason": "Both sessions are identical to the first two in 20261105-235147; retain the latter once."
+  },
+  "captures": [
+    {
+      "snapshot": "20261105-231341",
+      "id": "01-shimutshibu-automatic",
+      "recorder": "basic",
+      "sessions": [
+        {
+          "id": 1,
+          "role": "reference",
+          "scenario": "Acceleration to observed maximum, followed by hard braking; reported by user.",
+          "model": "Shimutshibu ST9 Challenge",
+          "engine": "Shimutshibu RC-B94S200 block",
+          "samples": 631,
+          "transmission_config": "1"
+        }
+      ],
+      "rejected_records": 0,
+      "incomplete_packets": 0,
+      "files": {
+        "telemetry.txt": {
+          "bytes": 540934,
+          "sha256": "f77bb18405715cc659b6d8675884a3ccc8c3fad678a781052017ec0c2c0a1f02"
+        },
+        "summary.json": {
+          "bytes": 240057,
+          "sha256": "eef4db8bf55f9f70ccd14e9d9e99acf0d94d399746e930cf97960ff4e834e52c"
+        },
+        "samples.csv": {
+          "bytes": 73317,
+          "sha256": "60a79fa86718622371c29f400641cd3aafde8847bb9ce957a244f76875d1fd39"
+        },
+        "shifts.csv": {
+          "bytes": 1282,
+          "sha256": "905042cef5701e0d37733b03581ccc7b728328c1a681c9db8ee1279bca7950fa"
+        },
+        "curves.csv": {
+          "bytes": 1143,
+          "sha256": "5e8e1e8cb96744d76083151107fdcfc90615d7aab9b50ca98e788234e1ff89c9"
+        },
+        "runs.csv": {
+          "bytes": 313,
+          "sha256": "c5c5692acbe44fa27c0f30cefdada76aaa1aa03399df409c83189b6bd386487c"
+        },
+        "overview.md": {
+          "bytes": 411,
+          "sha256": "ede14f2454bca54a641efd9eca6fbdca768205b20c3ab28e4a3a788026faddab"
+        },
+        "annotations.json": {
+          "bytes": 365,
+          "sha256": "cddde97c87c4fdf45ccd346171723eeadee9793486f2312b74b50457d29a671d"
+        }
+      }
+    },
+    {
+      "snapshot": "20261105-232144",
+      "id": "02-baiern-manual-auto-clutch",
+      "recorder": "basic",
+      "sessions": [
+        {
+          "id": 1,
+          "role": "setup",
+          "scenario": "Stationary before transmission mode change.",
+          "model": "Baiern CoupeSport 2.5",
+          "engine": "Baiern KraftWerk 2.5 engine block",
+          "samples": 11,
+          "transmission_config": "1"
+        },
+        {
+          "id": 2,
+          "role": "reference",
+          "scenario": "Manual shifting with automatic clutch; user did not reach terminal speed.",
+          "model": "Baiern CoupeSport 2.5",
+          "engine": "Baiern KraftWerk 2.5 engine block",
+          "samples": 810,
+          "transmission_config": "0"
+        }
+      ],
+      "rejected_records": 0,
+      "incomplete_packets": 0,
+      "files": {
+        "telemetry.txt": {
+          "bytes": 712837,
+          "sha256": "f383ee4fce58f461107a0aaed03dd1df30c30ac142dd216189940796ec82de20"
+        },
+        "summary.json": {
+          "bytes": 316589,
+          "sha256": "bf41aa5372ef67ee139382a42cd1bf0f9bc828248ea9643752a6c1855ddd3c20"
+        },
+        "samples.csv": {
+          "bytes": 92373,
+          "sha256": "15c3c2dff57fc7ff46ca219b902b6ed2b949d615610fc8bd7e6607f9c15d8a16"
+        },
+        "shifts.csv": {
+          "bytes": 675,
+          "sha256": "dc0a8d31f07282de950f16c7d4640b24adf57710027e88f60a28297666ca2f2f"
+        },
+        "curves.csv": {
+          "bytes": 1957,
+          "sha256": "23ad59a2c66ea1f43ba45f006b3ad65c0c0396b3ff9e6dd91c5316589a49af41"
+        },
+        "runs.csv": {
+          "bytes": 460,
+          "sha256": "c450f536663085dea0c2d6bf12a2118a8083c95e5436c9beefc26b826520a18b"
+        },
+        "overview.md": {
+          "bytes": 642,
+          "sha256": "fd0bacca4251eca952379cf8439f551e29b98d8045c81efbee9cdb151a8bd1a6"
+        },
+        "annotations.json": {
+          "bytes": 629,
+          "sha256": "a549c7c759309cd90325c2df3312e5b384dfe05761d5cb4967426fd5fc13c9f2"
+        }
+      }
+    },
+    {
+      "snapshot": "20261105-232613",
+      "id": "03-emer-automatic",
+      "recorder": "basic",
+      "sessions": [
+        {
+          "id": 1,
+          "role": "setup",
+          "scenario": "Stationary before transmission mode change.",
+          "model": "Emer Nonus Street GT",
+          "engine": "Emer StreetGT engine block",
+          "samples": 26,
+          "transmission_config": "0"
+        },
+        {
+          "id": 2,
+          "role": "reference",
+          "scenario": "Automatic acceleration and subsequent downshifts/stopping, observed in telemetry.",
+          "model": "Emer Nonus Street GT",
+          "engine": "Emer StreetGT engine block",
+          "samples": 559,
+          "transmission_config": "1"
+        }
+      ],
+      "rejected_records": 0,
+      "incomplete_packets": 0,
+      "files": {
+        "telemetry.txt": {
+          "bytes": 515134,
+          "sha256": "91d022f343db048f7a39d9934b46250e62d17e33291ef9bbcf616ec1a00763f8"
+        },
+        "summary.json": {
+          "bytes": 229148,
+          "sha256": "f7827e8f8da9ad90e49834b2daebd7428233dda778296c89ec3f885d3162fc47"
+        },
+        "samples.csv": {
+          "bytes": 65358,
+          "sha256": "3957a14fbe655c6f1e642d4b283c55d5d88f3752826ae3cdddf0473cfc3dcbed"
+        },
+        "shifts.csv": {
+          "bytes": 1237,
+          "sha256": "8980aa1d03c38b303179e6f969f4d69b5b9b369f37e4e3918e2c1fbead501e3d"
+        },
+        "curves.csv": {
+          "bytes": 2191,
+          "sha256": "c5061a822f0d16a5ce820d400017d3af481b4404f7c4c50e6916767671f8b49c"
+        },
+        "runs.csv": {
+          "bytes": 454,
+          "sha256": "a015dfc9672acf5e9f9e57b99c6b447cab24d1bcdf6cababf512baba8ee5343c"
+        },
+        "overview.md": {
+          "bytes": 627,
+          "sha256": "bc78a0c6469115749c409b43fd4ece363fd57180e90f80536017453332f35819"
+        },
+        "annotations.json": {
+          "bytes": 610,
+          "sha256": "a2d1e88781a93a7f448ef9d8ab7367c0312e2578c329c782155edcacbb0a487d"
+        }
+      }
+    },
+    {
+      "snapshot": "20261105-234053",
+      "id": "04-einvagen-na-turbo",
+      "recorder": "turbo",
+      "sessions": [
+        {
+          "id": 1,
+          "role": "reference",
+          "scenario": "Naturally aspirated member of the user-reported paired test.",
+          "model": "Einvagen 110 GTK",
+          "engine": "Einvagen 110 GT/GTK block",
+          "samples": 686,
+          "transmission_config": "1"
+        },
+        {
+          "id": 2,
+          "role": "reference",
+          "scenario": "Turbocharged member; initial temperature, native mass and wear differ.",
+          "model": "Einvagen 110 GTK",
+          "engine": "Einvagen 110 GT/GTK block",
+          "samples": 606,
+          "transmission_config": "1"
+        }
+      ],
+      "rejected_records": 0,
+      "incomplete_packets": 0,
+      "files": {
+        "telemetry.txt": {
+          "bytes": 1107845,
+          "sha256": "eecdee080eb554a229fe3e08ec5d87c5821ad6e04a80242fc7fa402841866ef3"
+        },
+        "summary.json": {
+          "bytes": 492228,
+          "sha256": "9c22bb9480953e05ace442d1e3251e7fd3ed6cb84620ac4a8bc47fd518e199d7"
+        },
+        "samples.csv": {
+          "bytes": 139591,
+          "sha256": "50a1bbeae3d37edf7b2e3a476f0844c3d3300ace3e8c7790a099cb556564a72d"
+        },
+        "shifts.csv": {
+          "bytes": 2093,
+          "sha256": "f7d32352935401fe19d3e8b12c26af418ef5f65754498b05d71265751fd4939d"
+        },
+        "curves.csv": {
+          "bytes": 1686,
+          "sha256": "8774a3a926801f44cee5898d71bb6143cae9e06fa6d297d9864c5b0386d3cbb9"
+        },
+        "runs.csv": {
+          "bytes": 626,
+          "sha256": "93cf947b2d23c36e13959ef115daa4f952867b20e6b08ebf5955983468beaa4b"
+        },
+        "overview.md": {
+          "bytes": 869,
+          "sha256": "e69b7abadc112202408e937b4fbfbeaf4bdbe4b06c12d4a6928d7d76908febf9"
+        },
+        "boost-estimates.csv": {
+          "bytes": 178683,
+          "sha256": "6ecc91554333b8f97e656e5737a0ea6694c7665419cdd857acefd7367e5f30a5"
+        },
+        "annotations.json": {
+          "bytes": 614,
+          "sha256": "911a62f69d47db240ccf4a30ef0f32539383cdade627e2c55836bb7333a53f69"
+        }
+      }
+    },
+    {
+      "snapshot": "20261105-235147",
+      "id": "05-duhen-manual-and-third-gear",
+      "recorder": "turbo",
+      "supersedes": "20261105-234903",
+      "sessions": [
+        {
+          "id": 1,
+          "role": "setup",
+          "scenario": "Stationary before transmission mode change.",
+          "model": "Duhen SunStrip 1.5 DVC",
+          "engine": "Duhen D15V block",
+          "samples": 7,
+          "transmission_config": "1"
+        },
+        {
+          "id": 2,
+          "role": "reference",
+          "scenario": "Previously captured manual-clutch acceleration through the gears.",
+          "model": "Duhen SunStrip 1.5 DVC",
+          "engine": "Duhen D15V block",
+          "samples": 635,
+          "transmission_config": "2"
+        },
+        {
+          "id": 3,
+          "role": "diagnostic",
+          "exclude_from_clean_launch_comparison": true,
+          "scenario": "First third-gear attempt; user reported an error. Vehicle already moving when third selected.",
+          "model": "Duhen SunStrip 1.5 DVC",
+          "engine": "Duhen D15V block",
+          "samples": 254,
+          "transmission_config": "2"
+        },
+        {
+          "id": 4,
+          "role": "reference",
+          "scenario": "Second third-gear attempt, stationary with clutch held before launch.",
+          "model": "Duhen SunStrip 1.5 DVC",
+          "engine": "Duhen D15V block",
+          "samples": 278,
+          "transmission_config": "2"
+        },
+        {
+          "id": 5,
+          "role": "reference",
+          "scenario": "Third third-gear attempt, stationary with clutch held before launch. Wear differs from preceding attempt.",
+          "model": "Duhen SunStrip 1.5 DVC",
+          "engine": "Duhen D15V block",
+          "samples": 267,
+          "transmission_config": "2"
+        }
+      ],
+      "rejected_records": 0,
+      "incomplete_packets": 0,
+      "files": {
+        "telemetry.txt": {
+          "bytes": 1269743,
+          "sha256": "2654725537aeb9c214b25cd940a138a6266e063512946735e3679362752be763"
+        },
+        "summary.json": {
+          "bytes": 565382,
+          "sha256": "3df9add99cbd752dad71e54003625bb6f64c5072eaa6bc34196c4ce2eed9d284"
+        },
+        "samples.csv": {
+          "bytes": 163611,
+          "sha256": "6b354f8a7354060030766f7d8da5e200431cf0d410c09b016d6cc8290b9556e6"
+        },
+        "shifts.csv": {
+          "bytes": 1433,
+          "sha256": "d2879a7884f1c9f5787f24415e01a47060bd7149d5bb640014d72ed237158319"
+        },
+        "curves.csv": {
+          "bytes": 5196,
+          "sha256": "f088137f094241e000406eaeab04e356abd51a431c28512eaf886be15185d5eb"
+        },
+        "runs.csv": {
+          "bytes": 1126,
+          "sha256": "57b2b3b55a710b7c882559335d99649ba1e59ee9078d34c7ce9bd896743e1f67"
+        },
+        "overview.md": {
+          "bytes": 1527,
+          "sha256": "84a28bca37fbd58a1e5a4e1c2d80f2fd1794672b58a295a8fd261a4c1559a195"
+        },
+        "boost-estimates.csv": {
+          "bytes": 183880,
+          "sha256": "401c7c7988f83009a680e73a7dd1c6dbacdc7b9800be71dc81687f309b2cca66"
+        },
+        "annotations.json": {
+          "bytes": 1537,
+          "sha256": "abe4aa3b83b3ba070768af7a4f8a27262cfa1a6e9179f7e9edadb4144a1a7cc3"
+        }
+      }
+    }
+  ],
+  "provenance": {
+    "recorders/basic/PhysicsTelemetry.java": {
+      "bytes": 5323,
+      "sha256": "10a5fc4890e83d1a18f76555aba95119b8d95dc7d0b57dbfdb1cb82627b8f119"
+    },
+    "recorders/turbo/PhysicsTelemetry.java": {
+      "bytes": 6189,
+      "sha256": "da731404d12c517674810209a6ec65fb575bccdc6b5321c7b8c26febfa980ae6"
+    },
+    "exporter/extract.mjs": {
+      "bytes": 6871,
+      "sha256": "76fcc5ea1ae945fb4264898c87a170e16077464ec77ba90a5d11f7e7330144cf"
+    },
+    "exporter/boost-estimate.mjs": {
+      "bytes": 1204,
+      "sha256": "01a4e229c3f9700d5074dac01eb05129772f6cce0f8e9335f860893b45c052a3"
+    }
+  }
+}

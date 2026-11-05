@@ -1,6 +1,16 @@
 # Original-game physics telemetry
 
-## Current original-game diagnostic state
+## Validated v2 capture corpus
+
+The original game successfully recorded short-field v2 telemetry across five
+car models. The [2026-11-05 capture corpus](../data/telemetry/original-game/2026-11-05/README.md)
+contains final log snapshots, CSV/JSON exports, protocol annotations and exact
+working recorder/exporter versions. The converter and recorder paths below
+describe the older v1 prototype and its historical debugging, not the active
+v2 capture workflow. The v2 corpus also documents unqualified native units,
+derived boost estimates and condition differences between runs.
+
+## Historical original-game diagnostic state
 
 The full recorder still crashes the original game without a script error after
 the import/mass fixes. It is not qualified for unattended capture. The user's

@@ -1,0 +1,51 @@
+{
+  "capture": "05-duhen-manual-and-third-gear",
+  "sessions": [
+    {
+      "id": 1,
+      "role": "setup",
+      "scenario": "Stationary before transmission mode change.",
+      "model": "Duhen SunStrip 1.5 DVC",
+      "engine": "Duhen D15V block",
+      "samples": 7,
+      "transmission_config": "1"
+    },
+    {
+      "id": 2,
+      "role": "reference",
+      "scenario": "Previously captured manual-clutch acceleration through the gears.",
+      "model": "Duhen SunStrip 1.5 DVC",
+      "engine": "Duhen D15V block",
+      "samples": 635,
+      "transmission_config": "2"
+    },
+    {
+      "id": 3,
+      "role": "diagnostic",
+      "exclude_from_clean_launch_comparison": true,
+      "scenario": "First third-gear attempt; user reported an error. Vehicle already moving when third selected.",
+      "model": "Duhen SunStrip 1.5 DVC",
+      "engine": "Duhen D15V block",
+      "samples": 254,
+      "transmission_config": "2"
+    },
+    {
+      "id": 4,
+      "role": "reference",
+      "scenario": "Second third-gear attempt, stationary with clutch held before launch.",
+      "model": "Duhen SunStrip 1.5 DVC",
+      "engine": "Duhen D15V block",
+      "samples": 278,
+      "transmission_config": "2"
+    },
+    {
+      "id": 5,
+      "role": "reference",
+      "scenario": "Third third-gear attempt, stationary with clutch held before launch. Wear differs from preceding attempt.",
+      "model": "Duhen SunStrip 1.5 DVC",
+      "engine": "Duhen D15V block",
+      "samples": 267,
+      "transmission_config": "2"
+    }
+  ]
+}

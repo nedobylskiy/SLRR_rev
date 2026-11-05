@@ -1,0 +1,3 @@
+"session","model","engine","samples","duration_s","median_interval_s","max_rpm","max_speed_kph","transmission_config","mass_native_raw","ended","shifts"
+"1","Emer Nonus Street GT","Emer StreetGT engine block","26","2.5330000000000013","0.10099999999999909","0","0","0","1627.141","true","0"
+"2","Emer Nonus Street GT","Emer StreetGT engine block","559","56.49300000000001","0.10099999999999909","7708.912","214.51680000000002","1","1627.141","true","12"

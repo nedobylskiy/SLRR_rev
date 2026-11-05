@@ -1,0 +1,23 @@
+{
+  "capture": "02-baiern-manual-auto-clutch",
+  "sessions": [
+    {
+      "id": 1,
+      "role": "setup",
+      "scenario": "Stationary before transmission mode change.",
+      "model": "Baiern CoupeSport 2.5",
+      "engine": "Baiern KraftWerk 2.5 engine block",
+      "samples": 11,
+      "transmission_config": "1"
+    },
+    {
+      "id": 2,
+      "role": "reference",
+      "scenario": "Manual shifting with automatic clutch; user did not reach terminal speed.",
+      "model": "Baiern CoupeSport 2.5",
+      "engine": "Baiern KraftWerk 2.5 engine block",
+      "samples": 810,
+      "transmission_config": "0"
+    }
+  ]
+}
