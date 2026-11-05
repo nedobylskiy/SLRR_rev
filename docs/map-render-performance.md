@@ -34,6 +34,10 @@ state and UV transforms. Transparent surfaces and materials holding separate
 baked textures remain independent. A streamed model holds one reference per
 distinct shared material; only its last owner disposes textures/material.
 Lighting and both shadow paths keep their existing independent switches.
+Paint-masked surfaces (including city facades) are excluded as well: their
+custom paint shader state is not fully represented by standard material fields.
+This conservatively restores their original independent material ownership
+after a report of missing facades. Shared texture Sources remain enabled.
 
 A fixed original city scene at focus `(-291, 10, 1034)` and range 850 m was
 fully loaded before rendering, with shadows and baked lighting disabled. Both

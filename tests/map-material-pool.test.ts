@@ -1,7 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BoxGeometry,Mesh,MeshStandardMaterial,Texture} from 'three';
+import {BoxGeometry,Color,Mesh,MeshStandardMaterial,Texture} from 'three';
 import {MapMaterialPool} from '../src/render/map-material-pool';
+import {SceneLighting} from '../src/render/scene-lighting';
+
+test('painted facades keep their original material and texture ownership instead of entering the pool',()=>{
+  const pool=new MapMaterialPool(),lighting=new SceneLighting(),texture=new Texture();
+  const parts=[0xff0000,0x0000ff].map(color=>{
+    const material=new MeshStandardMaterial({map:texture.clone()});
+    lighting.configureMaterial(material,true,true,new Color(color));
+    return new Mesh(new BoxGeometry(),material);
+  });
+  const originals=parts.map(p=>p.material);pool.acquire(parts);
+  assert.equal(parts[0].material,originals[0]);assert.equal(parts[1].material,originals[1]);
+  assert.notEqual(parts[0].material,parts[1].material);
+  for(const part of parts){assert.equal(pool.release(part.material),false);part.material.map!.dispose();part.material.dispose();}
+});
 
 test('equal static surfaces share material state until the last model evicts',()=>{
   const pool=new MapMaterialPool(),source=new Texture();

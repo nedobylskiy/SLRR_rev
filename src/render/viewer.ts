@@ -133,11 +133,14 @@ export class Viewer {
   private readonly graphicsDiagnostics:GraphicsDiagnostics;
   private readonly inspection:InspectionCamera;
   private inspectResident=false;
+  private mapPackPath?:string;
   setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
   setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);this.mapStream?.setInspectResident(enabled&&this.inspectResident);}
   setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);}
   resetInspectionCamera(){this.inspection.reset(this.controls.target);}
   graphicsDebugLines(){return [
+    `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
+    `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
       `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
     ...this.graphicsDiagnostics.lines(this.scene)];}
@@ -313,6 +316,7 @@ export class Viewer {
     });
   }
   clear() {
+    this.mapPackPath=undefined;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
     this.staticMapShadows.reset();this.staticMapRoot=undefined;this.staticMapDirection=undefined;
@@ -743,6 +747,7 @@ export class Viewer {
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false,
     options?: { groundId?: number; preserveCamera?: boolean }) {
     if (!keepWorld) this.clear(); const generation = this.generation;
+    this.mapPackPath=packPath;
     const pack = await assets.pack(packPath), warnings: string[] = [];
     const staticSun = pack.entries.find(entry => entry.type===13
       && entryProperties(entry).some(property => property.key==='type' && property.value==='directional'));
