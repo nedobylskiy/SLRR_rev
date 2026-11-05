@@ -24,6 +24,9 @@ export class JavaSceneVehicles {
   private disposed = false;
   private terrain?: Pick<MapTerrain, 'height'>;
   private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number; contacts:string }>();
+  private readonly synced = new WeakMap<BuiltVehicle, {
+    geometry: string; steering: number | undefined; pose: GameObject; revision: number; filters: string; terrain: boolean;
+  }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
     private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'>>,
     private readonly report: (message: string) => void,
@@ -99,6 +102,7 @@ export class JavaSceneVehicles {
       await this.factory.syncJavaAssembly(built.root, selection);
       if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
       this.settled.delete(built);
+      this.synced.delete(built);
       this.sync(node, built, ref);
       // showWorld skips existing GPU proxies and publishes only new part meshes.
       await this.viewer.showWorld(built.world, this.assets, true, true);
@@ -119,12 +123,23 @@ export class JavaSceneVehicles {
     built.world.wheelRefs=built.root.definition.config.wheels.map((_,index)=>this.result.chassis.wheelState(chassisRef,index));
     // Chassis.setState is used for the dealer's rotating display stand.
     const pose = chassis && chassis.poseRevision > node.poseRevision ? chassis : node;
+    const steering = this.viewer.calibrationSteering ?? node.steeringInput ?? chassis?.steeringInput;
+    const geometry = this.geometrySignature(built);
+    const filters = JSON.stringify([[...node.renderFilters], [...chassis?.renderFilters ?? []]]);
+    const previous = this.synced.get(built);
+    const runningGearChanged = !previous || previous.geometry !== geometry || previous.steering !== steering;
+    if (!runningGearChanged && previous.pose === pose && previous.revision === pose.poseRevision
+      && previous.filters === filters && previous.terrain === !!this.terrain) return;
     built.root.local.copy(poseMatrix({ position: [pose.position.x, pose.position.y, pose.position.z],
       rotation: [pose.orientation.y, pose.orientation.p, pose.orientation.r] }));
-    resetParkedRunningGear(built.root);
-    const steering = this.viewer.calibrationSteering ?? node.steeringInput ?? chassis?.steeringInput;
-    if (steering !== undefined) applyDisplaySteering(built.root, steering);
-    const suspended = settleParkedSuspension(built.root);
+    // Moving the chassis does not change the loaded spring pose or assembly mass.
+    if (runningGearChanged) {
+      resetParkedRunningGear(built.root);
+      if (steering !== undefined) applyDisplaySteering(built.root, steering);
+      settleParkedSuspension(built.root);
+    }
+    const suspended = built.root.definition.config.wheels.length === 4
+      && built.world.wheelRefs.some(wheel => wheel && wheel.force > 0 && wheel.restLength > 0);
     // Native physics normally resolves a freshly placed car out of the floor.
     // Static displays have no driving solver, so resolve wheel penetration here.
     let lift = suspended ? -Infinity : 0;
@@ -159,7 +174,7 @@ export class JavaSceneVehicles {
       // Java camera look commands address the installed part, not its chassis.
       // Publish the attachment transform without generating a new placement command.
       const native = part !== built.root && part.nativeId !== undefined
-        ? this.result.gameTypes.getByResourceId(part.nativeId) : undefined;
+        ? this.nativePart(part.nativeId) : undefined;
       if (native instanceof GameObject) {
         const position = new Vector3(), rotation = new Quaternion(), scale = new Vector3();
         part.matrix().decompose(position, rotation, scale);
@@ -171,6 +186,25 @@ export class JavaSceneVehicles {
       part.renderVisible = (node.renderFilters.get(category) ?? chassis?.renderFilters.get(category) ?? 0) !== 2;
     }
     this.viewer.syncWorldVisuals(built.world);
+    this.synced.set(built, { geometry: runningGearChanged ? this.geometrySignature(built) : geometry,
+      steering, pose, revision: pose.poseRevision, filters, terrain: !!this.terrain });
+  }
+
+  private nativePart(id: number) {
+    // Live GameObjects already have an index. Avoid scanning every resource for
+    // every installed part when publishing moving cars' camera attachment poses.
+    const indexed = this.result.gameTypes.getById(id);
+    return indexed?.resourceId === id ? indexed : this.result.gameTypes.getByResourceId(id);
+  }
+
+  /** Mutable inputs only: chassis motion and visibility do not invalidate suspension. */
+  private geometrySignature(built: BuiltVehicle): string {
+    const root = built.root;
+    return JSON.stringify([root.definition.config.wheels,
+      built.world.wheelRefs.map(wheel => wheel && [wheel.force, wheel.restLength, wheel.minLength, wheel.maxLength, wheel.radius]),
+      [...built.world.parts.values()].map(part => [part.id, part.parent?.id, part.parentSlot, part.ownSlot,
+        part === root ? null : part.local.elements, part.wheelFrameOffsetY, part.wheelFrameOffsets,
+        [...part.slotPositions], [...part.slotRotations], part.definition.config.slots, part.definition.config.bodies])]);
   }
 
   private async load(node: GameObject, ref: JavaValue): Promise<void> {

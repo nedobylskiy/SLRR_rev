@@ -9,6 +9,7 @@ import type { Assets } from '../src/assets';
 import { EngineWorld, type PartFactory } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
 import { javaStockSelection } from '../src/runtime/java-scene';
+import { createWheelRefState } from '../src/runtime/wheel-ref-native';
 
 test('scene vehicles use each Java chassis, follow poses and release removed or pending models', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'GameLogic.java',
@@ -50,12 +51,13 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   const reference = gameTypes.reference.bind(gameTypes);
   gameTypes.reference = node => vehicles.find(vehicle => vehicle.node === node)?.chassis ?? reference(node);
   const shown: EngineWorld[] = [], removed: EngineWorld[] = [], built: Awaited<ReturnType<PartFactory['stock']>>[] = [];
+  let visualSyncs = 0;
   let finishShow: (() => void) | undefined;
   const calibration = { value: undefined as number | undefined };
   const renderer = new JavaSceneVehicles(result, {} as Assets, {
     get calibrationSteering() { return calibration.value; },
     showWorld: async world => { shown.push(world); if (shown.length === 2) await new Promise<void>(resolve => { finishShow = resolve; }); return []; },
-    removeWorld: world => { removed.push(world); }, syncWorldVisuals: () => {},
+    removeWorld: world => { removed.push(world); }, syncWorldVisuals: () => { visualSyncs++; },
   }, message => assert.fail(message), {
     syncJavaAssembly: async () => { assert.fail('unchanged vehicles must not refresh their assemblies'); },
     stock: async (key, options) => {
@@ -106,7 +108,9 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.equal(vehicles[0].node.steeringInput, -0.7);
   assert.ok(Math.abs(wheel.local.elements[8]) > 0.1, 'Java command turns the displayed wheel');
   const turned = wheel.local.clone();
+  const beforeIdle = visualSyncs;
   renderer.update(map);
+  assert.equal(visualSyncs, beforeIdle, 'unchanged cars skip visual and native transform publication');
   assert.deepEqual(wheel.local, turned, 'display updates must not accumulate steering');
   await steer('0');
   assert.equal(wheel.local.elements[8], 0, 'setsteer 0 restores the neutral slot frame');
@@ -134,6 +138,29 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   renderer.update(map, { height: () => 2 }); await settle();
   assert.equal(built[0].root.local.elements[12], 15);
   assert.equal(built[1].root.definition.key.id, 2);
+  const stableSyncs = visualSyncs;
+  renderer.update(map, { height: () => 2 });
+  assert.equal(visualSyncs, stableSyncs, 'all loaded parked cars can sleep after settling');
+  const gear = built[0].root.children.get(101)!;
+  let attachmentReads = 0;
+  const slotFrame = built[0].root.slotFrame.bind(built[0].root);
+  built[0].root.slotFrame = slot => { attachmentReads++; return slotFrame(slot); };
+  chassisNode.setState({ x: 16, y: 2, z: 3 }, { y: 0.2, p: 0, r: 0 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 0, z: 0 });
+  renderer.update(map, { height: () => 2 });
+  assert.equal(visualSyncs, stableSyncs + 1, 'moving one car does not resynchronize the other cars');
+  assert.equal(attachmentReads, 0, 'rigid chassis motion reuses the loaded suspension pose');
+  const nativeWheel = gameTypes.getByResourceId(gear.nativeId!) as GameObject;
+  assert.ok(nativeWheel.position.x > 15, 'moving cars still publish camera attachment positions');
+  assert.equal(built[0].root.local.elements[12], 16);
+  const lateWheel = createWheelRefState();
+  result.chassis.wheelState = (_chassis, index) => index === 0 ? lateWheel : undefined;
+  const beforeWheelBinding = visualSyncs;
+  renderer.update(map, { height: () => 2 });
+  assert.ok(visualSyncs > beforeWheelBinding, 'late WheelRef bindings wake sleeping displays');
+  const beforeRadiusChange = visualSyncs;
+  lateWheel.radius += 0.1;
+  renderer.update(map, { height: () => 2 });
+  assert.ok(visualSyncs > beforeRadiusChange, 'in-place WheelRef tuning wakes sleeping displays');
   renderer.update(null); finishShow!(); await settle();
   assert.equal(removed.length, 2);
   assert.ok(built.every(model => model.world.disposed));

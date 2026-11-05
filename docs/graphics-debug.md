@@ -163,3 +163,18 @@ Until the first successful capture, the authored/global 2D reflection remains
 active. Disabling the feature clears the local uniforms and restores that path.
 The capture far plane is 5000 m so distant sky shells can enter the cubemap;
 capture still uses the already streamed geometry and requests no extra objects.
+
+## Parked vehicle polling
+
+The 150 ms Java scene poll still discovers cars and checks their installed trees.
+An unchanged displayed car skips suspension solving, native attachment pose
+publication and visual synchronization. The cache compares pose revision,
+steering, visibility filters, wheel bindings/values, calibration, attachment
+transforms and physical configuration; assembly refresh invalidates it.
+WheelRef tuning and newly available wheel states are checked even while asleep.
+
+Chassis motion wakes transform publication and floor contact checks, but reuses
+the loaded suspension pose while its inputs remain unchanged. Native part pose
+publication uses the existing live-object index instead of scanning all resource
+handles for every part. This is display synchronization, not a driving physics
+sleep system: moving simulated vehicles still need their regular solver ticks.
