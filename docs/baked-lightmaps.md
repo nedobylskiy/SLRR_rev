@@ -45,7 +45,8 @@ It does not run a new capture every frame.
 This is our cached shadow implementation, not a recovered native baker or a
 decoder for original embedded shadow atlases. Original baked SCX textures keep
 their existing path; the fallback does not replace or double-apply them. Dynamic
-shadows remain independently selectable and can include moving vehicles. A future
+shadows remain independently selectable and cast from vehicle parts only; static
+map meshes receive them but cast through the cached bake instead. A future
 baker can replace this basic projection with improved coefficients/UV atlases.
 
 Format/UV reference: OpenSLRR at

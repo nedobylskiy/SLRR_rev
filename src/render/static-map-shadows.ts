@@ -86,7 +86,7 @@ if (slrrStaticEnabled > 0.5 && slrrStaticAvailable > 0.5) {
     root.traverse(object => {
       if (!(object instanceof Mesh)) return;
       originals.push({mesh:object,material:object.material,visible:object.visible});
-      object.visible &&= object.castShadow;
+      object.visible &&= object.userData.staticMapCaster??object.castShadow;
       object.material = Array.isArray(object.material) ? object.material.map(material=>this.depth(material)) : this.depth(object.material);
     });
     try {

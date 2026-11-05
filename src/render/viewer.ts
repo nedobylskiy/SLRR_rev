@@ -255,13 +255,13 @@ export class Viewer {
   private staticMapRoot?: THREE.Group;
   setBakedLightmapsEnabled(enabled: boolean) {
     this.bakedLightmaps.value = this.staticMapShadows.enabled.value = enabled ? 1 : 0;
-    this.mapStream?.setShadowRange(enabled || this.lighting.shadows ? 150 : 0);
+    this.mapStream?.setShadowRange(enabled ? 150 : 0);
   }
   setShadowMapsEnabled(enabled: boolean) {
     this.lighting.shadows = enabled;
     this.renderer.shadowMap.enabled = enabled;
     this.sunLight.castShadow = enabled;
-    this.mapStream?.setShadowRange(enabled || this.bakedLightmaps.value ? 150 : 0);
+    this.mapStream?.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
     this.scene.traverse(object => {
       if (object instanceof THREE.Mesh) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -758,7 +758,7 @@ export class Viewer {
       group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
-      warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint));
+      warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint, true));
       if (generation !== this.generation) return warnings;
       const primaryPose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
       for (const extra of part.definition.additionalModels ?? []) {
@@ -769,7 +769,7 @@ export class Viewer {
         group.add(submodel);
         const extraModel = parseScx(await assets.read(extra.model.path));
         bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
-        warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint));
+        warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint, true));
         if (generation !== this.generation) return warnings;
       }
       for (const light of part.definition.lights ?? []) {
@@ -850,7 +850,7 @@ export class Viewer {
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
     stream.setGeometryCutoff(this.geometryCutoff);
-    stream.setShadowRange(this.lighting.shadows || this.bakedLightmaps.value ? 150 : 0);
+    stream.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
     this.updateFarPlane();
     this.nextStreamUpdate=-Infinity;
@@ -1319,7 +1319,7 @@ export class Viewer {
     material.depthWrite = false;
     material.needsUpdate = true;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint): Promise<string[]> {
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false): Promise<string[]> {
     const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
@@ -1346,7 +1346,7 @@ export class Viewer {
         part.paintMask ? paintColor === undefined ? material.color.clone() : new THREE.Color(paintColor & 0xffffff) : undefined);
       if(mapSurface)this.mapDistanceCutoff.configure(material);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
-      mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
+      mesh.castShadow = dynamicCaster && opacity === 1; mesh.receiveShadow = true;
       const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
       const file = boundTextures[diffuseIndex];
       if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
@@ -1406,7 +1406,8 @@ export class Viewer {
           } else texture.dispose(); // Opaque mix modes need the original material rule, not a covering pass.
         } catch (e) { warnings.push(`Texture layer ${layerFile}: ${e}`); }
       }
-      mesh.castShadow = !material.transparent;
+      mesh.castShadow = dynamicCaster && !material.transparent;
+      if(mapSurface)mesh.userData.staticMapCaster=!material.transparent;
       if(mapSurface)this.mapBackfaces.configure(material,geometry);
       const bakedFile = textures[part.lightmapIndex ?? -1];
       if (mapSurface && !bakedFile) {

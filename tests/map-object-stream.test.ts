@@ -161,15 +161,17 @@ test('chunk shadow reserve stays separate and is released when switching represe
   camera.position.set(0,5,0);camera.lookAt(0,0,-30);
   const geometry=new PlaneGeometry(512,512,16,16);geometry.rotateX(-Math.PI/2);
   stream.add([{position:new Vector3(),matrix:new Matrix4(),bounds:{minX:-256,maxX:256,minZ:-256,maxZ:256}}],async()=>{
-    const mesh=new Mesh(geometry,new MeshBasicMaterial());mesh.castShadow=true;return [mesh];
+    const mesh=new Mesh(geometry,new MeshBasicMaterial());mesh.castShadow=false;mesh.userData.staticMapCaster=true;return [mesh];
   });
   stream.setGeometryCutoff(true);stream.setShadowRange(100);
   stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
   const auxiliary=parent.children.filter(m=>m.userData.streamAuxiliary) as InstancedMesh[];
   assert.ok(auxiliary.some(m=>m.count>0));
   for(const extra of auxiliary.filter(m=>m.count>0)){
+    assert.equal(extra.castShadow,false);assert.equal(extra.userData.staticMapCaster,true);
     const main=parent.children.find((m:any)=>!m.userData.streamAuxiliary&&m.geometry===extra.geometry) as InstancedMesh;
-    assert.ok(main);assert.equal(main.count,0,'the same chunk instance cannot enter both passes');
+    assert.ok(main);assert.equal(main.userData.staticMapCaster,true);assert.equal(main.castShadow,false);
+    assert.equal(main.count,0,'the same chunk instance cannot enter both passes');
   }
   stream.setGeometryCutoff(false);stream.update(focus,camera);
   assert.equal(parent.children.length,1);assert.ok(auxiliary.every(m=>m.parent===null));

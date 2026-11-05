@@ -100,13 +100,19 @@ is clipped too. The report includes the primary camera's effective far value.
 
 ## Off-screen shadow support
 
-Enabling baked lightmaps or dynamic shadows retains a 150 m reserve of off-screen
+Enabling baked lightmaps retains a 150 m reserve of off-screen
 placements for shadow casting. This reserve uses separate auxiliary instance
 batches, sharing geometry and materials with the visible batches. It is excluded
 from the main color pass and raycast-occlusion candidates, while cached static
-depth, dynamic shadows and reflection capture can still use it. An instance is
+depth and reflection capture can still use it. An instance is
 never duplicated between the main and auxiliary lists of the same mesh.
 The report counts auxiliary mesh instances separately. The inspection camera
 shows the main list unless **Inspect all resident instances** is enabled.
 Large indivisible meshes whose bounds intersect the primary view can still
 extend behind the camera; splitting them is a separate geometry-cutoff option.
+
+**Dynamic shadows** accepts vehicle parts, including their additional linked
+renders. Static map surfaces and Java scenery do not cast into the dynamic sun
+shadow map; they still receive vehicle shadows. The cached bake uses a separate
+static-caster flag, preserved through instancing, auxiliary batches and chunks.
+Enabling dynamic shadows alone does not add a static-map reserve.

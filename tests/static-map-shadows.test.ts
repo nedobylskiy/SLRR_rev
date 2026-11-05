@@ -6,7 +6,7 @@ import { StaticMapShadows } from '../src/render/static-map-shadows';
 test('static shadow cache excludes vehicles, preserves cutouts and restores renderer state even after failure', () => {
   const cache = new StaticMapShadows(), scene = new Scene(), root = new Group();scene.add(root);
   const source = new MeshStandardMaterial({map:new Texture(),alphaTest:0.5}), tree = new Mesh(new BoxGeometry(),source);
-  tree.castShadow=true;root.add(tree);
+  tree.castShadow=false;tree.userData.staticMapCaster=true;root.add(tree);
   const car = new Mesh(new BoxGeometry(),new MeshStandardMaterial());scene.add(car);
   let captures = 0, fail = false;
   const renderer = {
@@ -17,6 +17,8 @@ test('static shadow cache excludes vehicles, preserves cutouts and restores rend
       captures++;assert.equal(pass.children[0],root);assert.equal(car.parent,scene);
       assert.equal((tree.material as any).isMeshDepthMaterial,true);
       assert.equal((tree.material as any).map,source.map);assert.equal(tree.material.alphaTest,0.5);
+      assert.equal(tree.visible,true,'static-only casters still enter the cached depth bake');
+      assert.equal(tree.castShadow,false,'the bake does not enable dynamic shadow casting');
       if(fail)throw new Error('capture failed');
     },
   };

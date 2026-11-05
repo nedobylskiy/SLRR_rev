@@ -380,7 +380,7 @@ const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement(
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
 const shadowsLabel = textElement('label', 'Dynamic shadows'), shadowsCheck = document.createElement('input');
 shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
-shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
+shadowsLabel.title = 'Dynamic sun shadows from vehicle parts only. Static map shadows use Baked lightmaps.';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
 const bakedLightmapsLabel = textElement('label', 'Baked lightmaps'), bakedLightmapsCheck = document.createElement('input');
 bakedLightmapsCheck.type = 'checkbox'; bakedLightmapsCheck.checked = true; bakedLightmapsLabel.prepend(bakedLightmapsCheck); mapDebugOptions.append(bakedLightmapsLabel);

@@ -181,6 +181,7 @@ export class MapObjectStream {
         proxy.name=`${mesh.name} / auxiliary casters`;proxy.renderOrder=mesh.renderOrder;
         proxy.castShadow=mesh.castShadow;proxy.receiveShadow=mesh.receiveShadow;proxy.matrixAutoUpdate=false;
         proxy.userData.streamAuxiliary=true;proxy.count=0;proxy.visible=false;
+        proxy.userData.staticMapCaster=mesh.userData.staticMapCaster;
         if(mesh.instanceColor)proxy.setColorAt(0,this.instanceColor.setHex(0xffffff));
         type.auxiliary.set(mesh,proxy);this.parent.add(proxy);
         const release=()=>{proxy!.removeFromParent();proxy!.dispose();type.meshDrawn.delete(proxy!);type.auxiliary.delete(mesh);mesh.removeEventListener('dispose',release);};
@@ -246,6 +247,7 @@ export class MapObjectStream {
         const mesh = new InstancedMesh(part.geometry, part.material, type.placements.length);
         mesh.name = part.name; mesh.renderOrder = part.renderOrder;
         mesh.castShadow = part.castShadow; mesh.receiveShadow = part.receiveShadow;
+        mesh.userData.staticMapCaster=part.userData.staticMapCaster;
         if (type.placements.some(placement => placement.paintColor !== undefined)) mesh.setColorAt(0, this.instanceColor.setHex(0xffffff));
         mesh.count = 0; mesh.visible = false;
         // Placements are baked into instance matrices; these map batches have no
@@ -271,6 +273,7 @@ export class MapObjectStream {
         mesh.name=`${base.name} / chunk ${index}`;mesh.renderOrder=base.renderOrder;
         mesh.castShadow=base.castShadow;mesh.receiveShadow=base.receiveShadow;mesh.matrixAutoUpdate=false;
         mesh.userData.mapChunk=true;mesh.count=0;mesh.visible=false;
+        mesh.userData.staticMapCaster=base.userData.staticMapCaster;
         if(base.instanceColor)mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));return mesh;
       });
     });
