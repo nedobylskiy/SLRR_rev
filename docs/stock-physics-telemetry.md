@@ -1,5 +1,32 @@
 # Original-game physics telemetry
 
+## Current original-game diagnostic state
+
+The full recorder still crashes the original game without a script error after
+the import/mass fixes. It is not qualified for unattended capture. The user's
+experimental installation currently uses
+`tools/stock-telemetry/diagnostics/stage0/PhysicsTelemetry.java`: both Track hooks
+are empty, with no static state, clock, vehicle reads or log calls. No telemetry
+output is expected at this stage. The complete recorder remains separate.
+
+Enable each next step only after an original-game run confirms the previous one:
+
+1. **Stage 0:** empty hooks; test entry, driving and exit from standard TestTrack.
+2. **Stage 1:** the provided stage1 variant logs one literal line per track visit,
+   without inspecting the Vehicle argument.
+3. Then add null checks, clock/throttle, RPM, speed, gear and control reads one
+   at a time, with before/after markers for each native getter.
+4. Leave metadata, mass, ratios and engine/dyno traversal disabled until basic
+   samples work. Split those sections into individual marked probes too.
+
+When switching variants, preserve the installed source and generated
+`sl/Scripts/game/PhysicsTelemetry.class`, then invalidate that generated class
+so the game recompiles the new source on a full restart. Never change the
+Steam installation as part of these experiments. Stage1 is prepared but has
+not been enabled; a stage0 rerun is pending.
+
+## Full recorder (not yet qualified in the original runtime)
+
 `tools/stock-telemetry/PhysicsTelemetry.java` is a passive recorder for the
 installed Steam/build-940 script API. It does not change throttle, gears, tuning,
 dyno calculation or assembly state. Hooks call it from `Track.animate()` and
