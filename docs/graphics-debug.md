@@ -50,3 +50,11 @@ Enable **Independent inspection camera** to look from a separate observer:
   off restores ordinary submission without changing the primary pose.
 
 This tool observes GPU work; it does not disable lighting effects to improve FPS.
+
+The stock City resource `c1_phys` (`maps/city/meshes/c1_phys.SCX`, untextured
+SCX3 material `_picsasag`) is a coarse collision shell that is also present in
+the map's child-render list. It is retained in terrain/collision processing but
+excluded from the visual stream, including all-resident inspection, shadow maps
+and reflection captures. The report counts this exclusion. Identification is
+scoped to this known stock resource and material signature; it is not an inferred
+native resource flag or a blanket filter on untextured models.

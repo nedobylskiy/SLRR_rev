@@ -34,7 +34,7 @@ import { previewScope } from '../runtime/preview-scope';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
-import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, isStockMapCollisionShell, mapRenderIds } from '../engine/map';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
@@ -134,6 +134,7 @@ export class Viewer {
   private readonly inspection:InspectionCamera;
   private inspectResident=false;
   private mapPackPath?:string;
+  private collisionOnlyMapMeshes=0;
   setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
   setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);this.mapStream?.setInspectResident(enabled&&this.inspectResident);}
   setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);}
@@ -141,6 +142,7 @@ export class Viewer {
   graphicsDebugLines(){return [
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
+    `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
       `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
     ...this.graphicsDiagnostics.lines(this.scene)];}
@@ -317,6 +319,7 @@ export class Viewer {
   }
   clear() {
     this.mapPackPath=undefined;
+    this.collisionOnlyMapMeshes=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
     this.staticMapShadows.reset();this.staticMapRoot=undefined;this.staticMapDirection=undefined;
@@ -796,6 +799,7 @@ export class Viewer {
       this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     }
     let loaded = 0, triangles = 0;
+    this.collisionOnlyMapMeshes=0;
     this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
@@ -819,11 +823,13 @@ export class Viewer {
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
         collision.add(parsed);
+        const collisionOnly=isStockMapCollisionShell(source.path,resource.path,source.pack.entries.find(entry=>entry.typeId===id)?.alias??'',parsed);
+        if(collisionOnly)this.collisionOnlyMapMeshes++;
         const bounds = new THREE.Box3();
         const vertex = new THREE.Vector3();
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
           bounds.expandByPoint(vertex.fromArray(mesh.positions, i).multiplyScalar(0.01));
-        if (!bounds.isEmpty()) {
+        if (!collisionOnly && !bounds.isEmpty()) {
           const center = bounds.getCenter(new THREE.Vector3());
           stream.add([{ matrix: new THREE.Matrix4(), position: center,
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
