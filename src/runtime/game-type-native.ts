@@ -5,6 +5,7 @@ import { RenderObject } from './render-object';
 import type { ResourceCatalog } from './resource-catalog';
 import type { BootEvent } from './game-boot';
 import type { ResourceIdentity } from 'slrr-jvm';
+import { normalizeResourcePackPath } from '../assets';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
@@ -39,6 +40,9 @@ export class GameTypeNative {
   private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
   private readonly trackPackSlots = new Map<string, number>();
+  private readonly savedResources = new Map<number, ResourceIdentity>();
+  private readonly savedResourceIds = new Map<string, number>();
+  private readonly savedResourcePackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly notifications = new Map<JavaObject, Notification[]>();
   private readonly triggerContacts = new Map<ResourceObject, boolean>();
@@ -47,9 +51,15 @@ export class GameTypeNative {
   private animatingCallbacks = false;
   private dispatchingEvents = false;
   private commandHandler?: (receiver: JavaValue, command: string) => void | Promise<void>;
+  private partCompatibilityReader?: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>;
   private axisReader?: (receiver: JavaValue, axis: number) => number;
   private renderCountReader?: (receiver: JavaValue) => number;
+  private objectCategoryReader?: (receiver: JavaValue) => number;
+  private partCategoryReader?: (receiver: JavaValue) => number;
+  private driveTypeReader?: (receiver: JavaValue) => number;
+  private removalReader?: (receiver: JavaValue) => number;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
+  private readonly resourceDestroyListeners = new Set<(receiver: JavaValue) => void>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
@@ -58,15 +68,36 @@ export class GameTypeNative {
     private readonly loadResourcePack?: (pack: string) => Promise<void>,
     private readonly resolvePackedResource?: (id: number) => ResourceIdentity | undefined,
     private readonly renderRemoved?: (node: RenderObject) => void,
-    private readonly configureUnscriptedResource?: (receiver: JavaValue, cfgPath: string) => Promise<void>) {
+    private readonly configureUnscriptedResource?: (receiver: JavaValue, cfgPath: string) => Promise<void>,
+    private readonly resourceScriptIsA?: (script: string, pack: string | null, base: string) => Promise<boolean>,
+    private readonly resourceSize?: (receiver: JavaValue) => Promise<number>) {
     const resourceRef = 'java.util.resource.ResourceRef';
+    jvm.natives.registerAsync(resourceRef, 'load', [], async ({ receiver }) => {
+      if (receiver.value == null) return voidValue();
+      const node = this.requireResource(receiver);
+      const identity = this.resolveResourceIdentity(node.typeId);
+      const pack = node.resourcePack ?? identity?.pack;
+      if (pack) {
+        await this.loadResourcePack?.(pack);
+        const definition = this.catalogResource(pack, node.typeId);
+        if (!definition) throw new Error(`ResourceRef.load: resource 0x${(node.typeId >>> 0).toString(16)} missing in ${pack}`);
+        node.resourcePack = definition.pack;
+        node.resourceScript = definition.script ?? null;
+        if (!(node instanceof GameObject)) node.resourceType = definition.type;
+      }
+      // Render buffers/textures remain demand-loaded by the renderer. This call
+      // resolves the resource binding; it must not instantiate its Java script
+      // again or replace the existing native object and its children.
+      if (node instanceof RenderObject) this.notifyRenderChanged(node);
+      return voidValue();
+    });
     jvm.natives.register(resourceRef, 'newNative', [], ({ receiver }) => {
       this.allocate(receiver); return voidValue();
     });
     jvm.natives.register(resourceRef, 'set', ['int'], ({ receiver, args }) => {
       const object = this.object(receiver);
       const id = Number(args[0].value) | 0;
-      const origin = args[0].resource ?? this.resolvePackedResource?.(id);
+      const origin = args[0].resource ?? this.resolveResourceIdentity(id);
       const live = this.liveByResourceId.get(id);
       // getInfo(GII_OWNER) yields a plain instance ID. It can numerically overlap
       // a loaded packed resource, so only an explicit resource literal outranks it.
@@ -81,6 +112,7 @@ export class GameTypeNative {
       node.resourceId = id;
       node.typeId = node.resourceId;
       node.resourceType = resource?.type ?? 0;
+      node.sceneLightManaged = false;
       node.resourcePack = resource?.pack ?? (origin?.pack ?? null);
       node.resourceScript = resource?.script ?? null;
       node.alias = resource?.alias ?? node.alias;
@@ -121,6 +153,7 @@ export class GameTypeNative {
       node.resourceId = source?.resourceId ?? literal?.id ?? 0;
       node.typeId = source?.typeId ?? node.resourceId;
       node.resourceType = source?.resourceType ?? 0;
+      node.sceneLightManaged = source?.sceneLightManaged ?? false;
       node.resourcePack = source?.resourcePack ?? (typeof literal?.pack === 'string' ? literal.pack : null);
       node.resourceScript = source?.resourceScript ?? null;
       node.copiedFromResourceId = null;
@@ -133,6 +166,7 @@ export class GameTypeNative {
       if (source === target) return voidValue();
       target.typeId = source.typeId;
       target.resourceType = source.resourceType;
+      target.sceneLightManaged = source.sceneLightManaged;
       target.resourcePack = source.resourcePack;
       target.resourceScript = source.resourceScript;
       target.params = source.params;
@@ -181,7 +215,7 @@ export class GameTypeNative {
       const node = this.requireResource(receiver), value = jv('int', node.resourceId);
       // Java stores mapStack[j].id() in an int. Keep its pack so a later
       // new GameRef(id) can resolve the right track script.
-      if (node.resourcePack && !(node instanceof GameObject)) value.resource = { pack: node.resourcePack, id: node.typeId };
+      if (node.resourcePack && !(node instanceof GameObject)) value.resource = this.resolveRenderResource(node) ?? undefined;
       return value;
     });
     jvm.natives.register(resourceRef, 'type', [], ({ receiver }) =>
@@ -209,6 +243,7 @@ export class GameTypeNative {
     jvm.natives.register(resourceRef, 'destroy', [], ({ receiver }) => {
       // A failed Track.enter may leave player.render null before Track.exit runs.
       if (receiver.value == null) return voidValue();
+      for (const listener of this.resourceDestroyListeners) listener(receiver);
       const node = this.getResource(receiver);
       if (!node) return voidValue();
       this.notifications.delete(this.object(receiver));
@@ -218,7 +253,10 @@ export class GameTypeNative {
         if (remaining.length) this.notifications.set(handler, remaining);
         else this.notifications.delete(handler);
       }
-      if (node instanceof RenderObject) this.renderRemoved?.(node);
+      if (node instanceof RenderObject) {
+        node.resourceType = 0;
+        this.renderRemoved?.(node);
+      }
       this.cancelTimers(this.object(receiver));
       node.setParent(null);
       for (const child of [...node.children]) child.setParent(null);
@@ -319,11 +357,36 @@ export class GameTypeNative {
     });
 
     const gameRef = 'java.util.resource.GameRef';
+    jvm.natives.register(gameRef, 'getScriptInstance', [], ({ receiver }) => {
+      const node = this.getResource(receiver);
+      const script = node instanceof GameObject ? this.handles.get(node) : undefined;
+      return jv('Object', script?.value ?? null);
+    });
+    const isScripted = async (receiver: JavaValue, args: readonly JavaValue[]) => {
+      if (receiver.value == null) return jv('int', 0);
+      const node = this.requireResource(receiver);
+      if (!node.resourceScript && node.resourcePack && this.loadResourcePack) {
+        await this.loadResourcePack(node.resourcePack);
+        const definition = this.catalogResource(node.resourcePack, node.typeId);
+        node.resourceScript = definition?.script ?? null;
+      }
+      if (!node.resourceScript) return jv('int', 0);
+      if (args[0]?.value == null) return jv('int', 1);
+      const base = String(args[0].value);
+      if (!this.resourceScriptIsA) throw new Error('GameRef.isScripted requires a resource script class resolver');
+      return jv('int', await this.resourceScriptIsA(node.resourceScript, node.resourcePack, base) ? 1 : 0);
+    };
+    // Resource tree traversal returns ResourceRef handles; the original scripts
+    // also query their script type before creating a GameRef instance.
+    for (const owner of [resourceRef, gameRef]) {
+      jvm.natives.registerAsync(owner, 'isScripted', ['String'], ({ receiver, args }) => isScripted(receiver, args));
+      jvm.natives.registerAsync(owner, 'isScripted', [], ({ receiver }) => isScripted(receiver, []));
+    }
     const createFromResource = async (receiver: JavaValue, args: readonly JavaValue[]): Promise<JavaValue> => {
       const type = this.getResource(args[1]);
       if (type?.resourcePack && !type.resourceScript && this.loadResourcePack) {
         await this.loadResourcePack(type.resourcePack);
-        const resource = this.catalog?.resolve(type.resourcePack, type.typeId);
+        const resource = this.catalogResource(type.resourcePack, type.typeId);
         if (resource) {
           type.resourceType = resource.type;
           type.resourcePack = resource.pack;
@@ -346,7 +409,13 @@ export class GameTypeNative {
         const node = this.requireResource(receiver);
         node.resourcePack = type.resourcePack;
         node.resourceScript = type.resourceScript;
-        const cfgPath = this.catalog?.resolve(type.resourcePack, type.typeId)?.cfgPath;
+        const definition = this.catalogResource(type.resourcePack, type.typeId);
+        const cfgPath = definition?.cfgPath;
+        if (definition?.nativeType === 'camera') {
+          const pose = String(args[2].value ?? '').split(',').slice(0, 6).map(Number);
+          if (pose.length === 6 && pose.every(Number.isFinite)) this.require(receiver).setMatrix(
+            { x: pose[0], y: pose[1], z: pose[2] }, { y: pose[3], p: pose[4], r: pose[5] });
+        }
         if (cfgPath) await this.configureUnscriptedResource?.(receiver, cfgPath);
       }
       return receiver;
@@ -356,8 +425,19 @@ export class GameTypeNative {
     // Build 940 also passes ResourceRef[] elements to the GameRef-typed native factory.
     jvm.natives.registerAsync(gameRef, 'create', ['GameRef', 'ResourceRef', 'String', 'String'],
       ({ receiver, args }) => createFromResource(receiver, args));
-    jvm.natives.register(gameRef, 'create_native', ['GameRef', 'GameRef', 'String', 'String'], ({ receiver, args }) =>
-      this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]));
+    jvm.natives.registerAsync(gameRef, 'create_native', ['GameRef', 'GameRef', 'String', 'String'], async ({ receiver, args }) => {
+      const type = this.getResource(args[1]);
+      this.create(receiver, args[0], this.typeId(args[1]), args[2], args[3]);
+      const node = this.require(receiver);
+      node.resourcePack = type?.resourcePack ?? this.resolveResourceIdentity(node.typeId)?.pack ?? null;
+      if (node.resourcePack) {
+        await this.loadResourcePack?.(node.resourcePack);
+        const definition = this.catalogResource(node.resourcePack, node.typeId);
+        node.resourceScript = definition?.script ?? null;
+        if (definition?.cfgPath) await this.configureUnscriptedResource?.(receiver, definition.cfgPath);
+      }
+      return voidValue();
+    });
     const getInfo = (receiver: JavaValue, query: number, index = 0): JavaValue => {
       const node = this.require(receiver);
       switch (query) {
@@ -365,19 +445,37 @@ export class GameTypeNative {
         // MOCK: The host has no separate animated bone node yet. Use the live
         // object's ID so Java camera commands can target its root transform.
         case 1: return jv('int', node.resourceId); // GII_BONE
+        case 7: return jv('int', this.objectCategoryReader?.(receiver) ?? 0); // GII_CATEGORY, distinct from CFG part category.
         case 5: return jv('int', node.resourceId); // GII_ID
-        case 6: return jv('int', node.typeId); // GII_TYPE
+        case 6: { // GII_TYPE: catalog copies pass this int into new GameRef(id).
+          if (node.resourcePack) {
+            const identity = this.resolveResourceIdentity(node.typeId);
+            return this.remountSavedResource(node.resourcePack, identity
+              && normalizeResourcePackPath(identity.pack) === normalizeResourcePackPath(node.resourcePack)
+              ? identity.id : node.typeId & 0xffff);
+          }
+          return jv('int', node.typeId);
+        }
+        case 11: return jv('int', 100); // GII_SIZE: native fallback when no visual reader is attached.
         case 15: return jv('int', 100); // GII_DAMAGE: live host body begins undamaged.
         case 24: return jv('int', node.parent?.resourceId ?? 0); // GII_OWNER
         case 25: return jv('int', Math.round(this.axisReader?.(receiver, index) ?? 0)); // GII_AXIS
         case 48: return jv('int', this.renderCountReader?.(receiver) ?? 0); // GII_RENDER: CFG camera count.
+        case 52: return jv('int', this.driveTypeReader?.(receiver) ?? 0); // GII_CAR_DRIVETYPE
+        case 55: return jv('int', this.partCategoryReader?.(receiver) ?? 0); // GII_PART_CATEGORY: original CFG category.
+        case 41: return jv('int', this.removalReader?.(receiver) ?? -1); // GII_GETOUT_OK
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
     };
-    jvm.natives.register(gameRef, 'getInfo', ['int', 'int'], ({ receiver, args }) =>
-      getInfo(receiver, Number(args[0].value) | 0, Number(args[1].value) | 0));
-    jvm.natives.register(gameRef, 'getInfo', ['int', 'String'], ({ receiver, args }) =>
-      getInfo(receiver, Number(args[0].value) | 0));
+    for (const indexType of ['int', 'String']) {
+      jvm.natives.registerAsync(gameRef, 'getInfo', ['int', indexType], async ({ receiver, args }) => {
+        const query = Number(args[0].value) | 0;
+        if ((query === 71 || query === 72) && this.partCompatibilityReader)
+          return jv('int', await this.partCompatibilityReader(receiver, args[1], query === 71));
+        if (query === 11 && this.resourceSize) return jv('int', await this.resourceSize(receiver));
+        return getInfo(receiver, query, indexType === 'int' ? Number(args[1].value) | 0 : 0);
+      });
+    }
     jvm.natives.register(gameRef, 'getFlags', [], ({ receiver }) => jv('int', this.require(receiver).flags));
     jvm.natives.register(gameRef, 'setFlags', ['int'], ({ receiver, args }) => {
       this.require(receiver).setFlags(Number(args[0].value) | 0); return voidValue();
@@ -415,6 +513,22 @@ export class GameTypeNative {
           const commands = this.lastCommands.get(node) ?? new Map<string, string>();
           commands.set(args[2].value.trim().split(/\s+/, 1)[0], args[2].value);
           this.lastCommands.set(node, commands);
+          if (node instanceof GameObject) {
+            const verb = args[2].value.trim().split(/\s+/, 1)[0];
+            if (verb === 'render') node.cameraRendering = true;
+            if (verb === 'hide') node.cameraRendering = false;
+            if (verb === 'setsteer') {
+              const words = args[2].value.trim().split(/\s+/);
+              const value = Number(words[1]);
+              if (words.length !== 2 || !Number.isFinite(value)) throw new Error(`Invalid steering command: ${args[2].value}`);
+              node.steeringInput = Math.max(-1, Math.min(1, value));
+            }
+            if (verb === 'filter') {
+              const match = /^filter\s+(\d+)\s+([012])\s*$/.exec(args[2].value.trim());
+              if (!match) throw new Error(`Invalid render filter command: ${args[2].value}`);
+              node.renderFilters.set(Number(match[1]), Number(match[2]));
+            }
+          }
         }
         await this.commandHandler?.(receiver, args[2].value);
       }
@@ -431,6 +545,46 @@ export class GameTypeNative {
     return node instanceof GameObject ? node : undefined;
   }
   getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
+  /** File-created texture handles retain a stable RID when Java passes only id(). */
+  bindTexture(receiver: JavaValue, identity: ResourceIdentity): void {
+    const node = this.allocate(receiver), id = 0x60000000 + identity.id;
+    this.savedResources.set(id, identity);
+    node.resourceId = node.typeId = id;
+    node.resourcePack = identity.pack;
+    node.resourceType = 7;
+  }
+  resolveResourceIdentity(id: number): ResourceIdentity | undefined {
+    return this.savedResources.get(id) ?? this.resolvePackedResource?.(id);
+  }
+  /** Host IDs (including SDAT remounts) are not local RPK entry indices. */
+  catalogResource(pack: string, id: number) {
+    const identity = this.resolveResourceIdentity(id);
+    const local = identity && normalizeResourcePackPath(identity.pack) === normalizeResourcePackPath(pack)
+      ? identity.id : id;
+    return this.catalog?.resolve(pack, local);
+  }
+  /** Remount a saved RPK entry independently of the current source dependency slots. */
+  remountSavedResource(pack: string, localId: number): JavaValue {
+    const identity = { pack: normalizeResourcePackPath(pack), id: localId & 0xffff };
+    const key = `${identity.pack}:${identity.id}`;
+    let id = this.savedResourceIds.get(key);
+    if (id === undefined) {
+      let slot = this.savedResourcePackSlots.get(identity.pack);
+      if (slot === undefined) {
+        slot = this.savedResourcePackSlots.size;
+        if (slot >= 0x1000) throw new Error('Saved resource pack ID space exhausted');
+        this.savedResourcePackSlots.set(identity.pack,slot);
+      }
+      // Java catalog filters compare id() >> 16 with GII_TYPE >> 16. Keep
+      // one namespace per pack and preserve the local entry in the low word.
+      id = 0x50000000 + slot * 0x10000 + identity.id;
+      this.savedResourceIds.set(key, id);
+      this.savedResources.set(id, identity);
+    }
+    const value = jv('int', id);
+    value.resource = identity;
+    return value;
+  }
   getRender(receiver: JavaValue): RenderObject | undefined {
     const node = this.getResource(receiver);
     return node instanceof RenderObject ? node : undefined;
@@ -439,7 +593,7 @@ export class GameTypeNative {
     // typeId is the RPK type. resourceId may be an engine-generated clone handle
     // such as 0x40000112 and must never be interpreted as an RPK entry ID.
     const sourceId = type.typeId;
-    return this.resolvePackedResource?.(sourceId)
+    return this.resolveResourceIdentity(sourceId)
       ?? (type.resourcePack ? { pack: type.resourcePack, id: sourceId & 0xffff } : null);
   }
   notifyRenderChanged(node: RenderObject): void { this.renderChanged?.(node); }
@@ -474,8 +628,17 @@ export class GameTypeNative {
   setCommandHandler(handler: (receiver: JavaValue, command: string) => void | Promise<void>): void {
     this.commandHandler = handler;
   }
+
+  setPartCompatibilityReader(reader: (receiver: JavaValue, target: JavaValue, installable: boolean) => Promise<number>): void {
+    this.partCompatibilityReader = reader;
+  }
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
+  setObjectCategoryReader(reader: (receiver: JavaValue) => number): void { this.objectCategoryReader = reader; }
+  setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
+  addResourceDestroyListener(listener: (receiver: JavaValue) => void): void { this.resourceDestroyListeners.add(listener); }
+  setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
+  setRemovalReader(reader: (receiver: JavaValue) => number): void { this.removalReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {
     return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
   }
@@ -555,10 +718,10 @@ export class GameTypeNative {
     node.queueEvent({ sourceId: sourceNode?.id ?? null, type,
       payload: value.value == null ? null : String(value.value) });
     this.pendingEvents.push({ receiver, type, arguments: [source, jv('int', type), value] });
-    this.queueNotifications(receiver, type, value);
+    this.queueNotifications(receiver, type, value, type === 65536 && source.value != null ? source : undefined);
   }
 
-  private queueNotifications(emitter: JavaValue, type: number, payload: JavaValue): void {
+  private queueNotifications(emitter: JavaValue, type: number, payload: JavaValue, source?: JavaValue): void {
     const watched = this.getResource(emitter);
     if (!watched) return;
     for (const [key, subscriptions] of this.notifications) {
@@ -572,7 +735,7 @@ export class GameTypeNative {
         handler.queueEvent({ sourceId: watched.id, type: forwarded,
           payload: value.value == null ? null : typeof value.value === 'number' ? value.value : String(value.value) });
         this.pendingEvents.push({ receiver: subscription.handler, type: forwarded,
-          arguments: [this.handle(watched), jv('int', forwarded), value], method: subscription.method });
+          arguments: [source ?? this.handle(watched), jv('int', forwarded), value], method: subscription.method });
         if (subscription.type & 0x80000000) {
           const index = subscriptions.indexOf(subscription);
           if (index >= 0) subscriptions.splice(index, 1);
@@ -626,6 +789,10 @@ export class GameTypeNative {
     this.notifications.clear();
     this.triggerContacts.clear();
     this.callbacks.clear();
+    this.savedResources.clear();
+    this.savedResourceIds.clear();
+    this.savedResourcePackSlots.clear();
+    this.resourceDestroyListeners.clear();
   }
 
   private cancelTimers(object: JavaObject): void {
@@ -666,7 +833,7 @@ export class GameTypeNative {
     this.catalogChildrenLoaded.add(parent);
     for (const child of this.catalog.childrenOf(parent.resourcePack, parent.resourceId)) {
       const receiver = this.jvm.construct('java.util.resource.ResourceRef',
-        [jv('ResourceRef', { pack: child.pack, id: child.id })]);
+        [this.remountSavedResource(child.pack,child.id)]);
       const node = this.requireResource(receiver);
       node.resourceType = child.type;
       node.resourceScript = child.script ?? null;

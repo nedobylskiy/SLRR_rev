@@ -83,3 +83,43 @@ test('Object.notifyAll resumes every Java monitor waiter and disposal cancels sl
   bridge.dispose();
   await assert.rejects(sleeper, /disposed/);
 });
+
+
+test('thread launch waits for async initialization but starts when its caller explicitly sleeps', async () => {
+  const source = `package demo;
+    interface Runnable { void run(); }
+    class Thread {
+      Runnable target;
+      Thread(Runnable value) { target = value; init("worker"); }
+      native void init(String name); native void start(); native void stop();
+      static native void sleep(float duration);
+    }
+    class Timer { int stopped = 7; }
+    class Worker implements Runnable {
+      Thread thread; Timer timer; int status; int observed;
+      native void loadAsset();
+      void run() { status = timer.stopped; }
+      void launch() { thread = new Thread(this); thread.start(); loadAsset(); timer = new Timer(); }
+      void yieldToThread() { Thread.sleep(40.0); }
+      void launchAndYield() { timer = new Timer(); thread = new Thread(this); thread.start(); yieldToThread(); observed = status; }
+    }`;
+  const errors: string[] = [];
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('demo.')
+    ? { path: 'demo/Worker.java', source } : null });
+  const bridge = new ThreadNative(jvm, message => errors.push(message), 'demo.Thread');
+  jvm.natives.registerAsync('demo.Worker', 'loadAsset', [], async () => {
+    await new Promise(resolve => setTimeout(resolve, 60)); return jv('void', undefined);
+  });
+  try {
+    await jvm.loadClass('demo.Worker');
+    const worker = await jvm.constructAsync('demo.Worker', []);
+    await jvm.invokeAsync(worker, 'launch');
+    for (let attempt = 0; attempt < 30 && jvm.get(worker, 'status').value !== 7; attempt++)
+      await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(jvm.get(worker, 'status').value, 7, 'background run must see the initialized timer after slow asset I/O');
+    const yielding = await jvm.constructAsync('demo.Worker', []);
+    await jvm.invokeAsync(yielding, 'launchAndYield');
+    assert.equal(jvm.get(yielding, 'observed').value, 7, 'a nested sleep must release work while its parent is still pending');
+    assert.deepEqual(errors, []);
+  } finally { bridge.dispose(); }
+});

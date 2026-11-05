@@ -1,0 +1,95 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, mapRenderIds } from '../src/engine/map';
+import type { ScxModel } from '../src/formats/scx';
+import type { RpkEntry } from '../src/formats/rpk';
+import { activeJavaTrack } from '../src/runtime/java-scene';
+import { GameTypeNative } from '../src/runtime/game-type-native';
+import type { BootResult } from '../src/runtime/game-boot';
+
+test('a direct ground mesh with child renders keeps the outdoor map loading path', () => {
+  const entry = (typeId: number, superId: number, type: number, text = ''): RpkEntry => ({
+    typeId, superId, type, flags: 0, compatibility: 1, offset: 0, size: text.length,
+    alias: '', data: new TextEncoder().encode(text),
+  });
+  const pack = { version: 0x200, dependencies: [], warnings: [], entries: [
+    entry(20, 0x40003, 14, 'mesh 0x15'), entry(21, 0, 5),
+    entry(51, 20, 14, 'mesh 0x32'), entry(50, 0, 5),
+    entry(5, 0x10003, 14, 'mesh 0x6'), entry(6, 0, 5),
+  ] };
+  assert.equal(groundRenderHasChildren(pack, 20), true, 'TestTrack root owns other map pieces');
+  assert.deepEqual(mapRenderIds(pack), [20, 51]);
+  assert.equal(groundRenderHasChildren(pack, 5), false, 'a garage room remains isolated');
+});
+
+test('ROC empty direct root must load sibling outdoor pieces while real rooms stay isolated', () => {
+  const entry = (typeId: number, superId: number, type: number, text = ''): RpkEntry => ({
+    typeId, superId, type, flags: 0, compatibility: 1, offset: 0, size: text.length,
+    alias: '', data: new TextEncoder().encode(text),
+  });
+  // ROC's GroundRef points to 0x1e; the actual area meshes belong to 0x14.
+  const pack = { version: 0x200, dependencies: [], warnings: [], entries: [
+    entry(0x1e, 0x20003, 14, 'mesh 0x1d'), entry(0x1d, 0, 5),
+    entry(0x14, 0x20003, 14), entry(0x24, 0x14, 14, 'mesh 0x23'), entry(0x23, 0, 5),
+  ] };
+  const empty: ScxModel = { version: 4, meshes: [], warnings: ['Empty SCX placeholder: no geometry'] };
+  assert.equal(groundRenderHasChildren(pack, 0x1e), false);
+  assert.equal(groundRenderIsRoom(pack, 0x1e, empty), false);
+  assert.deepEqual(mapRenderIds(pack), [0x24], 'the populated sibling tree supplies geometry and collision');
+  const triangle: ScxModel = { version: 4, warnings: [], meshes: [{ name: 'room',
+    positions: new Float32Array([0,0,0, 1,0,0, 0,0,1]), normals: new Float32Array(9), uv: new Float32Array(6),
+    indices: new Uint32Array([0,1,2]), diffuse: [1,1,1,1], textureIndex: 0xffff }] };
+  assert.equal(groundRenderIsRoom(pack, 0x1e, triangle), true, 'real leaf rooms retain their explicit mesh and pose');
+});
+
+test('compiled GroundRef RSD chooses its own room mesh and pose, not all rooms in the pack', () => {
+  for (const [id, renderId] of [[0x7a, 5], [6, 11], [0xc7, 40], [0x2f, 73]]) {
+    const text = new TextEncoder().encode(`gametype 0x00010035\r\nparams 0x${renderId.toString(16)},1,2,3,0.5,0,0\r\n`);
+    const data = new Uint8Array(21 + 8 + text.length);
+    data.set([82, 83, 68, 0], 21); new DataView(data.buffer).setUint32(25, text.length, true); data.set(text, 29);
+    const entry: RpkEntry = { superId: 0, typeId: id, type: 1, flags: 0, compatibility: 1, offset: 0, size: data.length, alias: 'room', data };
+    assert.deepEqual(groundRenderDefinition(entry), { gameType: 0x10035, renderId,
+      pose: { position: [1, 2, 3], rotation: [0.5, 0, 0] } });
+    assert.equal(groundRenderDefinition({ ...entry, type: 14 }), undefined);
+    assert.equal(groundRenderDefinition({ ...entry, data: data.slice(0, -1) }), undefined, 'do not decode a truncated RSD tail');
+  }
+});
+
+test('dealer GroundRef accepts a mesh-only params record with an implicit identity pose', () => {
+  const text = new TextEncoder().encode('gametype 0x00010035\r\nparams 0x00000002\r\n');
+  const data = new Uint8Array(8 + text.length);
+  data.set([82, 83, 68, 0]); new DataView(data.buffer).setUint32(4, text.length, true); data.set(text, 8);
+  const entry: RpkEntry = { superId: 0x10004, typeId: 1, type: 1, flags: 0, compatibility: 1,
+    offset: 0, size: data.length, alias: 'dealer', data };
+  assert.deepEqual(groundRenderDefinition(entry), { gameType: 0x10035, renderId: 2,
+    pose: { position: [0, 0, 0], rotation: [0, 0, 0] } });
+});
+
+test('non-driving maps do not wait for a stored car; tracks still wait for car attachment', async () => {
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['java.game.GameLogic', 'java.game.Track'].includes(className)
+    ? { path: 'GameLogic.java', source: 'package java.game; class GameLogic { static Object actualState; static Object player; } class Track { Object map; }' } : null });
+  await jvm.loadClass('java.game.GameLogic');
+  await jvm.globalAsync('java.game.GameLogic');
+  const resources = new GameTypeNative(jvm, () => {});
+  const object = (className: string, fields: Record<string, JavaValue> = {}) => jv(className.split('.').at(-1)!, { className, fields: new Map(Object.entries(fields)) });
+  const map = object('java.util.resource.GroundRef'), id = jv('int', 0x6007a); id.resource = { pack: 'misc.garage', id: 0x7a };
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', map, [id]);
+  const state = object('java.game.Garage', { map }), player = object('java.game.Player', { car: jv('Vehicle', null) });
+  jvm.set(jv('class', 'java.game.GameLogic'), 'actualState', state); jvm.set(jv('class', 'java.game.GameLogic'), 'player', player);
+  const result = { jvm, gameTypes: resources, resolveResourceIdentity: () => undefined } as unknown as BootResult;
+  const empty = activeJavaTrack(result)!;
+  assert.equal(empty.ready, true); assert.equal(empty.carPose, undefined);
+  assert.equal(empty.mapPack, 'misc/garage.rpk'); assert.equal(empty.mapResourceId, 0x7a);
+  const car = object('java.game.Vehicle', { chassis: jv('Chassis', null) }); jvm.set(player, 'car', car);
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', car, []);
+  assert.equal(activeJavaTrack(result)!.ready, true, 'a stored car must not prevent loading the car dealer');
+  assert.equal(activeJavaTrack(result)!.carPose, undefined);
+  await jvm.loadClass('java.game.Track');
+  const track = jvm.construct('java.game.Track', []); jvm.set(track, 'map', map);
+  jvm.set(jv('class', 'java.game.GameLogic'), 'actualState', track);
+  assert.equal(activeJavaTrack(result)!.ready, false);
+  resources.get(car)!.setParent(resources.getResource(map)!);
+  assert.equal(activeJavaTrack(result)!.ready, true);
+  assert.deepEqual(activeJavaTrack(result)!.carPose, { x: 0, y: 0, z: 0, yaw: 0 });
+});

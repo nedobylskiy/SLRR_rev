@@ -16,6 +16,14 @@ test('WheelRef native setters retain original slots and ignore invalid indices',
   assert.equal(state.friction, 2);
   callWheelRefNative(registry, receiver, 'setPacejka', [jv('int', 17), jv('float', 1)]);
   assert.equal(state.pacejka.length, 17);
+  callWheelRefNative(registry,receiver,'setLoadSmooth',[jv('float',0.25)]);
+  assert.equal(state.pacejka[14],0.25); assert.equal(state.pacejka[16],0);
+  callWheelRefNative(registry,receiver,'setDamping',[jv('float',100)]);
+  assert.deepEqual(state.damping,[100,70]);
+  registry.invoke('WheelRef','setBrake',receiver,[jv('float',25)]);
+  assert.equal(registry.invoke('WheelRef','getBrake',receiver,[])!.value,25);
+  registry.invoke('WheelRef','setOppWheel',receiver,[jv('int',3)]);
+  assert.equal(state.oppositeWheel,3);
 });
 
 test('original Java tyre calculations feed each wheel and change tire forces', () => {

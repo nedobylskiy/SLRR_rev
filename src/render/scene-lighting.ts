@@ -8,6 +8,8 @@ export class SceneLighting {
   shadows = false;
 
   configureMaterial(material: MeshStandardMaterial, hasVertexColors = false, paintMask = false, paintColor = new Color(1, 1, 1)) {
+    // Paint is custom shader state, not fully represented by standard material fields.
+    material.userData.slrrPaintMask=paintMask;
     const previous = material.onBeforeCompile;
     const previousKey = material.customProgramCacheKey.bind(material);
     const key = previousKey();

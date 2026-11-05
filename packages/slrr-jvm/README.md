@@ -81,6 +81,8 @@ An SLRR resource literal assigned to an `int` retains its numeric ID in `value` 
 
 SLRR source calls can pass a floating numeric literal to an `int` parameter. The interpreter accepts that narrowing conversion during overload selection and truncates toward zero. By default a `float` variable or computed expression does not gain this implicit conversion. Set `allowNumericNarrowing: true` for game sources that pass a float variable to an int-only method, as `LoadingScreen.userWait()` does when calling `track(int)`. An exact `float` overload still wins when available.
 
+`allowNumericStringArguments: true` enables a source-call compatibility rule: an `int`, `float`, or `double` can match an interpreted `String` parameter and is converted to text. Numeric overloads still rank ahead of this conversion. The engine enables this for Garage's numeric `Slider.printValue(...)` calls, while the installed Slider source exposes `printValue(String)`. This is an explicit compatibility policy, not a confirmed general rule of the original compiler; it is disabled by default and does not loosen native method signatures.
+
 ## Current limits
 
 - The shared parser accepts the 3,453 `.java` files currently visible in one Build 940 installation (the original `MainMenu.java` is temporarily renamed for a separate compiler runtime test). It yields 3,499 classes and 5,952 method bodies. Parsing does not imply every method can execute with the current host bindings.
@@ -90,3 +92,9 @@ SLRR source calls can pass a floating numeric literal to an `int` parameter. The
 - The runtime is **source-only**. TUFA `.class` parsing and bytecode execution are not part of this package.
 
 `npm run build` produces ESM JavaScript and TypeScript declarations in `dist/`. `npm pack --dry-run` shows the files included in a package archive. The package has not been published to the npm registry.
+
+### Cooperative thread startup
+
+Async native callbacks receive an optional `continuation`. Its `ready` promise resolves when the calling Java method returns or explicitly yields. A thread host can schedule its first `run()` after this promise instead of guessing a startup delay. Ordinary asynchronous asset I/O does not release it.
+
+Blocking thread primitives such as `sleep` and `wait` should call `continuation?.yield()` before awaiting their host timer or notification. This releases deferred work in the current caller chain, allowing child threads to run while their parent sleeps. Continuations are per invocation, so unrelated suspended Java calls do not share a global startup barrier.

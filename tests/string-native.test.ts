@@ -4,10 +4,31 @@ import { SlrrJvm, jv } from 'slrr-jvm';
 import { StringNative } from '../src/runtime/string-native';
 import { repairDecompiledSource } from '../src/runtime/source-repairs';
 
+test('Garage numeric slider labels execute the Java printValue(String) body and retain format strings', async () => {
+  const source = `package java.render.osd; import java.lang.Float;
+    class Slider { float value; String vFmt; String text;
+      void changeVLabelText(String text) { this.text = text; }
+      void printValue(String format) { vFmt = format; changeVLabelText(Float.toString(value, vFmt)); }
+      void update(float number) { printValue(number); }
+    }`;
+  const jvm = new SlrrJvm({ allowNumericStringArguments: true, resolveImport: ({ className }) =>
+    className === 'java.render.osd.Slider' ? { path: 'Slider.java', source } : null });
+  new StringNative(jvm); await jvm.loadClass('java.render.osd.Slider');
+  const slider = await jvm.constructAsync('java.render.osd.Slider', []);
+  jvm.set(slider, 'value', jv('float', 1.25));
+  await jvm.invokeAsync(slider, 'update', [jv('float', -0.5)]);
+  assert.equal(jvm.get(slider, 'text').value, '-0.5');
+  assert.equal(jvm.get(slider, 'vFmt').value, '-0.5');
+  assert.equal(jvm.get(slider, 'value').value, 1.25, 'printing a label does not move the slider');
+  await jvm.invokeAsync(slider, 'printValue', [jv('String', '%.2fm')]);
+  assert.equal(jvm.get(slider, 'text').value, '1.25m');
+});
+
 test('recovered getParams/trim preserve ROC tokens returned as Object values by a Vector', async () => {
   const source = `package java.lang; import java.util.Vector;
     class String {
-      public native int length(); public native String token(int i, String separators);
+      public native int length(); public native String token(int i, String separators); public native int intValue();
+      public int decodeROC() { return scanf().lastElement().intValue(); }
       public static String getParams(Vector arg0) {
         String local1; int i = 0;
         while (i < arg0.size()) { if (arg0.elementAt(i) instanceof String) { local1 += arg0.elementAt(i); local1 += "\\t"; } i++; }
@@ -21,7 +42,8 @@ test('recovered getParams/trim preserve ROC tokens returned as Object values by 
       public String trim() { return trim(1); }
     }`;
   const vector = `package java.util; class Vector { Object[] data = new Object[8]; int count;
-    void addElement(Object v) { data[count++] = v; } int size() { return count; } Object elementAt(int i) { return data[i]; } }`;
+    void addElement(Object v) { data[count++] = v; } int size() { return count; } Object elementAt(int i) { return data[i]; }
+    Object lastElement() { return data[count - 1]; } }`;
   const repaired = repairDecompiledSource('system/scripts/lang/decompiled/String.java', source);
   assert.equal(repairDecompiledSource('mods/src/String.java', source), source, 'mod sources are not rewritten');
   const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'java.lang.String'
@@ -32,6 +54,9 @@ test('recovered getParams/trim preserve ROC tokens returned as Object values by 
   const params = await jvm.invokeAsync(jv('class', 'java.lang.String'), 'getParams', [values]);
   assert.equal(params.value, '3\t1\t2\t0\t');
   assert.equal((await jvm.invokeAsync(params, 'trim')).value, '3\t1\t2\t');
+  assert.equal((await jvm.invokeAsync(jv('String', '3\t1\t2\t42'), 'decodeROC')).value, 42);
+  assert.equal(jvm.invoke(jv('Object', '17'), 'intValue').value, 17);
+  assert.equal((await jvm.invokeAsync(jv('Object', '17'), 'intValue')).value, 17);
 });
 
 test('native String operations coexist with methods from the original Java source', async () => {

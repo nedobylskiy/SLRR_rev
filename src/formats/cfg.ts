@@ -4,10 +4,15 @@ export interface SlotReference { resource: number; slot: number }
 export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
 export interface CfgCamera extends CfgPose { fov?: number }
+/** Original car config defaults; enginepower only overwrites supplied fields (00443f90). */
+export const DEFAULT_ENGINE_POWER = [200, 10, 0.0001, 0.03, 1000, 50] as const;
 export interface PartConfig {
+  category?: number;
+  enginePower?: number[];
+  brakePower?: [number, number];
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
-  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; pose?: CfgPose; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; links?: number[]; linkRules?: number[][]; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -30,6 +35,15 @@ export function parsePartConfig(source: string): PartConfig {
     };
     const pose = (offset = 0): CfgPose => ({ position: [number(offset), number(offset + 1), number(offset + 2)], rotation: [number(offset + 3), number(offset + 4), number(offset + 5)] });
     switch (command.toLowerCase()) {
+      case 'category': result.category = integer(0); break;
+      case 'enginepower': {
+        const values = [...(result.enginePower ?? DEFAULT_ENGINE_POWER)];
+        for (let i = 0; i < Math.min(args.length, 6); i++) values[i] = number(i);
+        result.enginePower = values;
+        break;
+      }
+      case 'brakepower':
+        result.brakePower = [number(0),number(1)]; break;
       case 'slot':
         slot = { ...pose(), id: integer(6), attach: [], compatible: [] };
         result.slots.push(slot); break;
@@ -43,7 +57,15 @@ export function parsePartConfig(source: string): PartConfig {
       case 'bonepos':
         if (!slot) throw new Error(`CFG line ${line}: bonepos before slot`);
         slot.bonePosition = [number(0), number(1), number(2)]; break;
-      case 'linked': result.links.push(args.map((_, i) => integer(i))); break;
+      case 'linked': {
+        const links = args.map((_, i) => integer(i));
+        result.links.push(links);
+        if (result.renders.length) {
+          result.renders.at(-1)!.links = links;
+          (result.renders.at(-1)!.linkRules ??= []).push(links);
+        }
+        break;
+      }
       case 'stockpart': result.stock.push(rid()); break;
       case 'render': {
         const resource = rid(), poseValue = args.length === 4 ? { position: [number(1), number(2), number(3)] as Triple, rotation: [0, 0, 0] as Triple } : args.length > 1 ? pose(1) : undefined;
@@ -51,6 +73,10 @@ export function parsePartConfig(source: string): PartConfig {
         if (render === undefined) { render = resource; renderPose = poseValue; }
         break;
       }
+      case 'flags':
+        if (result.renders.length) result.renders.at(-1)!.flags = ((result.renders.at(-1)!.flags ?? 0) | integer(0)) & 0x1ff;
+        else result.unknown.push({ line, command, args });
+        break;
       case 'lod':
         if (result.renders.length) result.renders.at(-1)!.lod = [integer(0), integer(1)];
         else result.unknown.push({ line, command, args });

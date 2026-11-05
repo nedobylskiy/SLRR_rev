@@ -2,6 +2,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
 import { createWheelRefState, registerWheelRefNatives, type WheelRefState } from './wheel-ref-native';
+import type { CfgWheel } from '../formats/cfg';
 
 const projectedFields = [
   'engine_inertia', 'engine_mass', 'engine_rpm_idle', 'maxRPM', 'RPM_limit',
@@ -25,7 +26,7 @@ interface ScriptSfxTable { items: ScriptSfxItem[] }
 
 /** Steering limits owned by each interpreted Chassis instance. */
 export class ChassisNative {
-  private readonly initialByClass = new Map<string, { maxSteer: number; ackermann: number }>();
+  private readonly initialByClass = new Map<string, { maxSteer: number; ackermann: number; wheels: readonly CfgWheel[] }>();
   private readonly maxSteer = new WeakMap<JavaObject, number>();
   private readonly ackermann = new WeakMap<JavaObject, number>();
   private readonly updates = new WeakMap<JavaObject, ChassisUpdateState>();
@@ -36,9 +37,55 @@ export class ChassisNative {
   private readonly sfxTableStates = new WeakMap<JavaObject, ScriptSfxTable>();
   private readonly exhaustMinVolume = new WeakMap<JavaObject, number>();
   private readonly steerWheel = new WeakMap<JavaObject, [number, number]>();
+  private readonly mileage = new WeakMap<JavaObject, number>();
+  private readonly wheelDamage = new WeakMap<JavaObject, Map<number, string>>();
+  private readonly cooling = new WeakMap<JavaObject, [number,number,number]>();
 
-  constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative) {
+  constructor(jvm: SlrrJvm, private readonly gameTypes: GameTypeNative,
+    readBounds?: ReturnType<typeof import('./resource-size').resourceBoundsReader>) {
     const owner = 'java.game.parts.bodypart.Chassis';
+    jvm.natives.register(owner,'setCooling',['float','float','float'],({receiver,args}) => {
+      const values=args.map(arg=>Number(arg.value));
+      if (values.some(value=>!Number.isFinite(value) || value<0)) throw new Error('Invalid chassis cooling parameters');
+      this.cooling.set(receiver.value as JavaObject,values as [number,number,number]);
+      return jv('void',undefined);
+    });
+    jvm.natives.register(owner,'getNitro',[],({receiver}) =>
+      jv('float',Math.max(0,Number((receiver.value as JavaObject).fields.get('tank_nitro')?.value ?? 0))));
+    jvm.natives.register(owner, 'getWheelDamage', ['int'], ({ receiver, args }) =>
+      jv('String', this.wheelDamage.get(receiver.value as JavaObject)?.get(Number(args[0].value)) ?? null));
+    jvm.natives.register(owner, 'setWheelDamage', ['int', 'String'], ({ receiver, args }) => {
+      const object = receiver.value as JavaObject, index = Number(args[0].value);
+      if (!Number.isInteger(index) || index < 0) throw new Error('Invalid chassis wheel damage index');
+      const damage = this.wheelDamage.get(object) ?? new Map<number, string>();
+      if (args[1].value == null) damage.delete(index);
+      else damage.set(index, String(args[1].value));
+      this.wheelDamage.set(object, damage);
+      // Preserve the save payload. Decoding it into suspension damage is pending.
+      return jv('void', undefined);
+    });
+    for (const method of ['getMin', 'getMax'] as const) {
+      jvm.natives.registerAsync(owner, method, [], async ({ receiver }) => {
+        if (!readBounds) throw new Error(`Chassis.${method} requires a visual bounds reader`);
+        const bounds = await readBounds(receiver);
+        // CarInfo needs chassis-local metres, independent of its world pose.
+        // Until native scene-bound/parent-walk padding is reproduced, use the
+        // actual CFG-transformed chassis mesh bounds without guessed offsets.
+        const point = bounds?.[method === 'getMin' ? 'min' : 'max'];
+        return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+          (['x', 'y', 'z'] as const).map(axis => [axis, jv('float', Math.fround(point?.[axis] ?? 0))])
+        ) } satisfies JavaObject);
+      });
+    }
+    jvm.natives.register(owner, 'getMileage', [], ({ receiver }) =>
+      jv('float', this.mileage.get(this.object(receiver)) ?? 0));
+    jvm.natives.register(owner, 'setMileage', ['float'], ({ receiver, args }) => {
+      const object = this.object(receiver), value = Math.fround(Number(args[0].value));
+      if (!Number.isFinite(value) || value < 0) throw new Error('Invalid chassis mileage');
+      // Original Java serializers and UI own unit conversion; retain the raw distance.
+      this.mileage.set(object, value);
+      return jv('void', undefined);
+    });
     jvm.natives.register(owner, 'getSfxTable', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id) || id < 0) return jv('SfxTable', null);
@@ -89,7 +136,17 @@ export class ChassisNative {
       const object = receiver.value as JavaObject;
       let states = this.wheels.get(object);
       if (!states) { states = []; this.wheels.set(object, states); }
-      const state = states[index] ??= createWheelRefState();
+      let state = states[index];
+      if (!state) {
+        state = createWheelRefState();
+        const cfg = this.initialByClass.get(object.className)?.wheels[index];
+        if (cfg) {
+          state.position = [...cfg.position];
+          state.orientation = [...cfg.rotation];
+          if (cfg.radius !== undefined) state.radius = cfg.radius;
+        }
+        states[index] = state;
+      }
       const wheel: JavaObject = { className: 'java.game.parts.WheelRef', fields: new Map() };
       this.wheelHandles.set(wheel, state);
       return jv('WheelRef', wheel);
@@ -159,6 +216,16 @@ export class ChassisNative {
     return this.updates.get(receiver.value as JavaObject);
   }
 
+  coolingSettings(receiver: JavaValue): readonly [number,number,number] {
+    return this.cooling.get(receiver.value as JavaObject) ?? [10,50,0.01];
+  }
+
+  private object(receiver: JavaValue): JavaObject {
+    const object = receiver.value as JavaObject | null;
+    if (!object?.className || !(object.fields instanceof Map)) throw new Error('Chassis receiver is not a Java object');
+    return object;
+  }
+
   scriptSfx(receiver: JavaValue, id: number): readonly ScriptSfxItem[] {
     const table = this.sfxTables.get(receiver.value as JavaObject)?.get(id);
     return table ? [...this.sfxTable(table).items] : [];
@@ -185,8 +252,8 @@ export class ChassisNative {
   }
 
   /** Called immediately before the resource's Java constructor executes. */
-  prepare(className: string, maxSteer: number, ackermann = 2): void {
-    this.initialByClass.set(className, { maxSteer, ackermann });
+  prepare(className: string, maxSteer: number, ackermann = 2, wheels: readonly CfgWheel[] = []): void {
+    this.initialByClass.set(className, { maxSteer, ackermann, wheels });
   }
 
   getMaxSteer(receiver: JavaValue): number {

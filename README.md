@@ -1,6 +1,8 @@
-# SLRR · Independent Engine
+# SLRR · WebGL Engine Remaster
 
-An independent TypeScript/WebGL 2 engine for Street Legal Racing: Redline assets. This is a **research prototype**, not a complete replacement for the game.
+An open-source engine remaster of **Street Legal Racing: Redline**, rebuilt for the browser with WebGL 2. Written in TypeScript with an optional C++/WebAssembly physics backend, it brings the original game's assets and scripts to a modern web runtime.
+
+The remaster is in active development.
 
 Soft-body physics has an optional [C++ / WebAssembly backend](docs/soft-body-wasm.md) alongside the TypeScript implementation, with automatic fallback and a live debug selector. The bundled module runs without a native compiler.
 

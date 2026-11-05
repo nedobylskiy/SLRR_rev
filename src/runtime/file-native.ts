@@ -3,6 +3,7 @@ import { parseSdat, serializeSdat, type Sdat } from '../formats/sdat';
 import { MemoryFile } from './memory-file';
 import type { GameTypeNative } from './game-type-native';
 import type { VirtualFileSystem } from './virtual-file-system';
+import { normalizeResourcePackPath } from '../assets';
 
 interface OpenFile { path: string; mode: 0 | 1; stream: MemoryFile; sdat?: Sdat }
 const owner = 'java.io.File';
@@ -20,9 +21,9 @@ export class FileNative {
       if (!path || (mode !== 0 && mode !== 1)) return jv('int', 0);
       if (mode === 1) {
         const stream = new MemoryFile();
-        this.opened.set(this.object(receiver), { path, mode, stream });
-        this.fs.write(path, serializeSdat({ type: 2, flags: 0, payload: new Uint8Array(),
-          packs: new Map(), unsaved: [] }));
+        const sdat: Sdat = { type: 2, flags: 0, payload: new Uint8Array(), packs: new Map(), unsaved: [] };
+        this.opened.set(this.object(receiver), { path, mode, stream, sdat });
+        this.fs.write(path, serializeSdat(sdat));
         return jv('int', 1);
       }
       const bytes = this.fs.read(path);
@@ -50,8 +51,24 @@ export class FileNative {
     jvm.natives.register(owner, 'write', ['ResourceRef'], ({ receiver, args }) =>
       jv('int', this.write(receiver, stream => {
         const resource = args[0].value == null ? null : this.resources.getResource(args[0]);
-        if (resource?.resourceId) throw new Error('File.write(ResourceRef) needs SDAT resource remount support');
-        stream.writeInt(resource?.resourceId ?? 0);
+        if (!resource?.resourceId) {
+          if (args[0].value != null && !resource) throw new Error('File.write(ResourceRef) has no native resource');
+          stream.writeInt(0); return 4;
+        }
+        // A modified clone needs embedded resource serialization, not its source RPK ID.
+        if (resource.resourceReplacements.size || Object.values(resource.meshScale).some(scale => scale !== 1))
+          throw new Error('File.write(ResourceRef) cannot yet embed a modified resource');
+        const identity = this.resources.resolveRenderResource(resource);
+        if (!identity) throw new Error('File.write(ResourceRef) cannot save a runtime object without an RPK identity');
+        const packs = this.opened.get(this.object(receiver))!.sdat!.packs;
+        const pack = normalizeResourcePackPath(identity.pack);
+        let ordinal = [...packs].find(([, path]) => path === pack)?.[0];
+        if (ordinal === undefined) {
+          ordinal = packs.size + 1;
+          if (ordinal >= 0xffff) throw new Error('SDAT pack count overflow');
+          packs.set(ordinal, pack);
+        }
+        stream.writeInt((ordinal << 16) | (identity.id & 0xffff));
         return 4;
       })));
     jvm.natives.register(owner, 'readInt', [], ({ receiver }) =>
@@ -59,14 +76,18 @@ export class FileNative {
     jvm.natives.register(owner, 'readFloat', [], ({ receiver }) =>
       jv('float', this.read(receiver, stream => stream.position + 4 <= stream.size ? stream.readFloat() : 0, 0)));
     jvm.natives.register(owner, 'readResID', [], ({ receiver }) =>
-      jv('int', this.read(receiver, stream => {
-        if (stream.position + 4 > stream.size) return 0;
-        const id = stream.readInt();
+      this.read(receiver, stream => {
+        if (stream.position + 4 > stream.size) return jv('int', 0);
+        const id = stream.readInt() >>> 0;
         const file = this.opened.get(this.object(receiver));
-        if (id && file?.sdat && (file.sdat.packs.size || file.sdat.unsaved.length))
-          throw new Error('File.readResID() needs SDAT resource remount support');
-        return id;
-      }, 0)));
+        if (!id || !file?.sdat) return jv('int', id | 0);
+        const ordinal = id >>> 16;
+        const pack = file.sdat.packs.get(ordinal);
+        if (pack) return this.resources.remountSavedResource(pack, id & 0xffff);
+        throw new Error(ordinal === 0xffff || ordinal === 0
+          ? 'File.readResID() cannot yet restore embedded SDAT resources'
+          : `SDAT resource references missing pack ordinal ${ordinal}`);
+      }, jv('int', 0)));
     jvm.natives.register(owner, 'readString', [], ({ receiver }) =>
       jv('String', this.read(receiver, stream => stream.position + 4 <= stream.size ? stream.readString() : null, null)));
     jvm.natives.register(owner, 'exists', ['String'], ({ args }) =>
@@ -84,8 +105,7 @@ export class FileNative {
     const file = this.opened.get(object);
     if (!file) return;
     this.opened.delete(object);
-    if (file.mode === 1) this.fs.write(file.path, serializeSdat({ type: 2, flags: 0,
-      payload: file.stream.toBytes(), packs: new Map(), unsaved: [] }));
+    if (file.mode === 1) this.fs.write(file.path, serializeSdat({ ...file.sdat!, payload: file.stream.toBytes() }));
   }
 
   private write(receiver: JavaValue, action: (stream: MemoryFile) => number): number {

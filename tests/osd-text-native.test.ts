@@ -6,6 +6,56 @@ import { GameTypeNative } from '../src/runtime/game-type-native';
 import { RenderRefNative } from '../src/runtime/render-ref-native';
 import type { OsdAlign, OsdElement } from '../src/osd/osd-layer';
 
+test('Java page changes destroy old Text HTML through renderinst.destroy without reviving it', async () => {
+  const resourceSource = `package java.util.resource;
+    class ResourceRef { ResourceRef() { newNative(); } native void newNative(); native int id(); native void destroy(); }
+    class RenderRef extends ResourceRef { RenderRef() { super(); } }`;
+  const textSource = `package java.render;
+    import java.util.resource.*;
+    class Text {
+      RenderRef renderinst = new RenderRef(); String text;
+      Text(String value) { create(null, new ResourceRef(), 0, 0); changeText(value); }
+      native void create(ResourceRef group, ResourceRef font, float x, float y); native void update();
+      void changeText(String value) { text = value; update(); }
+      void finalize() { renderinst.destroy(); }
+    }
+    class Page {
+      Text[] lines;
+      void change(String a, String b) {
+        if (lines != null) for (int i = 0; i < lines.length; i++) lines[i].finalize();
+        lines = new Text[2]; lines[0] = new Text(a); lines[1] = new Text(b);
+      }
+      void clear() { for (int i = 0; i < lines.length; i++) lines[i].finalize(); }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => ['java.render.Text', 'java.render.Page'].includes(className)
+    ? { path: 'Text.java', source: textSource } : ['java.util.resource.ResourceRef', 'java.util.resource.RenderRef'].includes(className)
+    ? { path: 'ResourceRef.java', source: resourceSource } : null });
+  const resources = new GameTypeNative(jvm, () => {});
+  const live = new Set<{ text: string }>();
+  let removals = 0;
+  const bridge = new OsdTextNative(jvm, { createText(): OsdElement {
+    const line = { text: '' }; live.add(line);
+    return { node: { style: {}, remove() { live.delete(line); removals++; } } as unknown as HTMLElement,
+      setText(text) { line.text = text; }, setResource() {}, setBounds() {},
+      show() { assert.ok(live.has(line), 'destroyed text must not be shown by the visibility ticker'); }, hide() {} };
+  } });
+  resources.addResourceDestroyListener(ref => bridge.removeRender(ref));
+  await jvm.loadClass('java.render.Page');
+  const page = await jvm.constructAsync('java.render.Page', []);
+  for (let index = 0; index < 4; index++) {
+    await jvm.invokeAsync(page, 'change', [jv('String', `Seat ${index}`), jv('String', `$${index}`)]);
+    bridge.syncVisibility();
+    assert.deepEqual([...live].map(line => line.text), [`Seat ${index}`, `$${index}`]);
+  }
+  await jvm.invokeAsync(page, 'clear'); bridge.syncVisibility();
+  assert.equal(live.size, 0); assert.equal(removals, 8);
+  const destroyed = (jvm.get(page, 'lines').value as unknown[])[0];
+  jvm.natives.invoke('java.render.Text', 'update', jv('Text', destroyed), []);
+  jvm.natives.invoke('java.render.Text', 'changeColor', jv('Text', destroyed), [jv('int', -1)]);
+  assert.equal(live.size, 0, 'late unfocus/animation calls must be harmless after the glyph is destroyed');
+  bridge.dispose(); assert.equal(removals, 8, 'disposed lines have already left the live element set');
+});
+
 test('interpreted Java Text updates an OSD element through its native calls', async () => {
   const source = `package java.render;
     class Text {

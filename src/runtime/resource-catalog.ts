@@ -1,7 +1,7 @@
 import { normalizePath, normalizeResourcePackPath } from '../assets';
 import { entryProperties, type RpkPack } from '../formats/rpk';
 
-export interface CatalogResource { pack: string; id: number; type: number; alias: string; script?: string; cfgPath?: string }
+export interface CatalogResource { pack: string; id: number; type: number; alias: string; script?: string; cfgPath?: string; nativeType?: string }
 
 /** Resolves RPK super IDs, including links through another pack's dependency slot. */
 export class ResourceCatalog {
@@ -22,6 +22,7 @@ export class ResourceCatalog {
       const script = entry.type === 8 ? properties.find(prop => prop.key === 'script')?.value : undefined;
       const cfgPath = /^(?:car|part)\s+(.+\.cfg)$/i.exec(properties.find(prop => prop.key === 'native')?.value ?? '')?.[1];
       const resource: CatalogResource = { pack: path, id: entry.typeId, type: entry.type, alias: entry.alias,
+        ...(properties.some(property => property.key === 'native' && property.value === 'camera') ? { nativeType: 'camera' } : {}),
         ...(script ? { script } : {}), ...(cfgPath ? { cfgPath: normalizePath(cfgPath) } : {}) };
       this.resources.set(ResourceCatalog.key(path, entry.typeId), resource);
       if (!entry.superId) continue;
@@ -41,6 +42,10 @@ export class ResourceCatalog {
 
   resolve(pack: string, id: number): CatalogResource | undefined {
     return this.resources.get(ResourceCatalog.key(pack, id));
+  }
+
+  registerTexture(pack: string, id: number, path: string): void {
+    this.resources.set(ResourceCatalog.key(pack, id), { pack, id, type: 7, alias: path });
   }
 
   private static key(pack: string, id: number): string {

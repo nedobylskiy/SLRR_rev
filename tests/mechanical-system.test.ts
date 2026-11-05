@@ -116,6 +116,43 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   assert.equal(system.gear, 0);
   assert.ok(system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]).torque.every(t => t === 0));
   system.reset(); assert.equal(system.gear, 0); assert.equal(system.boost, 0); assert.equal(system.manual, false);
+  world.javaPowertrain = {curve:{rpmStep:1000,torque:[0,100,200,220,210,180,100,0],watts:[],nitroTorque:[],nitroWatts:[]},
+    state:{revision:1,parameters:{engine_inertia:7,engine_mass:40,engine_rpm_idle:900,RPM_limit:6500,rearend_ratio:3,ClutchF:500},ratios:[0,3.5,2.1,1.4,0,0,0,-3],descendantPartIds:[]}};
+  assert.equal(system.estimateFlywheelTorqueAt(2500),210,'driving samples the executed Java engine table');
+  system.reset();
+  const wheels=[0,0,0,0];
+  for(let tick=0;tick<2400;tick++) {
+    const step=system.advance(1/240,{throttle:1,gearUp:tick===100},wheels);
+    step.torque.forEach((torque,index)=>{wheels[index]+=torque/1.6/240;});
+    assert.ok(Number.isFinite(system.rpm));
+  }
+  assert.ok(system.running && wheels[2]>0,'recovered exchange launches without instantly stalling the host engine');
+  assert.ok(system.temperature>20);
+  // Recovered dyno curves include negative torque beyond their firing band.
+  // It must never become negative clutch grip (clutch > 1 in the native kernel).
+  world.javaPowertrain.curve!.torque[6] = -50;
+  world.javaPowertrain.curve!.torque[7] = -100;
+  system.manual = true; system.gear = 1; system.rpm = 6800;
+  const overrun = system.advance(1/240, { throttle: 1 }, wheels);
+  assert.ok(Number.isFinite(system.rpm));
+  assert.ok(overrun.torque.every(Number.isFinite));
+  for (const native of [true, false]) {
+    if (!native) world.javaPowertrain = undefined;
+    for (const manual of [false, true]) {
+      system.reset(); system.gear = -1; system.manual = manual;
+      const reversing = [0, 0, 0, 0];
+      for (let tick = 0; tick < 240; tick++) {
+        const step = system.advance(1 / 240, { throttle: 1, throttleMode: 'pedal' }, reversing);
+        assert.equal(system.gear, -1, 'accelerator pedal must keep the selected reverse gear');
+        assert.equal(step.directionBrake, false, 'reverse accelerator must not apply the brakes');
+        step.torque.forEach((torque, index) => { reversing[index] += torque / 1.6 / 240; });
+      }
+      assert.ok(reversing[2] < -1, `reverse must drive the wheels backwards (native=${native}, manual=${manual})`);
+    }
+    system.reset(); system.gear = -1; system.manual = true;
+    assert.equal(system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]).directionBrake, true,
+      'legacy signed input retains direction braking');
+  }
   world.dispose();
 });
 

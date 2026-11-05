@@ -16,19 +16,33 @@ export class MapCollision {
   boxes = 0;
   /** Original CFG `body ... box hx hy hz`, placed by the map object pose. */
   addBox(matrix: Matrix4, half: Vector3) {
-    if (![half.x, half.y, half.z].every(n => Number.isFinite(n) && n > 0)) return;
+    if (![half.x, half.y, half.z].every(n => Number.isFinite(n) && n > 0)) return () => {};
     const bounds = new Box3(new Vector3(-half.x, -half.y, -half.z), half.clone()).applyMatrix4(matrix);
     const box: StaticBox = { matrix: matrix.clone(), inverse: matrix.clone().invert(), half: half.clone(), bounds };
     const x0 = Math.floor((bounds.min.x - 0.3) / this.size), x1 = Math.floor((bounds.max.x + 0.3) / this.size);
     const z0 = Math.floor((bounds.min.z - 0.3) / this.size), z1 = Math.floor((bounds.max.z + 0.3) / this.size);
-    if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) return;
+    if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) return () => {};
+    const keys: string[] = [];
     for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
       const key = `${x},${z}`, list = this.boxCells.get(key) ?? [];
       if (!list.length) this.boxCells.set(key, list);
       list.push(box);
+      keys.push(key);
     }
     this.allBoxes.push(box);
     this.boxes++;
+    let removed = false;
+    return () => {
+      if (removed) return;
+      removed = true;
+      for (const key of keys) {
+        const list = this.boxCells.get(key)!;
+        list.splice(list.indexOf(box), 1);
+        if (!list.length) this.boxCells.delete(key);
+      }
+      this.allBoxes.splice(this.allBoxes.indexOf(box), 1);
+      this.boxes--;
+    };
   }
   add(model: ScxModel) {
     for (const mesh of model.meshes) {

@@ -4,6 +4,7 @@ export interface QueuedGameEvent { sourceId: number | null; type: number; payloa
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
+let poseRevision = 0;
 
 /** Host counterpart of one GameRef/GameType instance. Simulation systems may bind to this state later. */
 export class GameObject extends ResourceObject {
@@ -13,6 +14,11 @@ export class GameObject extends ResourceObject {
   worldTreeRoot = false;
   collisionActivationQueued = false;
   collisionEnabled = false;
+  cameraRendering = false;
+  readonly renderFilters = new Map<number, number>();
+  /** Normalized car steering command, used by parked display vehicles. */
+  steeringInput?: number;
+  poseRevision = 0;
   position = zeroVector();
   orientation = zeroOrientation();
   velocity = zeroVector();
@@ -32,6 +38,7 @@ export class GameObject extends ResourceObject {
   }
 
   setMatrix(position: Vector3State, orientation: OrientationState): void {
+    this.poseRevision = ++poseRevision;
     this.position = { ...position };
     this.orientation = { ...orientation };
     this.velocity = zeroVector();
@@ -39,6 +46,7 @@ export class GameObject extends ResourceObject {
   }
 
   setState(position: Vector3State, orientation: OrientationState, velocity: Vector3State, angularVelocity: Vector3State): void {
+    this.poseRevision = ++poseRevision;
     this.position = { ...position };
     this.orientation = { ...orientation };
     this.velocity = { ...velocity };

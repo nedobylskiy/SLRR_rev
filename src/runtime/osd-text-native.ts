@@ -2,7 +2,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { OsdAlign, OsdElement, OsdLayer } from '../osd/osd-layer';
 import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from './osd-depth';
 
-interface TextState { object: JavaObject; element?: OsdElement; group?: JavaObject; x: number; y: number; viewport: OsdViewport; align: OsdAlign; scaleX: number; scaleY: number; fontSize: number; fadeGlyph: boolean; depth: number; labelAdjusted: boolean }
+interface TextState { object: JavaObject; render?: JavaObject; element?: OsdElement; group?: JavaObject; x: number; y: number; viewport: OsdViewport; align: OsdAlign; scaleX: number; scaleY: number; fontSize: number; fadeGlyph: boolean; depth: number; labelAdjusted: boolean }
 
 /** Native Text operations; the original Java constructors and changeText logic still execute. */
 export class OsdTextNative {
@@ -23,6 +23,8 @@ export class OsdTextNative {
     });
     jvm.natives.register(owner, 'create', ['ResourceRef', 'ResourceRef', 'float', 'float'], ({ receiver, args }) => {
       const object = this.object(receiver);
+      const previous = this.states.get(object);
+      if (previous) this.removeState(previous);
       const x = Number(args[2].value), y = Number(args[3].value);
       const fontId = Number(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', args[1], [])?.value ?? 0) & 0xffff;
       const fadeGlyph = fontId === 0x1a25 || fontId === 0x1a26;
@@ -35,11 +37,11 @@ export class OsdTextNative {
       if (element) element.node.style.color = '#ffffff';
       if (element) this.live.add(element);
       const group = args[0].value as JavaObject | null;
-      const state = { object, element, group: group?.fields instanceof Map ? group : undefined,
+      const renderinst = object.fields.get('renderinst')?.value as JavaObject | null | undefined;
+      const state: TextState = { object, element, render: renderinst?.fields instanceof Map ? renderinst : undefined, group: group?.fields instanceof Map ? group : undefined,
         x, y, viewport, align: 'left' as OsdAlign, scaleX: 1, scaleY: 1, fontSize, fadeGlyph, depth,
         labelAdjusted: false };
       this.states.set(object, state);
-      const renderinst = object.fields.get('renderinst')?.value as JavaObject | null | undefined;
       if (renderinst?.fields instanceof Map) this.renderStates.set(renderinst, state);
       this.activeStates.add(state);
       return nil();
@@ -115,6 +117,24 @@ export class OsdTextNative {
   }
 
   /** Text.renderinst is a native handle for the text glyph, not a standalone scene render. */
+  removeRender(receiver: JavaValue): void {
+    const render = receiver.value as JavaObject | null;
+    const state = render && this.renderStates.get(render);
+    if (!state) return;
+    this.renderStates.delete(render!);
+    this.removeState(state);
+  }
+
+  private removeState(state: TextState): void {
+    state.element?.node.remove();
+    if (state.element) this.live.delete(state.element);
+    // Java can still unfocus or stop an animator after destroying its glyph.
+    // Keep the weak state as a no-op handle; never recreate the removed DOM node.
+    state.element = undefined;
+    this.activeStates.delete(state);
+    if (state.render && this.renderStates.get(state.render) === state) this.renderStates.delete(state.render);
+  }
+
   setRenderMatrix(receiver: JavaValue, position: { x: number; y: number; z: number }): boolean {
     const object = receiver.value as JavaObject | null;
     if (!object || !(object.fields instanceof Map)) return false;

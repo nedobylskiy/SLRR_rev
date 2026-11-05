@@ -1,4 +1,4 @@
-import { JavaSourceMachine, coerce, jv, parseSourceClass, type JavaHost, type JavaValue, type ResourceIdentity, type SourceClass } from './java-source.js';
+import { JavaSourceMachine, coerce, jv, parseSourceClass, type JavaHost, type JavaContinuation, type JavaValue, type ResourceIdentity, type SourceClass } from './java-source.js';
 import { JavaNativeRegistry } from './native.js';
 import { parseSource as parseSlrrSource } from 'slrr-jvm-compiler';
 import type { Expr as ParsedExpr, FloatMode, SourceClass as ParsedClass, Stmt as ParsedStmt } from 'slrr-jvm-compiler';
@@ -19,6 +19,8 @@ export interface SlrrJvmOptions {
   floatMode?: FloatMode;
   /** Allow the SLRR source dialect to narrow a float variable when only an int overload exists. */
   allowNumericNarrowing?: boolean;
+  /** Compatibility for game sources passing numbers to interpreted String parameters. */
+  allowNumericStringArguments?: boolean;
   /** Resolve a resource literal to the integer used by the source file's owning RPK. */
   resolveResourceId?(resource: ResourceIdentity, sourcePath: string): number | undefined;
   budget?: number;
@@ -181,6 +183,7 @@ export class SlrrJvm implements JavaHost {
     }
     this.ensureInitialized(entry);
     const object: JavaObject = { className, fields: new Map() }, receiver = jv(entry.parsed.name, object);
+    this.allocateInstanceFields(entry, object);
     this.instanceInitialized.set(object, new Set());
     this.runConstructor(receiver, entry, args);
     return receiver;
@@ -198,9 +201,18 @@ export class SlrrJvm implements JavaHost {
     }
     await this.ensureInitializedAsync(entry);
     const object: JavaObject = { className, fields: new Map() }, receiver = jv(entry.parsed.name, object);
+    this.allocateInstanceFields(entry, object);
     this.instanceInitialized.set(object, new Set());
     await this.runConstructorAsync(receiver, entry, args);
     return receiver;
+  }
+
+  private allocateInstanceFields(entry: LoadedClass, object: JavaObject): void {
+    // All declared fields exist before any constructor can dispatch virtually.
+    // Explicit initializers still execute after their superclass constructor.
+    for (const cls of this.lineage(entry).reverse()) for (const field of cls.parsed.fields)
+      if (!field.isStatic) object.fields.set(field.name,
+        jv(field.type, ['int', 'float', 'double'].includes(field.type) ? 0 : null));
   }
 
   private async runConstructorAsync(receiver: JavaValue, entry: LoadedClass, args: JavaValue[]): Promise<JavaValue> {
@@ -337,10 +349,10 @@ export class SlrrJvm implements JavaHost {
     throw new Error(`Native constructor missing: ${className}(${args.map(arg => arg.type).join(',')})`);
   }
 
-  /** Some SLRR decompilations call a grandparent's constructor through super(...). */
+  /** SLRR chained this/super calls may select a constructor declared by an ancestor. */
   private resolveSuperConstructor(entry: LoadedClass, target: 'super' | 'this', args: JavaValue[]):
     { selected: LoadedClass; skipped: LoadedClass[] } {
-    if (target !== 'super' || !args.length) return { selected: entry, skipped: [] };
+    if (!args.length) return { selected: entry, skipped: [] };
     const constructors = entry.parsed.methods.filter(method => method.name === entry.parsed.name);
     if (!constructors.length || this.selectMethod(constructors, args, entry.name))
       return { selected: entry, skipped: [] };
@@ -462,8 +474,7 @@ export class SlrrJvm implements JavaHost {
   }
 
   call(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): JavaValue {
-    const object = this.object(receiver);
-    const className = fromClass ? this.resolveName(fromClass) : object?.className ?? (receiver.type === 'class' ? this.resolveName(String(receiver.value)) : this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
+    const className = this.callClass(receiver, fromClass);
     if (!className) throw new Error(`Java call target unavailable: ${receiver.type}.${name}`);
     const argumentTypes = args.map(arg => arg.type);
     const visited = new Set<string>();
@@ -493,9 +504,8 @@ export class SlrrJvm implements JavaHost {
     throw new Error(`Java method/native missing: ${className}.${name}(${argumentTypes.join(',')})`);
   }
 
-  async callAsync(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): Promise<JavaValue> {
-    const object = this.object(receiver);
-    const className = fromClass ? this.resolveName(fromClass) : object?.className ?? (receiver.type === 'class' ? this.resolveName(String(receiver.value)) : this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
+  async callAsync(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string, continuation?: JavaContinuation): Promise<JavaValue> {
+    const className = this.callClass(receiver, fromClass);
     if (!className) throw new Error(`Java call target unavailable: ${receiver.type}.${name}`);
     const argumentTypes = args.map(arg => arg.type), visited = new Set<string>();
     for (let current: string | null = className; current; current = this.classes.has(current) ? this.parent(current) : null) {
@@ -517,10 +527,10 @@ export class SlrrJvm implements JavaHost {
           entry.hintedMethods.add(name);
         }
         const method = this.selectMethod(entry.parsed.methods.filter(method => method.name === name), args, entry.name);
-        if (method) return this.invokeSourceAsync(entry, method, receiver, args);
+        if (method) return this.invokeSourceAsync(entry, method, receiver, args, continuation);
       }
       const native = await this.natives.invokeAsync(current, name, receiver, args,
-        (parameter, argument) => this.parameterScore(parameter, argument));
+        (parameter, argument) => this.parameterScore(parameter, argument), continuation);
       if (native) return native;
     }
     for (const current of visited) {
@@ -530,6 +540,16 @@ export class SlrrJvm implements JavaHost {
       if (declared) throw new Error(`Java native implementation missing: ${current}.${name}(${argumentTypes.join(',')})`);
     }
     throw new Error(`Java method/native missing: ${className}.${name}(${argumentTypes.join(',')})`);
+  }
+
+  private callClass(receiver: JavaValue, fromClass?: string): string | undefined {
+    if (fromClass) return this.resolveName(fromClass);
+    if (receiver.type === 'class') return this.resolveName(String(receiver.value));
+    // String storage remains primitive even when a Java collection widens it
+    // to Object. Dispatch against its runtime class, as for boxed Java objects.
+    if (typeof receiver.value === 'string') return 'java.lang.String';
+    return this.object(receiver)?.className
+      ?? (this.natives.hasClass(this.resolveName(receiver.type)) ? this.resolveName(receiver.type) : undefined);
   }
 
   parent(name: string): string | null {
@@ -601,8 +621,20 @@ export class SlrrJvm implements JavaHost {
     finally { this.activeClasses.pop(); }
   }
 
-  private parameterScore(parameter: string, argument: JavaValue): number {
-    if (argument.value === null) return ['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long'].includes(parameter) ? Infinity : 5;
+  private parameterScore(parameter: string, argument: JavaValue, sourceCall = false): number {
+    if (argument.value === null) {
+      if (['int', 'float', 'double', 'boolean', 'byte', 'short', 'char', 'long'].includes(parameter)) return Infinity;
+      if (argument.type === 'Object' || argument.type === 'java.lang.Object') return 5; // untyped null literal
+      const wanted = this.resolveName(parameter), declared = this.resolveName(argument.type);
+      if (wanted === declared) return 0;
+      if (parameter === 'Object' || wanted === 'java.lang.Object') return 20;
+      const entry = this.classes.get(declared);
+      if (!entry) return Infinity;
+      const lineage = this.lineage(entry);
+      const distance = lineage.findIndex(cls => cls.name === wanted);
+      if (distance >= 0) return distance;
+      return lineage.some(cls => this.implementsInterface(cls, wanted)) ? 1 : Infinity;
+    }
     if (parameter === 'int' && argument.type === 'ResourceRef' && typeof argument.value === 'object'
       && 'id' in argument.value && !('fields' in argument.value)) return 1;
     if (parameter === argument.type || this.resolveName(parameter) === this.resolveName(argument.type)) return 0;
@@ -613,6 +645,8 @@ export class SlrrJvm implements JavaHost {
     if (argument.type === 'float' && parameter === 'double') return 1;
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
     if (this.options.allowNumericNarrowing && parameter === 'int' && ['float', 'double'].includes(argument.type)) return 6;
+    if (sourceCall && this.options.allowNumericStringArguments && (parameter === 'String' || parameter === 'java.lang.String')
+      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 8;
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {
@@ -632,7 +666,7 @@ export class SlrrJvm implements JavaHost {
   private selectMethod(methods: SourceClass['methods'], args: JavaValue[], owner: string): SourceClass['methods'][number] | undefined {
     const ranked = methods.filter(method => method.parameters.length === args.length).map(method => ({
       method,
-      score: method.parameters.reduce((total, parameter, i) => total + this.parameterScore(parameter.type, args[i]), 0),
+      score: method.parameters.reduce((total, parameter, i) => total + this.parameterScore(parameter.type, args[i], true), 0),
     })).filter(candidate => Number.isFinite(candidate.score)).sort((a, b) => a.score - b.score);
     if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
       const tied = ranked.filter(candidate => candidate.score === ranked[0].score);
@@ -663,10 +697,10 @@ export class SlrrJvm implements JavaHost {
   }
 
   private async invokeSourceAsync(entry: LoadedClass, method: SourceClass['methods'][number], receiver: JavaValue,
-    args: JavaValue[]): Promise<JavaValue> {
+    args: JavaValue[], continuation?: JavaContinuation): Promise<JavaValue> {
     const completed = this.options.observeSourceCall?.(entry.name, method.name);
     this.activeClasses.push(entry.name);
-    try { return await this.machine.invokeAsync(method, receiver, args); }
+    try { return await this.machine.invokeAsync(method, receiver, args, continuation); }
     finally { this.activeClasses.pop(); completed?.(); }
   }
 

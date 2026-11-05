@@ -84,13 +84,13 @@ export class ControllerNative {
 
   bindings(receiver: JavaValue): readonly Readonly<AxisBinding>[] { return this.state(receiver).bindings; }
 
-  read(receiver: JavaValue, virtualAxis: number): number {
+  read(receiver: JavaValue, virtualAxis: number, device?: number): number {
     const state = this.state(receiver);
     const force = state.properties.get(virtualAxis)?.force ?? 0;
     if (force !== 0) return force;
     let value = 0;
     for (const binding of state.bindings) {
-      if (binding.virtualAxis !== virtualAxis) continue;
+      if (binding.virtualAxis !== virtualAxis || device !== undefined && binding.device !== device) continue;
       const raw = this.physicalAxis(binding.device, binding.physicalAxis);
       const span = binding.fromMax - binding.fromMin;
       if (!Number.isFinite(raw) || span === 0) continue;

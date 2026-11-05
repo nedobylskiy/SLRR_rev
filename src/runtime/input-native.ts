@@ -36,6 +36,8 @@ const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> =
 export class InputNative {
   private readonly axes = new Map<string, number>();
   private readonly pressedKeys: number[] = [];
+  private readonly cheatRing = new Uint8Array(16);
+  private cheatWrite = 0;
   private readonly hotkeys: HotkeyRegistration[] = [];
   private readonly pressedCodes = new Set<string>();
   private readonly cameraAliases = new Map<string, number>();
@@ -48,7 +50,37 @@ export class InputNative {
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'getAxis', ['int', 'int'], ({ args }) =>
       jv('float', this.physicalAxis(Number(args[0].value), Number(args[1].value))));
-    jvm.natives.register(owner, 'lastKey', [], () => jv('int', this.pressedKeys.shift() ?? 0));
+    jvm.natives.register(owner, 'lastKey', [], () => {
+      const key = this.pressedKeys.shift() ?? 0;
+      const character = (key >>> 16) & 0xff;
+      if (character) {
+        this.cheatRing[this.cheatWrite] = character;
+        this.cheatWrite = (this.cheatWrite + 1) % this.cheatRing.length;
+      }
+      return jv('int', key);
+    });
+    // Original native 0x0047CB50: ASCII+1 strings, reverse search, 16-byte
+    // history populated by lastKey (including Input.flushKeys).
+    jvm.natives.register('java.game.GameLogic', 'kismajomCheck', ['String[]'], ({ args }) => {
+      const codes = args[0].value;
+      if (!Array.isArray(codes)) return jv('int', -1);
+      for (let i = codes.length - 1; i >= 0; i--) {
+        const encoded = (codes[i] as JavaValue)?.value;
+        if (typeof encoded !== 'string') continue;
+        let matches = true;
+        for (let n = 0; n < encoded.length; n++) {
+          const index = (this.cheatWrite - 1 - n % 16 + 16) % 16;
+          if (((encoded.charCodeAt(encoded.length - 1 - n) - 1) & 255) !== this.cheatRing[index]) {
+            matches = false; break;
+          }
+        }
+        if (matches) {
+          this.cheatRing[(this.cheatWrite + 15) % 16] = 0;
+          return jv('int', i);
+        }
+      }
+      return jv('int', -1);
+    });
     jvm.natives.register(owner, 'createHotkey', ['int', 'int', 'Hotkey', 'GameRef', 'Osd', 'int'], ({ args }) => {
       const [axis, flags, hotkey, handler, osd, eventFilter] = args;
       this.createHotkey(Number(axis.value), Number(flags.value), hotkey, handler, osd, Number(eventFilter.value));
@@ -70,6 +102,42 @@ export class InputNative {
   }
 
   physicalAxis(device: number, axis: number): number { return this.axes.get(`${device}:${axis}`) ?? 0; }
+
+  mouseCursor(): JavaValue | undefined {
+    try { return this.jvm.get(jv('class', 'java.io.Input'), 'cursor'); } catch { return undefined; }
+  }
+
+  /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
+  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[] }): void {
+    const cursor = this.mouseCursor();
+    if (!cursor?.value) return;
+    const native = this.jvm.get(cursor, 'cursor');
+    if (!this.events.getResource(native)) return;
+    const node = hit && this.events.getByResourceId(hit.id);
+    const suffix = hit ? code === 15 ? `${hit.id} ${hit.physicsId ?? 0}` : code === 16 ? `${hit.id}` : `${hit.id} ${hit.local.join(' ')} ${hit.world.join(' ')}` : '';
+    this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,
+      jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`));
+    this.events.dispatchQueuedEventsCooperative();
+  }
+
+  sceneCameraMotion(camera: JavaValue): { x: number; y: number; zoom: number } | null {
+    const cursor = this.mouseCursor();
+    if (!cursor?.value) return null;
+    const controlled = this.jvm.get(cursor, 'controlledcam');
+    if (!controlled.value || this.events.getResource(controlled) !== this.events.getResource(camera)) return null;
+    const controller = this.jvm.get(cursor, 'controller');
+    const read = (axis: number) => controller.value ? this.controllers.read(controller, axis)
+      + 4 * this.controllers.read(controller, axis, 0) : 0;
+    const motion = { x: read(7), y: read(8), zoom: read(10) + read(11) };
+    for (const axis of [0, 1, 2]) {
+      // The cooperative Java RDRAGBEGIN handler may still be installing mappings
+      // on the first frame. Retain that sample until the receiving axis exists.
+      if (controller.value && this.controllers.bindings(controller).some(binding => binding.device === 1
+        && binding.physicalAxis === axis && [7, 8, 10, 11].includes(binding.virtualAxis)))
+        this.setPhysicalAxis(1, axis, 0);
+    }
+    return motion;
+  }
 
   setPhysicalAxis(device: number, axis: number, value: number, character = 0): void {
     if (!Number.isFinite(value)) throw new Error('Input axis value must be finite');

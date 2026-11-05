@@ -5,7 +5,36 @@ import { PartNative } from '../src/runtime/part-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { parsePartConfig } from '../src/formats/cfg';
 
-test('Java part wear belongs to each instance while tear remains pristine', async () => {
+test('CFG categories reach the native query used by the Java mechanic inventory', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {}), parts = new PartNative(jvm, resources);
+  for (const category of [1, 2, 3]) {
+    const part = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', part, []);
+    const config = parsePartConfig(`category ${category}`);
+    assert.equal(config.category, category);
+    parts.configure(part, config);
+    const value = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', part, [jv('int', 55), jv('int', 0)]);
+    assert.equal(value?.value, category);
+  }
+});
+
+test('garage right click reads native object category through an aliased GameRef', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {}), parts = new PartNative(jvm, resources);
+  for (const [source, expected] of [['category 1', 9], ['category 2', 9], ['category 3', 9],
+    ['wheel 0 0 0 0 0 0 0 0 1 1', 5]] as const) {
+    const part = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', part, []);
+    parts.configure(part, parsePartConfig(source));
+    const alias = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.util.resource.ResourceRef', 'set', alias, [jv('int', resources.getResource(part)!.resourceId)]);
+    const value = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', alias, [jv('int', 7), jv('int', 0)]);
+    assert.equal(value?.value, expected);
+  }
+});
+
+test('Java part wear and tear belong to each instance', async () => {
   const source = `package java.game.parts; class Part {
     native float getWear(); native float setWear(float value);
     native float getTear(); native float setTear(float value);
@@ -24,8 +53,9 @@ test('Java part wear belongs to each instance while tear remains pristine', asyn
   assert.equal(jvm.invoke(worn, 'getWear').value, Math.fround(0.4));
   assert.equal(jvm.invoke(newPart, 'getWear').value, 1);
   assert.equal(jvm.invoke(worn, 'setTear', [jv('float', 0.2)]).value, Math.fround(0.2));
-  assert.equal(jvm.invoke(worn, 'getTear').value, 1);
-  assert.equal(jvm.invoke(worn, 'condition').value, Math.fround(0.4));
+  assert.equal(jvm.invoke(worn, 'getTear').value, Math.fround(0.2));
+  assert.equal(jvm.invoke(newPart, 'getTear').value, 1);
+  assert.ok(Math.abs(Number(jvm.invoke(worn, 'condition').value)-0.08)<1e-6);
   jvm.invoke(worn, 'setMaxWear', [jv('float', 500)]);
   assert.equal(native.wearLimit(worn), 500);
   assert.equal(jvm.invoke(worn, 'getTexture').value, 0);
@@ -136,4 +166,49 @@ test('CFG slots connect parts through Java install commands and expose both side
   assert.equal(parts.partMass(engine), 50);
   assert.equal(parts.assemblyMass(car), 1080);
   assert.equal(jvm.natives.invoke('java.game.parts.bodypart.Chassis', 'getMass', car, [])?.value, 1080);
+  assert.deepEqual(parts.assemblyCenterOfMass(car).toArray(), [0, 0, 0]);
+  // Rotate an offset engine mount; nested masses must follow both mating frames.
+  parts.configure(car, parsePartConfig(`body 0 0 0 0 0 0 1000 box 1 1 1\nslot 2 0 0 ${Math.PI / 2} 0 0 401\nattach 0x000D003F 19`));
+  parts.configure(engine, parsePartConfig('body 2 0 0 0 0 0 50 box 1 1 1\nslot 1 0 0 0 0 0 19\nslot 0 0 0 0 0 0 8'));
+  const center = parts.assemblyCenterOfMass(car);
+  assert.ok(Math.abs(center.x - 160 / 1080) < 1e-10);
+  assert.ok(Math.abs(center.z + 20 / 1080) < 1e-10);
+  const nativeCenter = jvm.natives.invoke('java.game.parts.bodypart.Chassis', 'getCM', car, [])!;
+  assert.equal(jvm.get(nativeCenter, 'x').value, Math.fround(center.x));
+  assert.equal(jvm.get(nativeCenter, 'z').value, Math.fround(center.z));
+  const vector = jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+    [['x', jv('float', 4)], ['y', jv('float', 0)], ['z', jv('float', 0)]]) });
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
+  assert.ok(Math.abs(parts.assemblyCenterOfMass(car).x - 480 / 1080) < 1e-10);
+  // Reapplying saved drag offsets resets to the CFG mount instead of accumulating.
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
+  assert.ok(Math.abs(parts.assemblyCenterOfMass(car).x - 480 / 1080) < 1e-10);
+  for (const axis of ['x', 'y', 'z']) jvm.set(vector, axis, jv('float', 0));
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, jv('Ypr', null)]);
+  assert.deepEqual(parts.slotOverrides(car).get(401)?.position, [2, 0, 0]);
+  assert.ok(parts.assemblyCenterOfMass(car).distanceTo(center) < 1e-10);
+  const zeroRotation = jv('Ypr', { className: 'java.lang.Ypr', fields: new Map(
+    ['y', 'p', 'r'].map(axis => [axis, jv('float', 0)])) });
+  // Original Part.load supplies a zero Ypr for an unadjusted part. Keep its CFG rotation.
+  jvm.natives.invoke('java.game.parts.Part', 'setSlotPos', car, [jv('int', 401), vector, zeroRotation]);
+  assert.ok(parts.assemblyCenterOfMass(car).distanceTo(center) < 1e-10);
+  assert.ok(Math.abs(parts.slotOverrides(car).get(401)!.rotation![0] - Math.PI / 2) < 1e-10);
+  // A separately created chassis without CFG masses has a deterministic zero center.
+  const empty = ref('java.game.parts.bodypart.Chassis'); create(empty, root, 0x159);
+  assert.deepEqual(parts.assemblyCenterOfMass(empty).toArray(), [0, 0, 0]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `remove 0 ${id(empty)}`)]);
+  assert.equal(gameTypes.get(flywheel)!.parent, gameTypes.get(empty));
+  assert.equal(call(crank, 'partOnSlot', 6), null);
+  assert.equal(call(flywheel, 'getSlotID', -1), 0);
+  assert.equal(parts.assemblyMass(car), 1070);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)}`)]);
+  assert.equal(call(crank, 'partOnSlot', 6), flywheel.value, 'inventory short command finds a nested mount');
+  assert.equal(parts.assemblyMass(car), 1080);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `remove 0 ${id(empty)}`)]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', flywheel,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)} 0 0 0 -1.25 0.5 2`)]);
+  assert.equal(call(crank, 'partOnSlot', 6), flywheel.value, 'inventory drop command accepts signed fractional coordinates');
 });

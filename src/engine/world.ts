@@ -4,17 +4,25 @@ import { entryProperties } from '../formats/rpk';
 import { parsePartConfig, secondaryRenders, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
 import { parseScx } from '../formats/scx';
-import { slotMatrix } from './slot-frames';
+import { slotMatrix, wheelFrameMatrix, SUSPENSION_ATTACHMENT_OFFSETS, type WheelFrameOffsets } from './slot-frames';
 import { SCX_TO_WORLD } from './model-transform';
 import { poseMatrix } from './transforms';
 import { OriginalStock, type MechanicalProfile, type WheelCorner } from './original-stock';
 import { executeTyreSource } from '../runtime/tyre-java';
+import { linkedSuspensionAnchors } from './linked-suspension';
+import { vehicleLight, type VehicleLight } from './vehicle-light';
+import type { DynoCurve } from '../runtime/dyno-native';
+import type { ChassisUpdateState } from '../runtime/chassis-native';
 import type { WheelRefState } from '../runtime/wheel-ref-native';
 export { poseMatrix } from './transforms';
 
 export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
+  nativeId?: number;
+  rootRender?: ResourceKey;
+  rootTexture?: ResourceKey;
+  powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
   tyres: (ResourceKey | undefined)[];
@@ -23,30 +31,42 @@ export interface JavaStockSelection {
   rootPositions?: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
 }
 export interface JavaInstalledPart {
+  nativeId?: number;
   key: ResourceKey;
   parentSlot: number;
   ownSlot: number;
   positions: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
   render?: ResourceKey;
+  texture?: ResourceKey;
   wear: number;
   children: JavaInstalledPart[];
 }
 export interface PartDefinition {
   key: ResourceKey; alias: string; script?: string; cfgPath: string; config: PartConfig;
   model?: { path: string; textures: string[] };
-  additionalModels?: { model: { path: string; textures: string[] }; pose?: CfgPose }[];
+  additionalModels?: { model: { path: string; textures: string[] }; pose?: CfgPose; flags?: number; links?: number[]; linkRules?: number[][] }[];
+  lights?: { source: VehicleLight; pose?: CfgPose; flags?: number }[];
   mechanics?: MechanicalProfile;
 }
 export const resourceKey = (key: ResourceKey) => `${normalizePath(key.pack)}:${key.id}`;
 
 /** Assets are shared; instances and slot occupancy belong exclusively to a world. */
 export class EnginePart {
+  /** Shared placement calibration for wheel/hub/strut frames, in chassis meters. */
+  wheelFrameOffsetY = 0;
+  wheelFrameOffsets: WheelFrameOffsets = [];
+  wheelFrame(index: number) { return wheelFrameMatrix(this.definition.config, index, this.wheelFrameOffsetY, this.wheelFrameOffsets); }
+  nativeId?: number;
+  renderVisible = true;
+  paintTexture?: ResourceKey;
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
+  /** Steering in parent axes, separate from suspension travel for linked arms. */
+  readonly steeringTransform = new Matrix4();
   readonly renderAdjustment = new Matrix4();
   readonly slotPositions = new Map<number, Triple>();
   readonly slotRotations = new Map<number, Triple>();
-  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id), rotation = this.slotRotations.get(slot.id); return slotMatrix(this.definition.config, position || rotation ? { ...slot, position: position ?? slot.position, rotation: rotation ?? slot.rotation } : slot); }
+  slotFrame(slot: CfgSlot) { const position = this.slotPositions.get(slot.id), rotation = this.slotRotations.get(slot.id); return slotMatrix(this.definition.config, position || rotation ? { ...slot, position: position ?? slot.position, rotation: rotation ?? slot.rotation } : slot, this.wheelFrameOffsetY, this.wheelFrameOffsets); }
   parent?: EnginePart;
   parentSlot?: number;
   ownSlot?: number;
@@ -63,6 +83,9 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  /** Active CFG render channels: brake=1, reverse=2, running lights=4, indicators=16. */
+  lightMask = 0;
+  javaPowertrain?: JavaStockSelection['powertrain'];
   wheelRefs: (WheelRefState | undefined)[] = [];
   create(definition: PartDefinition) {
     if (this.disposed) throw new Error('World disposed');
@@ -78,7 +101,18 @@ export class EngineWorld {
     const a = mountSlot(parent.definition.config.slots, parentSlot), b = mountSlot(child.definition.config.slots, ownSlot);
     if (!a || !b) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
+    child.steeringTransform.identity();
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
+  }
+  refreshAttachment(child: EnginePart) {
+    const parent = child.parent;
+    if (!parent) return;
+    const find = (part: EnginePart, id: number) => part.definition.config.slots.find(slot =>
+      slot.id === id && (slot.attach.length || slot.compatible.length)) ?? part.definition.config.slots.find(slot => slot.id === id);
+    const mount = find(parent, child.parentSlot!), mate = find(child, child.ownSlot!);
+    if (!mount || !mate) throw new Error('Missing attachment slot');
+    child.local.copy(parent.slotFrame(mount)).multiply(child.slotFrame(mate).invert());
+    child.steeringTransform.identity();
   }
   detach(child: EnginePart) {
     if (this.parts.get(child.id) !== child || this.disposed) throw new Error('Part outside live world');
@@ -95,6 +129,61 @@ export class PartFactory {
   private definitions = new Map<string, Promise<PartDefinition>>();
   private aliases = new Map<string, Promise<Set<string>>>();
   constructor(readonly assets: Assets) {}
+  /** Reconcile the interpreted tree without recreating unchanged part instances. */
+  async syncJavaAssembly(root: EnginePart, selection: JavaStockSelection): Promise<void> {
+    const world = root.world;
+    const existing = new Map([...world.parts.values()].filter(part => part !== root && part.nativeId !== undefined)
+      .map(part => [part.nativeId!, part]));
+    const desired: { node: JavaInstalledPart; parentId?: number }[] = [];
+    const visit = (nodes: JavaInstalledPart[], parentId?: number) => {
+      for (const node of nodes) {
+        if (node.nativeId === undefined) throw new Error('Installed Java part has no native ID');
+        desired.push({ node, parentId }); visit(node.children, node.nativeId);
+      }
+    };
+    visit(selection.installed);
+    const definitions = new Map<number, PartDefinition>(), source = new OriginalStock(this.assets);
+    // Resolve only new resources before changing the visible assembly.
+    for (const { node } of desired) if (!existing.has(node.nativeId!)) {
+      let definition = await this.definition(node.key);
+      if (world.mechanical) definition = { ...definition, mechanics: await source.profile(definition) };
+      if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
+      definitions.set(node.nativeId!, definition);
+    }
+    if (world.disposed) return;
+    const wanted = new Set(desired.map(({ node }) => node.nativeId!));
+    for (const [id, part] of existing) if (!wanted.has(id)) {
+      world.detach(part); world.parts.delete(part.id); existing.delete(id);
+    }
+    for (const [id, definition] of definitions) {
+      const part = world.create(definition); part.nativeId = id;
+      existing.set(id, part);
+    }
+    // Detach moved mounts first, allowing two parts to exchange occupied slots.
+    for (const { node, parentId } of desired) {
+      const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
+      if (part.parent && (part.parent !== parent || part.parentSlot !== node.parentSlot || part.ownSlot !== node.ownSlot)) world.detach(part);
+    }
+    const positions = (part: EnginePart, values: JavaStockSelection['rootPositions']) => {
+      part.slotPositions.clear(); part.slotRotations.clear();
+      for (const [id, pose] of values ?? []) {
+        if (pose.position) part.slotPositions.set(id, pose.position);
+        if (pose.rotation) part.slotRotations.set(id, pose.rotation);
+      }
+    };
+    positions(root, selection.rootPositions);
+    root.paintTexture = selection.rootTexture;
+    for (const { node } of desired) positions(existing.get(node.nativeId!)!, node.positions);
+    for (const { node, parentId } of desired) {
+      const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
+      part.condition = Math.max(0, Math.min(1, node.wear));
+      part.paintTexture = node.texture;
+      if (part.parent) world.refreshAttachment(part);
+      else world.install(parent, node.parentSlot, part, node.ownSlot);
+    }
+    world.wheelRefs = [...selection.wheelRefs]; world.javaPowertrain = selection.powertrain;
+    if (world.mechanical) await this.alignRunningGear(root, world.parts.values());
+  }
   async definition(key: ResourceKey): Promise<PartDefinition> {
     const resolved = await this.assets.resource(key.pack, key.id);
     const canonical = { pack: normalizePath(resolved.packPath), id: resolved.entry.typeId }, cacheKey = resourceKey(canonical);
@@ -111,14 +200,17 @@ export class PartFactory {
         const renderId = config.render ?? config.mesh;
         const model = renderId === undefined ? undefined : await this.assets.modelForResource(canonical.pack, renderId);
         const extraRenders = secondaryRenders(config);
+        const lights: NonNullable<PartDefinition['lights']> = [];
         const additionalModels = (await Promise.all(extraRenders.map(async render => {
-          try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose }; }
+          const light = await vehicleLight(this.assets, canonical.pack, render.resource);
+          if (light) { lights.push({ source: light, pose: render.pose, flags: render.flags }); return undefined; }
+          try { return { model: await this.assets.modelForResource(canonical.pack, render.resource), pose: render.pose, flags: render.flags, links: render.links, linkRules: render.linkRules }; }
           catch (error) {
             if (/has no external SCX\/render\/mesh/.test(String(error))) return undefined;
             throw error;
           }
         }))).filter(model => model !== undefined);
-        return { key: canonical, alias: resolved.entry.alias, script: props.find(p => p.key === 'script')?.value, cfgPath, config, model, additionalModels };
+        return { key: canonical, alias: resolved.entry.alias, script: props.find(p => p.key === 'script')?.value, cfgPath, config, model, additionalModels, lights };
       })();
       this.definitions.set(cacheKey, pending);
       pending.catch(() => { if (this.definitions.get(cacheKey) === pending) this.definitions.delete(cacheKey); });
@@ -178,14 +270,28 @@ export class PartFactory {
     }
   }
   /** Install the executed Java tree when provided; otherwise read CFG stock declarations. */
-  async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection } = {}) {
+  async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection; suspensionMountOffsetY?: number; suspensionMountOffsets?: WheelFrameOffsets } = {}) {
     const world = new EngineWorld(), warnings: string[] = [];
     try {
-      const root = world.create(await this.definition(key));
+      let definition = await this.definition(key);
+      if (options.javaSelection?.rootRender) {
+        const render = options.javaSelection.rootRender;
+        definition = { ...definition, model: await this.assets.modelForResource(render.pack, render.id) };
+      }
+      const root = world.create(definition);
+      // User-measured placement correction, shared by installation, linked
+      // anchors and the physical suspension. Debug sliders remain additional.
+      if (definition.config.wheels.length) {
+        root.wheelFrameOffsetY = options.suspensionMountOffsetY ?? 0.165;
+        root.wheelFrameOffsets = (options.suspensionMountOffsets ?? SUSPENSION_ATTACHMENT_OFFSETS).map(offset => [...offset] as Triple);
+      }
       const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {
+        root.nativeId = options.javaSelection.nativeId;
+        root.paintTexture = options.javaSelection.rootTexture;
         world.wheelRefs = [...options.javaSelection.wheelRefs];
+        world.javaPowertrain = options.javaSelection.powertrain;
         for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
           if (pose.position) root.slotPositions.set(slot, pose.position);
           if (pose.rotation) root.slotRotations.set(slot, pose.rotation);
@@ -195,6 +301,8 @@ export class PartFactory {
           if (options.mechanical) definition = { ...definition, mechanics: await source.profile(definition) };
           if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
           const part = world.create(definition);
+          part.nativeId = node.nativeId;
+          part.paintTexture = node.texture;
           part.condition = Math.max(0, Math.min(1, node.wear));
           for (const [slot, pose] of node.positions) {
             if (pose.position) part.slotPositions.set(slot, pose.position);
@@ -272,25 +380,19 @@ export class PartFactory {
           if (child && own) child.local.copy(root.slotFrame(slot)).multiply(child.slotFrame(own).invert());
         }
       }
-      if (options.mechanical) for (const part of world.parts.values()) {
+      if (options.mechanical) await this.alignRunningGear(root, world.parts.values());
+      return { world, root, warnings };
+    } catch (error) { world.dispose(); throw error; }
+  }
+  private async alignRunningGear(root: EnginePart, parts: Iterable<EnginePart>): Promise<void> {
+    for (const part of parts) {
         const kind = part.definition.mechanics?.kind;
         if (kind !== 'shock' && kind !== 'spring' || part.parent !== root) continue;
-        const slot = root.definition.config.slots.find(s => s.id === part.parentSlot);
-        const type = slot?.type, model = part.definition.model;
-        if (!slot || type === undefined || !(type >= 201 && type <= 204 || type >= 301 && type <= 304) || !model) continue;
-        const corner = type % 100 - 1;
-        const linked = part.definition.config.links.find(link => link.length >= 2 &&
-          root.definition.config.slots.some(s => s.id === link[0] + corner && s.bonePosition) &&
-          root.definition.config.slots.some(s => s.id === link[1] + corner));
-        if (!linked) continue;
-        const lowerSlot = root.definition.config.slots.find(s => s.id === linked[0] + corner)!;
-        const wheel = root.definition.config.wheels[type % 100 - 1];
-        if (!wheel) continue;
+        const model = part.definition.model, anchors = linkedSuspensionAnchors(root, part);
+        if (!model || !anchors) continue;
         // linked identifies the two chassis anchors. A spring can mount at a separate
         // CFG slot while its mesh follows the damper's lower anchor.
-        const inverse = part.local.clone().invert();
-        const lower = new Vector3().setFromMatrixPosition(root.slotFrame(lowerSlot)).applyMatrix4(inverse);
-        const upper = new Vector3(...lowerSlot.bonePosition!).applyMatrix4(poseMatrix(wheel)).applyMatrix4(inverse);
+        const { lower, upper } = anchors;
         const axis = upper.sub(lower), length = axis.length();
         if (length < 0.01) continue;
         const geometry = parseScx(await this.assets.read(model.path)), renderPose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);
@@ -308,7 +410,5 @@ export class PartFactory {
           .multiply(new Matrix4().makeScale(1, length / (maxY - minY), 1))
           .multiply(new Matrix4().makeTranslation(-(minX + maxX) / 2, -minY, -(minZ + maxZ) / 2));
       }
-      return { world, root, warnings };
-    } catch (error) { world.dispose(); throw error; }
   }
 }

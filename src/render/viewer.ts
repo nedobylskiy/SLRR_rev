@@ -1,9 +1,29 @@
 import * as THREE from 'three';
+import { previewMaterial } from './preview-material';
+import { ptxTexture } from './ptx-texture';
+import { AssetTextureSources, TextureSourceCache } from './texture-source-cache';
+import { GraphicsDiagnostics } from './graphics-diagnostics';
+import { InspectionCamera } from './inspection-camera';
+import { MapDistanceCutoff } from './map-distance-cutoff';
+import { MapBackfaceCulling } from './map-backface-culling';
+import { MapRaycastOcclusion } from './map-raycast-occlusion';
+import { diffuseTextureIndex } from './diffuse-texture';
+import { StaticMapShadows } from './static-map-shadows';
+import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
+import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
+import { normalizePath } from '../assets';
+import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
+import { createVehicleFlare } from './vehicle-flare';
+import { linkedRenderPose } from '../engine/linked-render';
+import { selectLinkedRule } from '../engine/linked-slots';
+import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugRotation, rearArmAdjustment, type SuspensionDebugSettings } from './suspension-debug';
+import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
+import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
-import type { ScxModel } from '../formats/scx';
+import type { ScxModel, ScxMesh } from '../formats/scx';
 import type { Assets } from '../assets';
 import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
@@ -13,10 +33,12 @@ import { DrivingDemo } from '../engine/driving-demo';
 import type { DrivingInput } from '../engine/driving-demo';
 import { HoodLab } from './hood-lab';
 import type { PartDefinition } from '../engine/world';
+import { previewScope } from '../runtime/preview-scope';
 import { CarCrashDemo } from '../engine/car-crash-demo';
 import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
-import { mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, isStockMapCollisionShell, mapRenderIds } from '../engine/map';
+import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
 import { mapObjectPlacements, mapObjectSeed, mapRenderResource, parseIcfg } from '../engine/map-objects';
@@ -33,6 +55,8 @@ import { FrameProfiler } from './frame-profiler';
 import { SceneLighting } from './scene-lighting';
 import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
+import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
+import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -45,9 +69,127 @@ function transmissionCondition(part?: EnginePart) {
 }
 
 const partRenderPose = (part: EnginePart) => part.renderAdjustment.clone().multiply(part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4());
+function bindLinkedRender(group: THREE.Group, links: number[] | undefined, model: ScxModel, pose?: import('../formats/cfg').CfgPose, rules?: number[][]) {
+  if (!links?.length) return;
+  const bounds = new THREE.Box3(), renderPose = pose ? poseMatrix(pose) : new THREE.Matrix4();
+  const point = new THREE.Vector3();
+  for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+    bounds.expandByPoint(point.fromArray(mesh.positions, i).multiplyScalar(0.01).applyMatrix4(renderPose));
+  const meshBounds = new THREE.Box3();
+  for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+    meshBounds.expandByPoint(point.fromArray(mesh.positions, i));
+  group.userData.linkedRender = { links, rules: rules ?? [links], bounds, renderPose, baseMatrix: group.matrix.clone(), meshCenter: meshBounds.getCenter(new THREE.Vector3()) };
+}
+function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: SuspensionDebugSettings) {
+  for (const child of group.children) {
+    const binding = child.userData.linkedRender;
+    if (!binding) continue;
+    const links = selectLinkedRule(part, binding.rules);
+    const pose = links && linkedRenderPose(part, links, binding.bounds);
+    if (!pose) { child.matrix.copy(binding.baseMatrix); child.matrixWorldNeedsUpdate = true; continue; }
+    // Single-anchor additional renders are the control arms; the CV shaft has
+    // two anchors and must retain its independent rotation controls.
+    if (!links![1]) {
+      child.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
+        .multiply(pose).multiply(binding.renderPose).multiply(new THREE.Matrix4().makeScale(0.01, 0.01, 0.01));
+      if (debug && (suspensionCorner(part) ?? -1) >= 2) {
+        const center = binding.meshCenter;
+        const adjustment = rearArmAdjustment(debug, suspensionCorner(part)!);
+        child.matrix.multiply(new THREE.Matrix4().makeTranslation(...adjustment.offset.map(value => value * 100) as [number, number, number]))
+          .multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
+          .multiply(debugRotation(adjustment.rotation))
+          .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+      }
+      child.matrixWorldNeedsUpdate = true;
+      continue;
+    }
+    if (debug && debug.rearShaftRotation.some(value => value !== 0) && (suspensionCorner(part) ?? -1) >= 2) {
+      const center = binding.bounds.getCenter(new THREE.Vector3());
+      pose.multiply(new THREE.Matrix4().makeTranslation(center.x, center.y, center.z))
+        .multiply(debugRotation(debug.rearShaftRotation))
+        .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+    }
+    child.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
+      .multiply(pose).multiply(binding.renderPose).multiply(new THREE.Matrix4().makeScale(0.01, 0.01, 0.01));
+    child.matrixWorldNeedsUpdate = true;
+  }
+}
 
 export class Viewer {
+  /** Optional garage alignment override; normal Java setsteer resumes when cleared. */
+  calibrationSteering?: number;
+  private suspensionDebug = defaultSuspensionDebug();
+  private suspensionDebugActive = false;
+  private visualPartMatrix(part: EnginePart) {
+    return this.suspensionDebugActive ? suspensionDebugMatrix(part, this.suspensionDebug) : part.matrix();
+  }
+  setSuspensionDebug(settings: SuspensionDebugSettings) {
+    this.suspensionDebug = structuredClone(settings);
+    this.suspensionDebugActive = Object.values(settings).some((values: number[]) => values.some(value => value !== 0));
+    for (const [part, group] of this.proxies) {
+      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      group.matrixWorldNeedsUpdate = true;
+      syncLinkedRenders(part, group, this.suspensionDebug);
+    }
+  }
   readonly profiler: FrameProfiler;
+  private performanceContext?:()=>string[];
+  setPerformanceContext(read?:()=>string[]){this.performanceContext=read;}
+  private readonly graphicsDiagnostics:GraphicsDiagnostics;
+  private readonly inspection:InspectionCamera;
+  private readonly rayOcclusion:MapRaycastOcclusion;
+  setRaycastOcclusionEnabled(enabled:boolean){this.rayOcclusion.setEnabled(enabled);}
+  setRaycastOcclusionBudget(ms:number){if(Number.isFinite(ms)&&ms>=.5&&ms<=8)this.rayOcclusion.budgetMs=ms;}
+  private inspectResident=false;
+  private mapPackPath?:string;
+  private collisionOnlyMapMeshes=0;
+  private geometryCutoff=false;
+  private readonly mapDistanceCutoff=new MapDistanceCutoff();
+  private readonly mapBackfaces=new MapBackfaceCulling();
+  private streamThrottle=true;
+  private streamIntervalMs=100;
+  private nextStreamUpdate=-Infinity;
+  private farPlaneEnabled=false;
+  private normalCameraFar=1000;
+  setFarPlaneEnabled(enabled:boolean){this.farPlaneEnabled=enabled;this.updateFarPlane();this.nextStreamUpdate=-Infinity;}
+  private updateFarPlane(){
+    const far=this.farPlaneEnabled&&this.mapStream?Math.max(this.camera.near+.001,Math.min(this.normalCameraFar,this.mapStreamRange)):this.normalCameraFar;
+    if(this.camera.far!==far){this.camera.far=far;this.camera.updateProjectionMatrix();}
+  }
+  setStreamThrottleEnabled(enabled:boolean){this.streamThrottle=enabled;this.nextStreamUpdate=-Infinity;}
+  setStreamIntervalMs(ms:number){
+    if(!Number.isFinite(ms)||ms<0)return;
+    this.streamIntervalMs=ms;this.nextStreamUpdate=-Infinity;
+  }
+  private updateMapStream(now:number){
+    if(!this.mapStream||this.streamThrottle&&now<this.nextStreamUpdate)return;
+    this.mapStream.update(this.mapStreamFocus??this.camera.position,this.camera);
+    this.nextStreamUpdate=now+this.streamIntervalMs;
+  }
+  setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
+  private updateCutoff(){this.mapDistanceCutoff.enabled.value=this.geometryCutoff&&!(this.inspection.enabled&&this.inspectResident)?1:0;}
+  setGeometryCutoffEnabled(enabled:boolean){this.geometryCutoff=enabled;this.mapStream?.setGeometryCutoff(enabled);this.updateCutoff();}
+  setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
+  setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);if(enabled){this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}this.mapStream?.setInspectResident(enabled&&this.inspectResident);this.updateCutoff();}
+  setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);this.updateCutoff();}
+  resetInspectionCamera(){this.inspection.reset(this.controls.target);this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}
+  graphicsDebugLines(){return [
+    `FPS ${this.fps}`,
+    `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
+    `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
+    `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
+    `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
+    `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
+    `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
+    `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
+    `Auxiliary map caster instances (excluded from main color): ${this.mapStream?.auxiliaryVisible??0}`,
+    ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
+    ...this.rayOcclusion.lines(),
+    ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
+      `Observer position: ${this.inspection.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · far ${this.inspection.camera.far.toFixed(1)} m`,
+      `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
+    ...this.graphicsDiagnostics.lines(this.scene),
+    ...(this.physicsWork?[this.physicsWork]:[]),...this.performanceContext?.()??[]];}
   physicsWork = '';
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
@@ -64,9 +206,20 @@ export class Viewer {
   private javaSkyDomeNodes = new Map<number, { group: THREE.Group; offset: THREE.Vector3 }>();
   private javaRenderTypes = new Map<number, string>();
   private javaRenderRequests = new Map<number, number>();
+  private javaRenderRevisions = new Map<number, number>();
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
+  private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
+  private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
   private internalView = false;
+  private readonly vehicleReflections = new VehicleReflections();
+  private readonly reflectionUniforms: VehicleReflectionUniforms = {
+    environment: { value: null }, available: { value: 0 }, dynamic: { value: 0 },
+  };
+  setRealReflectionsEnabled(enabled: boolean) {
+    this.vehicleReflections.enabled = enabled; this.reflectionUniforms.dynamic.value = enabled ? 1 : 0;
+    if (!enabled) this.vehicleReflections.reset();
+  }
   private inertialCameraEnabled = false;
   setInertialCameraEnabled(enabled: boolean) { this.inertialCameraEnabled = enabled; }
   private collisionMeshes = new Map<EnginePart, number[]>();
@@ -78,14 +231,23 @@ export class Viewer {
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private frame?: (now: number) => void;
   private stopDriving?: () => void;
+  private scriptCamera?: () => JavaSceneCamera | null;
+  private scriptCameraId?: number;
+  setJavaSceneCamera(reader?: () => JavaSceneCamera | null) {
+    if (this.scriptCameraId !== undefined && !this.stopDriving) this.controls.enabled = true;
+    this.scriptCamera = reader; this.scriptCameraId = undefined;
+  }
   private generation = 0;
   private mapStream?: MapObjectStream;
+  private mapTextures = new TextureSourceCache();
+  private vehicleTextures = new AssetTextureSources();
   private mapStreamRange = 500;
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
     this.mapStreamRange = value;
     this.mapStream?.setRange(value);
+    this.updateFarPlane();this.nextStreamUpdate=-Infinity;
   }
   private mapStreamFocus?: THREE.Vector3;
   private mapDebug?: MapDebugView;
@@ -95,11 +257,18 @@ export class Viewer {
   private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
   private lighting = new SceneLighting();
+  private bakedLightmaps = { value: 0 };
+  private staticMapShadows = new StaticMapShadows();
+  private staticMapRoot?: THREE.Group;
+  setBakedLightmapsEnabled(enabled: boolean) {
+    this.bakedLightmaps.value = this.staticMapShadows.enabled.value = enabled ? 1 : 0;
+    this.mapStream?.setShadowRange(enabled ? 150 : 0);
+  }
   setShadowMapsEnabled(enabled: boolean) {
     this.lighting.shadows = enabled;
     this.renderer.shadowMap.enabled = enabled;
     this.sunLight.castShadow = enabled;
-    this.mapStream?.setShadowRange(enabled ? 150 : 0);
+    this.mapStream?.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
     this.scene.traverse(object => {
       if (object instanceof THREE.Mesh) {
         const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -120,6 +289,10 @@ export class Viewer {
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.profiler = new FrameProfiler(this.renderer);
+    this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
+    this.rayOcclusion=new MapRaycastOcclusion(this.renderer);
+    this.mapBackfaces.setEnabled(true);
+    this.setBakedLightmapsEnabled(true);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -131,6 +304,7 @@ export class Viewer {
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    this.inspection=new InspectionCamera(container,this.camera);this.scene.add(this.inspection.helpers);
     this.scene.add(this.ambientLight);
     this.sunLight.position.set(3, 5, 4); this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
@@ -144,31 +318,78 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      this.profiler.beginFrame(now);
+      try {
       if (document.hidden) this.previousFrame = undefined;
       if (this.previousFrame !== undefined && now > this.previousFrame) {
         this.profiler.recordFrame(now - this.previousFrame);
         this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
       }
       this.previousFrame = document.hidden ? undefined : now;
+      this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
-      if (this.controls.enabled) this.controls.update();
-      this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
+      const scriptCamera = !this.stopDriving ? this.scriptCamera?.() : null;
+      if (scriptCamera) {
+        const factor = this.scriptCameraId !== scriptCamera.id || !scriptCamera.smoothing ? 1
+          : 1 - Math.exp(-Math.min(this.frameDuration, 100) / 1000 / scriptCamera.smoothing);
+        this.scriptCameraId = scriptCamera.id;
+        this.controls.enabled = false;
+        this.camera.position.lerp(scriptCamera.position, factor);
+        this.controls.target.lerp(scriptCamera.target, factor);
+        this.camera.lookAt(this.controls.target);
+        this.camera.fov = scriptCamera.fov; this.camera.near = scriptCamera.near; this.normalCameraFar = scriptCamera.far;
+        this.updateFarPlane();
+        this.camera.updateProjectionMatrix();
+      } else {
+        if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
+        if (this.controls.enabled) this.controls.update();
+      }
+      this.updateFarPlane();
+      this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
+      this.mapDistanceCutoff.radius.value=this.mapStreamRange;
+      this.profiler.measure('Streaming CPU', () => this.updateMapStream(now));
+      this.profiler.measure('Occlusion CPU',()=>this.rayOcclusion.prepare(this.camera,this.staticMapRoot));
+      const size=this.getViewportSize();
+      this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
+      const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
       this.lighting.updateSun(this.sunLight, this.mapStreamFocus ?? this.controls.target);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.lighting.direction, 500);
       this.profiler.beginGpu();
-      this.profiler.measure('Render CPU', () => this.renderer.render(this.scene, this.camera));
+      this.inspection.helpers.visible=false;
+      try {
+        this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
+          this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.revision ?? 0,now)));
+        this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
+          this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
+      } finally {this.inspection.helpers.visible=this.inspection.enabled;}
+      for (const { group, offset } of this.javaSkyDomeNodes.values())
+        group.position.copy(renderCamera.position).add(offset);
+      if(this.sunFlare)this.sunFlare.position.copy(renderCamera.position).addScaledVector(this.lighting.direction,500);
+      this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>
+        this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera))));
       this.profiler.endGpu();
+      }finally{this.profiler.endGpu();this.profiler.endFrame();}
     });
   }
   clear() {
+    this.rayOcclusion.reset();
+    this.mapPackPath=undefined;
+    this.collisionOnlyMapMeshes=0;
+    // Loads from a previous scene retain their own pool until their clones dispose.
+    this.mapTextures = new TextureSourceCache();
+    this.vehicleTextures = new AssetTextureSources();
+    this.staticMapShadows.reset();this.staticMapRoot=undefined;
+    this.vehicleReflections.reset();
     this.sunFlareRevision++;
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
     this.sunFlareTexture?.dispose(); this.sunFlareTexture = undefined;
     this.javaRenderRoot.clear(); this.javaRenderNodes.clear(); this.javaRenderModels.clear(); this.javaSkyDomeNodes.clear();
+    this.javaRenderLights.clear(); this.javaLightDefinitions.clear();
     this.javaRenderTypes.clear(); this.javaRenderRequests.clear();
+    this.javaRenderRevisions.clear();
     this.skyFogUniforms.clear();
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
@@ -180,12 +401,13 @@ export class Viewer {
     this.internalView = false;
     this.generation++;
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
-    this.camera.near = 0.01; this.camera.far = 1000; this.camera.updateProjectionMatrix();
+    this.camera.near = 0.01; this.normalCameraFar = 1000; this.updateFarPlane(); this.camera.updateProjectionMatrix();
     this.model.traverse(obj => {
+      if (obj instanceof THREE.Sprite) { obj.material.map?.dispose(); obj.material.dispose(); return; }
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(material => { material.map?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
     });
     this.model.clear();
   }
@@ -195,8 +417,10 @@ export class Viewer {
     if (node.resourceType !== 3) {
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
+      this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       this.javaSkyDomeNodes.delete(node.id);
       this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
+      this.javaRenderRevisions.delete(node.id);
       return;
     }
     if (!group) {
@@ -215,15 +439,45 @@ export class Viewer {
     group.position.set(node.position.x, node.position.y, node.position.z);
     group.rotation.set(node.orientation.p, node.orientation.y, node.orientation.r, 'YXZ');
     const modelGroup = this.javaRenderModels.get(node.id)!;
+    const revision = (this.javaRenderRevisions.get(node.id) ?? 0) + 1;
+    this.javaRenderRevisions.set(node.id, revision);
     modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
-    const isLightResource = node.renderType?.resourceType === 13;
-    if (isNavigatorOverlay || isLightResource) {
+    if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node)) {
       group.visible = false;
       modelGroup.clear();
+      this.javaRenderTypes.delete(node.id);
+      this.javaRenderRequests.set(node.id, (this.javaRenderRequests.get(node.id) ?? 0) + 1);
+      this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       return;
     }
+    const lightIdentity = node.renderResource;
+    if (lightIdentity && (!node.renderType?.resourceType || node.renderType.resourceType === 13)) {
+      const key = `${lightIdentity.pack.toLowerCase()}:${lightIdentity.id}`;
+      let definition = this.javaLightDefinitions.get(key);
+      if (!definition) {
+        definition = assets.resource(lightIdentity.pack, lightIdentity.id).then(({ entry }) => parseResourceLight(entry));
+        this.javaLightDefinitions.set(key, definition);
+        void definition.catch(() => { if (this.javaLightDefinitions.get(key) === definition) this.javaLightDefinitions.delete(key); });
+      }
+      const light = await definition;
+      if (generation !== this.generation || this.javaRenderRevisions.get(node.id) !== revision
+        || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
+      if (light) {
+        if (node.renderType) node.renderType.resourceType = 13;
+        modelGroup.clear(); this.javaRenderTypes.delete(node.id);
+        this.javaRenderRequests.set(node.id, (this.javaRenderRequests.get(node.id) ?? 0) + 1);
+        this.javaSkyDomeNodes.delete(node.id); group.visible = true;
+        if (this.javaRenderLights.get(node.id)?.key !== key) {
+          this.javaRenderLights.get(node.id)?.group.removeFromParent();
+          const lights = createResourceLight(light);
+          group.add(lights); this.javaRenderLights.set(node.id, { key, group: lights });
+        }
+        return;
+      }
+    }
+    this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
     group.visible = true;
     // Scene.java names map sky shells "egbolt-*". The original renderer keeps these
     // shells around the camera; leaving one at map origin makes it look like a hill.
@@ -367,6 +621,7 @@ export class Viewer {
   async setGlobalEnvmap(source: EnvironmentMapSource | null): Promise<void> {
     const revision = ++this.environmentRevision;
     if (!source) {
+      this.reflectionUniforms.environment.value = null; this.reflectionUniforms.available.value = 0;
       this.scene.environment = null;
       this.environmentTexture?.dispose(); this.environmentTexture = undefined;
       return;
@@ -382,6 +637,7 @@ export class Viewer {
     texture.needsUpdate = true;
     const previous = this.environmentTexture;
     this.environmentTexture = texture;
+    this.reflectionUniforms.environment.value = texture; this.reflectionUniforms.available.value = 1;
     this.scene.environment = texture;
     previous?.dispose();
   }
@@ -404,41 +660,181 @@ export class Viewer {
     if (generation === this.generation) this.fit();
     return warnings;
   }
-  async showWorld(world: EngineWorld, assets: Assets, keepScene = false): Promise<string[]> {
+  removeWorld(world: EngineWorld): void {
+    for (const [part, group] of this.proxies) if (part.world === world) {
+      group.removeFromParent(); this.disposeGroup(group);
+      this.proxies.delete(part); this.collisionMeshes.delete(part);
+    }
+  }
+  /** Build an isolated inventory mesh tree; never publish its objects/lights into the world. */
+  async createPreviewWorld(world: EngineWorld, assets: Assets): Promise<THREE.Group> {
+    const root = new THREE.Group(), generation = this.generation;
+    try {
+      for (const part of world.parts.values()) {
+        const model = part.definition.model;
+        if (!model) continue;
+        const paint = await partPaint(part, assets);
+        const group = new THREE.Group(); group.matrixAutoUpdate = false;
+        group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); root.add(group);
+        await this.append(parseScx(await assets.read(model.path)), assets, model.textures, group, generation, false, () => true, undefined, paint);
+        const pose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
+        for (const extra of part.definition.additionalModels ?? []) {
+          const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
+          sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
+          sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
+          group.add(sub);
+          const extraModel = parseScx(await assets.read(extra.model.path));
+          bindLinkedRender(sub, extra.links, extraModel, extra.pose, extra.linkRules);
+          await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
+        }
+        syncLinkedRenders(part, group);
+      }
+      root.traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return;
+        const unlit = (source: THREE.MeshStandardMaterial) => {
+            const material = previewMaterial(source);
+          source.userData.reflectionTexture?.dispose();
+          source.dispose(); return material;
+        };
+        object.material = Array.isArray(object.material) ? object.material.map(unlit) : unlit(object.material);
+        object.castShadow = object.receiveShadow = false;
+      });
+      return root;
+    } catch (error) { this.disposeGroup(root); throw error; }
+  }
+  disposePreviewWorld(group: THREE.Group): void { this.disposeGroup(group); }
+  private async updatePartPaint(part: EnginePart, assets: Assets): Promise<void> {
+    if (part.definition.config.texture === undefined) return;
+    const group = this.proxies.get(part);
+    if (!group) return;
+    const key = part.paintTexture ? `${part.paintTexture.pack}:${part.paintTexture.id}` : 'default';
+    if (group.userData.paintKey === key) return;
+    const paint = await partPaint(part, assets);
+    if (!paint) return;
+    const materials: THREE.MeshStandardMaterial[] = [];
+    group.traverse(object => { if (object instanceof THREE.Mesh) {
+      for (const material of Array.isArray(object.material) ? object.material : [object.material])
+        if (material.userData.paintDefault) materials.push(material);
+    } });
+    for (const material of materials) {
+      const texture = await this.vehicleTextures.acquire(assets, paint.to,
+        async () => this.texture(await assets.read(paint.to), paint.to));
+      if (part.world.disposed || this.proxies.get(part) !== group) { texture.dispose(); return; }
+      texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      if (material.map) { texture.repeat.copy(material.map.repeat); texture.offset.copy(material.map.offset); material.map.dispose(); }
+      material.map = texture; material.needsUpdate = true;
+    }
+    group.userData.paintKey = key;
+  }
+  syncWorldVisuals(world: EngineWorld): void {
+    this.profiler.measure('Vehicle mesh sync CPU',()=>this.syncWorldVisualsCore(world));
+  }
+  private syncWorldVisualsCore(world:EngineWorld):void {
+    for (const [part, group] of this.proxies) if (part.world === world) {
+      if (world.parts.get(part.id) !== part) {
+        group.removeFromParent(); this.disposeGroup(group);
+        this.proxies.delete(part); this.collisionMeshes.delete(part);
+        continue;
+      }
+      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      group.matrixWorldNeedsUpdate = true;
+      group.visible = !group.userData.partLoading && this.partVisible(part);
+      applyCfgRenderChannels(group, world.lightMask);
+      syncLinkedRenders(part, group, this.suspensionDebug);
+    }
+  }
+  pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1,
+      1 - (clientY - rect.top) / rect.height * 2), this.camera);
+    const groups = [...this.proxies].filter(([part, group]) => part.nativeId && group.visible);
+    this.scene.updateMatrixWorld(true);
+    const hit = ray.intersectObjects(groups.map(([, group]) => group), true)[0];
+    if (!hit) return;
+    const entry = groups.find(([, group]) => { for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) if (node === group) return true; return false; });
+    if (!entry) return;
+    return { id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
+  }
+  async showWorld(world: EngineWorld, assets: Assets, keepScene = false, publishTogether = false): Promise<string[]> {
     if (!keepScene) this.clear();
     const generation = this.generation, warnings: string[] = [];
+    const staged: THREE.Group[] = [];
     for (const part of world.parts.values()) {
+      if (this.proxies.has(part)) { await this.updatePartPaint(part, assets); continue; }
       const model = part.definition.model;
       if (!model) continue;
+      const paint = await partPaint(part, assets);
       const parsed = parseScx(await assets.read(model.path));
       const collision = await loadPartCollision(assets, part.definition);
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
-      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); this.model.add(group);
+      if (publishTogether) { group.visible = false; group.userData.partLoading = true; staged.push(group); }
+      group.matrixAutoUpdate = false; group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part))); this.model.add(group);
       this.proxies.set(part, group);
       this.collisionMeshes.set(part, collision);
-      warnings.push(...await this.append(parsed, assets, model.textures, group, generation));
+      warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint, true));
       if (generation !== this.generation) return warnings;
       const primaryPose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
       for (const extra of part.definition.additionalModels ?? []) {
         const submodel = new THREE.Group();
         submodel.matrixAutoUpdate = false;
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
+        submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
         group.add(submodel);
-        warnings.push(...await this.append(parseScx(await assets.read(extra.model.path)), assets, extra.model.textures, submodel, generation));
+        const extraModel = parseScx(await assets.read(extra.model.path));
+        bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
+        warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint, true));
         if (generation !== this.generation) return warnings;
       }
+      for (const light of part.definition.lights ?? []) {
+        // A light is commonly placed at the lens centre, inside its SCX bounds.
+        // Clear that lens before depth testing, rather than drawing through walls.
+        let lensRadius = 0;
+        for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+          lensRadius = Math.max(lensRadius, Math.hypot(mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]) * 0.01);
+        const flare = await createVehicleFlare(light.source, assets, Math.min(0.25, lensRadius), light.flags);
+        if (generation !== this.generation || world.disposed) { flare.material.map?.dispose(); flare.material.dispose(); return warnings; }
+        const lamp = new THREE.Group(); lamp.name = 'CFG lamp flare'; lamp.matrixAutoUpdate = false;
+        // Cancel centimetre mesh scaling: RPK light positions are in metres.
+        lamp.matrix.makeScale(100, 100, 100).multiply(partRenderPose(part).invert())
+          .multiply(light.pose ? poseMatrix(light.pose) : new THREE.Matrix4());
+        lamp.userData.lightFlags = light.flags ?? 0; lamp.visible = cfgRenderVisible(light.flags, world.lightMask);
+        lamp.add(flare); group.add(lamp);
+      }
+    }
+    if (generation === this.generation && !world.disposed) {
+      for (const group of staged) delete group.userData.partLoading;
+      this.syncWorldVisuals(world);
     }
     if (generation === this.generation && !keepScene) this.fit();
     return warnings;
   }
-  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false) {
+  async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false,
+    options?: { groundId?: number; preserveCamera?: boolean }) {
     if (!keepWorld) this.clear(); const generation = this.generation;
+    this.mapPackPath=packPath;
     const pack = await assets.pack(packPath), warnings: string[] = [];
+    const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
+    const ground = groundEntry && groundRenderDefinition(groundEntry);
+    let room: typeof ground;
+    if (ground) {
+      const gameType = await assets.resource(packPath, ground.gameType);
+      const render = await assets.resource(packPath, ground.renderId);
+      // TestTrack also names a direct ground mesh, but its child renders form
+      // the rest of the map. Only leaf meshes use the isolated room path.
+      if (entryProperties(gameType.entry).some(property => property.key === 'native' && property.value === 'ground')
+        && render.entry.type === 14 && entryProperties(render.entry).some(property => property.key === 'mesh')
+        && !groundRenderHasChildren(pack, ground.renderId)) {
+        const resource = await assets.modelForResource(packPath, ground.renderId);
+        const model = parseScx(await assets.read(resource.path));
+        if (groundRenderIsRoom(pack, ground.renderId, model)) room = ground;
+      }
+    }
     const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
     // A map can declare a sibling map package as a continuation (for example City → City2).
     // Load it only when both its RDB and static map render resources are present.
-    for (const dependency of pack.dependencies) {
+    for (const dependency of room ? [] : pack.dependencies) {
       const path = dependency.path.replaceAll('\\', '/').toLowerCase();
       if (!path.startsWith('maps/') || !path.endsWith('.rpk') || mapSources.some(source => source.path === path)) continue;
       if (!assets.byPath.has(path.replace(/\.rpk$/i, '.rdb'))) continue;
@@ -447,38 +843,62 @@ export class Viewer {
         if (mapRenderIds(linkedPack).length) mapSources.push({ path, pack: linkedPack });
       } catch (error) { warnings.push(`Map dependency ${path}: ${String(error)}`); }
     }
-    const ids = mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
+    const ids = room ? [{ source: mapSources[0], id: room.renderId }]
+      : mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
+    this.mapStream?.dispose(); this.mapStreamFocus = undefined;
+    this.rayOcclusion.reset();
+    this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.scene.fog = this.mapFogEnabled ? new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far) : null;
     this.scene.background = new THREE.Color(this.mapFog.color);
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
-    this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
-    this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
+    this.camera.near = 0.1; this.normalCameraFar = 5000; this.updateFarPlane(); this.camera.updateProjectionMatrix();
+    if (!options?.preserveCamera) {
+      this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
+    }
     let loaded = 0, triangles = 0;
-    const stream = new MapObjectStream(this.model, this.mapStreamRange);
-    stream.setShadowRange(this.lighting.shadows ? 150 : 0);
+    this.collisionOnlyMapMeshes=0;
+    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
+    this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
+    const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
+    stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
+    stream.setGeometryCutoff(this.geometryCutoff);
+    stream.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
+    this.updateFarPlane();
+    this.nextStreamUpdate=-Infinity;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
       try {
         const resource = await assets.modelForResource(source.path, id);
-        const parsed = parseScx(await assets.read(resource.path));
+        const placeGround = (parsed: ScxModel) => {
+          if (!room) return parsed;
+          const transform = poseMatrix(room.pose), point = new THREE.Vector3();
+          for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
+            point.fromArray(mesh.positions, i).multiplyScalar(0.01).applyMatrix4(transform).multiplyScalar(100).toArray(mesh.positions, i);
+          for (const mesh of parsed.meshes) for (let i = 0; i < mesh.normals.length; i += 3)
+            point.fromArray(mesh.normals, i).transformDirection(transform).toArray(mesh.normals, i);
+          return parsed;
+        };
+        const parsed = placeGround(parseScx(await assets.read(resource.path)));
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
         collision.add(parsed);
+        const collisionOnly=isStockMapCollisionShell(source.path,resource.path,source.pack.entries.find(entry=>entry.typeId===id)?.alias??'',parsed);
+        if(collisionOnly)this.collisionOnlyMapMeshes++;
         const bounds = new THREE.Box3();
         const vertex = new THREE.Vector3();
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
           bounds.expandByPoint(vertex.fromArray(mesh.positions, i).multiplyScalar(0.01));
-        if (!bounds.isEmpty()) {
+        if (!collisionOnly && !bounds.isEmpty()) {
           const center = bounds.getCenter(new THREE.Vector3());
           stream.add([{ matrix: new THREE.Matrix4(), position: center,
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
             if (!wanted()) return [];
             const template = new THREE.Group();
-            const model = parseScx(await assets.read(resource.path));
+            const model = placeGround(parseScx(await assets.read(resource.path)));
             if (!wanted()) return [];
             warnings.push(...await this.append(model, assets, resource.textures, template, generation, true, wanted));
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
@@ -493,7 +913,7 @@ export class Viewer {
     }
     let objects = 0;
     const objectBatches = new Map<string, { pack: string; id: number; alias: string; placements: StreamPlacement[] }>();
-    for (const source of mapSources) try {
+    for (const source of room ? [] : mapSources) try {
       const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
       const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
       for (const placement of placements) {
@@ -563,15 +983,18 @@ export class Viewer {
   }
   showInternals(value: boolean) {
     this.internalView = value;
-    for (const [part, group] of this.proxies) {
-      const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
-      group.visible = !value || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200;
-    }
+    for (const [part, group] of this.proxies) group.visible = this.partVisible(part);
+  }
+  private partVisible(part: EnginePart): boolean {
+    const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
+    return part.renderVisible && (!this.internalView || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200);
   }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
+      applyCfgRenderChannels(group, part.world.lightMask);
+      syncLinkedRenders(part, group, this.suspensionDebug);
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
-      group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part)));
+      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
     }
   }
@@ -750,6 +1173,8 @@ export class Viewer {
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
         this.physicsWork = `Physics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
+      root.world.lightMask = (root.world.lightMask & ~3) | (input.brake ? 1 : 0)
+        | (crash instanceof Vehicle3D && crash.suspension.mechanics?.gear === -1 ? 2 : 0);
       this.syncWorld(softParts);
       for (const [part, helper] of vehicleBounds) {
         if (!helper.visible) continue;
@@ -841,6 +1266,7 @@ export class Viewer {
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
+      root.world.lightMask &= ~3;
       panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
@@ -878,10 +1304,11 @@ export class Viewer {
   }
   private disposeGroup(group: THREE.Group): void {
     group.traverse(object => {
+      if (object instanceof THREE.Sprite) { object.material.map?.dispose(); object.material.dispose(); return; }
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach(material => { material.map?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
     });
     group.clear();
   }
@@ -907,9 +1334,15 @@ export class Viewer {
     material.depthWrite = false;
     material.needsUpdate = true;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number): Promise<string[]> {
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false): Promise<string[]> {
+    const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
+    const mapTextures = this.mapTextures;
+    const vehicleTextures = this.vehicleTextures;
+    const loadTexture = (bytes: Uint8Array, path: string) => mapSurface
+      ? mapTextures.acquire(normalizePath(path), () => this.texture(bytes, path))
+      : vehicleTextures.acquire(assets, path, () => this.texture(bytes, path));
     for (const part of model.meshes) {
       if (!wanted()) break;
       const geometry = new THREE.BufferGeometry();
@@ -927,13 +1360,17 @@ export class Viewer {
       const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide, opacity, transparent: opacity < 1, depthWrite: opacity === 1 });
       this.lighting.configureMaterial(material, !!part.colors, !!part.paintMask || scxUsesVertexPaintMask(model.version, part.materialFlags),
         part.paintMask ? paintColor === undefined ? material.color.clone() : new THREE.Color(paintColor & 0xffffff) : undefined);
+      if(mapSurface)this.mapDistanceCutoff.configure(material);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
-      mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
-      const file = textures[part.textureIndex];
+      mesh.castShadow = dynamicCaster && opacity === 1; mesh.receiveShadow = true;
+      const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
+      const file = boundTextures[diffuseIndex];
+      if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
+        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
       if (file) {
         try {
           const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
-          const texture = await this.texture(selected.bytes, selected.path);
+          const texture = await loadTexture(selected.bytes, selected.path);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           if (part.textureMap) {
             texture.repeat.set(part.textureMap.scaleU, part.textureMap.scaleV);
@@ -952,10 +1389,11 @@ export class Viewer {
           else if (alphaEnabled && alpha === 'blend' && (!mapSurface || opacity < 1)) { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
       }
+      let secondLayer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
       if (layerFile) {
         try {
-          const bytes = await assets.read(layerFile), texture = await this.texture(bytes, layerFile);
+          const bytes = await assets.read(layerFile), texture = await loadTexture(bytes, layerFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -974,7 +1412,9 @@ export class Viewer {
               roughness: 0.85, metalness: 0, side: THREE.DoubleSide, transparent: true,
               depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
             const layer = new THREE.Mesh(layerGeometry, layerMaterial);
+            secondLayer = layer;
             this.lighting.configureMaterial(layerMaterial, !!part.colors);
+            if(mapSurface)this.mapDistanceCutoff.configure(layerMaterial);
             layer.receiveShadow = true;
             layer.name = `${part.name} / layer2`;
             layer.renderOrder = 1;
@@ -982,7 +1422,59 @@ export class Viewer {
           } else texture.dispose(); // Opaque mix modes need the original material rule, not a covering pass.
         } catch (e) { warnings.push(`Texture layer ${layerFile}: ${e}`); }
       }
-      mesh.castShadow = !material.transparent;
+      mesh.castShadow = dynamicCaster && !material.transparent;
+      if(mapSurface)mesh.userData.staticMapCaster=!material.transparent;
+      if(mapSurface)this.mapBackfaces.configure(material,geometry);
+      const garageBake=part.lightmapIndex===undefined?stockGarageLightmap(part,textures,model.version):undefined;
+      const bakedFile = textures[part.lightmapIndex ?? garageBake?.index ?? -1];
+      if (bakedFile) {
+        try {
+          const uv = garageBake?.uv??bakedLightmapUvs(part);
+          if (!uv) throw new Error(`UV channel ${part.lightmapMap?.channel ?? 1} missing`);
+          const texture = await loadTexture(await assets.read(bakedFile), bakedFile);
+          if (generation !== this.generation) { texture.dispose(); return warnings; }
+          configureBakedLightmap(material, geometry, uv, texture, this.bakedLightmaps);
+          // A transparent second diffuse pass belongs to the same surface.
+          if (secondLayer) configureBakedLightmap(secondLayer.material, secondLayer.geometry, uv, texture, this.bakedLightmaps);
+        } catch (error) { warnings.push(`Baked lightmap ${bakedFile}: ${String(error)}`); }
+      }
+      if(mapSurface&&!material.userData.bakedLightmapTexture){
+        this.staticMapShadows.configure(material);
+        if(secondLayer)this.staticMapShadows.configure(secondLayer.material);
+      }
+      if (!mapSurface) {
+        const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {
+          if (!path) return;
+          const texture = await vehicleTextures.acquire(assets, path,
+            async () => this.texture(await assets.read(path), path));
+          if (generation !== this.generation) { texture.dispose(); return; }
+          texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+          if (map) { texture.repeat.set(map.scaleU, map.scaleV); texture.offset.set(map.offsetU, map.offsetV); }
+          return texture;
+        };
+        let detail: THREE.Texture | undefined, reflection: THREE.Texture | undefined;
+        try {
+          if (part.mixIndex !== undefined && part.mixIndex !== part.textureIndex) {
+            detail = await loadLayer(boundTextures[part.mixIndex], part.mixMap);
+            const channel = part.mixMap?.channel ?? 0;
+            const uv = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (detail && uv) {
+              const values = new Float32Array(uv.length);
+              for (let i = 0; i < uv.length; i++) values[i] = uv[i] * (i % 2 ? part.mixMap?.scaleV ?? 1 : part.mixMap?.scaleU ?? 1)
+                + (i % 2 ? part.mixMap?.offsetV ?? 0 : part.mixMap?.offsetU ?? 0);
+              geometry.setAttribute('slrrDetailUv', new THREE.BufferAttribute(values, 2));
+            } else { detail?.dispose(); detail = undefined; }
+          }
+          if (part.reflectionMap && part.reflectionMap.channel !== 0xfffffffe) {
+            const channel = part.reflectionMap.channel;
+            const uv = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (uv) geometry.setAttribute('slrrReflectionUv', new THREE.BufferAttribute(uv, 2));
+          }
+          reflection = await loadLayer(boundTextures[part.reflectionIndex ?? -1]);
+          if (detail || part.reflectionIndex !== undefined || material.userData.paintDefault)
+            configureVehicleMaterial(material, part, this.reflectionUniforms, detail, reflection);
+        } catch (error) { detail?.dispose(); reflection?.dispose(); warnings.push(`SCX material layers ${part.name}: ${String(error)}`); }
+      }
       if (generation !== this.generation) return warnings;
     }
     return warnings;
@@ -996,12 +1488,13 @@ export class Viewer {
     this.controls.target.set(0, 0, 0); this.camera.position.set(6, 3.5, 6); this.controls.update();
   }
   private async texture(bytes: Uint8Array, path: string): Promise<THREE.Texture> {
+    if (/\.ptx$/i.test(path)){const texture=await ptxTexture(bytes);texture.name=path;return texture;}
     const buffer = bytes.slice().buffer;
     const url = URL.createObjectURL(new Blob([buffer]));
     try {
       const texture = /\.dds$/i.test(path) ? await new DDSLoader().loadAsync(url)
         : /\.tga$/i.test(path) ? await new TGALoader().loadAsync(url) : await new THREE.TextureLoader().loadAsync(url);
-      texture.flipY = false; return texture;
+      texture.flipY = false;texture.name=path; return texture;
     }
     finally { URL.revokeObjectURL(url); }
   }

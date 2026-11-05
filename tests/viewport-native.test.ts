@@ -51,4 +51,7 @@ test('Camera.create links its render resource to the Java parent and viewport', 
   assert.equal(cameras.get(camera)?.halfAov, 16.7);
   jvm.natives.invoke('java.util.resource.RenderRef', 'setMatrix', camera, [vector(0, 0, 10), jv('Ypr', null)]);
   assert.deepEqual(resources.getRender(camera)?.position, { x: 0, y: 0, z: 10 });
+  assert.equal([...cameras.entries()].length, 1);
+  jvm.natives.invoke('java.render.Camera', 'destroy', camera, []);
+  assert.equal([...cameras.entries()].length, 0, 'closed inventory panels release their preview cameras');
 });

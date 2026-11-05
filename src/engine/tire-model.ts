@@ -2,7 +2,7 @@
 import type { WheelRefState } from '../runtime/wheel-ref-native';
 export interface MagicFormulaAxis { B: number; C: number; D: number; E: number }
 export interface TireModelSettings {
-  model: 'legacy' | 'pacejka';
+  model: 'legacy' | 'pacejka' | 'sl2';
   longitudinal: MagicFormulaAxis;
   lateral: MagicFormulaAxis;
 }

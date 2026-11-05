@@ -1,7 +1,75 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
+
+test('large static surfaces submit nearby cells and restore the intact mesh when cutoff is disabled',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),geometry=new PlaneGeometry(512,512,32,32);
+  geometry.rotateX(-Math.PI/2);const originalIndices=Array.from(geometry.index!.array),texture=new Texture(),material=new MeshBasicMaterial({map:texture});
+  let textureDisposals=0;texture.addEventListener('dispose',()=>textureDisposals++);
+  stream.add([{position:new Vector3(),matrix:new Matrix4(),bounds:{minX:-256,maxX:256,minZ:-256,maxZ:256}}],async()=>[new Mesh(geometry,material)]);
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());
+  const original=parent.children[0];stream.setGeometryCutoff(true);stream.update(new Vector3());
+  const selected=parent.children.filter((m:any)=>m.visible) as InstancedMesh[];
+  assert.ok(parent.children.length>selected.length);assert.ok(selected.length>1);
+  const triangles=selected.reduce((n,m)=>n+m.geometry.index!.count/3*m.count,0);
+  assert.ok(triangles<geometry.index!.count/3,'far cell indices never enter the draw');
+  for(const mesh of selected)assert.equal(mesh.material,material);
+  assert.deepEqual(Array.from(geometry.index!.array),originalIndices);
+  stream.setInspectResident(true);stream.update(new Vector3());assert.ok(parent.children.every((m:any)=>m.visible));
+  stream.setInspectResident(false);stream.setGeometryCutoff(false);stream.update(new Vector3());
+  assert.equal(parent.children.length,1);assert.equal(parent.children[0],original);assert.ok(original.visible);
+  stream.setGeometryCutoff(true);stream.update(new Vector3());assert.ok(parent.children.length>1,'cached cells can upload again');
+  assert.equal(textureDisposals,0,'switching representations must retain shared textures');
+  stream.dispose();assert.equal(parent.children.length,0);assert.equal(textureDisposals,1);
+});
+
+test('chunk instance compaction preserves the selected placement matrix and palette',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),geometry=new PlaneGeometry(512,512,16,16);
+  geometry.rotateX(-Math.PI/2);
+  stream.add([0,180].map((x,i)=>({position:new Vector3(x,0,0),matrix:new Matrix4().makeTranslation(x,0,0),
+    bounds:{minX:x-256,maxX:x+256,minZ:-256,maxZ:256},paintColor:i?0x0000ff:0xff0000})),async()=>[new Mesh(geometry,new MeshBasicMaterial())]);
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());
+  stream.setGeometryCutoff(true);stream.update(new Vector3());
+  const chunk=parent.children.find((m:any)=>m.visible&&m.geometry.boundingBox.max.x<=-192&&m.geometry.boundingBox.min.z===0) as InstancedMesh;
+  assert.ok(chunk);assert.equal(chunk.count,1);
+  const matrix=new Matrix4(),color=new Color();chunk.getMatrixAt(0,matrix);chunk.getColorAt(0,color);
+  assert.equal(matrix.elements[12],180);assert.equal(color.getHex(),0x0000ff);stream.dispose();
+});
+
+test('resident inspection reveals off-screen instances without loading around the observer',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3();
+  const primary=new PerspectiveCamera(60,1,.1,200);primary.lookAt(0,0,-1);
+  let nearLoads=0,farLoads=0;
+  stream.add([-20,20].map(z=>({position:new Vector3(0,0,z),matrix:new Matrix4().makeTranslation(0,0,z)})),async()=>{
+    nearLoads++;return [new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  });
+  stream.add([{position:new Vector3(1000,0,0),matrix:new Matrix4().makeTranslation(1000,0,0)}],async()=>{
+    farLoads++;return [new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  });
+  stream.update(focus,primary);await Promise.resolve();stream.update(focus,primary);
+  assert.equal(stream.active,2);assert.equal(stream.visible,1);assert.equal(stream.primaryVisible,1);
+  stream.setInspectResident(true);stream.update(focus,primary);
+  assert.equal(stream.visible,2);assert.equal(stream.primaryVisible,1);assert.equal(stream.active,2);
+  assert.equal(nearLoads,1);assert.equal(farLoads,0);
+  stream.setInspectResident(false);stream.update(focus,primary);assert.equal(stream.visible,1);
+  stream.dispose();
+});
+
+for (const cancelled of [false,true]) test(`stream releases shared baked maps once (${cancelled ? 'cancelled load' : 'loaded model'})`, async () => {
+  const stream = new MapObjectStream(new Group(),100), texture = new Texture();
+  let disposals = 0;
+  texture.addEventListener('dispose', () => disposals++);
+  stream.add([{position:new Vector3(),matrix:new Matrix4()}],async () => [0,1].map(() => {
+    const material = new MeshBasicMaterial();material.userData.bakedLightmapTexture = texture;
+    return new Mesh(new BoxGeometry(),material);
+  }));
+  stream.update(new Vector3());
+  if (cancelled) stream.dispose();
+  await Promise.resolve();
+  if (!cancelled) { stream.update(new Vector3()); stream.dispose(); }
+  assert.equal(disposals,1);
+});
 
 test('finishing a model load does not rescan distant placements until the focus changes', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100), focus = new Vector3();
@@ -59,10 +127,55 @@ test('instances of one model are culled independently without unloading and came
   stream.setRange(100); stream.update(focus, camera);
   assert.equal(stream.visible, 1); assert.equal(loads, 1);
   stream.setShadowRange(30); stream.update(focus, camera);
-  assert.equal(stream.visible, 2, 'nearby off-screen casters remain available to the shadow pass');
+  assert.equal(stream.visible, 1, 'shadow support does not expand the main color list');
+  assert.equal(stream.auxiliaryVisible,1,'nearby off-screen instances remain available separately');
   stream.setShadowRange(0); stream.update(focus, camera);
   assert.equal(stream.visible, 1, 'disabling shadows restores normal camera culling');
+  assert.equal(stream.auxiliaryVisible,0);
   stream.dispose();
+});
+
+test('auxiliary caster batches preserve palettes, swap with the view and release without disposing shared geometry',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3(),camera=new PerspectiveCamera(60,1,.1,200);
+  camera.lookAt(0,0,-1);stream.setShadowRange(30);
+  const geometry=new BoxGeometry(),material=new MeshBasicMaterial();let disposed=0;geometry.addEventListener('dispose',()=>disposed++);
+  stream.add([-20,20,80].map((z,i)=>({position:new Vector3(0,0,z),matrix:new Matrix4().makeTranslation(0,0,z),paintColor:[0xff0000,0x0000ff,0x00ff00][i]})),async()=>{
+    const mesh=new Mesh(geometry,material);mesh.castShadow=true;return [mesh];
+  });
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  const main=parent.children.find(m=>!m.userData.streamAuxiliary) as InstancedMesh;
+  const auxiliary=parent.children.find(m=>m.userData.streamAuxiliary) as InstancedMesh;
+  assert.equal(main.count,1);assert.equal(auxiliary.count,1);assert.equal(auxiliary.castShadow,true);
+  assert.equal(auxiliary.geometry,main.geometry);assert.equal(auxiliary.material,main.material);
+  const matrix=new Matrix4(),color=new Color();auxiliary.getMatrixAt(0,matrix);auxiliary.getColorAt(0,color);
+  assert.equal(matrix.elements[14],20);assert.equal(color.getHex(),0x0000ff);
+  const version=auxiliary.instanceMatrix.version;stream.update(focus,camera);assert.equal(auxiliary.instanceMatrix.version,version);
+  camera.lookAt(0,0,1);stream.update(focus,camera);
+  assert.equal(main.count,2);assert.equal(auxiliary.count,1);auxiliary.getMatrixAt(0,matrix);assert.equal(matrix.elements[14],-20);
+  stream.setInspectResident(true);stream.update(focus,camera);assert.equal(main.count,3);assert.equal(auxiliary.count,0,'inspection does not duplicate casters');
+  assert.equal(disposed,0);stream.dispose();assert.equal(disposed,1);assert.equal(parent.children.length,0);
+});
+
+test('chunk shadow reserve stays separate and is released when switching representations',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3(),camera=new PerspectiveCamera(60,1,.1,100);
+  camera.position.set(0,5,0);camera.lookAt(0,0,-30);
+  const geometry=new PlaneGeometry(512,512,16,16);geometry.rotateX(-Math.PI/2);
+  stream.add([{position:new Vector3(),matrix:new Matrix4(),bounds:{minX:-256,maxX:256,minZ:-256,maxZ:256}}],async()=>{
+    const mesh=new Mesh(geometry,new MeshBasicMaterial());mesh.castShadow=false;mesh.userData.staticMapCaster=true;return [mesh];
+  });
+  stream.setGeometryCutoff(true);stream.setShadowRange(100);
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  const auxiliary=parent.children.filter(m=>m.userData.streamAuxiliary) as InstancedMesh[];
+  assert.ok(auxiliary.some(m=>m.count>0));
+  for(const extra of auxiliary.filter(m=>m.count>0)){
+    assert.equal(extra.castShadow,false);assert.equal(extra.userData.staticMapCaster,true);
+    const main=parent.children.find((m:any)=>!m.userData.streamAuxiliary&&m.geometry===extra.geometry) as InstancedMesh;
+    assert.ok(main);assert.equal(main.userData.staticMapCaster,true);assert.equal(main.castShadow,false);
+    assert.equal(main.count,0,'the same chunk instance cannot enter both passes');
+  }
+  stream.setGeometryCutoff(false);stream.update(focus,camera);
+  assert.equal(parent.children.length,1);assert.ok(auxiliary.every(m=>m.parent===null));
+  stream.dispose();assert.equal(parent.children.length,0);
 });
 
 test('instance frustum tests include parent transforms and mesh bounds away from their origin', async () => {
