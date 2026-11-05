@@ -4,10 +4,11 @@
 
 The full recorder still crashes the original game without a script error after
 the import/mass fixes. It is not qualified for unattended capture. The user's
-experimental installation currently uses
-`tools/stock-telemetry/diagnostics/stage0/PhysicsTelemetry.java`: both Track hooks
-are empty, with no static state, clock, vehicle reads or log calls. No telemetry
-output is expected at this stage. The complete recorder remains separate.
+experimental installation now uses
+`tools/stock-telemetry/diagnostics/stage1/PhysicsTelemetry.java`: one literal
+`System.log` line per track visit, with no clock or vehicle reads. The complete
+recorder remains separate. Stage 0 (empty hooks) was confirmed by the user to
+run without crashing and correctly produced no telemetry output.
 
 Enable each next step only after an original-game run confirms the previous one:
 
@@ -22,8 +23,9 @@ Enable each next step only after an original-game run confirms the previous one:
 When switching variants, preserve the installed source and generated
 `sl/Scripts/game/PhysicsTelemetry.class`, then invalidate that generated class
 so the game recompiles the new source on a full restart. Never change the
-Steam installation as part of these experiments. Stage1 is prepared but has
-not been enabled; a stage0 rerun is pending.
+Steam installation as part of these experiments. Stage 1 is enabled; an
+original-game rerun and confirmation of the actual log destination are pending.
+Expected marker: `SLRR_TELEMETRY_PROBE stage=1 hook=animate`.
 
 ## Full recorder (not yet qualified in the original runtime)
 
