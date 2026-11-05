@@ -345,6 +345,91 @@
           "sha256": "abe4aa3b83b3ba070768af7a4f8a27262cfa1a6e9179f7e9edadb4144a1a7cc3"
         }
       }
+    },
+    {
+      "snapshot": "20261106-000155",
+      "id": "06-einvagen-second-third-gear",
+      "recorder": "turbo",
+      "snapshot_note": "Copied after local midnight; game log last modified on 2026-11-05. Grouped with the same capture campaign.",
+      "sessions": [
+        {
+          "id": 1,
+          "role": "setup",
+          "scenario": "Stationary before changing to manual clutch mode.",
+          "model": "Einvagen 110 GTK",
+          "engine": "Einvagen 110 GT/GTK block",
+          "samples": 16,
+          "transmission_config": "1"
+        },
+        {
+          "id": 2,
+          "role": "diagnostic",
+          "scenario": "User-reported stalled third-gear launch with turbo. RPM falls below idle; no explicit engine-running/stalled state is logged.",
+          "exclude_from_successful_launch_comparison": true,
+          "model": "Einvagen 110 GTK",
+          "engine": "Einvagen 110 GT/GTK block",
+          "samples": 104,
+          "transmission_config": "2"
+        },
+        {
+          "id": 3,
+          "role": "reference",
+          "scenario": "Second-gear launch with turbo, followed by braking.",
+          "model": "Einvagen 110 GTK",
+          "engine": "Einvagen 110 GT/GTK block",
+          "samples": 231,
+          "transmission_config": "2"
+        },
+        {
+          "id": 4,
+          "role": "reference",
+          "scenario": "Second-gear launch without turbo, followed by braking. Wear, initial temperature and native mass differ from turbo run.",
+          "model": "Einvagen 110 GTK",
+          "engine": "Einvagen 110 GT/GTK block",
+          "samples": 252,
+          "transmission_config": "2"
+        }
+      ],
+      "rejected_records": 0,
+      "incomplete_packets": 0,
+      "files": {
+        "telemetry.txt": {
+          "bytes": 560757,
+          "sha256": "20b28ae5459fef8bdfbfbff0aabed8ba5c2aa42edf0a81db2d853116fde35d1f"
+        },
+        "summary.json": {
+          "bytes": 247671,
+          "sha256": "64f34d5660282c04cd979d3b707d6cb9da58c60d926449c00845b514dbeb33ca"
+        },
+        "samples.csv": {
+          "bytes": 65292,
+          "sha256": "50321dca0e2172b36078c6889ee99dfdaf0b3fe9fa084a0cb95986f5a7fd7585"
+        },
+        "shifts.csv": {
+          "bytes": 750,
+          "sha256": "d32fd1ca5a1018635255655ec97f379f03db0b389813ed33a5df8790fd7fe4dc"
+        },
+        "curves.csv": {
+          "bytes": 3318,
+          "sha256": "5995c1d74eded3e3160e0ff68b79726d6a8e1f64ba9dda120065fa810f7f1612"
+        },
+        "runs.csv": {
+          "bytes": 993,
+          "sha256": "8cc3c5693344c8fd617d91c9aee9a55fb86bfbd2a5604a9477f522395f55fec0"
+        },
+        "overview.md": {
+          "bytes": 1310,
+          "sha256": "b2c82f513c5af75a0eb0a699ba0f7f6a38335a71645b49d43346aea4847977a0"
+        },
+        "boost-estimates.csv": {
+          "bytes": 83253,
+          "sha256": "0d1a5ce2a70e6b61e708ee7177b0318514ee7b34eab1be50daa8b07c87e0b230"
+        },
+        "annotations.json": {
+          "bytes": 1314,
+          "sha256": "dd397e2c398a10d6c6e7ba318ee8ad1fefc059e29651b5f4abc7cd6e5d0a8916"
+        }
+      }
     }
   ],
   "provenance": {

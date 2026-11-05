@@ -1,6 +1,6 @@
 # Original-game driving captures — 2026-11-05
 
-Five user-recorded log snapshots, 12 sessions and **4,770 complete samples**.
+Six user-recorded log snapshots, 16 sessions and **5,373 complete samples**.
 All snapshots parsed with zero rejected records and zero incomplete packets.
 These are observations of the original game, not tuned remaster parameters or
 proof of matching physics. Use multiple cars to qualify shared equations,
@@ -20,6 +20,13 @@ snapshot labels are local Europe/Madrid timestamps, not session start times.
 | [03](03-emer-automatic/overview.md) | Emer Nonus Street GT | 2; 1 is setup | Automatic | Acceleration and slowing/stopping |
 | [04](04-einvagen-na-turbo/overview.md) | Einvagen 110 GTK | 1 without turbo; 2 with turbo | Automatic | Paired configuration comparison |
 | [05](05-duhen-manual-and-third-gear/overview.md) | Duhen SunStrip 1.5 DVC | 2 baseline; 4/5 clean third-gear attempts | Manual clutch | Through-gear acceleration and third-gear launches |
+| [06](06-einvagen-second-third-gear/overview.md) | Einvagen 110 GTK | 2 third-gear stall attempt; 3 turbo / 4 naturally aspirated second-gear launches; 1 setup | Manual clutch | High-gear launch comparison |
+
+Capture 06 was copied just after local midnight on November 6, from a log last
+modified on November 5, and belongs to this capture campaign. Session 2 is a
+user-reported stall: recorded RPM drops below idle, but this logger has no
+explicit engine-running/stalled state channel. Preserve this failed launch as
+a diagnostic rather than treating it as a successful acceleration run.
 
 For capture 05, session 1 is setup. Session 3 is the user's first, flawed
 third-gear attempt: the car was already moving when third was selected. Retain
@@ -60,7 +67,7 @@ node data/telemetry/original-game/2026-11-05/provenance/exporter/extract.mjs dat
 ```
 
 The archived basic recorder produced captures 01–03. The turbo-parameter
-extension produced captures 04–05. Both emit short v2 field records and use
+extension produced captures 04–06. Both emit short v2 field records and use
 a 0.1-second time gate; actual sample spacing is retained. Long-expression
 concatenation is a suspected cause of earlier crashes, not a proven VM limit.
 Intermediate staged debugging probes are not part of this dataset.
@@ -84,6 +91,8 @@ Intermediate staged debugging probes are not part of this dataset.
 - Paired Einvagen runs differ in initial temperature, native mass and engine
   wear. Duhen attempt wear changes from 0.885 to 0.849 to 0.807. These are not
   identical-condition repetitions; preserve those differences during fitting.
+  Capture 06's second-gear runs also differ in launch RPM and pedal history:
+  engine wear is 0.978 with turbo versus 0.940 without turbo.
 - There is no driven-wheel angular-speed channel, so clutch slip and tyre slip
   cannot be uniquely separated from engine RPM and chassis speed alone.
 
