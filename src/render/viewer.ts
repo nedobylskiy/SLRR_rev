@@ -5,6 +5,7 @@ import { TextureSourceCache } from './texture-source-cache';
 import { GraphicsDiagnostics } from './graphics-diagnostics';
 import { InspectionCamera } from './inspection-camera';
 import { MapDistanceCutoff } from './map-distance-cutoff';
+import { MapBackfaceCulling } from './map-backface-culling';
 import { MapRaycastOcclusion } from './map-raycast-occlusion';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
@@ -142,6 +143,8 @@ export class Viewer {
   private collisionOnlyMapMeshes=0;
   private geometryCutoff=false;
   private readonly mapDistanceCutoff=new MapDistanceCutoff();
+  private readonly mapBackfaces=new MapBackfaceCulling();
+  setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
   private updateCutoff(){this.mapDistanceCutoff.enabled.value=this.geometryCutoff&&!(this.inspection.enabled&&this.inspectResident)?1:0;}
   setGeometryCutoffEnabled(enabled:boolean){this.geometryCutoff=enabled;this.mapStream?.setGeometryCutoff(enabled);this.updateCutoff();}
   setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
@@ -152,6 +155,7 @@ export class Viewer {
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
+    `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
     ...this.rayOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
@@ -1378,6 +1382,7 @@ export class Viewer {
         } catch (e) { warnings.push(`Texture layer ${layerFile}: ${e}`); }
       }
       mesh.castShadow = !material.transparent;
+      if(mapSurface)this.mapBackfaces.configure(material,geometry);
       const bakedFile = textures[part.lightmapIndex ?? -1];
       if (mapSurface && !bakedFile) {
         this.staticMapShadows.configure(material);

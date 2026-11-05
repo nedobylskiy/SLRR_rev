@@ -319,6 +319,10 @@ rayBudgetInput.onchange=()=>viewer?.setRaycastOcclusionBudget(Number(rayBudgetIn
 cutoffCheck.type='checkbox';cutoffLabel.prepend(cutoffCheck);mapDebugOptions.append(cutoffLabel);
 cutoffLabel.title='Split large static meshes into 64 m cells and cut at the streaming radius. Cells prepare once when enabled. Physics stays unchanged.';
 cutoffCheck.onchange=()=>viewer?.setGeometryCutoffEnabled(cutoffCheck.checked);
+const backfaceLabel=textElement('label','Back-face culling (map)'),backfaceCheck=document.createElement('input');
+backfaceCheck.type='checkbox';backfaceLabel.prepend(backfaceCheck);mapDebugOptions.append(backfaceLabel);
+backfaceLabel.title='Experimental: cull reverse faces of opaque static map meshes with consistent winding. Foliage, transparency and shadow casters stay two-sided.';
+backfaceCheck.onchange=()=>viewer?.setMapBackfaceCullingEnabled(backfaceCheck.checked);
 graphicsDetailsCheck.type='checkbox';graphicsDetailsLabel.prepend(graphicsDetailsCheck);mapDebugOptions.append(graphicsDetailsLabel);
 graphicsDetailsLabel.title='Sample GPU passes and count mesh draws. Instrumentation adds CPU overhead while enabled.';
 graphicsDetailsCheck.onchange=()=>viewer?.setGraphicsDiagnosticsEnabled(graphicsDetailsCheck.checked);

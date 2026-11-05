@@ -59,7 +59,7 @@ if (slrrStaticEnabled > 0.5 && slrrStaticAvailable > 0.5) {
     let entry = this.depths.get(source);
     if (!entry) {
       const surface = source as MeshStandardMaterial;
-      const material = new MeshDepthMaterial({depthPacking:RGBADepthPacking,side:source.side,
+      const material = new MeshDepthMaterial({depthPacking:RGBADepthPacking,side:source.shadowSide??source.side,
         map:surface.map,alphaMap:surface.alphaMap,alphaTest:source.alphaTest});
       const release = () => { material.dispose();source.removeEventListener('dispose',release);this.depths.delete(source); };
       source.addEventListener('dispose',release);

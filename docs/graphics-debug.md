@@ -58,3 +58,19 @@ excluded from the visual stream, including all-resident inspection, shadow maps
 and reflection captures. The report counts this exclusion. Identification is
 scoped to this known stock resource and material signature; it is not an inferred
 native resource flag or a blanket filter on untextured models.
+
+## Map back-face experiment
+
+**Back-face culling (map)** is off by default for A/B comparison. It switches
+opaque static map materials to FrontSide only when every nondegenerate triangle
+agrees with the authored normals. Mixed or uncertain winding, alpha cutouts and
+transparent layers remain DoubleSide. Future streamed models use the selected
+policy too; toggling off restores two-sided rendering. Vehicles are unaffected.
+Dynamic shadows and the cached static depth bake retain DoubleSide casters.
+
+This reduces reverse-face rasterization and fragment work, not submitted vertex
+counts or necessarily draw calls. Transparent DoubleSide surfaces may still need
+two passes. No FPS improvement is assumed: compare the same view and lighting
+settings. For isolated measurement leave raycast occlusion off: its conservative
+blocker policy currently accepts only DoubleSide surfaces, so enabling back-face
+culling can reduce the set of ray occluders.
