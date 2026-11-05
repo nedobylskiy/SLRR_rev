@@ -61,7 +61,7 @@ test('Java logger executes sample throttling, shift bracketing and clock resets 
       float engine_rpm_idle=850.0,RPM_limit=6500.0,engine_inertia=1.0,engine_mass=100.0,rearend_ratio=3.3,ClutchF=500.0;
       int gears=5; float[] ratio=new float[8]; float rpm=6000.0; int gear=1; java.game.parts.Part engine;
       public java.game.parts.Part partOnSlot(int slot){return engine;}
-      public float getMassPatch(){return 1200.0;} public float getRPM(){return rpm;}
+      public float getMass(){return 1200.0;} public float getRPM(){return rpm;}
       public int getAIparam_int(int key){return gear;} public float getAIparam_float(int key){return .5;}
       public int getShifting(){return 0;} public float getEngineTemp(){return 80.0;} }`,
   };
@@ -92,6 +92,9 @@ test('Java logger executes sample throttling, shift bracketing and clock resets 
   assert.equal(report.runs[0].shifts[0].rpm_before, '6000');
   assert.equal(report.runs[0].shifts[0].rpm_after, '4200');
   assert.equal(report.runs[0].model, 'Duhen'); assert.ok(report.runs[0].curves.length > 10);
+  assert.equal(report.runs[0].metadata.mass_native_raw, '1200');
+  assert.equal(report.runs[0].metadata.mass_source, 'Chassis.getMass_unqualified');
+  assert.equal(report.runs[0].metadata.mass_kg, undefined, 'native mass is not silently advertised as qualified total mass');
   now = .1; await jvm.invokeAsync(telemetry, 'sample', [car]);
   jvm.set(jv('class', 'java.util.Config'), 'player_transmission', jv('int', 2));
   now = .2; await jvm.invokeAsync(telemetry, 'sample', [car]);

@@ -11,7 +11,7 @@ actual timestamps are logged and there is no catch-up loop.
 From this repository, stage a new mod directory outside the game:
 
 ```powershell
-node tools/stock-telemetry.mjs stage --game-root "C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline" --output .research/stock-telemetry-mod-v2
+node tools/stock-telemetry.mjs stage --game-root "C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline" --output .research/stock-telemetry-mod-v3
 ```
 
 The output must be a new folder with an existing parent. It contains:
@@ -22,7 +22,7 @@ The output must be a new folder with an existing parent. It contains:
 
 The command reads the installation and writes only the staging directory.
 The staged files for the inspected installation have also been generated locally
-at `.research/stock-telemetry-mod-v2/`. To try them in an isolated game copy, back up
+at `.research/stock-telemetry-mod-v3/`. To try them in an isolated game copy, back up
 both `Track.java` and its generated `Track.class`, copy the staged source files
 into the corresponding script source folder, then let that copy of the game
 compile them. Remove the added source/generated class and restore the original
@@ -37,6 +37,13 @@ The fixture now uses that actual namespace. The corrected script and removal
 of its stale generated class have been applied to the user's explicitly named
 experimental copy; a successful original-game rerun is still pending.
 
+The next run reached `describe()` but failed because `getMassPatch()` is only
+mentioned by an outdated Chassis comment, not implemented. Version 3 calls the
+existing native `getMass()` and labels the result `mass_native_raw` with source
+`Chassis.getMass_unqualified`. Do not treat this as verified total vehicle mass.
+The script's `getTotalMass()` alternative creates a temporary chassis, so it is
+not used by the passive recorder. The fixture no longer invents getMassPatch.
+
 The game writes `SLRR_PHYSICS|v=1|...` records through `System.log` (normally its
 system log under `system/`). The actual log destination is controlled by that
 game installation. Retain the complete log, including the initial metadata.
@@ -45,7 +52,7 @@ new configuration on the same car, leave/re-enter the track to refresh metadata.
 
 ## Recorded information
 
-- Vehicle/chassis identity, names, mass, transmission configuration, gear ratios,
+- Vehicle/chassis identity, names, unqualified native mass, transmission configuration, gear ratios,
   final drive, idle/redline RPM, engine inertia/mass and clutch parameter.
 - Engine block identity, wear/tear, dyno statistics and peak RPM values.
 - The existing dyno torque/power table sampled every 500 RPM, bounded at 20,000

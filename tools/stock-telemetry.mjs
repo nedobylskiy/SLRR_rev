@@ -52,7 +52,8 @@ export function compareTelemetry(reference, candidate) {
       // Only compare matching observed configurations; do not pool different
       // cars, ratios or transmission modes into one supposed formula error.
       const key = JSON.stringify([run.metadata.chassis_type, run.engine.engine_type, run.model,
-        run.engine.name, run.metadata.transmission_config, run.metadata.mass_kg,
+        run.engine.name, run.metadata.transmission_config,
+        run.metadata.mass_kg ?? run.metadata.mass_native_raw, run.metadata.mass_source ?? 'legacy_mass_kg',
         run.metadata.final_drive, run.metadata.idle_rpm, run.metadata.redline_rpm,
         run.engine.wear, run.engine.tear, run.ratios.map(row => [row.index, row.ratio])]);
       let group = groups.get(key);

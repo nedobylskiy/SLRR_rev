@@ -52,7 +52,7 @@ public class PhysicsTelemetry
             + "|vehicle_codes=" + codes(c.vehicleName)
             + "|model_codes=" + codes(c.modelName)
             + "|vendor_codes=" + codes(c.vendorName)
-            + "|mass_kg=" + c.getMassPatch()
+            + "|mass_native_raw=" + c.getMass() + "|mass_source=Chassis.getMass_unqualified"
             + "|transmission_config=" + Config.player_transmission
             + "|idle_rpm=" + c.engine_rpm_idle + "|redline_rpm=" + c.RPM_limit
             + "|engine_inertia=" + c.engine_inertia + "|engine_mass=" + c.engine_mass
