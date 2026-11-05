@@ -22,6 +22,7 @@ interface StreamType {
   candidates: number[];
   localBounds?: Sphere;
   instanceBounds: Map<number, Sphere>;
+  primaryVisible: number;
   unusedSince?: number;
 }
 
@@ -42,6 +43,8 @@ export class MapObjectStream {
   private shadowRange = 0;
   private readonly instanceColor = new Color();
   private readonly materials = new MapMaterialPool();
+  private inspectResident=false;
+  setInspectResident(enabled:boolean){this.inspectResident=enabled;this.viewDirty=true;}
   constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
   setRange(value: number) {
@@ -55,7 +58,7 @@ export class MapObjectStream {
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
     this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
-      drawn: [], candidates: [], instanceBounds: new Map() });
+      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0 });
     this.dirty = true;
   }
 
@@ -121,15 +124,18 @@ export class MapObjectStream {
 
   private draw(type: StreamType, focus: Vector3, cull: boolean) {
     const visible = type.candidates; visible.length = 0;
+    type.primaryVisible=0;
     for (const index of type.active) {
-      if (distanceTo(type.placements[index], focus) > this.distance) continue;
-      if (cull) {
+      let primary=distanceTo(type.placements[index], focus)<=this.distance;
+      if (primary && cull) {
         let bounds = type.instanceBounds.get(index);
         if (!bounds) { bounds = type.localBounds!.clone().applyMatrix4(type.placements[index].matrix); type.instanceBounds.set(index, bounds); }
         // Off-screen objects near the car may still cast visible sun shadows.
         if (!this.frustum.intersectsSphere(bounds)
-          && (!this.shadowRange || distanceTo(type.placements[index], focus) > this.shadowRange)) continue;
+          && (!this.shadowRange || distanceTo(type.placements[index], focus) > this.shadowRange)) primary=false;
       }
+      if(primary)type.primaryVisible++;
+      if(!primary&&!this.inspectResident)continue;
       visible.push(index);
     }
     if (visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index)) {
@@ -202,6 +208,7 @@ export class MapObjectStream {
 
   get active() { return this.types.reduce((sum, type) => sum + type.active.length, 0); }
   get visible() { return this.types.reduce((sum, type) => sum + type.drawn.length, 0); }
+  get primaryVisible() { return this.types.reduce((sum,type)=>sum+type.primaryVisible,0); }
   get total() { return this.types.reduce((sum, type) => sum + type.placements.length, 0); }
   private release(type: StreamType) {
     if (type.meshes?.length) this.revision++;

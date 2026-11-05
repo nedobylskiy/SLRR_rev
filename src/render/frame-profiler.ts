@@ -2,11 +2,18 @@ import type { WebGLRenderer } from 'three';
 
 /** CPU measurements are submission time; GPU queries complete asynchronously. */
 export class FrameProfiler {
-  private samples = new Map<string, { average: number; peak: number; since: number }>();
+  private samples = new Map<string, { average: number; peak: number; since: number; last:number }>();
   private readonly gl: WebGL2RenderingContext;
   private readonly timer: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
-  private queries: WebGLQuery[] = [];
-  private current?: WebGLQuery;
+  private queries: {query:WebGLQuery;name:string}[] = [];
+  private current?: {query:WebGLQuery;name:string};
+  detailedGpu = false;
+  setDetailedGpu(enabled:boolean){
+    this.detailedGpu=enabled;
+    for(const name of this.samples.keys())if(name.startsWith('GPU'))this.samples.delete(name);
+    for(const {query} of this.queries)this.gl.deleteQuery(query);this.queries=[];
+  }
+  private samplingFrame = false;
   private frames = 0;
   private intervals: number[] = [];
   private intervalSlot = 0;
@@ -18,7 +25,7 @@ export class FrameProfiler {
     const now = performance.now(), previous = this.samples.get(name);
     this.samples.set(name, { average: previous ? previous.average + (ms - previous.average) * 0.08 : ms,
       peak: previous && now - previous.since < 2000 ? Math.max(previous.peak, ms) : ms,
-      since: previous && now - previous.since < 2000 ? previous.since : now });
+      since: previous && now - previous.since < 2000 ? previous.since : now, last:now });
   }
   recordFrame(ms: number) {
     if (!Number.isFinite(ms) || ms <= 0) return;
@@ -32,15 +39,35 @@ export class FrameProfiler {
   beginGpu() {
     const { gl, timer } = this;
     if (!timer) return;
+    this.samplingFrame = ++this.frames % 17 === 0;
+    if (!this.samplingFrame) return;
     const disjoint = gl.getParameter(timer.GPU_DISJOINT_EXT);
-    this.queries = this.queries.filter(query => {
+    if(disjoint){
+      for(const {query} of this.queries)gl.deleteQuery(query);
+      this.queries=[];this.samplingFrame=false;return;
+    }
+    this.queries = this.queries.filter(({query,name}) => {
       if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return true;
-      if (!disjoint) this.record('GPU', gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6);
+      if (!disjoint) this.record(name, gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6);
       gl.deleteQuery(query); return false;
     });
-    if (++this.frames % 15 || this.queries.length >= 4 || disjoint) return;
-    const query = gl.createQuery();
-    if (query) { gl.beginQuery(timer.TIME_ELAPSED_EXT, query); this.current = query; }
+    // Alternate full-frame and pass samples: WebGL forbids nested timer queries.
+    if (!this.detailedGpu || this.frames%34===0) this.startGpuSection(this.detailedGpu?'GPU total':'GPU');
+  }
+  startGpuSection(name: string): WebGLQuery | undefined {
+    if (!this.timer || !this.samplingFrame || this.current || this.queries.length>=32) return;
+    const query=this.gl.createQuery();
+    if(query){this.gl.beginQuery(this.timer.TIME_ELAPSED_EXT,query);this.current={query,name};return query;}
+  }
+  finishGpuSection(query: WebGLQuery | undefined,keep=true) {
+    if(query && this.current?.query===query){
+      if(keep)this.endGpu();
+      else {this.gl.endQuery(this.timer!.TIME_ELAPSED_EXT);this.gl.deleteQuery(query);this.current=undefined;}
+    }
+  }
+  gpuSection<T>(name: string, work:()=>T): T {
+    const query=this.detailedGpu?this.startGpuSection(name):undefined;
+    try{return work();}finally{this.finishGpuSection(query);}
   }
   endGpu() {
     if (!this.current || !this.timer) return;
@@ -48,7 +75,8 @@ export class FrameProfiler {
     this.queries.push(this.current); this.current = undefined;
   }
   lines() {
-    const rows = [...this.samples].map(([name, s]) => `${name}: ${s.average.toFixed(1)} ms (peak ${s.peak.toFixed(1)})`);
+    const rows = [...this.samples].map(([name, s]) => `${name}: ${s.average.toFixed(1)} ms (peak ${s.peak.toFixed(1)})`
+      +(name.startsWith('GPU')&&performance.now()-s.last>1000?` · last sample ${((performance.now()-s.last)/1000).toFixed(1)}s ago`:''));
     if (this.intervals.length) {
       const sorted = [...this.intervals].sort((a, b) => a - b);
       const percentile = (p: number) => sorted[Math.ceil(sorted.length * p) - 1].toFixed(1);
@@ -62,7 +90,8 @@ export class FrameProfiler {
     return rows;
   }
   dispose() {
-    for (const query of this.queries) this.gl.deleteQuery(query);
+    this.endGpu();
+    for (const {query} of this.queries) this.gl.deleteQuery(query);
     this.queries = [];
   }
 }

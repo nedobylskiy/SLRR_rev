@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
 import { ptxTexture } from './ptx-texture';
 import { TextureSourceCache } from './texture-source-cache';
+import { GraphicsDiagnostics } from './graphics-diagnostics';
+import { InspectionCamera } from './inspection-camera';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
@@ -128,6 +130,17 @@ export class Viewer {
     }
   }
   readonly profiler: FrameProfiler;
+  private readonly graphicsDiagnostics:GraphicsDiagnostics;
+  private readonly inspection:InspectionCamera;
+  private inspectResident=false;
+  setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
+  setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);this.mapStream?.setInspectResident(enabled&&this.inspectResident);}
+  setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);}
+  resetInspectionCamera(){this.inspection.reset(this.controls.target);}
+  graphicsDebugLines(){return [
+    ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
+      `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
+    ...this.graphicsDiagnostics.lines(this.scene)];}
   physicsWork = '';
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
@@ -226,6 +239,7 @@ export class Viewer {
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.profiler = new FrameProfiler(this.renderer);
+    this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -237,6 +251,7 @@ export class Viewer {
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
+    this.inspection=new InspectionCamera(container,this.camera);this.scene.add(this.inspection.helpers);
     this.scene.add(this.ambientLight);
     this.sunLight.position.set(3, 5, 4); this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
@@ -256,6 +271,7 @@ export class Viewer {
         this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
       }
       this.previousFrame = document.hidden ? undefined : now;
+      this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       const scriptCamera = !this.stopDriving ? this.scriptCamera?.() : null;
       if (scriptCamera) {
@@ -273,17 +289,26 @@ export class Viewer {
         if (this.controls.enabled) this.controls.update();
       }
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
+      const size=this.getViewportSize();
+      this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
+      const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
       this.lighting.updateSun(this.sunLight, this.mapStreamFocus ?? this.controls.target);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.lighting.direction, 500);
       this.profiler.beginGpu();
-      this.profiler.measure('Static shadow bake CPU', () => this.staticMapShadows.update(this.renderer,this.staticMapRoot,
-        this.mapStreamFocus ?? this.controls.target,this.staticMapDirection ?? this.lighting.direction,this.mapStream?.revision ?? 0,now));
-      this.profiler.measure('Reflections CPU', () => this.vehicleReflections.update(this.renderer, this.scene,
-        this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now));
-      this.profiler.measure('Render CPU', () => this.renderer.render(this.scene, this.camera));
+      this.inspection.helpers.visible=false;
+      try {
+        this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
+          this.mapStreamFocus ?? this.controls.target,this.staticMapDirection ?? this.lighting.direction,this.mapStream?.revision ?? 0,now)));
+        this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
+          this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
+      } finally {this.inspection.helpers.visible=this.inspection.enabled;}
+      for (const { group, offset } of this.javaSkyDomeNodes.values())
+        group.position.copy(renderCamera.position).add(offset);
+      if(this.sunFlare)this.sunFlare.position.copy(renderCamera.position).addScaledVector(this.lighting.direction,500);
+      this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>this.renderer.render(this.scene,renderCamera)));
       this.profiler.endGpu();
     });
   }
@@ -769,6 +794,7 @@ export class Viewer {
     this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
+    stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
     stream.setShadowRange(this.lighting.shadows || this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
     for (const { source, id } of ids) {

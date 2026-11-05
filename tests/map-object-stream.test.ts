@@ -3,6 +3,25 @@ import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Texture, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
 
+test('resident inspection reveals off-screen instances without loading around the observer',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3();
+  const primary=new PerspectiveCamera(60,1,.1,200);primary.lookAt(0,0,-1);
+  let nearLoads=0,farLoads=0;
+  stream.add([-20,20].map(z=>({position:new Vector3(0,0,z),matrix:new Matrix4().makeTranslation(0,0,z)})),async()=>{
+    nearLoads++;return [new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  });
+  stream.add([{position:new Vector3(1000,0,0),matrix:new Matrix4().makeTranslation(1000,0,0)}],async()=>{
+    farLoads++;return [new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  });
+  stream.update(focus,primary);await Promise.resolve();stream.update(focus,primary);
+  assert.equal(stream.active,2);assert.equal(stream.visible,1);assert.equal(stream.primaryVisible,1);
+  stream.setInspectResident(true);stream.update(focus,primary);
+  assert.equal(stream.visible,2);assert.equal(stream.primaryVisible,1);assert.equal(stream.active,2);
+  assert.equal(nearLoads,1);assert.equal(farLoads,0);
+  stream.setInspectResident(false);stream.update(focus,primary);assert.equal(stream.visible,1);
+  stream.dispose();
+});
+
 for (const cancelled of [false,true]) test(`stream releases shared baked maps once (${cancelled ? 'cancelled load' : 'loaded model'})`, async () => {
   const stream = new MapObjectStream(new Group(),100), texture = new Texture();
   let disposals = 0;

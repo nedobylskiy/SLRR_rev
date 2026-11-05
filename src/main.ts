@@ -306,6 +306,34 @@ const mapDebugPanel = document.createElement('details'); mapDebugPanel.className
 mapDebugPanel.append(textElement('summary', 'Graphics / map debug'));
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
+const graphicsDetailsLabel=textElement('label','Detailed GPU diagnostics'),graphicsDetailsCheck=document.createElement('input');
+graphicsDetailsCheck.type='checkbox';graphicsDetailsLabel.prepend(graphicsDetailsCheck);mapDebugOptions.append(graphicsDetailsLabel);
+graphicsDetailsLabel.title='Sample GPU passes and count mesh draws. Instrumentation adds CPU overhead while enabled.';
+graphicsDetailsCheck.onchange=()=>viewer?.setGraphicsDiagnosticsEnabled(graphicsDetailsCheck.checked);
+const observerLabel=textElement('label','Independent inspection camera'),observerCheck=document.createElement('input');
+observerCheck.type='checkbox';observerLabel.prepend(observerCheck);mapDebugOptions.append(observerLabel);
+observerLabel.title='Left drag orbit, right drag pan, wheel zoom. Streaming stays attached to the primary game camera.';
+observerCheck.onchange=()=>viewer?.setInspectionCameraEnabled(observerCheck.checked);
+const residentLabel=textElement('label','Inspect all resident instances'),residentCheck=document.createElement('input');
+residentCheck.type='checkbox';residentLabel.prepend(residentCheck);mapDebugOptions.append(residentLabel);
+residentLabel.title='Observer only: show already loaded instances, including those excluded by primary-camera culling. This deliberately increases render work.';
+residentCheck.onchange=()=>viewer?.setInspectResidentEnabled(residentCheck.checked);
+const observerReset=textElement('button','Reset inspection camera') as HTMLButtonElement;
+observerReset.type='button';observerReset.onclick=()=>viewer?.resetInspectionCamera();mapDebugOptions.append(observerReset);
+const graphicsReport=textElement('pre','','map-debug-data');
+mapDebugPanel.append(graphicsReport);
+const graphicsCopy=textElement('button','Copy graphics report') as HTMLButtonElement;
+graphicsCopy.type='button';graphicsCopy.onclick=()=>{void navigator.clipboard.writeText([
+  new Date().toISOString(),...viewer?.profiler.lines()??[],...viewer?.graphicsDebugLines()??[],
+].join('\n')).catch(error=>{graphicsReport.textContent=String(error);});};
+mapDebugOptions.append(graphicsCopy);
+window.setInterval(()=>{
+  if(mapDebugPanel.hidden)return;
+  graphicsReport.textContent=[
+    ...(graphicsDetailsCheck.checked?viewer?.profiler.lines().filter(line=>line.startsWith('GPU'))??[]:[]),
+    ...viewer?.graphicsDebugLines()??[],
+  ].join('\n');
+},500);
 const mapDebugChecks: HTMLInputElement[] = [];
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
   const label = textElement('label', title), input = document.createElement('input'); input.type = 'checkbox';
