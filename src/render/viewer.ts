@@ -133,6 +133,8 @@ export class Viewer {
     }
   }
   readonly profiler: FrameProfiler;
+  private performanceContext?:()=>string[];
+  setPerformanceContext(read?:()=>string[]){this.performanceContext=read;}
   private readonly graphicsDiagnostics:GraphicsDiagnostics;
   private readonly inspection:InspectionCamera;
   private readonly rayOcclusion:MapRaycastOcclusion;
@@ -172,6 +174,8 @@ export class Viewer {
   setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);this.updateCutoff();}
   resetInspectionCamera(){this.inspection.reset(this.controls.target);this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}
   graphicsDebugLines(){return [
+    `FPS ${this.fps}`,
+    `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
@@ -182,8 +186,10 @@ export class Viewer {
     ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
     ...this.rayOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
+      `Observer position: ${this.inspection.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · far ${this.inspection.camera.far.toFixed(1)} m`,
       `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
-    ...this.graphicsDiagnostics.lines(this.scene)];}
+    ...this.graphicsDiagnostics.lines(this.scene),
+    ...(this.physicsWork?[this.physicsWork]:[]),...this.performanceContext?.()??[]];}
   physicsWork = '';
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
@@ -311,6 +317,8 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      this.profiler.beginFrame(now);
+      try {
       if (document.hidden) this.previousFrame = undefined;
       if (this.previousFrame !== undefined && now > this.previousFrame) {
         this.profiler.recordFrame(now - this.previousFrame);
@@ -362,6 +370,7 @@ export class Viewer {
       this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>
         this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera))));
       this.profiler.endGpu();
+      }finally{this.profiler.endGpu();this.profiler.endFrame();}
     });
   }
   clear() {
@@ -715,6 +724,9 @@ export class Viewer {
     group.userData.paintKey = key;
   }
   syncWorldVisuals(world: EngineWorld): void {
+    this.profiler.measure('Vehicle mesh sync CPU',()=>this.syncWorldVisualsCore(world));
+  }
+  private syncWorldVisualsCore(world:EngineWorld):void {
     for (const [part, group] of this.proxies) if (part.world === world) {
       if (world.parts.get(part.id) !== part) {
         group.removeFromParent(); this.disposeGroup(group);
@@ -1470,13 +1482,13 @@ export class Viewer {
     this.controls.target.set(0, 0, 0); this.camera.position.set(6, 3.5, 6); this.controls.update();
   }
   private async texture(bytes: Uint8Array, path: string): Promise<THREE.Texture> {
-    if (/\.ptx$/i.test(path)) return ptxTexture(bytes);
+    if (/\.ptx$/i.test(path)){const texture=await ptxTexture(bytes);texture.name=path;return texture;}
     const buffer = bytes.slice().buffer;
     const url = URL.createObjectURL(new Blob([buffer]));
     try {
       const texture = /\.dds$/i.test(path) ? await new DDSLoader().loadAsync(url)
         : /\.tga$/i.test(path) ? await new TGALoader().loadAsync(url) : await new THREE.TextureLoader().loadAsync(url);
-      texture.flipY = false; return texture;
+      texture.flipY = false;texture.name=path; return texture;
     }
     finally { URL.revokeObjectURL(url); }
   }

@@ -9,12 +9,13 @@ const mib=(bytes:number)=>(bytes/1048576).toFixed(1)+' MiB';
 /** Referenced scene resources, not a driver VRAM reading or vertex/fragment invocation counter. */
 export function sceneResources(scene:Scene) {
   const buffers=new Set<object>(),sources=new Map<string,Texture>(),materials=new Set<Material>();
-  let geometryBytes=0,instanceBytes=0,instanceSlots=0;
+  let geometryBytes=0,instanceBytes=0,instanceSlots=0,objects=0,meshes=0,visibleMeshes=0;
   const buffer=(attribute:any)=>{
     const storage=attribute?.isInterleavedBufferAttribute?attribute.data:attribute;
     if(!storage?.array||buffers.has(storage))return 0;buffers.add(storage);return storage.array.byteLength;
   };
   scene.traverse((object:any)=>{
+    objects++;if(object.isMesh)meshes++;
     if(object.geometry){for(const attr of Object.values(object.geometry.attributes))geometryBytes+=buffer(attr);geometryBytes+=buffer(object.geometry.index);}
     if(object.instanceMatrix){instanceBytes+=buffer(object.instanceMatrix)+buffer(object.instanceColor);instanceSlots+=object.instanceMatrix.count;}
     for(const material of object.material?(Array.isArray(object.material)?object.material:[object.material]):[]) {
@@ -25,15 +26,22 @@ export function sceneResources(scene:Scene) {
       }
     }
   });
+  scene.traverseVisible((object:any)=>{if(object.isMesh)visibleMeshes++;});
   let textureBytes=0;
+  const files=new Map<string,{name:string;bytes:number;copies:number;width:number;height:number}>();
   for(const texture of sources.values()) {
     const mipBytes=texture.mipmaps?.reduce((n:number,m:any)=>n+(m.data?.byteLength??0),0)??0;
-    if(mipBytes){textureBytes+=mipBytes;continue;}
+    let bytes=mipBytes;
     const images=Array.isArray(texture.image)?texture.image:[texture.image];
-    for(const image of images)if(image?.width&&image?.height)textureBytes+=image.width*image.height
+    if(!mipBytes)for(const image of images)if(image?.width&&image?.height)bytes+=image.width*image.height
       *(texture.type===FloatType?16:texture.type===HalfFloatType?8:4)*(texture.generateMipmaps?4/3:1);
+    textureBytes+=bytes;
+    const name=texture.name?.replaceAll('\\','/').toLowerCase()||'(unnamed)';
+    const row=files.get(name)??{name,bytes:0,copies:0,width:images[0]?.width??0,height:images[0]?.height??0};
+    row.bytes+=bytes;row.copies++;files.set(name,row);
   }
-  return {geometryBytes,instanceBytes,instanceSlots,textureBytes,materials:materials.size,textures:sources.size};
+  return {geometryBytes,instanceBytes,instanceSlots,textureBytes,materials:materials.size,textures:sources.size,objects,meshes,visibleMeshes,
+    textureFiles:[...files.values()].sort((a,b)=>b.bytes-a.bytes)};
 }
 
 /** Optional mesh draw inspection. Disabled mode adds only a branch to existing renderer entry points. */
@@ -47,6 +55,8 @@ export class GraphicsDiagnostics {
   private colorQuery?:WebGLQuery;
   private draws=0;
   private colorStart=0;
+  private colorCpuStart?:number;
+  private shadowCpu=0;
   private readonly size=new Vector2();
   private memory?:ReturnType<typeof sceneResources>;
   private memoryAt=-Infinity;
@@ -73,11 +83,14 @@ export class GraphicsDiagnostics {
       if(!this.enabled||this.phase!=='Main color')return shadows(...args);
       const previous=this.phase;this.phase='Dynamic shadows';
       const start=this.draws;
+      const cpuStart=performance.now();
       const query=profiler.detailedGpu?profiler.startGpuSection('GPU dynamic shadows'):undefined;
       try{return shadows(...args);}finally{
+        this.shadowCpu=performance.now()-cpuStart;profiler.record('Dynamic shadow submission CPU',this.shadowCpu);
         profiler.finishGpuSection(query,this.draws>start);this.phase=previous;
         this.colorQuery=profiler.detailedGpu?profiler.startGpuSection('GPU main color'):undefined;
         this.colorStart=this.draws;
+        this.colorCpuStart=performance.now();
       }
     };
   }
@@ -88,12 +101,20 @@ export class GraphicsDiagnostics {
   }}
   pass<T>(name:string,work:()=>T):T {
     const previous=this.phase;this.phase=name;
+    const cpuStart=performance.now();
+    if(name==='Main color'){this.colorCpuStart=undefined;this.shadowCpu=0;}
     const start=this.draws;
     const query=name!=='Main color'&&this.profiler.detailedGpu?this.profiler.startGpuSection(`GPU ${name.toLowerCase()}`):undefined;
     try{return work();}
     finally{
       this.profiler.finishGpuSection(query,this.draws>start);
-      if(name==='Main color'){this.profiler.finishGpuSection(this.colorQuery,this.draws>this.colorStart);this.colorQuery=undefined;}
+      if(name==='Main color'){
+        this.profiler.finishGpuSection(this.colorQuery,this.draws>this.colorStart);this.colorQuery=undefined;
+        if(this.enabled&&this.colorCpuStart!==undefined){
+          this.profiler.record('Main color submission CPU',performance.now()-this.colorCpuStart);
+          this.profiler.record('Renderer prepare CPU',Math.max(0,this.colorCpuStart-cpuStart-this.shadowCpu));
+        }
+      }
       this.phase=previous;
     }
   }
@@ -101,13 +122,18 @@ export class GraphicsDiagnostics {
     if(!this.enabled)return [];
     const now=performance.now();if(!this.memory||now-this.memoryAt>2000){this.memory=sceneResources(scene);this.memoryAt=now;}
     const m=this.memory;this.renderer.getDrawingBufferSize(this.size);
+    const totals=empty();for(const work of this.passes.values())add(totals,work);
     return [
       `Drawing buffer: ${this.size.x} × ${this.size.y} (${(this.size.x*this.size.y/1e6).toFixed(2)} MP), DPR ${this.renderer.getPixelRatio()}`,
       `Programs: ${this.renderer.info.programs?.length??0} · resident materials: ${m.materials}`,
+      `Scene graph: objects ${m.objects} · meshes ${m.meshes} · visible hierarchy meshes ${m.visibleMeshes} (before camera culling)`,
+      `All instrumented passes this frame: ${totals.draws} draws · ${totals.triangles.toLocaleString('en-US')} triangles · ${totals.instances} instance submissions`,
       `Render targets observed: ${[...this.targets].map(([name,sizes])=>`${name}: ${[...sizes].join(', ')}`).join(' · ')}`,
       `Referenced buffers: geometry ${mib(m.geometryBytes)} · instances ${mib(m.instanceBytes)} (${m.instanceSlots} slots)`,
       `Referenced texture storage ≈ ${mib(m.textureBytes)} (${m.textures} source/sampler pairs)`,
       'Estimates exclude driver, framebuffer/MSAA, shadow and reflection targets.',
+      'Largest referenced texture files (source/sampler copies, not file sizes):',
+      ...m.textureFiles.slice(0,12).map(t=>`${mib(t.bytes)} · ${t.copies} copies · ${t.width}×${t.height} · ${t.name}`),
       'Mesh work per pass (draws / triangles / instance submissions):',
       ...[...this.passes].map(([name,w])=>`${name}: ${w.draws} / ${w.triangles.toLocaleString('en-US')} / ${w.instances}`),
       ...[...this.recentPasses].filter(([name])=>!this.passes.has(name)).map(([name,{work:w,at}])=>

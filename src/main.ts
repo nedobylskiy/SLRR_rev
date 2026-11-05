@@ -118,16 +118,23 @@ async function runGameBoot() {
   } else if (viewer) {
     const javaControls = javaDrivingControls(result);
     const sceneVehicles = new JavaSceneVehicles(result, source, viewer, message => appendJavaEvent({ level: 'error', message }));
+    viewer.setPerformanceContext(()=>[
+      `Java scheduler: ${animating?`animating for ${(performance.now()-animateStartTime).toFixed(1)} ms`:'idle'} · skipped animation ticks ${animationSkipped} · animate period 50 ms · scene poll period 150 ms · map loading ${loadingTrack?'yes':'no'}`,
+      'Java call profiles (wall time, includes async waits; nested calls overlap):',
+      ...[...result.javaProfile].sort((a,b)=>b[1].peakMs-a[1].peakMs).map(([name,t])=>
+        `JVM ${name}: avg ${t.averageMs.toFixed(1)} ms · peak ${t.peakMs.toFixed(1)} · calls ${t.calls} · age ${((performance.now()-t.lastAt)/1000).toFixed(1)}s`),
+    ]);
     const partPreviews = new JavaPartPreviews(gameOsd.stage, result, source, viewer,
       message => appendJavaEvent({ level: 'error', message }));
-    let animating = false, loadingTrack = false;
+    let animating = false, loadingTrack = false,animationSkipped=0,animateStartTime=0;
     let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
-      if (animating) return;
+      if (animating){animationSkipped++;return;}
       animating = true;
       const animateStart = performance.now();
+      animateStartTime=animateStart;
       void result.gameTypes.animateCallbacks(error => {
         appendJavaEvent({ level: 'error', message: `Java animate: ${error.message}` });
       }).finally(() => { viewer?.profiler.record('Java animate (wall)', performance.now() - animateStart); animating = false; });
@@ -256,10 +263,11 @@ async function runGameBoot() {
       loadedTrackKey = key;
       void loadSelectedTrack(selected).finally(() => { loadingTrack = false; });
     };
-    const trackPoll = window.setInterval(checkActiveTrack, 150);
+    const trackPoll = window.setInterval(()=>viewer?.profiler.measure('Java scene poll CPU',checkActiveTrack), 150);
     disposeJavaScene = () => {
       mapDebugPanel.hidden = true;
       viewer?.setJavaSceneCamera(undefined);
+      viewer?.setPerformanceContext(undefined);
       sceneVehicles.dispose();
       partPreviews.dispose();
       window.clearInterval(animationTimer);
@@ -336,7 +344,7 @@ backfaceCheck.type='checkbox';backfaceCheck.checked=true;backfaceLabel.prepend(b
 backfaceLabel.title='Experimental: cull reverse faces of opaque static map meshes with consistent winding. Foliage, transparency and shadow casters stay two-sided.';
 backfaceCheck.onchange=()=>viewer?.setMapBackfaceCullingEnabled(backfaceCheck.checked);
 graphicsDetailsCheck.type='checkbox';graphicsDetailsLabel.prepend(graphicsDetailsCheck);mapDebugOptions.append(graphicsDetailsLabel);
-graphicsDetailsLabel.title='Sample GPU passes and count mesh draws. Instrumentation adds CPU overhead while enabled.';
+graphicsDetailsLabel.title='Record GPU passes, CPU/browser stalls, GL resource activity and texture memory estimates. Instrumentation adds CPU overhead while enabled.';
 graphicsDetailsCheck.onchange=()=>viewer?.setGraphicsDiagnosticsEnabled(graphicsDetailsCheck.checked);
 const observerLabel=textElement('label','Independent inspection camera'),observerCheck=document.createElement('input');
 observerCheck.type='checkbox';observerLabel.prepend(observerCheck);mapDebugOptions.append(observerLabel);
@@ -351,16 +359,21 @@ observerReset.type='button';observerReset.onclick=()=>viewer?.resetInspectionCam
 const graphicsReport=textElement('pre','','map-debug-data');
 mapDebugPanel.append(graphicsReport);
 const graphicsCopy=textElement('button','Copy graphics report') as HTMLButtonElement;
-graphicsCopy.type='button';graphicsCopy.onclick=()=>{void navigator.clipboard.writeText([
-  new Date().toISOString(),...viewer?.profiler.lines()??[],...viewer?.graphicsDebugLines()??[],
-].join('\n')).catch(error=>{graphicsReport.textContent=String(error);});};
+graphicsCopy.type='button';graphicsCopy.onclick=()=>{
+  const report=viewer?.profiler.measure('Graphics report build CPU',()=>[
+    new Date().toISOString(),...viewer!.profiler.lines(),...viewer!.graphicsDebugLines(),
+  ].join('\n'))??new Date().toISOString();
+  void navigator.clipboard.writeText(report).catch(error=>{graphicsReport.textContent=String(error);});
+};
 mapDebugOptions.append(graphicsCopy);
 window.setInterval(()=>{
   if(mapDebugPanel.hidden)return;
+  viewer?.profiler.measure('Graphics debug UI CPU',()=>{
   graphicsReport.textContent=[
     ...(graphicsDetailsCheck.checked?viewer?.profiler.lines().filter(line=>line.startsWith('GPU'))??[]:[]),
     ...viewer?.graphicsDebugLines()??[],
   ].join('\n');
+  });
 },500);
 const mapDebugChecks: HTMLInputElement[] = [];
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
@@ -522,7 +535,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     const row = `${prefix}${part.definition.alias} [0x${part.definition.key.id.toString(16)}] · ${slot} · wear ${Math.round(part.condition * 100)}%`;
     return [row, ...[...part.children.values()].flatMap(child => tree(child, depth + 1))];
   };
-  const refresh = () => {
+  const refreshCore = () => {
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
@@ -537,6 +550,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     ].join('\n');
     vehicleDebugTree.textContent = tree(root).join('\n');
   };
+  const refresh=()=>viewer?.profiler.measure('Vehicle debug UI CPU',refreshCore);
   refresh(); vehicleDebugTimer = window.setInterval(refresh, 200);
 }
 function clearVehicleDebug() {

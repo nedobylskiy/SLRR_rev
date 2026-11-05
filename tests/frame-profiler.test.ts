@@ -34,3 +34,29 @@ test('detailed mode alternates pass samples with a total GPU sample',()=>{
   f.profiler.endGpu();f.sample();
   assert.ok(f.profiler.lines().some(line=>line.startsWith('GPU total:')));f.profiler.dispose();
 });
+
+test('slow interval history separates the previous render callback from work between frames without double-counting nested scopes',context=>{
+  let now=0;context.mock.method(performance,'now',()=>now);
+  const {profiler:p}=fixture();p.setDetailedGpu(true);p.beginFrame(0);
+  p.measure('Render CPU',()=>{now+=2;p.measure('Nested CPU',()=>{now+=3;});now+=5;});
+  now=12;p.endFrame();p.measure('Dealer poll CPU',()=>{now+=20;});
+  now=66.7;p.beginFrame(now);p.endFrame();
+  const report=p.lines().join('\n');
+  assert.match(report,/interval 66.7 ms · previous callback 12.0 · gap 54.7/);
+  assert.match(report,/callback sections: Render CPU 10.0 · between callbacks measured CPU: Dealer poll CPU 20.0/);
+  assert.match(report,/Uninstrumented callback CPU: .*max session 2.0/);
+  now=70;p.measure('Late timer CPU',()=>{now+=80;});p.beginFrame(83.4);p.endFrame();
+  assert.ok(p.lines().some(l=>l.includes('RAF timestamp delta 16.7')&&l.includes('Late timer CPU 80.0')),
+    'a stale RAF timestamp cannot hide an actual main-thread stall');
+  for(let i=0;i<25;i++){now+=50;p.beginFrame(now);p.endFrame();}
+  assert.equal(p.lines().filter(l=>l.includes('s ago · interval')).length,12,'history stays bounded');
+  now+=120001;assert.equal(p.lines().filter(l=>l.includes('s ago · interval')).length,0,'old stalls expire');
+  p.dispose();
+});
+
+test('session maximum survives the short peak window and invalid samples are ignored',context=>{
+  let now=0;context.mock.method(performance,'now',()=>now);
+  const {profiler:p}=fixture();p.setDetailedGpu(true);p.record('Probe',50);now=3000;p.record('Probe',1);p.record('Probe',NaN);
+  assert.ok(p.lines().some(l=>l.startsWith('Probe:')&&l.includes('peak 1.0')&&l.includes('max session 50.0')&&l.includes('samples 2')));
+  p.dispose();
+});

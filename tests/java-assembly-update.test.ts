@@ -62,7 +62,9 @@ test('viewer drops only removed proxies and does not reload meshes already on sc
   scene.add(keptGroup, removedGroup);
   const proxies = new Map([[built.root, keptGroup], [removed, removedGroup]]), collisions = new Map([[removed, {}]]);
   const disposed: Group[] = [];
-  const viewer = { generation: 0, proxies, collisionMeshes: collisions, disposeGroup: (group: Group) => disposed.push(group) } as unknown as Viewer;
+  const viewer = { generation: 0, proxies, collisionMeshes: collisions,
+    profiler:{measure:(_name:string,work:()=>unknown)=>work()},
+    disposeGroup: (group: Group) => disposed.push(group) } as unknown as Viewer;
   Object.setPrototypeOf(viewer, Viewer.prototype);
   built.world.parts.delete(removed.id);
   Viewer.prototype.syncWorldVisuals.call(viewer, built.world);

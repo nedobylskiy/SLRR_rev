@@ -30,6 +30,41 @@ MSAA, shadow targets and reflection targets are excluded from the memory estimat
 Fragment invocations, texture-cache misses and actual overdraw are not available
 through these counters. CPU submission and GPU timings overlap; do not add them.
 
+**Copy graphics report** also includes all available Java callback profiles,
+vehicle/part counts, physics work summaries and both camera positions. With
+detailed diagnostics enabled, additional evidence is collected:
+
+- Whole render-callback CPU, uninstrumented callback CPU, RAF scheduling delay
+  and the wall gap between callbacks. Renderer preparation, shadow submission
+  and color submission are measured separately. CPU scopes can include driver
+  waits; this is not CPU utilization.
+- Parked-vehicle updates, vehicle mesh synchronization, Java scene polling and
+  debug/report UI work. Async Java timings are wall spans and overlap other work.
+- Last 180 samples' p95, the existing 2-second peak window, sample count and a
+  persistent maximum for each timing. GPU samples remain asynchronous and cannot
+  be matched to a slow CPU frame just because they appear in the same report.
+- The twelve worst frame intervals in the last 120 seconds, retaining the
+  previous callback's top-level sections and measured work between callbacks.
+  Both actual callback-start intervals and RAF timestamp deltas are shown:
+  timestamps can lag behind execution after a blocked main thread.
+- Browser long tasks and long animation frames when supported, including script
+  attribution, blocking duration and rendering/style-layout phase markers.
+  Observer records overlap. A 100 ms timer also records visible-page scheduling
+  delay. No browser API here directly measures garbage-collector pauses.
+- GPU vendor/renderer, GL/GLSL versions, context attributes/limits, hardware
+  concurrency, memory hints, optional JS heap readings and page visibility.
+  Hardware queries are cached rather than issued per frame.
+- CPU cost/counts of shader compilation/linking, buffer/texture uploads, mipmap
+  generation and observed readbacks/waits. Wrappers add no GL calls, readbacks or
+  synchronization. They are removed when diagnostics is disabled/disposed.
+- A total across all instrumented passes, plus texture-file storage and distinct
+  source/sampler-copy counts to reveal repeated uploads of the same asset.
+
+Enable diagnostics before reproducing a hitch, then copy the report while its
+history is still within 120 seconds. Instrumentation and live report formatting
+have a cost (the latter is measured). Disabling detailed diagnostics stops the
+browser observers, timer and GL resource hooks.
+
 Use **Copy graphics report** to copy the current measurements. Diagnostic mesh
 wrappers and resource traversal add CPU overhead while enabled; compare normal
 performance with this checkbox off.

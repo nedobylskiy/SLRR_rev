@@ -25,11 +25,15 @@ export class JavaSceneVehicles {
   private terrain?: Pick<MapTerrain, 'height'>;
   private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number; contacts:string }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
-    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>,
+    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'>>,
     private readonly report: (message: string) => void,
     private readonly factory: Pick<PartFactory, 'stock' | 'syncJavaAssembly'> = new PartFactory(assets)) {}
 
   update(map: JavaValue | null, terrain?: Pick<MapTerrain, 'height'>): void {
+    if(this.viewer.profiler)this.viewer.profiler.measure('Parked vehicles update CPU',()=>this.updateCore(map,terrain));
+    else this.updateCore(map,terrain);
+  }
+  private updateCore(map:JavaValue|null,terrain?:Pick<MapTerrain,'height'>):void {
     if (this.disposed) return;
     this.terrain = terrain;
     const { gameTypes, jvm } = this.result;
