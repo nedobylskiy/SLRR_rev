@@ -7,26 +7,37 @@ CPU work, default 2 ms, range 0.5–8 ms. Preparation and indexing can exceed th
 soft budget briefly. This is a CPU/GPU tradeoff, not a guarantee of more FPS.
 
 The culler uses the primary perspective camera, never the observer's position.
-It samples all eight vertices and the centre of each candidate's world AABB.
-Each ray must hit before the target with a 0.5 m safety margin. Hiding additionally
-requires every ray to hit the **same convex opaque patch**: either one triangle
-or a coplanar pair whose shared edge forms a convex quadrilateral. Nine random
-hits across unrelated walls do not prove full coverage and keep the object
-visible. Geometry is tested with triangle BVHs and an instance-bounds BVH;
-bounding boxes are not themselves used as occluders.
+Centre rays select actual opaque triangle patches using triangle and instance
+BVHs. A candidate patch generates a convex occlusion volume from the camera
+through its boundary. The **entire world AABB** must fit behind its plane and
+inside that volume, with 0.5 m depth and 1 cm edge margins. A centre hit alone
+never hides an object. Bounding boxes are not themselves used as blockers.
+The ray can consider a surface behind the nearest decorative triangles if that
+surface still lies in front of the target and proves full coverage.
 
-Only fully in-frustum target boxes are eligible. Camera-inside boxes, clipped
-objects and unproven cases remain visible. Near-plane-clipped intersections are
-not accepted. Blockers use the actual visual static-map geometry, not collision
+Patches include individual triangles, convex pairs and connected coplanar
+facades with any number of triangles. A large patch is accepted only with one
+closed convex boundary, consistent winding and matching triangle/polygon area.
+Holes, multiple boundary loops and concave boundaries are not filled in. This
+avoids the old restriction that all samples had to hit one triangle pair even
+when a solid tessellated building filled the screen.
+
+Boxes intersecting the primary frustum are eligible, including partially clipped
+boxes if the whole box is proven covered. Camera-inside and unproven boxes stay
+visible. Near-plane-clipped blockers are rejected conservatively using camera
+projection and plane distance. Blockers use visual static-map geometry, not collision
 shells. Blended/alpha-cutout/alpha-hashed/displaced surfaces are excluded, as are
 morphed geometries and invisible/non-depth-writing blockers. To bound initial
 cost, blocker geometry has at most 4096 triangles, at least 3 m height and 4 m
 horizontal extent. These restrictions intentionally miss some occlusion.
 
 Geometry BVHs are prepared incrementally. Stationary-camera results are cached.
-Camera/projection or streaming changes invalidate hidden decisions immediately;
-unprocessed instances default to visible. The report shows BVH preparation queue,
-rays and tests in the last frame, processed candidates and hidden instances.
+On camera motion, existing proofs are revalidated against updated occlusion
+volumes rather than throwing away every hidden decision. Invalid proofs and
+removed/changed blockers restore visibility immediately. Candidate processing is
+round-robin: camera movement and new BVHs never restart at the first objects.
+Unprocessed cases default to visible. The report shows BVH preparation queue,
+rays/tests, processed candidates, hidden instances and retained proofs.
 Partial progress while moving is expected. Use **Occlusion CPU**, main-color GPU
 time, draws and triangles to evaluate the result after preparation settles.
 
@@ -51,8 +62,16 @@ pixels exactly with the method off/on, including after moving around the wall,
 while submitting fewer color triangles. Real City comparisons also check pixel
 identity rather than assuming that fewer draws imply correct visibility.
 
-At the fixed City view `(15, 8, 15)` looking toward `(0, 15, -40)`, radius
-500 m, the completed cache hid 278 instances: 660 draws / 264495 triangles
+The initial implementation at City view `(15, 8, 15)` looking toward
+`(0, 15, -40)`, radius 500 m, hid 278 instances: 660 draws / 264495 triangles
 became 596 draws / 250772 triangles. The 256px offscreen comparison had no
 different color components. This measures submission and visibility, not FPS
 on the user's hardware.
+
+A near-wall regression view uses focus `(-35.3, 1.8, -9.6)`, camera
+`(-27.3, 4.3, -9.6)` and target `(-35.3, 2.9, -9.6)`, radius 500 m and the
+150 m off-screen shadow allowance. The updated method reduced 624 draws /
+215395 triangles to 406 draws / 158736 triangles, with identical comparison
+pixels. After repeated sub-millimetre camera motion it retained 896 hidden
+instances with no changed pixels. Tests also cover tessellated convex facades,
+partially clipped targets, silhouette protrusions and connected surfaces with holes.

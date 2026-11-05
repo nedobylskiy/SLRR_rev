@@ -72,3 +72,35 @@ test('a fully hidden batch skips only color submission and proxy cleanup never d
   f.draw(f.target);assert.deepEqual(f.draws,[f.target]);assert.equal(f.target.count,1);
   f.target.dispose();f.prepare();assert.equal(geometryDisposals,0);f.occlusion.reset();
 });
+test('a tessellated convex facade occludes across all its triangle boundaries',()=>{
+  const f=fixture();f.wall.geometry=new PlaneGeometry(6,10,12,20);f.prepare();
+  assert.ok(f.root.children.some(o=>o.userData.rayOcclusionProxy));f.occlusion.reset();
+});
+test('small camera motion retains a revalidated proof without restarting the candidate queue',()=>{
+  const f=fixture();f.prepare();const proxy=f.root.children.find(o=>o.userData.rayOcclusionProxy);
+  const cursor=(f.occlusion as any).cursor;f.occlusion.budgetMs=0;
+  for(let i=0;i<5;i++){f.camera.position.x+=.0001;f.camera.lookAt(f.camera.position.x,0,-1);f.occlusion.prepare(f.camera,f.root);}
+  assert.equal(f.root.children.find(o=>o.userData.rayOcclusionProxy),proxy);
+  assert.equal((f.occlusion as any).cursor,cursor);assert.match(f.occlusion.lines()[1],/retained proofs 1/);f.occlusion.reset();
+});
+test('a center ray alone never hides a box protruding outside the occluder silhouette',()=>{
+  const f=fixture();f.target.geometry=new BoxGeometry(10,10,10);f.target.count=1;f.prepare();
+  assert.equal(f.root.children.some(o=>o.userData.rayOcclusionProxy),false);
+  f.occlusion.renderMain(false,()=>f.draw(f.target));assert.deepEqual(f.draws,[f.target]);f.occlusion.reset();
+});
+test('a convex coverage proof also handles partially clipped target bounds',()=>{
+  const f=fixture();f.wall.geometry=new PlaneGeometry(100,100);f.target.geometry=new BoxGeometry(30,10,2);f.target.count=1;f.prepare();
+  f.occlusion.renderMain(false,()=>f.draw(f.target));assert.equal(f.draws.length,0);f.occlusion.reset();
+});
+test('connected triangulated surfaces with a hole are not promoted to a filled convex patch',()=>{
+  const geometry=new PlaneGeometry(6,6,6,6),indices=Array.from(geometry.index!.array);
+  geometry.setIndex(indices.filter((_,i)=>{const cell=Math.floor(i/6),x=cell%6,y=Math.floor(cell/6);return !([2,3].includes(x)&&[2,3].includes(y));}));
+  geometry.translate(0,0,-5);const rays=new OccluderGeometry(geometry);
+  assert.equal(rays.nearest(new Ray(new Vector3(),new Vector3(0,0,-1)),20),undefined);
+  const hit=rays.nearest(new Ray(new Vector3(),new Vector3(2,0,-5).normalize()),20)!;
+  assert.ok(hit);const throughHole=new Ray(new Vector3(),new Vector3(0,0,-1));
+  for(const patch of hit.patches){
+    const polygon=rays.patchVertices(patch);if(!polygon)continue;
+    for(let i=1;i+1<polygon.length;i++)assert.equal(throughHole.intersectTriangle(polygon[0],polygon[i],polygon[i+1],false,new Vector3()),null);
+  }
+});
