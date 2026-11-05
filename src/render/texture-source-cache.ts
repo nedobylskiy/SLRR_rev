@@ -1,4 +1,16 @@
 import type { Texture } from 'three';
+import { normalizePath, type Assets } from '../assets';
+
+/** A path identifies pixels only within the asset collection that supplied it. */
+export class AssetTextureSources {
+  private readonly assets = new WeakMap<Assets, TextureSourceCache>();
+
+  acquire(assets: Assets, path: string, load: () => Promise<Texture>): Promise<Texture> {
+    let cache = this.assets.get(assets);
+    if (!cache) { cache = new TextureSourceCache(); this.assets.set(assets, cache); }
+    return cache.acquire(normalizePath(path), load);
+  }
+}
 
 /** Share decoded/uploaded pixels, while each material owns its sampler and UV transform. */
 export class TextureSourceCache {

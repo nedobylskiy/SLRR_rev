@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { previewMaterial } from './preview-material';
 import { ptxTexture } from './ptx-texture';
-import { TextureSourceCache } from './texture-source-cache';
+import { AssetTextureSources, TextureSourceCache } from './texture-source-cache';
 import { GraphicsDiagnostics } from './graphics-diagnostics';
 import { InspectionCamera } from './inspection-camera';
 import { MapDistanceCutoff } from './map-distance-cutoff';
@@ -240,6 +240,7 @@ export class Viewer {
   private generation = 0;
   private mapStream?: MapObjectStream;
   private mapTextures = new TextureSourceCache();
+  private vehicleTextures = new AssetTextureSources();
   private mapStreamRange = 500;
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
@@ -379,6 +380,7 @@ export class Viewer {
     this.collisionOnlyMapMeshes=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
+    this.vehicleTextures = new AssetTextureSources();
     this.staticMapShadows.reset();this.staticMapRoot=undefined;
     this.vehicleReflections.reset();
     this.sunFlareRevision++;
@@ -715,7 +717,8 @@ export class Viewer {
         if (material.userData.paintDefault) materials.push(material);
     } });
     for (const material of materials) {
-      const texture = await this.texture(await assets.read(paint.to), paint.to);
+      const texture = await this.vehicleTextures.acquire(assets, paint.to,
+        async () => this.texture(await assets.read(paint.to), paint.to));
       if (part.world.disposed || this.proxies.get(part) !== group) { texture.dispose(); return; }
       texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
       if (material.map) { texture.repeat.copy(material.map.repeat); texture.offset.copy(material.map.offset); material.map.dispose(); }
@@ -1336,9 +1339,10 @@ export class Viewer {
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     const mapTextures = this.mapTextures;
+    const vehicleTextures = this.vehicleTextures;
     const loadTexture = (bytes: Uint8Array, path: string) => mapSurface
       ? mapTextures.acquire(normalizePath(path), () => this.texture(bytes, path))
-      : this.texture(bytes, path);
+      : vehicleTextures.acquire(assets, path, () => this.texture(bytes, path));
     for (const part of model.meshes) {
       if (!wanted()) break;
       const geometry = new THREE.BufferGeometry();
@@ -1441,7 +1445,9 @@ export class Viewer {
       if (!mapSurface) {
         const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {
           if (!path) return;
-          const texture = await this.texture(await assets.read(path), path);
+          const texture = await vehicleTextures.acquire(assets, path,
+            async () => this.texture(await assets.read(path), path));
+          if (generation !== this.generation) { texture.dispose(); return; }
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           if (map) { texture.repeat.set(map.scaleU, map.scaleV); texture.offset.set(map.offsetU, map.offsetV); }
           return texture;

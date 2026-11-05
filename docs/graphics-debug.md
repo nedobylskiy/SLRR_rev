@@ -178,3 +178,19 @@ the loaded suspension pose while its inputs remain unchanged. Native part pose
 publication uses the existing live-object index instead of scanning all resource
 handles for every part. This is display synchronization, not a driving physics
 sleep system: moving simulated vehicles still need their regular solver ticks.
+
+## Shared vehicle texture sources
+
+Vehicle, preview and Java-object SCX materials share decoded texture sources by
+normalized file path within the same Assets collection. Diffuse, paint changes,
+second layers, authored lightmaps, detail and reflection layers use this pool.
+Each consumer owns a Texture clone with independent UV transforms and sampler
+settings. Three.js can reuse the GPU upload when source and sampler agree;
+different samplers or color spaces can still require separate GPU storage.
+
+Disposing one part releases its clone only. The last consumer evicts the source,
+so this is not an unbounded cache across scene changes. Scene clear starts a new
+pool; pending old requests retain their old pool until their clones are released.
+Different Assets collections never share pixels merely because paths match.
+This does not merge materials or reduce draw calls. Compare texture copies and
+referenced storage in reports from otherwise identical scenes.
