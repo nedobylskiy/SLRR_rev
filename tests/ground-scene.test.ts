@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlrrJvm, jv, type JavaValue } from 'slrr-jvm';
-import { groundRenderDefinition, groundRenderHasChildren, mapRenderIds } from '../src/engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, mapRenderIds } from '../src/engine/map';
+import type { ScxModel } from '../src/formats/scx';
 import type { RpkEntry } from '../src/formats/rpk';
 import { activeJavaTrack } from '../src/runtime/java-scene';
 import { GameTypeNative } from '../src/runtime/game-type-native';
@@ -20,6 +21,26 @@ test('a direct ground mesh with child renders keeps the outdoor map loading path
   assert.equal(groundRenderHasChildren(pack, 20), true, 'TestTrack root owns other map pieces');
   assert.deepEqual(mapRenderIds(pack), [20, 51]);
   assert.equal(groundRenderHasChildren(pack, 5), false, 'a garage room remains isolated');
+});
+
+test('ROC empty direct root must load sibling outdoor pieces while real rooms stay isolated', () => {
+  const entry = (typeId: number, superId: number, type: number, text = ''): RpkEntry => ({
+    typeId, superId, type, flags: 0, compatibility: 1, offset: 0, size: text.length,
+    alias: '', data: new TextEncoder().encode(text),
+  });
+  // ROC's GroundRef points to 0x1e; the actual area meshes belong to 0x14.
+  const pack = { version: 0x200, dependencies: [], warnings: [], entries: [
+    entry(0x1e, 0x20003, 14, 'mesh 0x1d'), entry(0x1d, 0, 5),
+    entry(0x14, 0x20003, 14), entry(0x24, 0x14, 14, 'mesh 0x23'), entry(0x23, 0, 5),
+  ] };
+  const empty: ScxModel = { version: 4, meshes: [], warnings: ['Empty SCX placeholder: no geometry'] };
+  assert.equal(groundRenderHasChildren(pack, 0x1e), false);
+  assert.equal(groundRenderIsRoom(pack, 0x1e, empty), false);
+  assert.deepEqual(mapRenderIds(pack), [0x24], 'the populated sibling tree supplies geometry and collision');
+  const triangle: ScxModel = { version: 4, warnings: [], meshes: [{ name: 'room',
+    positions: new Float32Array([0,0,0, 1,0,0, 0,0,1]), normals: new Float32Array(9), uv: new Float32Array(6),
+    indices: new Uint32Array([0,1,2]), diffuse: [1,1,1,1], textureIndex: 0xffff }] };
+  assert.equal(groundRenderIsRoom(pack, 0x1e, triangle), true, 'real leaf rooms retain their explicit mesh and pose');
 });
 
 test('compiled GroundRef RSD chooses its own room mesh and pose, not all rooms in the pack', () => {

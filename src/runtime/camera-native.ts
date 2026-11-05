@@ -16,7 +16,7 @@ interface CameraState {
 
 /** Script-facing camera resource; the active Three.js camera can consume this state later. */
 export class CameraNative {
-  private readonly cameras = new WeakMap<JavaObject, CameraState>();
+  private readonly cameras = new Map<JavaObject, CameraState>();
 
   constructor(jvm: SlrrJvm, resources: GameTypeNative, viewports: ViewportNative) {
     const voidValue = () => jv('void', undefined);
@@ -47,6 +47,10 @@ export class CameraNative {
   }
 
   get(receiver: JavaValue): Readonly<CameraState> | undefined { return this.cameras.get(this.object(receiver)); }
+  *entries(): IterableIterator<[JavaValue, Readonly<CameraState>]> {
+    for (const [object, state] of this.cameras) yield [jv('Camera', object), state];
+  }
+  dispose(): void { this.cameras.clear(); }
 
   private object(receiver: JavaValue): JavaObject {
     const object = receiver.value as JavaObject | null;

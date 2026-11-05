@@ -1,8 +1,9 @@
-import type { JavaValue } from './java-source.js';
+import type { JavaValue, JavaContinuation } from './java-source.js';
 
 export interface NativeCall {
   receiver: JavaValue;
   args: readonly JavaValue[];
+  continuation?: JavaContinuation;
 }
 
 export type NativeFunction = (call: NativeCall) => JavaValue;
@@ -66,8 +67,8 @@ export class JavaNativeRegistry {
   }
 
   async invokeAsync(className: string, method: string, receiver: JavaValue, args: readonly JavaValue[],
-    score?: (parameter: string, argument: JavaValue) => number): Promise<JavaValue | undefined> {
-    return this.find(className, method, args, score)?.implementation({ receiver, args });
+    score?: (parameter: string, argument: JavaValue) => number, continuation?: JavaContinuation): Promise<JavaValue | undefined> {
+    return this.find(className, method, args, score)?.implementation({ receiver, args, continuation });
   }
 
   private find(className: string, method: string, args: readonly JavaValue[],

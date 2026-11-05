@@ -44,6 +44,10 @@ export class ResourceCatalog {
     return this.resources.get(ResourceCatalog.key(pack, id));
   }
 
+  registerTexture(pack: string, id: number, path: string): void {
+    this.resources.set(ResourceCatalog.key(pack, id), { pack, id, type: 7, alias: path });
+  }
+
   private static key(pack: string, id: number): string {
     return `${normalizeResourcePackPath(pack)}:${id & 0xffff}`;
   }

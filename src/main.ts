@@ -3,6 +3,8 @@ import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
+import { JavaPartPreviews } from './render/java-part-previews';
+import { JavaMouse } from './render/java-mouse';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
 import { parseRpk, entryProperties } from './formats/rpk';
@@ -10,6 +12,7 @@ import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
+import { defaultSuspensionDebug, type SuspensionDebugSettings } from './render/suspension-debug';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import { Vector3 } from 'three';
@@ -27,8 +30,8 @@ import { initializeSoftBodyWasm, softBodyRuntime, type SoftBodyBackend } from '.
 const softBodyReady = initializeSoftBodyWasm();
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Independent engine · Research build 0.1</small></div></div><div class="header-right"><span id="connection">Connecting…</span><button id="memory-lab">Memory stream</button><label class="button">Open game folder<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
-<main><aside><div class="eyebrow">ORIGINAL ASSETS</div><h1>Under the hood.</h1><p class="intro">SLRR assets in a new environment. No original EXE required.</p><div id="counts"></div><input id="search" type="search" placeholder="Search: Baiern, chassis, GameLogic…" aria-label="Search assets"><nav id="filters"><button data-kind="scx" class="active">Models</button><button data-kind="rpk">Packages</button><button data-kind="class">Scripts</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Cars</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
+<header><div class="brand"><span class="mark">SL / R</span><div>REDLINE <b>REBUILT</b><small>Open-source WebGL remaster · Development build 0.1</small></div></div><div class="header-right"><span id="connection">Connecting…</span><button id="memory-lab">Memory stream</button><label class="button">Open game folder<input id="folder" type="file" webkitdirectory multiple hidden></label></div></header>
+<main><aside><div class="eyebrow">ORIGINAL ASSETS</div><h1>Under the hood.</h1><p class="intro">An open-source engine remaster of Street Legal Racing: Redline, rebuilt for the browser with WebGL 2.</p><div id="counts"></div><input id="search" type="search" placeholder="Search: Baiern, chassis, GameLogic…" aria-label="Search assets"><nav id="filters"><button data-kind="scx" class="active">Models</button><button data-kind="rpk">Packages</button><button data-kind="class">Scripts</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Cars</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
 <section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">JAVA / ENTRY POINT</span><div id="filename">Waiting for Init.java</div></div><span class="badge" id="state">Idle</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">Left drag: rotate &nbsp; · &nbsp; Wheel: zoom &nbsp; · &nbsp; Right drag: pan</div><div class="detail"><div class="eyebrow">DIAGNOSTICS</div><div id="details">Loading game catalog…</div></div></section></main><footer><span>JAVA SOURCE / WEBGL 2</span><span>Original Init.java runs first · GameLogic is under implementation</span><span id="total"></span></footer>`;
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -91,6 +94,8 @@ async function runGameBoot() {
   disposeGameBoot = () => result.dispose();
   viewer?.setJavaSceneCamera(() => javaSceneCamera(result));
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
+  const javaMouse = new JavaMouse(el('viewport'), result, source,
+    message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));
   const poll = window.setInterval(() => {
     try { result.input.pollCooperative(); }
     catch (reason) {
@@ -98,7 +103,7 @@ async function runGameBoot() {
       appendJavaEvent({ level: 'error', message: `Java input: ${reason instanceof Error ? reason.message : String(reason)}` });
     }
   }, 50);
-  disposeJavaInput = () => { detachKeyboard(); window.clearInterval(poll); };
+  disposeJavaInput = () => { javaMouse.dispose(); detachKeyboard(); window.clearInterval(poll); };
   el<HTMLButtonElement>('java-retry').disabled = false;
   el('java-run-state').textContent = result.error ? 'Blocked at Java call' : 'Init.java completed';
   el('details').textContent = result.error
@@ -113,14 +118,23 @@ async function runGameBoot() {
   } else if (viewer) {
     const javaControls = javaDrivingControls(result);
     const sceneVehicles = new JavaSceneVehicles(result, source, viewer, message => appendJavaEvent({ level: 'error', message }));
-    let animating = false, loadingTrack = false;
+    viewer.setPerformanceContext(()=>[
+      `Java scheduler: ${animating?`animating for ${(performance.now()-animateStartTime).toFixed(1)} ms`:'idle'} · skipped animation ticks ${animationSkipped} · animate period 50 ms · scene poll period 150 ms · map loading ${loadingTrack?'yes':'no'}`,
+      'Java call profiles (wall time, includes async waits; nested calls overlap):',
+      ...[...result.javaProfile].sort((a,b)=>b[1].peakMs-a[1].peakMs).map(([name,t])=>
+        `JVM ${name}: avg ${t.averageMs.toFixed(1)} ms · peak ${t.peakMs.toFixed(1)} · calls ${t.calls} · age ${((performance.now()-t.lastAt)/1000).toFixed(1)}s`),
+    ]);
+    const partPreviews = new JavaPartPreviews(gameOsd.stage, result, source, viewer,
+      message => appendJavaEvent({ level: 'error', message }));
+    let animating = false, loadingTrack = false,animationSkipped=0,animateStartTime=0;
     let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
-      if (animating) return;
+      if (animating){animationSkipped++;return;}
       animating = true;
       const animateStart = performance.now();
+      animateStartTime=animateStart;
       void result.gameTypes.animateCallbacks(error => {
         appendJavaEvent({ level: 'error', message: `Java animate: ${error.message}` });
       }).finally(() => { viewer?.profiler.record('Java animate (wall)', performance.now() - animateStart); animating = false; });
@@ -131,6 +145,7 @@ async function runGameBoot() {
 
     const loadSelectedTrack = async (selected: NonNullable<ReturnType<typeof activeJavaTrack>>) => {
       sceneVehicles.update(null);
+      mapDebugPanel.hidden = true;
       sceneTerrain = undefined;
       const stopPrevious = activeTrackCleanup;
       activeTrackCleanup = undefined;
@@ -159,6 +174,7 @@ async function runGameBoot() {
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         sceneTerrain = map.terrain;
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
+        showMapDebugControls(map);
         if (built && selected.driving) {
           gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
           const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
@@ -191,7 +207,6 @@ async function runGameBoot() {
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
                   result.gameTypes.updateTriggerContacts(car);
                 } });
-            showMapDebugControls(map);
             showVehicleDebug(built.root, session, () => [...result.javaProfile].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 3)
               .map(([name, t]) => `JVM ${name}: ${t.averageMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / calls ${t.calls} / ${((performance.now() - t.lastAt) / 1000).toFixed(1)}s ago (wall)`).join('\n'));
             driveHud.hidden = true;
@@ -223,6 +238,7 @@ async function runGameBoot() {
       const selected = activeJavaTrack(result);
       if (!selected || !source.byPath.has(selected.mapPack)) {
         sceneVehicles.update(null);
+        mapDebugPanel.hidden = true;
         loadedTrackKey = '';
         pendingTrackKey = '';
         return;
@@ -247,10 +263,13 @@ async function runGameBoot() {
       loadedTrackKey = key;
       void loadSelectedTrack(selected).finally(() => { loadingTrack = false; });
     };
-    const trackPoll = window.setInterval(checkActiveTrack, 150);
+    const trackPoll = window.setInterval(()=>viewer?.profiler.measure('Java scene poll CPU',checkActiveTrack), 150);
     disposeJavaScene = () => {
+      mapDebugPanel.hidden = true;
       viewer?.setJavaSceneCamera(undefined);
+      viewer?.setPerformanceContext(undefined);
       sceneVehicles.dispose();
+      partPreviews.dispose();
       window.clearInterval(animationTimer);
       window.clearInterval(trackPoll);
       window.removeEventListener('pointerdown', unlockMusic);
@@ -292,9 +311,70 @@ const hoodButton = textElement('button', 'Hood impact test'); hoodButton.classNa
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
-mapDebugPanel.append(textElement('summary', 'Map collision frames'));
+mapDebugPanel.append(textElement('summary', 'Graphics / map debug'));
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
+const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
+farPlaneCheck.type='checkbox';farPlaneLabel.prepend(farPlaneCheck);mapDebugOptions.append(farPlaneLabel);
+farPlaneLabel.title='Limit the primary camera far clipping plane to the streaming radius. The inspection camera retains its full range. Disable to restore the game camera range.';
+farPlaneCheck.onchange=()=>viewer?.setFarPlaneEnabled(farPlaneCheck.checked);
+const streamThrottleLabel=textElement('label','Limit streamer update rate'),streamThrottleCheck=document.createElement('input');
+streamThrottleCheck.type='checkbox';streamThrottleCheck.checked=true;streamThrottleLabel.prepend(streamThrottleCheck);mapDebugOptions.append(streamThrottleLabel);
+streamThrottleLabel.title='Reuse the prepared map instance lists between updates. Larger intervals also delay visibility changes and installation of loaded objects.';
+const streamIntervalLabel=textElement('label','Streamer interval (ms)'),streamIntervalInput=document.createElement('input');
+streamIntervalInput.type='number';streamIntervalInput.min='0';streamIntervalInput.step='1';streamIntervalInput.value='100';
+streamIntervalInput.style.width='75px';streamIntervalLabel.append(streamIntervalInput);mapDebugOptions.append(streamIntervalLabel);
+streamThrottleCheck.onchange=()=>{streamIntervalInput.disabled=!streamThrottleCheck.checked;viewer?.setStreamThrottleEnabled(streamThrottleCheck.checked);};
+streamIntervalInput.onchange=()=>{if(streamIntervalInput.value!==''&&streamIntervalInput.checkValidity())viewer?.setStreamIntervalMs(Number(streamIntervalInput.value));};
+const graphicsDetailsLabel=textElement('label','Detailed GPU diagnostics'),graphicsDetailsCheck=document.createElement('input');
+const cutoffLabel=textElement('label','Geometry distance cutoff'),cutoffCheck=document.createElement('input');
+const rayOcclusionLabel=textElement('label','Raycast occlusion culling'),rayOcclusionCheck=document.createElement('input');
+rayOcclusionCheck.type='checkbox';rayOcclusionLabel.prepend(rayOcclusionCheck);mapDebugOptions.append(rayOcclusionLabel);
+rayOcclusionLabel.title='Experimental CPU rays against opaque visual triangles. Only proven convex coverage hides a box. Shadows and reflections retain full geometry.';
+rayOcclusionCheck.onchange=()=>viewer?.setRaycastOcclusionEnabled(rayOcclusionCheck.checked);
+const rayBudgetLabel=textElement('label','Ray budget (ms)'),rayBudgetInput=document.createElement('input');
+rayBudgetInput.type='number';rayBudgetInput.min='.5';rayBudgetInput.max='8';rayBudgetInput.step='.5';rayBudgetInput.value='2';
+rayBudgetInput.style.width='55px';rayBudgetLabel.append(rayBudgetInput);mapDebugOptions.append(rayBudgetLabel);
+rayBudgetInput.onchange=()=>viewer?.setRaycastOcclusionBudget(Number(rayBudgetInput.value));
+cutoffCheck.type='checkbox';cutoffLabel.prepend(cutoffCheck);mapDebugOptions.append(cutoffLabel);
+cutoffLabel.title='Split large static meshes into 64 m cells and cut at the streaming radius. Cells prepare once when enabled. Physics stays unchanged.';
+cutoffCheck.onchange=()=>viewer?.setGeometryCutoffEnabled(cutoffCheck.checked);
+const backfaceLabel=textElement('label','Back-face culling (map)'),backfaceCheck=document.createElement('input');
+backfaceCheck.type='checkbox';backfaceCheck.checked=true;backfaceLabel.prepend(backfaceCheck);mapDebugOptions.append(backfaceLabel);
+backfaceLabel.title='Experimental: cull reverse faces of opaque static map meshes with consistent winding. Foliage, transparency and shadow casters stay two-sided.';
+backfaceCheck.onchange=()=>viewer?.setMapBackfaceCullingEnabled(backfaceCheck.checked);
+graphicsDetailsCheck.type='checkbox';graphicsDetailsLabel.prepend(graphicsDetailsCheck);mapDebugOptions.append(graphicsDetailsLabel);
+graphicsDetailsLabel.title='Record GPU passes, CPU/browser stalls, GL resource activity and texture memory estimates. Instrumentation adds CPU overhead while enabled.';
+graphicsDetailsCheck.onchange=()=>viewer?.setGraphicsDiagnosticsEnabled(graphicsDetailsCheck.checked);
+const observerLabel=textElement('label','Independent inspection camera'),observerCheck=document.createElement('input');
+observerCheck.type='checkbox';observerLabel.prepend(observerCheck);mapDebugOptions.append(observerLabel);
+observerLabel.title='Left drag orbit, right drag pan, wheel zoom. Streaming stays attached to the primary game camera.';
+observerCheck.onchange=()=>viewer?.setInspectionCameraEnabled(observerCheck.checked);
+const residentLabel=textElement('label','Inspect all resident instances'),residentCheck=document.createElement('input');
+residentCheck.type='checkbox';residentLabel.prepend(residentCheck);mapDebugOptions.append(residentLabel);
+residentLabel.title='Observer only: show already loaded instances, including those excluded by primary-camera culling. This deliberately increases render work.';
+residentCheck.onchange=()=>viewer?.setInspectResidentEnabled(residentCheck.checked);
+const observerReset=textElement('button','Reset inspection camera') as HTMLButtonElement;
+observerReset.type='button';observerReset.onclick=()=>viewer?.resetInspectionCamera();mapDebugOptions.append(observerReset);
+const graphicsReport=textElement('pre','','map-debug-data');
+mapDebugPanel.append(graphicsReport);
+const graphicsCopy=textElement('button','Copy graphics report') as HTMLButtonElement;
+graphicsCopy.type='button';graphicsCopy.onclick=()=>{
+  const report=viewer?.profiler.measure('Graphics report build CPU',()=>[
+    new Date().toISOString(),...viewer!.profiler.lines(),...viewer!.graphicsDebugLines(),
+  ].join('\n'))??new Date().toISOString();
+  void navigator.clipboard.writeText(report).catch(error=>{graphicsReport.textContent=String(error);});
+};
+mapDebugOptions.append(graphicsCopy);
+window.setInterval(()=>{
+  if(mapDebugPanel.hidden)return;
+  viewer?.profiler.measure('Graphics debug UI CPU',()=>{
+  graphicsReport.textContent=[
+    ...(graphicsDetailsCheck.checked?viewer?.profiler.lines().filter(line=>line.startsWith('GPU'))??[]:[]),
+    ...viewer?.graphicsDebugLines()??[],
+  ].join('\n');
+  });
+},500);
 const mapDebugChecks: HTMLInputElement[] = [];
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
   const label = textElement('label', title), input = document.createElement('input'); input.type = 'checkbox';
@@ -311,10 +391,18 @@ inertialCameraLabel.title = 'Experimental external camera with its own velocity 
 inertialCameraCheck.onchange = () => viewer?.setInertialCameraEnabled(inertialCameraCheck.checked);
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
-const shadowsLabel = textElement('label', 'Shadow maps'), shadowsCheck = document.createElement('input');
+const shadowsLabel = textElement('label', 'Dynamic shadows'), shadowsCheck = document.createElement('input');
 shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
-shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
+shadowsLabel.title = 'Dynamic sun shadows from vehicle parts only. Static map shadows use Baked lightmaps.';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
+const bakedLightmapsLabel = textElement('label', 'Baked lightmaps'), bakedLightmapsCheck = document.createElement('input');
+bakedLightmapsCheck.type = 'checkbox'; bakedLightmapsCheck.checked = true; bakedLightmapsLabel.prepend(bakedLightmapsCheck); mapDebugOptions.append(bakedLightmapsLabel);
+bakedLightmapsLabel.title = 'Authored SCX lighting; surfaces without a lightmap use cached static-map shadows. Independent of dynamic shadows.';
+bakedLightmapsCheck.onchange = () => viewer?.setBakedLightmapsEnabled(bakedLightmapsCheck.checked);
+const reflectionsLabel = textElement('label', 'Real reflections'), reflectionsCheck = document.createElement('input');
+reflectionsCheck.type = 'checkbox'; reflectionsLabel.prepend(reflectionsCheck); mapDebugOptions.append(reflectionsLabel);
+reflectionsLabel.title = 'Local 128px cubemap around the car, refreshed four times per second (additional GPU cost)';
+reflectionsCheck.onchange = () => viewer?.setRealReflectionsEnabled(reflectionsCheck.checked);
 const lightingLabel = textElement('label', 'Dynamic lighting'), lightingCheck = document.createElement('input');
 lightingCheck.type = 'checkbox'; lightingCheck.checked = true; lightingLabel.prepend(lightingCheck); mapDebugOptions.append(lightingLabel);
 lightingLabel.title = 'Sun and ambient illumination; disable to inspect original texture colors';
@@ -344,6 +432,82 @@ for (const [value, title] of [['auto', 'Auto (prefer C++ / WASM)'], ['ts', 'Type
 }
 softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.value as SoftBodyBackend; };
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
+const suspensionDebugPanel = document.createElement('details');
+suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
+suspensionDebugPanel.append(textElement('p', 'Base suspension: height +0.165 m; front attachments 0.055 m inward, rear 0.075 m outward. Sliders add visual offsets (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
+const suspensionSettings = defaultSuspensionDebug();
+let suspensionSteer: number | undefined;
+const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
+const suspensionValues = document.createElement('textarea'); suspensionValues.readOnly = true; suspensionValues.rows = 8;
+suspensionValues.setAttribute('aria-label', 'Suspension debug values to share');
+const updateSuspensionDebug = () => {
+  viewer?.setSuspensionDebug(suspensionSettings);
+  if (viewer) viewer.calibrationSteering = suspensionSteer;
+  suspensionValues.value = JSON.stringify({ ...suspensionSettings, steeringInput: suspensionSteer ?? null }, null, 2);
+};
+for (const [key, title] of [
+  ['frontLeftAttachmentOffset', 'Front left attachment offset'], ['frontRightAttachmentOffset', 'Front right attachment offset'],
+  ['rearLeftAttachmentOffset', 'Rear left attachment offset'], ['rearRightAttachmentOffset', 'Rear right attachment offset'],
+  ['rearRotation', 'Rear control arm rotation'], ['rearShaftRotation', 'Rear CV shaft rotation'],
+  ['rearLeftArmOffset', 'Left rear arm offset'], ['rearLeftArmRotation', 'Left rear arm rotation'],
+  ['rearRightArmOffset', 'Right rear arm offset'], ['rearRightArmRotation', 'Right rear arm rotation'],
+  ['frontLeftWheelOffset', 'Front left wheel offset'], ['frontRightWheelOffset', 'Front right wheel offset'],
+  ['rearLeftWheelOffset', 'Rear left wheel offset'], ['rearRightWheelOffset', 'Rear right wheel offset'],
+] as const) {
+  suspensionDebugPanel.append(textElement('strong', title));
+  const rotation = key.includes('Rotation');
+  for (let axis = 0; axis < 3; axis++) {
+    const label = document.createElement('label'); label.className = 'suspension-debug-axis';
+    const range = document.createElement('input'), number = document.createElement('input');
+    range.type = 'range'; number.type = 'number';
+    for (const input of [range, number]) {
+      input.min = rotation ? '-180' : '-0.5'; input.max = rotation ? '180' : '0.5';
+      input.step = rotation ? '1' : '0.005'; input.value = '0';
+      input.setAttribute('aria-label', `${title} ${'XYZ'[axis]} (${rotation ? 'degrees' : 'meters'})`);
+    }
+    const change = (input: HTMLInputElement) => {
+      if (input.value === '' || !Number.isFinite(input.valueAsNumber)) return;
+      const value = Math.max(Number(input.min), Math.min(Number(input.max), input.valueAsNumber));
+      suspensionSettings[key][axis] = value; range.value = number.value = String(value); updateSuspensionDebug();
+    };
+    range.oninput = () => change(range); number.oninput = () => change(number);
+    label.append(textElement('span', `${'XYZ'[axis]} ${rotation ? '°' : 'm'}`), range, number);
+    suspensionDebugPanel.append(label); suspensionInputs.push({ key, axis, range, number });
+  }
+}
+const steeringLabel = document.createElement('label'); steeringLabel.className = 'map-stream-range';
+const steeringReadout = textElement('span', 'Garage steering: script controlled');
+const steeringRange = document.createElement('input'); steeringRange.type = 'range';
+steeringRange.min = '-1'; steeringRange.max = '1'; steeringRange.step = '0.01'; steeringRange.value = '0';
+steeringRange.setAttribute('aria-label', 'Garage vehicle steering');
+steeringRange.oninput = () => {
+  suspensionSteer = Number(steeringRange.value);
+  steeringReadout.textContent = `Garage steering: ${suspensionSteer.toFixed(2)}`;
+  updateSuspensionDebug();
+};
+const steeringRestore = textElement('button', 'Restore script steering');
+steeringRestore.onclick = () => {
+  suspensionSteer = undefined; steeringRange.value = '0'; steeringReadout.textContent = 'Garage steering: script controlled'; updateSuspensionDebug();
+};
+steeringLabel.append(steeringReadout, steeringRange, steeringRestore); suspensionDebugPanel.append(steeringLabel);
+const suspensionReset = textElement('button', 'Reset suspension alignment');
+const suspensionHeightPreset = textElement('button', 'Use base height (+0.165 m)');
+suspensionHeightPreset.onclick = () => {
+  suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0;
+  for (const offset of [suspensionSettings.frontLeftAttachmentOffset, suspensionSettings.frontRightAttachmentOffset,
+    suspensionSettings.rearLeftAttachmentOffset, suspensionSettings.rearRightAttachmentOffset]) offset[1] = 0;
+  for (const { key, axis, range, number } of suspensionInputs)
+    range.value = number.value = String(suspensionSettings[key][axis]);
+  updateSuspensionDebug();
+};
+suspensionReset.onclick = () => {
+  Object.assign(suspensionSettings, defaultSuspensionDebug());
+  suspensionSteer = undefined; steeringRange.value = '0'; steeringReadout.textContent = 'Garage steering: script controlled';
+  for (const { range, number } of suspensionInputs) range.value = number.value = '0';
+  updateSuspensionDebug();
+};
+suspensionDebugPanel.append(suspensionHeightPreset, suspensionReset, suspensionValues); mapDebugPanel.append(suspensionDebugPanel);
+updateSuspensionDebug();
 let mapDebugSession: ReturnType<Viewer['drive']> | undefined;
 vehicleFramesCheck.onchange = () => mapDebugSession?.vehicleFrames(vehicleFramesCheck.checked);
 bodyVisibleCheck.onchange = () => mapDebugSession?.bodyVisible(bodyVisibleCheck.checked);
@@ -371,7 +535,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     const row = `${prefix}${part.definition.alias} [0x${part.definition.key.id.toString(16)}] · ${slot} · wear ${Math.round(part.condition * 100)}%`;
     return [row, ...[...part.children.values()].flatMap(child => tree(child, depth + 1))];
   };
-  const refresh = () => {
+  const refreshCore = () => {
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
@@ -386,6 +550,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     ].join('\n');
     vehicleDebugTree.textContent = tree(root).join('\n');
   };
+  const refresh=()=>viewer?.profiler.measure('Vehicle debug UI CPU',refreshCore);
   refresh(); vehicleDebugTimer = window.setInterval(refresh, 200);
 }
 function clearVehicleDebug() {
@@ -400,11 +565,12 @@ const tireSettings: TireModelSettings = structuredClone(DEFAULT_TIRE_MODEL);
 const tireStorageKey = 'slrr.tire-model.v1';
 let storedTires: Partial<TireModelSettings> | undefined;
 try { storedTires = JSON.parse(localStorage.getItem(tireStorageKey) ?? 'null') ?? undefined; } catch { /* Ignore invalid saved tuning. */ }
-if (storedTires?.model === 'legacy') tireSettings.model = 'legacy';
-const modelLabel = textElement('label', 'Magic Formula (Pacejka)'), modelCheck = document.createElement('input');
-modelCheck.type = 'checkbox'; modelCheck.checked = tireSettings.model === 'pacejka'; modelLabel.prepend(modelCheck); tireControls.append(modelLabel);
+if (storedTires?.model === 'legacy' || storedTires?.model === 'sl2') tireSettings.model = storedTires.model;
+const modelLabel = textElement('label', 'Tire solver'), modelCheck = document.createElement('select');
+for (const [value,label] of [['sl2','Original SL2 (Java WheelRef)'],['pacejka','Tunable Pacejka'],['legacy','Legacy']]) { const option=document.createElement('option'); option.value=value; option.textContent=label; modelCheck.append(option); }
+modelCheck.value=tireSettings.model; modelLabel.append(modelCheck); tireControls.append(modelLabel);
 const tireSliders: { input: HTMLInputElement; output: HTMLOutputElement; axis: 'longitudinal' | 'lateral'; parameter: 'B' | 'C' | 'D' | 'E' }[] = [];
-const updateTireModel = () => { tireSettings.model = modelCheck.checked ? 'pacejka' : 'legacy'; tirePanel.querySelector('summary')!.textContent = `Tire model · ${modelCheck.checked ? 'Pacejka' : 'legacy'}`; try { localStorage.setItem(tireStorageKey, JSON.stringify(tireSettings)); } catch { /* Live tuning still works without storage. */ } crashSession?.tireModel(tireSettings); };
+const updateTireModel = () => { tireSettings.model = modelCheck.value as TireModelSettings['model']; tirePanel.querySelector('summary')!.textContent = `Tire model · ${modelCheck.selectedOptions[0].textContent}`; try { localStorage.setItem(tireStorageKey, JSON.stringify(tireSettings)); } catch { /* Live tuning still works without storage. */ } crashSession?.tireModel(tireSettings); };
 modelCheck.onchange = updateTireModel;
 for (const [axis, title] of [['longitudinal', 'Longitudinal grip'], ['lateral', 'Lateral grip']] as const) {
   tireControls.append(textElement('strong', title));
@@ -425,7 +591,7 @@ for (const [axis, title] of [['longitudinal', 'Longitudinal grip'], ['lateral', 
   }
 }
 const resetTires = textElement('button', 'Reset tire parameters');
-resetTires.onclick = () => { Object.assign(tireSettings, structuredClone(DEFAULT_TIRE_MODEL)); modelCheck.checked = true; for (const { input, output, axis, parameter } of tireSliders) { input.value = String(tireSettings[axis][parameter]); output.value = Number(input.value).toFixed(2); } updateTireModel(); };
+resetTires.onclick = () => { Object.assign(tireSettings, structuredClone(DEFAULT_TIRE_MODEL)); modelCheck.value = DEFAULT_TIRE_MODEL.model; for (const { input, output, axis, parameter } of tireSliders) { input.value = String(tireSettings[axis][parameter]); output.value = Number(input.value).toFixed(2); } updateTireModel(); };
 const copyTires = textElement('button', 'Copy parameters');
 copyTires.onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(tireSettings, null, 2)); copyTires.textContent = 'Copied'; } catch { copyTires.textContent = 'Copy unavailable'; } setTimeout(() => { copyTires.textContent = 'Copy parameters'; }, 1800); };
 tireControls.append(resetTires, copyTires);

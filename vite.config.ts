@@ -49,7 +49,7 @@ function gameAssets(): Plugin {
           if (url.pathname === '/index') {
             index ??= walk(gameRoot).then(files => Promise.all(files.map(async f => {
               const relative = relativeGamePath(f);
-              const readable = allowed.has(path.extname(f).toLowerCase()) || relative.toLowerCase().startsWith('save/');
+              const readable = allowed.has(path.extname(f).toLowerCase()) || relative.toLowerCase().startsWith('save/') || relative.toLowerCase() === 'streetlegal_redline.exe';
               return { path: relative, size: readable ? (await stat(f)).size : 0 };
             })));
             res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(await index));
@@ -63,7 +63,7 @@ function gameAssets(): Plugin {
             res.setHeader('Content-Type', 'video/webm'); res.setHeader('Content-Length', video.length); res.end(video);
           } else if (url.pathname === '/file') {
             const f = await safeGamePath(url.searchParams.get('path') ?? '');
-            if (!allowed.has(path.extname(f).toLowerCase()) && !relativeGamePath(f).toLowerCase().startsWith('save/')) {
+            if (!allowed.has(path.extname(f).toLowerCase()) && !relativeGamePath(f).toLowerCase().startsWith('save/') && relativeGamePath(f).toLowerCase() !== 'streetlegal_redline.exe') {
               res.statusCode = 403; res.setHeader('Content-Type', 'text/plain; charset=utf-8');
               res.end(`Unsupported game asset type: ${path.extname(f)}`); return;
             }

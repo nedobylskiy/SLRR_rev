@@ -41,12 +41,11 @@ export class PhysicsRefNative {
     });
   }
 
-  createBox(receiver: JavaValue, args: readonly JavaValue[]): JavaValue {
+  /** OSD hit targets need distinct physics IDs, without world collision bodies. */
+  createReference(receiver: JavaValue, parentRef: JavaValue, label: string): ResourceObject {
     let node = this.resources.getResource(receiver);
-    const parent = args[0].value == null ? undefined : this.resources.getResource(args[0]);
+    const parent = parentRef.value == null ? undefined : this.resources.getResource(parentRef);
     if (!parent) throw new Error('PhysicsRef.createBox parent has no native handle');
-    const dimensions = args.slice(1, 4).map(value => Number(value.value));
-    if (!dimensions.every(value => Number.isFinite(value) && value > 0)) throw new Error('PhysicsRef.createBox requires positive finite dimensions');
     // Garage keeps its PhysicsRef field across exit()/enter(): destroy removes
     // the body, while createBox recreates it on the same live Java wrapper.
     if (!node) {
@@ -59,7 +58,14 @@ export class PhysicsRefNative {
     node.setParent(parent);
     node.resourceId = 0x30000000 + node.id;
     node.resourceType = 2; // INSTANCE_PHYSICS
-    node.alias = String(args[4].value ?? 'physics_box');
+    node.alias = label;
+    return node;
+  }
+
+  createBox(receiver: JavaValue, args: readonly JavaValue[]): JavaValue {
+    const dimensions = args.slice(1, 4).map(value => Number(value.value));
+    if (!dimensions.every(value => Number.isFinite(value) && value > 0)) throw new Error('PhysicsRef.createBox requires positive finite dimensions');
+    const node = this.createReference(receiver, args[0], String(args[4].value ?? 'physics_box'));
     this.boxes.set(node, { receiver, node, half: new Vector3(...dimensions).multiplyScalar(0.5),
       position: { x: 0, y: 0, z: 0 }, orientation: { y: 0, p: 0, r: 0 } });
     this.sync(); return voidValue();

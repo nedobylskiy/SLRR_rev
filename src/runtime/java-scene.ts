@@ -55,9 +55,9 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
     ready: !driving || car?.value == null || attached };
 }
 
-/** Read the lists selected by the executed chassis Java, including kit branches. */
+/** Project the installed Java assembly; stock lists only describe the factory recipe. */
 export async function javaStockSelection(result: BootResult, assets: Assets, chassisPack: string,
-  vehicle?: JavaValue, requireRunningGear = true): Promise<JavaStockSelection> {
+  vehicle?: JavaValue): Promise<JavaStockSelection> {
   const { jvm } = result;
   const car = vehicle ?? jvm.get(jvm.get(jv('class', 'java.game.GameLogic'), 'player'), 'car');
   const chassis = jvm.get(car, 'chassis');
@@ -76,10 +76,12 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
     return { pack: packPath, id: localId };
   };
   const project = async (native: ReturnType<typeof result.parts.installedTree>[number]): Promise<JavaInstalledPart> => ({
+    nativeId: native.node.resourceId,
     key: await resolve(native.node.typeId, native.node.resourcePack ?? chassisPack),
     parentSlot: native.parentSlot, ownSlot: native.ownSlot,
     positions: native.positions,
     render: native.renderType ? await resolve(native.renderType, native.node.resourcePack ?? chassisPack) : undefined,
+    texture: native.texture?.value ? native.texture.resource ?? await resolve(Number(native.texture.value), native.node.resourcePack ?? chassisPack) : undefined,
     wear: native.wear,
     children: await Promise.all(native.children.map(project)),
   });
@@ -90,10 +92,26 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   const mechanical = await Promise.all(mechanicalLists.flatMap(name => values(`parts_list_RGear_${name}`)).map(id => resolve(id)));
   const tyreIds = values('parts_list_RGear_tyres');
   const tyres = await Promise.all(tyreIds.map(id => resolve(id)));
-  if (requireRunningGear && (values('parts_list_RGear_wheels').length !== 4 || values('parts_list_RGear_suspensions').length !== 4))
-    throw new Error('Executed Java chassis did not select four wheels and four suspensions');
+  // A loaded/rebuilt car need not retain its stock-parts recipe. Its actual
+  // attachments above (and WheelRefs below) are authoritative, including missing parts.
   const wheelRefs = Array.from({ length: 4 }, (_, index) => result.chassis.wheelState(chassis, index));
-  return { body, mechanical, tyres, wheelRefs, installed, rootPositions: result.parts.slotOverrides(chassis) };
+  let revision = -1, curve: ReturnType<typeof result.dyno.curve>;
+  const powertrain = {
+    get curve() {
+      const next = result.chassis.updateState(chassis)?.revision ?? 0;
+      if (next !== revision) {
+        revision = next;
+        const dyno = result.parts.engineDyno(chassis);
+        curve = dyno?.value ? result.dyno.curve(dyno) : undefined;
+      }
+      return curve;
+    },
+    get state() { return result.chassis.updateState(chassis); },
+    get cooling() { return result.chassis.coolingSettings(chassis); },
+  };
+  const texture = result.parts.textureFor?.(chassis);
+  const rootTexture = texture?.value ? texture.resource ?? await resolve(Number(texture.value)) : undefined;
+  return { nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */
@@ -110,7 +128,7 @@ export function javaDrivingControls(result: BootResult): { sample(): DrivingInpu
       const current = controller();
       const axis = (id: number) => current?.value == null ? 0 : controllers.read(current, id);
       const gear = axis(50);
-      return { throttle: Math.max(0, axis(28)), steer: Math.max(-1, Math.min(1, axis(1))),
+      return { throttle: Math.max(0, axis(28)), throttleMode: 'pedal', steer: Math.max(-1, Math.min(1, axis(1))),
         brake: axis(29) > 0.2 || axis(48) > 0.2, clutch: axis(49) > 0.2,
         gearUp: gear > 0.2, gearDown: gear < -0.2 };
     },

@@ -1,7 +1,18 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mapRenderIds } from '../src/engine/map';
+import { isStockMapCollisionShell, mapRenderIds } from '../src/engine/map';
 import type { RpkEntry, RpkPack } from '../src/formats/rpk';
+import type {ScxModel} from '../src/formats/scx';
+
+test('identified City collision shell stays distinct from visible untextured map meshes',()=>{
+  const model:ScxModel={version:3,warnings:[],meshes:[{name:'_picsasag',positions:new Float32Array(),
+    normals:new Float32Array(),uv:new Float32Array(),indices:new Uint32Array(),diffuse:[.58,.58,.58,1],textureIndex:0xffff,layer2Index:0xffff}]};
+  assert.ok(isStockMapCollisionShell('maps/city.rpk','maps\\city\\meshes\\c1_phys.SCX','c1_phys',model));
+  assert.equal(isStockMapCollisionShell('maps/city.rpk','maps/city/meshes/Wall_10.scx','Wall_10',model),false);
+  assert.equal(isStockMapCollisionShell('maps/custom.rpk','maps/city/meshes/c1_phys.scx','c1_phys',model),false);
+  model.meshes[0].textureIndex=0;
+  assert.equal(isStockMapCollisionShell('maps/city.rpk','maps/city/meshes/c1_phys.scx','c1_phys',model),false);
+});
 
 function entry(typeId: number, superId: number, type: number, body = ''): RpkEntry {
   const data = new TextEncoder().encode(body);

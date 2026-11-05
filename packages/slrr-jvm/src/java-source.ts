@@ -10,6 +10,8 @@ type Expr = { kind: string; line: number; text?: string; value?: JavaValue; item
 type Stmt = { kind: string; statements?: Stmt[]; expr?: Expr; condition?: Expr; body?: Stmt; otherwise?: Stmt; init?: Stmt; update?: Expr; updates?: Expr[]; declarations?: { type: string; name: string; expr?: Expr }[]; cases?: { value?: Expr; statements: Stmt[] }[] };
 export interface SourceMethod { owner: string; name: string; parameters: { type: string; name: string }[]; result: string; isStatic: boolean; body: Stmt; line: number }
 export interface SourceClass { name: string; parent: string | null; interfaces: string[]; methods: SourceMethod[]; constants: Map<string, JavaValue>; fields: { type: string; name: string; expr?: Expr; isStatic: boolean }[] }
+/** A source call may release scheduled work when it returns or explicitly yields. */
+export interface JavaContinuation { ready: Promise<void>; yield(): void }
 export interface JavaHost {
   global(name: string): JavaValue;
   get(receiver: JavaValue, name: string): JavaValue;
@@ -21,7 +23,7 @@ export interface JavaHost {
   isInstance(receiver: JavaValue, name: string): boolean;
   globalAsync?(name: string): Promise<JavaValue>;
   getAsync?(receiver: JavaValue, name: string): Promise<JavaValue>;
-  callAsync?(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string): Promise<JavaValue>;
+  callAsync?(receiver: JavaValue, name: string, args: JavaValue[], fromClass?: string, continuation?: JavaContinuation): Promise<JavaValue>;
   constructAsync?(name: string, args: JavaValue[]): Promise<JavaValue>;
   constructorCallAsync?(receiver: JavaValue, fromClass: string, target: 'super' | 'this', args: JavaValue[]): Promise<JavaValue>;
 }
@@ -111,7 +113,8 @@ export function parseSourceClass(source: string, selected?: ReadonlySet<string>,
 
 class Scope {
   values = new Map<string, JavaValue>();
-  constructor(readonly parent?: Scope) {}
+  constructor(readonly parent?: Scope, private readonly callContinuation?: JavaContinuation) {}
+  get continuation(): JavaContinuation | undefined { return this.callContinuation ?? this.parent?.continuation; }
   owner(name: string): Scope | undefined { return this.values.has(name) ? this : this.parent?.owner(name); }
 }
 export function coerce(type: string, value: JavaValue): JavaValue {
@@ -166,17 +169,24 @@ export class JavaSourceMachine {
     try { return this.invoke(method, receiver, args); }
     finally { this.singleIteration = false; }
   }
-  async invokeAsync(method: SourceMethod, receiver: JavaValue, args: JavaValue[]): Promise<JavaValue> {
+  async invokeAsync(method: SourceMethod, receiver: JavaValue, args: JavaValue[], parent?: JavaContinuation): Promise<JavaValue> {
     this.requireAsyncHost();
     if (this.depth === 0) this.remaining = this.budget;
     if (args.length !== method.parameters.length) throw new Error(`Java argument count: ${method.owner}.${method.name}`);
     // Suspended Java threads share this machine. Their frames remain pending across await,
     // so this counter is not a call-stack depth and cannot enforce maxDepth here.
     this.depth++;
-    const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
+    let release: (() => void) | undefined, ready: Promise<void> | undefined, finished = false;
+    const finish = () => { finished = true; release?.(); };
+    const continuation: JavaContinuation = {
+      // Most source calls never schedule a thread; avoid allocating their Promise.
+      get ready() { return ready ??= finished ? Promise.resolve() : new Promise<void>(resolve => { release = resolve; }); },
+      yield() { finish(); parent?.yield(); },
+    };
+    const scope = new Scope(undefined, continuation); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
     try { const flow = await this.statementAsync(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
     catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${describeThrown(e)}`, { cause: e }); }
-    finally { this.depth--; }
+    finally { finish(); this.depth--; }
   }
   async initializeFieldsAsync(cls: SourceClass, receiver: JavaValue, staticOnly = false): Promise<void> {
     this.requireAsyncHost();
@@ -357,15 +367,15 @@ export class JavaSourceMachine {
           const callee = expr.left!;
           if (callee.kind === 'name' && (callee.text === 'super' || callee.text === 'this'))
             return await this.host.constructorCallAsync!(self, method.owner, callee.text, await args(expr.items));
-          if (callee.kind === 'name') return await this.host.callAsync!(self, callee.text!, await args(expr.items));
+          if (callee.kind === 'name') return await this.host.callAsync!(self, callee.text!, await args(expr.items), undefined, scope.continuation);
           if (callee.kind !== 'member') throw new Error('Only named Java calls supported');
           const receiver = await ev(callee.left!), values = await args(expr.items);
           if (receiver.type === 'super') {
             const s = receiver.value as { receiver: JavaValue; owner: string }, parent = this.host.parent(s.owner);
             if (!parent) throw new Error('Missing superclass');
-            return await this.host.callAsync!(s.receiver, callee.text!, values, parent);
+            return await this.host.callAsync!(s.receiver, callee.text!, values, parent, scope.continuation);
           }
-          return await this.host.callAsync!(receiver, callee.text!, values);
+          return await this.host.callAsync!(receiver, callee.text!, values, undefined, scope.continuation);
         }
         case 'assign': {
           const ref = await this.referenceAsync(expr.left!, scope, self, method), value = await ev(expr.right!);

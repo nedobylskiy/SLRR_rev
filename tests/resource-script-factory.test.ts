@@ -60,6 +60,17 @@ test('GameRef.create resolves a pack-qualified int and runs its scripted class',
   assert.equal(created?.type, 'Scripted');
   assert.equal(jvm.invoke(created!, 'init').value, 0x102);
   assert.equal(resources.get(created!)?.resourcePack, 'multibot/maps/norisring/t_data.rpk');
+  const copiedId = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'getInfo', created!, [jv('int', 6), jv('int', 0)]);
+  assert.equal(copiedId?.value, resources.remountSavedResource('multibot/maps/norisring/t_data.rpk',0x102).value,
+    'type identity shares the same pack namespace as catalog child IDs');
+  assert.deepEqual(copiedId?.resource, { pack: 'multibot/maps/norisring/t_data.rpk', id: 0x102 });
+  const copyType = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map([['typeID', jv('int', 0x102)]]) });
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', copyType, [copiedId!]);
+  const copyFactory = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+  const copy = await jvm.natives.invokeAsync('java.util.resource.GameRef', 'create', copyFactory,
+    [jv('GameRef', null), copyType, jv('String', null), jv('String', 'inventory copy')]);
+  assert.equal(copy?.type, 'Scripted', 'GII_TYPE must recreate the original script, not a bare GameRef');
+  assert.equal(jvm.invoke(copy!, 'init').value, copiedId!.value);
 });
 
 test('map texture type IDs remain distinct across t_data packs', () => {

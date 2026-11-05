@@ -2,7 +2,7 @@ import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
 import type { PartConfig, CfgSlot } from '../formats/cfg';
-import { Matrix4, Vector3 } from 'three';
+import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { slotMatrix } from '../engine/slot-frames';
 
 interface InstalledSlot { child: ResourceObject; mate: number }
@@ -21,6 +21,7 @@ export interface NativeInstalledPart {
   ownSlot: number;
   positions: ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }>;
   renderType?: number;
+  texture?: JavaValue;
   wear: number;
   children: NativeInstalledPart[];
 }
@@ -29,7 +30,8 @@ export interface NativeInstalledPart {
 export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
-  private readonly texture = new WeakMap<JavaObject, number>();
+  private readonly tear = new WeakMap<JavaObject, number>();
+  private readonly texture = new WeakMap<JavaObject, JavaValue>();
   private readonly mesh = new WeakMap<JavaObject, JavaValue>();
   private readonly slotDamage = new WeakMap<JavaObject, Map<number, string>>();
   private readonly renderType = new WeakMap<JavaObject, number>();
@@ -41,7 +43,54 @@ export class PartNative {
       child: ResourceObject, childSlot: CfgSlot) => Promise<boolean>) {
     const owner = 'java.game.parts.Part';
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
+    gameTypes.setObjectCategoryReader(receiver => {
+      const node = gameTypes.getResource(receiver);
+      const canonical = node && gameTypes.reference(node);
+      const config = this.configs.get(receiver.value as JavaObject)
+        ?? (canonical && this.configs.get(canonical.value as JavaObject));
+      // Native car bodies own the wheel definitions. Other configured parts
+      // remain GIR_CAT_PART regardless of their body/engine/running-gear filter.
+      return config ? config.wheels.length ? 5 : 9 : 0;
+    });
+    gameTypes.setPartCategoryReader(receiver => {
+      const node = gameTypes.getResource(receiver);
+      const canonical = node && gameTypes.reference(node);
+      return this.configs.get(receiver.value as JavaObject)?.category
+        ?? (canonical && this.configs.get(canonical.value as JavaObject)?.category) ?? 0;
+    });
     gameTypes.setPartCompatibilityReader((receiver, target, installable) => this.compatibility(receiver, target, installable));
+    gameTypes.setRemovalReader(receiver => {
+      const child = gameTypes.getResource(receiver);
+      if (!child?.parent) return -1;
+      const state = this.partSlots(gameTypes.reference(child));
+      const parent = this.partSlots(gameTypes.reference(child.parent));
+      return state.parentSlot && !parent.disabled.has(state.parentSlot) ? 0 : -1;
+    });
+    jvm.natives.registerAsync(owner, 'install_OK', ['GameRef','int','GameRef','int','Vector3'], async ({receiver,args}) => {
+      const child = gameTypes.getResource(receiver), root = gameTypes.getResource(args[0]);
+      if (!child || !root || child === root) return jv('int[]',null);
+      const ownId = Number(args[1].value), targetId = Number(args[3].value);
+      const ownSlots = this.partSlots(gameTypes.reference(child)).slots;
+      const preferred = args[4].value == null ? undefined : new Vector3(...['x','y','z'].map(axis => Number(jvm.get(args[4],axis).value)) as [number,number,number]);
+      let best: {node: ResourceObject; own: number; slot: number; distance: number} | undefined;
+      const visit = async (parent: ResourceObject): Promise<void> => {
+        if (parent === child) return;
+        const state = this.partSlots(gameTypes.reference(parent));
+        for (const slot of state.slots) {
+          if (targetId && targetId !== slot.id || state.disabled.has(slot.id) || state.installed.has(slot.id)) continue;
+          for (const own of ownSlots) {
+            if (ownId && own.id !== ownId || !await this.matches(parent,slot,child,own)) continue;
+            const distance = preferred ? new Vector3(...slot.position).distanceToSquared(preferred) : 0;
+            if (!best || distance < best.distance) best = {node:parent,own:own.id,slot:slot.id,distance};
+          }
+        }
+        for (const nested of state.installed.values()) await visit(nested.child);
+      };
+      await visit(root);
+      if (!best) return jv('int[]',null);
+      if (args[2].value != null) jvm.natives.invoke('java.util.resource.ResourceRef','set',args[2],[jv('ResourceRef',gameTypes.reference(best.node).value)]);
+      return jv('int[]',[best.own,best.slot]);
+    });
     jvm.natives.register(owner, 'getSlots', [], ({ receiver }) =>
       jv('int', this.partSlots(receiver).slots.length));
     jvm.natives.register(owner, 'getSlotID', ['int'], ({ receiver, args }) => {
@@ -99,7 +148,16 @@ export class PartNative {
       const rotation = read(args[2], ['y', 'p', 'r']);
       if ([...(position ?? []), ...(rotation ?? [])].some(value => !Number.isFinite(value)))
         throw new Error('Invalid part slot position');
-      state.positions.set(id, { position, rotation });
+      const slot = state.slots.find(slot => slot.id === id);
+      // Part.load passes the saved drag offset, not an absolute CFG mount.
+      // Reset to the prototype on every call so repeated loads cannot accumulate it.
+      const adjustedRotation = slot && rotation ? new Euler().setFromQuaternion(
+        new Quaternion().setFromEuler(new Euler(slot.rotation[1], slot.rotation[0], slot.rotation[2], 'YXZ'))
+          .multiply(new Quaternion().setFromEuler(new Euler(rotation[1], rotation[0], rotation[2], 'YXZ'))), 'YXZ') : undefined;
+      if (slot) state.positions.set(id, {
+        position: position ? slot.position.map((base, axis) => base + position[axis]) as [number, number, number] : undefined,
+        rotation: adjustedRotation ? [adjustedRotation.y, adjustedRotation.x, adjustedRotation.z] : undefined,
+      });
       return jv('void', undefined);
     });
     // Some stock part resources have no script binding and GameRef.create returns a
@@ -113,10 +171,14 @@ export class PartNative {
         this.wear.set(receiver.value as JavaObject, value);
         return jv('float', value);
       });
-      // Deformation is held at pristine condition until Java parts are linked to the physics bodies.
-      jvm.natives.register(conditionOwner, 'getTear', [], () => jv('float', 1));
-      jvm.natives.register(conditionOwner, 'setTear', ['float'], ({ args }) =>
-        jv('float', Math.fround(Number(args[0].value))));
+      jvm.natives.register(conditionOwner, 'getTear', [], ({receiver}) =>
+        jv('float',this.tear.get(receiver.value as JavaObject) ?? 1));
+      jvm.natives.register(conditionOwner, 'setTear', ['float'], ({receiver,args}) => {
+        const value=Math.fround(Number(args[0].value));
+        if (!Number.isFinite(value)) throw new Error('Invalid part tear');
+        this.tear.set(receiver.value as JavaObject,value);
+        return jv('float',value);
+      });
     }
     jvm.natives.register(owner, 'setMaxWear', ['float'], ({ receiver, args }) => {
       const limit = Number(args[0].value);
@@ -125,7 +187,7 @@ export class PartNative {
       return jv('void', undefined);
     });
     jvm.natives.register(owner, 'getTexture', [], ({ receiver }) =>
-      jv('int', this.texture.get(receiver.value as JavaObject) ?? 0));
+      this.texture.get(receiver.value as JavaObject) ?? jv('int', 0));
     // The mesh binding is seeded from the CFG's mesh directive and may be
     // replaced per instance. It is distinct from the CFG render resource ID.
     jvm.natives.register(owner, 'getMesh', [], ({ receiver }) =>
@@ -153,7 +215,7 @@ export class PartNative {
     jvm.natives.register(owner, 'setTexture', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part texture resource ID');
-      this.texture.set(receiver.value as JavaObject, id | 0);
+      this.texture.set(receiver.value as JavaObject, { ...args[0], type: 'int', value: id | 0 });
       // The original native reports success even when no render object is bound yet.
       return jv('int', 1);
     });
@@ -201,6 +263,8 @@ export class PartNative {
   slotOverrides(receiver: JavaValue): ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }> {
     return this.partSlots(receiver).positions;
   }
+  renderTypeFor(receiver: JavaValue): number | undefined { return this.renderType.get(receiver.value as JavaObject); }
+  textureFor(receiver: JavaValue): JavaValue | undefined { return this.texture.get(receiver.value as JavaObject); }
 
   installedTree(receiver: JavaValue): NativeInstalledPart[] {
     const root = this.gameTypes.getResource(receiver);
@@ -214,7 +278,7 @@ export class PartNative {
         const handle = this.gameTypes.reference(child), object = handle.value as JavaObject;
         const childState = this.partSlots(handle);
         return { node: child, parentSlot, ownSlot: mate, positions: childState.positions,
-          renderType: this.renderType.get(object), wear: this.wear.get(object) ?? 1,
+          renderType: this.renderType.get(object), texture: this.texture.get(object), wear: this.wear.get(object) ?? 1,
           children: children(child) };
       });
     };
@@ -288,6 +352,16 @@ export class PartNative {
     return state;
   }
 
+  /** The engine's native table is owned by the installed Java Block, not Chassis. */
+  engineDyno(receiver: JavaValue): JavaValue | undefined {
+    for (const installed of this.installedTree(receiver)) {
+      const handle = this.gameTypes.reference(installed.node);
+      if (this.jvm.isInstance(handle,'java.game.parts.enginepart.Block'))
+        return (handle.value as JavaObject).fields.get('dynodata');
+    }
+    return undefined;
+  }
+
   private carNode(receiver: JavaValue): ResourceObject | null {
     for (let node: ResourceObject | null | undefined = this.gameTypes.get(receiver); node; node = node.parent) {
       for (let className: string | null = node.className; className; className = this.jvm.parent(className))
@@ -298,16 +372,63 @@ export class PartNative {
 
   private async command(receiver: JavaValue, command: string): Promise<void> {
     const words = command.trim().split(/\s+/);
+    // Vehicle.wakeUp and the garage lift's reset follow inventory edits. Run
+    // Java's recalculation here so disableSlot reflects the current assembly,
+    // rather than the assembly it had when the vehicle was first created.
+    if (words[0] === 'wakeup' || words[0] === 'reset') {
+      const root = this.gameTypes.getResource(receiver);
+      const car = this.carNode(receiver) ?? [...root?.children ?? []].find(node =>
+        this.carNode(this.gameTypes.reference(node)) === node);
+      if (car) await this.jvm.natives.invokeAsync('java.game.parts.bodypart.Chassis', 'forceUpdate',
+        this.gameTypes.reference(car), []);
+      return;
+    }
+    if (words[0] === 'remove') {
+      if (words.length !== 3 || words.slice(1).some(word => !/^\d+$/.test(word))) throw new Error(`Invalid part remove command: ${command}`);
+      const child = this.gameTypes.getResource(receiver);
+      if (!child) return;
+      const state = this.partSlots(receiver), parent = child.parent;
+      const car = this.carNode(receiver);
+      if (!parent || !state.parentSlot) return;
+      const handle = this.gameTypes.reference(child), object = handle.value as JavaObject;
+      if (object.fields.has('attachedParts')) await this.jvm.invokeAsync(handle, 'remove');
+      if (car && (this.gameTypes.reference(car).value as JavaObject).fields.has('attachedParts')) {
+        const notify = async (part: ResourceObject): Promise<void> => {
+          const ref = this.gameTypes.reference(part);
+          if ((ref.value as JavaObject).fields.has('attachedParts')) await this.jvm.invokeAsync(this.gameTypes.reference(car), 'rempart', [ref]);
+          for (const nested of part.children) await notify(nested);
+        };
+        await notify(child);
+      }
+      this.partSlots(this.gameTypes.reference(parent)).installed.delete(state.parentSlot);
+      state.parentSlot = state.ownSlot = 0;
+      const destination = this.gameTypes.getByResourceId(Number(words[2])) ?? this.gameTypes.getById(Number(words[2]));
+      child.setParent(destination ?? null);
+      return;
+    }
     if (words[0] !== 'install') return;
-    if (words.length !== 6 || words.slice(1).some(word => !/^\d+$/.test(word)))
+    if (![3, 6, 9].includes(words.length) || words.slice(1, 6).some(word => !/^-?\d+$/.test(word))
+      || words.slice(6).some(word => !Number.isFinite(Number(word))))
       throw new Error(`Invalid part install command: ${command}`);
     const child = this.gameTypes.getResource(receiver);
-    const parent = this.gameTypes.getById(Number(words[4]));
     const root = this.gameTypes.getById(Number(words[2]));
+    let parent = Number(words[4] ?? 0) ? this.gameTypes.getById(Number(words[4])) : root;
+    let requestedOwn = Number(words[3] ?? 0), requestedParent = Number(words[5] ?? 0);
+    // Inventory uses the short form, or appends a drop position with zero mount
+    // IDs. Resolve those through the same native query Java's installCheck used.
+    if (child && root && !Number(words[4] ?? 0)) {
+      const selectedParent = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+      const position = words.length === 9 ? jv('Vector3', { className: 'java.lang.Vector3',
+        fields: new Map(['x', 'y', 'z'].map((axis, index) => [axis, jv('float', Number(words[6 + index]))])) }) : jv('Vector3', null);
+      const selected = await this.jvm.natives.invokeAsync('java.game.parts.Part', 'install_OK', receiver,
+        [jv('GameRef', this.gameTypes.reference(root).value), jv('int', requestedOwn), selectedParent, jv('int', requestedParent), position]);
+      if (!selected?.value) return;
+      [requestedOwn, requestedParent] = selected.value as number[];
+      parent = this.gameTypes.getResource(selectedParent);
+    }
     if (!child || !parent || !root || child === parent) return;
     if (parent !== root && !this.isDescendant(parent, root)) return;
     const childState = this.partSlots(this.gameTypes.reference(child));
-    const requestedOwn = Number(words[3]), requestedParent = Number(words[5]);
     const candidates: ResourceObject[] = [];
     const seen = new Set<ResourceObject>();
     const visit = (node: ResourceObject): void => {

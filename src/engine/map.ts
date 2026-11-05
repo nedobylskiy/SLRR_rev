@@ -1,9 +1,27 @@
 import { entryProperties, parseProperties, type RpkEntry, type RpkPack } from '../formats/rpk';
+import type { ScxModel } from '../formats/scx';
 import type { CfgPose } from '../formats/cfg';
+
+/** Stock City exports its coarse collision shell as a child render resource too.
+ * Keep loading it for terrain/collision, but never submit it as visible scenery.
+ * This is an identified stock asset, not a general rule for untextured meshes.
+ */
+export function isStockMapCollisionShell(packPath:string,meshPath:string,alias:string,model:ScxModel):boolean {
+  const normalize=(path:string)=>path.replaceAll('\\','/').toLowerCase();
+  return normalize(packPath)==='maps/city.rpk' && normalize(meshPath)==='maps/city/meshes/c1_phys.scx'
+    && alias.toLowerCase()==='c1_phys' && model.version===3 && model.meshes.length>0
+    && model.meshes.every(mesh=>mesh.name==='_picsasag' && mesh.textureIndex===0xffff
+      && (mesh.layer2Index===undefined||mesh.layer2Index===0xffff));
+}
 
 /** A direct mesh can also be the root of an outdoor map's render tree. */
 export function groundRenderHasChildren(pack: RpkPack, renderId: number): boolean {
   return pack.entries.some(entry => entry.type === 14 && entry.superId === renderId);
+}
+
+/** Empty roots (ROC) select the outdoor resource tree, not an isolated room. */
+export function groundRenderIsRoom(pack: RpkPack, renderId: number, model: ScxModel): boolean {
+  return !groundRenderHasChildren(pack, renderId) && model.meshes.some(mesh => mesh.indices.length > 0);
 }
 
 /** Ground instances retain their script payload in a length-prefixed trailing RSD chunk. */

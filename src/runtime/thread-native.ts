@@ -20,22 +20,22 @@ export class ThreadNative {
     owner = 'java.lang.Thread') {
     const nil = () => jv('void', undefined);
     jvm.natives.register(owner, 'init', ['String'], ({ receiver }) => { this.state(receiver); return nil(); });
-    jvm.natives.register(owner, 'start', [], ({ receiver }) => {
+    jvm.natives.register(owner, 'start', [], ({ receiver, continuation }) => {
       const state = this.state(receiver);
       if (state.alive || state.stopped) return nil();
       state.alive = true;
-      // Let the Java caller finish configuring the thread before its first run.
-      state.startTimer = setTimeout(() => {
+      // Start after this source caller returns or cooperatively yields. Asset I/O
+      // can keep a caller suspended longer than any fixed scheduling delay.
+      const schedule = () => { if (state.stopped) return; state.startTimer = setTimeout(() => {
         state.startTimer = undefined;
         if (state.stopped) { state.alive = false; return; }
         const target = this.jvm.get(receiver, 'target');
         void this.jvm.invokeAsync(target, 'run').catch(error => {
           if (!state.stopped) this.report(`Thread.run: ${error instanceof Error ? error.message : String(error)}`);
         }).finally(() => { state.alive = false; state.pending = undefined; this.live.delete(state); });
-      // A zero-delay timer can run as soon as an async Java/native call yields,
-      // before the Java caller has finished constructing fields consumed by
-      // run(). Give that caller one short scheduling window to finish setup.
-      }, 10);
+      }, 0); };
+      if (continuation) void continuation.ready.then(schedule);
+      else schedule();
       return nil();
     });
     jvm.natives.register(owner, 'stop', [], ({ receiver }) => {
@@ -58,7 +58,8 @@ export class ThreadNative {
       this.state(receiver).daemon = Boolean(args[0].value);
       return nil();
     });
-    jvm.natives.registerAsync(owner, 'wait', [], ({ receiver }) => new Promise<JavaValue>((resolve, reject) => {
+    jvm.natives.registerAsync(owner, 'wait', [], ({ receiver, continuation }) => new Promise<JavaValue>((resolve, reject) => {
+      continuation?.yield();
       const state = this.state(receiver);
       if (state.stopped) { reject(new Error('Java thread stopped')); return; }
       state.pending = { resolve, reject };
@@ -69,13 +70,15 @@ export class ThreadNative {
       state.pending = undefined;
       return nil();
     });
-    jvm.natives.registerAsync(owner, 'sleep', ['float'], ({ args }) => new Promise<JavaValue>((resolve, reject) => {
+    jvm.natives.registerAsync(owner, 'sleep', ['float'], ({ args, continuation }) => new Promise<JavaValue>((resolve, reject) => {
+      continuation?.yield();
       const pending = { timer: setTimeout(() => { this.sleeps.delete(pending); resolve(nil()); },
         Math.max(0, Number(args[0].value))), reject };
       this.sleeps.add(pending);
     }));
     const objectOwner = 'java.lang.Object';
-    jvm.natives.registerAsync(objectOwner, 'wait', [], ({ receiver }) => new Promise<JavaValue>((resolve, reject) => {
+    jvm.natives.registerAsync(objectOwner, 'wait', [], ({ receiver, continuation }) => new Promise<JavaValue>((resolve, reject) => {
+      continuation?.yield();
       const key = this.monitor(receiver);
       const waiters = this.objectWaiters.get(key) ?? new Set();
       waiters.add({ resolve, reject }); this.objectWaiters.set(key, waiters);

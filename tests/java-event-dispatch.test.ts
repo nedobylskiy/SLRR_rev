@@ -15,6 +15,24 @@ class Handler {
   void handleEvent(Object ref, int type, int value) { calls++; last = value; }
 }`;
 
+test('cursor subscriptions receive the picked Java part as source, not the cursor object', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'Listener.java', source: `package demo;
+    class Listener { Object picked; String payload; void handleEvent(Object ref, int event, String text) { picked=ref; payload=text; } }` }) });
+  await jvm.loadClass('demo.Listener');
+  const events = new GameTypeNative(jvm, () => {}), listener = jvm.construct('demo.Listener', []);
+  const ref = (name: string) => jv('GameRef', { className: name, fields: new Map() });
+  const cursor = ref('MouseCursor'), part = ref('Part');
+  for (const object of [listener, cursor, part]) jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', object, []);
+  jvm.natives.invoke('java.lang.GameType', 'setEventMask', listener, [jv('int', 65536)]);
+  jvm.natives.invoke('java.lang.GameType', 'addNotification', listener,
+    [cursor, jv('int', 65536), jv('int', 0), jv('Object', null)]);
+  events.queueStringEvent(cursor, part, 65536, jv('String', '5 1 2 0 0 0 1 2 3'));
+  events.dispatchQueuedEvents();
+  assert.equal(jvm.get(listener, 'picked').value, part.value);
+  assert.equal(jvm.get(listener, 'payload').value, '5 1 2 0 0 0 1 2 3');
+  events.dispose();
+});
+
 test('GameType notifications route watched trigger events to a named Java handler', async () => {
   const notificationSource = `package demo; class Listener {
     int calls; int last; String text;
