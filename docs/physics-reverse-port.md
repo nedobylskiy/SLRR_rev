@@ -1,5 +1,8 @@
 # Physics recovered from sl-remastered
 
+For subsequent upstream changes and suspension research, see the
+[2026-11-05 audit](physics-upstream-audit-2026-11-05.md).
+
 This branch adapts the recovered scalar calculations from
 [nicolas-found42/sl-remastered, commit 7aa574d26098e288367a3707f0b7ac7bb892ebbe](https://github.com/nicolas-found42/sl-remastered/tree/7aa574d26098e288367a3707f0b7ac7bb892ebbe).
 It continues to execute the installed game's Java source. The Java Block, DynoData,
