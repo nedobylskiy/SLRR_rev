@@ -5,27 +5,30 @@
 The full recorder still crashes the original game without a script error after
 the import/mass fixes. It is not qualified for unattended capture. The user's
 experimental installation now uses
-`tools/stock-telemetry/diagnostics/stage1/PhysicsTelemetry.java`: one literal
-`System.log` line per track visit, with no clock or vehicle reads. The complete
+`tools/stock-telemetry/diagnostics/stage2/PhysicsTelemetry.java`: one guarded RPM
+read per track visit, with log markers before/after the getter. The complete
 recorder remains separate. Stage 0 (empty hooks) was confirmed by the user to
-run without crashing and correctly produced no telemetry output.
+run without crashing and correctly produced no telemetry output. The user also
+found the stage1 literal marker, confirming that the Track hook and System.log
+can run. The unusual filename observed from an earlier run is not proof of memory
+corruption; the actual logging route remains a separate investigation.
 
 Enable each next step only after an original-game run confirms the previous one:
 
 1. **Stage 0:** empty hooks; test entry, driving and exit from standard TestTrack.
 2. **Stage 1:** the provided stage1 variant logs one literal line per track visit,
    without inspecting the Vehicle argument.
-3. Then add null checks, clock/throttle, RPM, speed, gear and control reads one
-   at a time, with before/after markers for each native getter.
+3. **Stage 2:** null-check car/chassis and read getRPM once, with before/after
+   markers. Then add clock/throttle, speed, gear and control reads individually.
 4. Leave metadata, mass, ratios and engine/dyno traversal disabled until basic
    samples work. Split those sections into individual marked probes too.
 
 When switching variants, preserve the installed source and generated
 `sl/Scripts/game/PhysicsTelemetry.class`, then invalidate that generated class
 so the game recompiles the new source on a full restart. Never change the
-Steam installation as part of these experiments. Stage 1 is enabled; an
-original-game rerun and confirmation of the actual log destination are pending.
-Expected marker: `SLRR_TELEMETRY_PROBE stage=1 hook=animate`.
+Steam installation as part of these experiments. Stage 2 is enabled; an
+original-game rerun is pending. Expected final marker:
+`SLRR_TELEMETRY_PROBE stage=2 after=getRPM rpm=...`.
 
 ## Full recorder (not yet qualified in the original runtime)
 
