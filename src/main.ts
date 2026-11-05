@@ -308,6 +308,14 @@ const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.app
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
 const graphicsDetailsLabel=textElement('label','Detailed GPU diagnostics'),graphicsDetailsCheck=document.createElement('input');
 const cutoffLabel=textElement('label','Geometry distance cutoff'),cutoffCheck=document.createElement('input');
+const rayOcclusionLabel=textElement('label','Raycast occlusion culling'),rayOcclusionCheck=document.createElement('input');
+rayOcclusionCheck.type='checkbox';rayOcclusionLabel.prepend(rayOcclusionCheck);mapDebugOptions.append(rayOcclusionLabel);
+rayOcclusionLabel.title='Experimental CPU rays against opaque visual triangles. Only proven convex coverage hides a box. Shadows and reflections retain full geometry.';
+rayOcclusionCheck.onchange=()=>viewer?.setRaycastOcclusionEnabled(rayOcclusionCheck.checked);
+const rayBudgetLabel=textElement('label','Ray budget (ms)'),rayBudgetInput=document.createElement('input');
+rayBudgetInput.type='number';rayBudgetInput.min='.5';rayBudgetInput.max='8';rayBudgetInput.step='.5';rayBudgetInput.value='2';
+rayBudgetInput.style.width='55px';rayBudgetLabel.append(rayBudgetInput);mapDebugOptions.append(rayBudgetLabel);
+rayBudgetInput.onchange=()=>viewer?.setRaycastOcclusionBudget(Number(rayBudgetInput.value));
 cutoffCheck.type='checkbox';cutoffLabel.prepend(cutoffCheck);mapDebugOptions.append(cutoffLabel);
 cutoffLabel.title='Split large static meshes into 64 m cells and cut at the streaming radius. Cells prepare once when enabled. Physics stays unchanged.';
 cutoffCheck.onchange=()=>viewer?.setGeometryCutoffEnabled(cutoffCheck.checked);

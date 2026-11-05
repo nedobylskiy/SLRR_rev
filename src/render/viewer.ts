@@ -5,6 +5,7 @@ import { TextureSourceCache } from './texture-source-cache';
 import { GraphicsDiagnostics } from './graphics-diagnostics';
 import { InspectionCamera } from './inspection-camera';
 import { MapDistanceCutoff } from './map-distance-cutoff';
+import { MapRaycastOcclusion } from './map-raycast-occlusion';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
@@ -133,6 +134,9 @@ export class Viewer {
   readonly profiler: FrameProfiler;
   private readonly graphicsDiagnostics:GraphicsDiagnostics;
   private readonly inspection:InspectionCamera;
+  private readonly rayOcclusion:MapRaycastOcclusion;
+  setRaycastOcclusionEnabled(enabled:boolean){this.rayOcclusion.setEnabled(enabled);}
+  setRaycastOcclusionBudget(ms:number){if(Number.isFinite(ms)&&ms>=.5&&ms<=8)this.rayOcclusion.budgetMs=ms;}
   private inspectResident=false;
   private mapPackPath?:string;
   private collisionOnlyMapMeshes=0;
@@ -149,6 +153,7 @@ export class Viewer {
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
+    ...this.rayOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
       `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
     ...this.graphicsDiagnostics.lines(this.scene)];}
@@ -251,6 +256,7 @@ export class Viewer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.profiler = new FrameProfiler(this.renderer);
     this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
+    this.rayOcclusion=new MapRaycastOcclusion(this.renderer);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -302,6 +308,7 @@ export class Viewer {
       this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
       this.mapDistanceCutoff.radius.value=this.mapStreamRange;
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
+      this.profiler.measure('Occlusion CPU',()=>this.rayOcclusion.prepare(this.camera,this.staticMapRoot));
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
@@ -321,11 +328,13 @@ export class Viewer {
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(renderCamera.position).add(offset);
       if(this.sunFlare)this.sunFlare.position.copy(renderCamera.position).addScaledVector(this.lighting.direction,500);
-      this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>this.renderer.render(this.scene,renderCamera)));
+      this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>
+        this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera))));
       this.profiler.endGpu();
     });
   }
   clear() {
+    this.rayOcclusion.reset();
     this.mapPackPath=undefined;
     this.collisionOnlyMapMeshes=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
@@ -797,6 +806,7 @@ export class Viewer {
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.mapStream?.dispose(); this.mapStreamFocus = undefined;
+    this.rayOcclusion.reset();
     this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.grid.visible = false; this.driveGrid.visible = false; this.ground.visible = false;
     this.scene.fog = this.mapFogEnabled ? new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far) : null;
