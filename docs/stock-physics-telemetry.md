@@ -11,7 +11,7 @@ actual timestamps are logged and there is no catch-up loop.
 From this repository, stage a new mod directory outside the game:
 
 ```powershell
-node tools/stock-telemetry.mjs stage --game-root "C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline" --output .research/stock-telemetry-mod-v1
+node tools/stock-telemetry.mjs stage --game-root "C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline" --output .research/stock-telemetry-mod-v2
 ```
 
 The output must be a new folder with an existing parent. It contains:
@@ -22,13 +22,20 @@ The output must be a new folder with an existing parent. It contains:
 
 The command reads the installation and writes only the staging directory.
 The staged files for the inspected installation have also been generated locally
-at `.research/stock-telemetry-mod-v1/`. To try them in an isolated game copy, back up
+at `.research/stock-telemetry-mod-v2/`. To try them in an isolated game copy, back up
 both `Track.java` and its generated `Track.class`, copy the staged source files
 into the corresponding script source folder, then let that copy of the game
 compile them. Remove the added source/generated class and restore the original
 Track source/class to uninstall. Do not mix precompiled classes from another
 game version. Original-game compilation and a live run remain to be verified;
 only source-interpreter fixture execution has been tested here.
+
+The first original-game attempt reported `parse error (2)` in `sample()` at
+the `Config.player_transmission` assignment. Version 2 adds the missing
+`java.util.*` import: the stock Config belongs to `java.util`, not `java.game`.
+The fixture now uses that actual namespace. The corrected script and removal
+of its stale generated class have been applied to the user's explicitly named
+experimental copy; a successful original-game rerun is still pending.
 
 The game writes `SLRR_PHYSICS|v=1|...` records through `System.log` (normally its
 system log under `system/`). The actual log destination is controlled by that

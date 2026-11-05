@@ -1,5 +1,6 @@
 package java.game;
 
+import java.util.*;
 import java.game.parts.*;
 import java.game.parts.bodypart.*;
 import java.game.parts.enginepart.*;

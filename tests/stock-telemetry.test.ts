@@ -48,7 +48,7 @@ test('Java logger executes sample throttling, shift bracketing and clock resets 
     'java.game.PhysicsTelemetry': logger,
     'java.lang.System': 'package java.lang; class System { public static native void log(String text); public static native float currentTime(); }',
     'java.lang.GameType': 'package java.lang; class GameType { static int GII_TYPE=6; }',
-    'java.game.Config': 'package java.game; class Config { static int player_transmission=1; }',
+    'java.util.Config': 'package java.util; class Config { static int player_transmission=1; }',
     'java.game.Vehicle': `package java.game; class Vehicle { java.game.parts.bodypart.Chassis chassis;
       public float getSpeed() { return 10.0; } }`,
     'java.game.parts.Part': 'package java.game.parts; class Part { String name="engine"; public int getInfo(int key){return 6;} public float getWear(){return 1.0;} public float getTear(){return 1.0;} }',
@@ -93,7 +93,7 @@ test('Java logger executes sample throttling, shift bracketing and clock resets 
   assert.equal(report.runs[0].shifts[0].rpm_after, '4200');
   assert.equal(report.runs[0].model, 'Duhen'); assert.ok(report.runs[0].curves.length > 10);
   now = .1; await jvm.invokeAsync(telemetry, 'sample', [car]);
-  jvm.set(jv('class', 'java.game.Config'), 'player_transmission', jv('int', 2));
+  jvm.set(jv('class', 'java.util.Config'), 'player_transmission', jv('int', 2));
   now = .2; await jvm.invokeAsync(telemetry, 'sample', [car]);
   await jvm.invokeAsync(telemetry, 'stop', []);
   const sessions = parseTelemetry(lines.join('\n')).runs;
