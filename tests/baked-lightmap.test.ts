@@ -1,13 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BufferGeometry, MeshStandardMaterial, ShaderLib, Texture, NoColorSpace } from 'three';
-import { bakedLightmapUvs, configureBakedLightmap } from '../src/render/baked-lightmap';
+import { bakedLightmapUvs, configureBakedLightmap,stockGarageLightmap } from '../src/render/baked-lightmap';
 import { SceneLighting } from '../src/render/scene-lighting';
 import type { ScxMesh } from '../src/formats/scx';
 
 const mesh = (): ScxMesh => ({name:'mapped', positions:new Float32Array(6), normals:new Float32Array(6),
   uv:new Float32Array([0,0,1,1]), uv2:new Float32Array([0.25,0.5,0.75,1]), uv3:new Float32Array([1,0,0,1]),
   indices:new Uint32Array(), diffuse:[1,1,1,1], textureIndex:0, lightmapIndex:1});
+
+test('stock garage illumination slots use their atlas UVs without reclassifying city emission masks',()=>{
+  const part=mesh();part.lightmapIndex=undefined;part.selfIllumIndex=1;
+  assert.deepEqual(stockGarageLightmap(part,['diffuse.dds','misc\\garage\\g1\\g1shadow.dds'],3)?.uv,part.uv2);
+  assert.equal(stockGarageLightmap(part,['diffuse.dds','maps/city/textures/F_light.dds'],3),undefined);
+  assert.equal(stockGarageLightmap(part,['diffuse.dds','mod/g1shadow.dds'],3),undefined);
+  part.illuminationIndex=2;part.illuminationMap={channel:1,tiling:0,scaleU:2,scaleV:.5,offsetU:.125,offsetV:.25};
+  assert.deepEqual(Array.from(stockGarageLightmap(part,['diffuse.dds','unused.dds','misc/garage/g2/g2objectshadow.dds'],4)!.uv),[-.25,.625,.75,.875]);
+  part.uv2=new Float32Array(4);part.illuminationMap=undefined;
+  assert.equal(stockGarageLightmap(part,['diffuse.dds','misc/garage/g1/g1shadow.dds'],3),undefined);
+  part.uv2=undefined;
+  assert.equal(stockGarageLightmap(part,['diffuse.dds','misc/garage/g1/g1shadow.dds'],3),undefined);
+});
 
 test('baked UVs use the authored channel and centred v4 atlas transform without modifying diffuse UVs', () => {
   const part = mesh();

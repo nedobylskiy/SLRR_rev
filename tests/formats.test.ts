@@ -113,8 +113,10 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
   assert.equal(lit.textureIndex, 3);
   assert.equal(lit.lightmapIndex, 4);
   assert.deepEqual(lit.lightmapMap, { channel: 0, tiling: 0, scaleU: 0, scaleV: 0, offsetU: 0, offsetV: 0 });
-  assert.equal(parseScx(fixture([[0x06000004, 4]])).meshes[0].lightmapIndex, undefined,
-    'the bump-map property must not become baked lighting');
+  const illumination=parseScx(fixture([[0x06000004,4]])).meshes[0];
+  assert.equal(illumination.lightmapIndex,undefined,'emission slots must not become general multiplicative lightmaps');
+  assert.equal(illumination.illuminationIndex,4);
+  assert.deepEqual(illumination.illuminationMap,{channel:0,tiling:0,scaleU:0,scaleV:0,offsetU:0,offsetV:0});
   assert.equal(parseScx(fixture([[0x06000007, 0xffffffff]])).meshes[0].lightmapIndex, undefined);
   const night = parseScx(fixture([[0x06000000, 3], [0x06000005, 4]])).meshes[0];
   assert.equal(night.textureIndex, 3);

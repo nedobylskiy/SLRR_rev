@@ -3,7 +3,7 @@
 Graphics / map debug exposes independent switches:
 
 - **Baked lightmaps**: authored SCX lighting/shadow textures, plus cached static
-  shadows on map surfaces without an authored lightmap. Initially off.
+  shadows on map surfaces without an authored lightmap. Initially on.
 - **Dynamic shadows**: the renderer's sun shadow map. Initially off.
 - **Dynamic lighting**: sun/ambient shading. Initially on.
 - **Vertex colors**: authored vertex RGB. Initially on.
@@ -19,9 +19,23 @@ material offset `0x38`, not a multiplicative baked lightmap. City facades bind
 must not darken the diffuse surface. The parser retains this as `selfIllumIndex`.
 Rendering these window masks with the game's time-of-day rules remains separate
 work. Neither extended v3 headers nor the 56-byte header currently expose an
-identified baked-map field in this parser. V4 uses map property `0x06000007`,
+identified general baked-map field in this parser. V4 uses map property `0x06000007`,
 with its authored UV channel and centred scale/offset transform. `0x06000004`
-is not a lightmap. Missing UVs or texture files do not substitute diffuse UVs.
+is not a general lightmap. Missing UVs or texture files do not substitute diffuse UVs.
+
+Stock garage assets are an explicit exception: g1–g3 bind `gNshadow.dds` and
+`gNobjectshadow.dds` lighting atlases in the v3 illumination slot or the v4
+`0x06000004` EmissiveMap slot. The known g4 `t_garazs_shadow`, `t_01_shadow`
+and `t_object_shadow` atlases use the same policy. Those exact stock texture
+paths, together with a nonzero finite authored lighting UV channel, opt into
+the coefficient-lightmap shader. V4's map transform is preserved. Emission
+slots elsewhere (including City window masks) retain their existing behavior.
+No texture is classified from a generic `shadow` filename alone.
+
+Garage surfaces with these atlases use their original lighting instead of our
+cached sun projection, avoiding double static darkening. Other map surfaces
+retain the cached fallback, while vehicle dynamic shadows can compose with
+either path. All authored coefficients and the fallback share **Baked lightmaps**.
 
 The render layer loads baked maps as lighting coefficients, without sRGB decode,
 and multiplies the illuminated surface by them before output encoding. Emission

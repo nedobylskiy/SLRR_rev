@@ -1,6 +1,19 @@
 import { BufferAttribute, BufferGeometry, ClampToEdgeWrapping, MeshStandardMaterial, NoColorSpace, Texture } from 'three';
 import type { ScxMesh } from '../formats/scx';
 
+/** Known stock garage illumination atlases, not a general reinterpretation of emission slots. */
+export function stockGarageLightmap(part:ScxMesh,textures:string[],version:number){
+  const index=version===3?part.selfIllumIndex:part.illuminationIndex;
+  if(index===undefined)return;
+  const path=textures[index]?.replaceAll('\\','/').toLowerCase();
+  if(!path||!(/^misc\/garage\/g([1-3])\/g\1(?:object)?shadow\.dds$/.test(path)
+    ||/^misc\/garage\/g4\/t_(?:garazs_shadow|01_shadow|object_shadow)\.dds$/.test(path)))return;
+  const map=version===3?undefined:part.illuminationMap;
+  const uv=bakedLightmapUvs({...part,lightmapMap:map});
+  if(!uv?.length||!uv.some(value=>value!==0)||!uv.every(Number.isFinite))return;
+  return {index,uv};
+}
+
 /** Original baked maps modulate illumination; Three's additive lightMap has different semantics. */
 export function bakedLightmapUvs(part: ScxMesh): Float32Array | undefined {
   const map = part.lightmapMap;

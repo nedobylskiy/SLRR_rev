@@ -9,7 +9,7 @@ import { MapBackfaceCulling } from './map-backface-culling';
 import { MapRaycastOcclusion } from './map-raycast-occlusion';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
-import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
+import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
@@ -1409,14 +1409,11 @@ export class Viewer {
       mesh.castShadow = dynamicCaster && !material.transparent;
       if(mapSurface)mesh.userData.staticMapCaster=!material.transparent;
       if(mapSurface)this.mapBackfaces.configure(material,geometry);
-      const bakedFile = textures[part.lightmapIndex ?? -1];
-      if (mapSurface && !bakedFile) {
-        this.staticMapShadows.configure(material);
-        if (secondLayer) this.staticMapShadows.configure(secondLayer.material);
-      }
+      const garageBake=part.lightmapIndex===undefined?stockGarageLightmap(part,textures,model.version):undefined;
+      const bakedFile = textures[part.lightmapIndex ?? garageBake?.index ?? -1];
       if (bakedFile) {
         try {
-          const uv = bakedLightmapUvs(part);
+          const uv = garageBake?.uv??bakedLightmapUvs(part);
           if (!uv) throw new Error(`UV channel ${part.lightmapMap?.channel ?? 1} missing`);
           const texture = await loadTexture(await assets.read(bakedFile), bakedFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
@@ -1424,6 +1421,10 @@ export class Viewer {
           // A transparent second diffuse pass belongs to the same surface.
           if (secondLayer) configureBakedLightmap(secondLayer.material, secondLayer.geometry, uv, texture, this.bakedLightmaps);
         } catch (error) { warnings.push(`Baked lightmap ${bakedFile}: ${String(error)}`); }
+      }
+      if(mapSurface&&!material.userData.bakedLightmapTexture){
+        this.staticMapShadows.configure(material);
+        if(secondLayer)this.staticMapShadows.configure(secondLayer.material);
       }
       if (!mapSurface) {
         const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {

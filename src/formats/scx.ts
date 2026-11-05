@@ -17,6 +17,8 @@ export interface ScxMesh {
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
   lightmapIndex?: number; lightmapMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
   selfIllumIndex?: number; selfIllumMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
+  /** V4 EmissiveMap slot; some stock garage assets bind lighting atlases here. */
+  illuminationIndex?:number;illuminationMap?:ScxMesh['textureMap'];
 }
 export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string[] }
 
@@ -108,6 +110,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         uv2: current.uv2, uv3: current.uv3, colors: current.colors, paintMask: current.paintMask, textureMap: current.textureMap,
         lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
+        illuminationIndex:current.illuminationIndex,illuminationMap:current.illuminationMap,
         materialFlags: current.materialFlags,
         materialType: current.materialType, reflectionIndex: current.reflectionIndex,
         reflectionStrength: current.reflectionStrength, reflectionMap: current.reflectionMap,
@@ -148,6 +151,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
                 current.paintMask = type === 0x06000001 && !(current.materialFlags! & 0x20000000);
               }
               if (type === 0x06000007 && index !== 0xffffffff) { current.lightmapIndex = index; current.lightmapMap = map; }
+              if(type===0x06000004&&index!==0xffffffff){current.illuminationIndex=index;current.illuminationMap=map;}
               if (type === 0x06000005) { current.selfIllumIndex = index; current.selfIllumMap = map; }
               if (type === 0x06000001) { current.mixIndex = index; current.mixMap = map; }
               if (type === 0x06000003) { current.reflectionIndex = index; current.reflectionMap = map; }
@@ -160,9 +164,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
           const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags } = current;
-          const { materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap } = current;
+          const { materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap,illuminationIndex,illuminationMap } = current;
           finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags,
-            materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap };
+            materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap,illuminationIndex,illuminationMap };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);
