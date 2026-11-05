@@ -86,3 +86,14 @@ all wait for the next update. Resource requests already in flight still complete
 asynchronously. Long intervals can make object appearance and camera turns lag.
 There is no catch-up loop after a slow frame. The graphics report records the
 selected interval; physics and rendering continue every frame.
+
+## Far plane experiment
+
+**Far plane** (off by default) limits the primary camera's far clipping plane
+to the streaming radius, or the game camera's original far value if smaller.
+It clips triangles at the view-space far plane, without splitting geometry or
+adding per-fragment distance checks. It is a depth limit, not a spherical radius.
+Range changes apply immediately; disabling restores the latest game camera far
+value. The inspection camera retains the original far range for observation.
+Shadow and reflection camera ranges are unchanged. Sky geometry beyond the plane
+is clipped too. The report includes the primary camera's effective far value.

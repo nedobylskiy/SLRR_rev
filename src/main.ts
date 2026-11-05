@@ -306,6 +306,10 @@ const mapDebugPanel = document.createElement('details'); mapDebugPanel.className
 mapDebugPanel.append(textElement('summary', 'Graphics / map debug'));
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
+const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
+farPlaneCheck.type='checkbox';farPlaneLabel.prepend(farPlaneCheck);mapDebugOptions.append(farPlaneLabel);
+farPlaneLabel.title='Limit the primary camera far clipping plane to the streaming radius. The inspection camera retains its full range. Disable to restore the game camera range.';
+farPlaneCheck.onchange=()=>viewer?.setFarPlaneEnabled(farPlaneCheck.checked);
 const streamThrottleLabel=textElement('label','Limit streamer update rate'),streamThrottleCheck=document.createElement('input');
 streamThrottleCheck.type='checkbox';streamThrottleLabel.prepend(streamThrottleCheck);mapDebugOptions.append(streamThrottleLabel);
 streamThrottleLabel.title='Reuse the prepared map instance lists between updates. Larger intervals also delay visibility changes and installation of loaded objects.';

@@ -147,6 +147,13 @@ export class Viewer {
   private streamThrottle=false;
   private streamIntervalMs=100;
   private nextStreamUpdate=-Infinity;
+  private farPlaneEnabled=false;
+  private normalCameraFar=1000;
+  setFarPlaneEnabled(enabled:boolean){this.farPlaneEnabled=enabled;this.updateFarPlane();this.nextStreamUpdate=-Infinity;}
+  private updateFarPlane(){
+    const far=this.farPlaneEnabled&&this.mapStream?Math.max(this.camera.near+.001,Math.min(this.normalCameraFar,this.mapStreamRange)):this.normalCameraFar;
+    if(this.camera.far!==far){this.camera.far=far;this.camera.updateProjectionMatrix();}
+  }
   setStreamThrottleEnabled(enabled:boolean){this.streamThrottle=enabled;this.nextStreamUpdate=-Infinity;}
   setStreamIntervalMs(ms:number){
     if(!Number.isFinite(ms)||ms<0)return;
@@ -161,15 +168,16 @@ export class Viewer {
   private updateCutoff(){this.mapDistanceCutoff.enabled.value=this.geometryCutoff&&!(this.inspection.enabled&&this.inspectResident)?1:0;}
   setGeometryCutoffEnabled(enabled:boolean){this.geometryCutoff=enabled;this.mapStream?.setGeometryCutoff(enabled);this.updateCutoff();}
   setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
-  setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);this.mapStream?.setInspectResident(enabled&&this.inspectResident);this.updateCutoff();}
+  setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);if(enabled){this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}this.mapStream?.setInspectResident(enabled&&this.inspectResident);this.updateCutoff();}
   setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);this.updateCutoff();}
-  resetInspectionCamera(){this.inspection.reset(this.controls.target);}
+  resetInspectionCamera(){this.inspection.reset(this.controls.target);this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}
   graphicsDebugLines(){return [
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
+    `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
     ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
     ...this.rayOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
@@ -231,6 +239,7 @@ export class Viewer {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
     this.mapStreamRange = value;
     this.mapStream?.setRange(value);
+    this.updateFarPlane();this.nextStreamUpdate=-Infinity;
   }
   private mapStreamFocus?: THREE.Vector3;
   private mapDebug?: MapDebugView;
@@ -317,12 +326,14 @@ export class Viewer {
         this.camera.position.lerp(scriptCamera.position, factor);
         this.controls.target.lerp(scriptCamera.target, factor);
         this.camera.lookAt(this.controls.target);
-        this.camera.fov = scriptCamera.fov; this.camera.near = scriptCamera.near; this.camera.far = scriptCamera.far;
+        this.camera.fov = scriptCamera.fov; this.camera.near = scriptCamera.near; this.normalCameraFar = scriptCamera.far;
+        this.updateFarPlane();
         this.camera.updateProjectionMatrix();
       } else {
         if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
         if (this.controls.enabled) this.controls.update();
       }
+      this.updateFarPlane();
       this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
       this.mapDistanceCutoff.radius.value=this.mapStreamRange;
       this.profiler.measure('Streaming CPU', () => this.updateMapStream(now));
@@ -377,7 +388,7 @@ export class Viewer {
     this.internalView = false;
     this.generation++;
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
-    this.camera.near = 0.01; this.camera.far = 1000; this.camera.updateProjectionMatrix();
+    this.camera.near = 0.01; this.normalCameraFar = 1000; this.updateFarPlane(); this.camera.updateProjectionMatrix();
     this.model.traverse(obj => {
       if (obj instanceof THREE.Sprite) { obj.material.map?.dispose(); obj.material.dispose(); return; }
       if (!(obj instanceof THREE.Mesh)) return;
@@ -830,7 +841,7 @@ export class Viewer {
     this.scene.fog = this.mapFogEnabled ? new THREE.Fog(this.mapFog.color, this.mapFog.near, this.mapFog.far) : null;
     this.scene.background = new THREE.Color(this.mapFog.color);
     this.model.scale.setScalar(1); this.model.position.set(0, 0, 0);
-    this.camera.near = 0.1; this.camera.far = 5000; this.camera.updateProjectionMatrix();
+    this.camera.near = 0.1; this.normalCameraFar = 5000; this.updateFarPlane(); this.camera.updateProjectionMatrix();
     if (!options?.preserveCamera) {
       this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     }
@@ -843,6 +854,7 @@ export class Viewer {
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setShadowRange(this.lighting.shadows || this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
+    this.updateFarPlane();
     this.nextStreamUpdate=-Infinity;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
