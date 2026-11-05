@@ -306,6 +306,14 @@ const mapDebugPanel = document.createElement('details'); mapDebugPanel.className
 mapDebugPanel.append(textElement('summary', 'Graphics / map debug'));
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
+const streamThrottleLabel=textElement('label','Limit streamer update rate'),streamThrottleCheck=document.createElement('input');
+streamThrottleCheck.type='checkbox';streamThrottleLabel.prepend(streamThrottleCheck);mapDebugOptions.append(streamThrottleLabel);
+streamThrottleLabel.title='Reuse the prepared map instance lists between updates. Larger intervals also delay visibility changes and installation of loaded objects.';
+const streamIntervalLabel=textElement('label','Streamer interval (ms)'),streamIntervalInput=document.createElement('input');
+streamIntervalInput.type='number';streamIntervalInput.min='0';streamIntervalInput.step='1';streamIntervalInput.value='100';streamIntervalInput.disabled=true;
+streamIntervalInput.style.width='75px';streamIntervalLabel.append(streamIntervalInput);mapDebugOptions.append(streamIntervalLabel);
+streamThrottleCheck.onchange=()=>{streamIntervalInput.disabled=!streamThrottleCheck.checked;viewer?.setStreamThrottleEnabled(streamThrottleCheck.checked);};
+streamIntervalInput.onchange=()=>{if(streamIntervalInput.value!==''&&streamIntervalInput.checkValidity())viewer?.setStreamIntervalMs(Number(streamIntervalInput.value));};
 const graphicsDetailsLabel=textElement('label','Detailed GPU diagnostics'),graphicsDetailsCheck=document.createElement('input');
 const cutoffLabel=textElement('label','Geometry distance cutoff'),cutoffCheck=document.createElement('input');
 const rayOcclusionLabel=textElement('label','Raycast occlusion culling'),rayOcclusionCheck=document.createElement('input');

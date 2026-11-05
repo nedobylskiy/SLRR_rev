@@ -144,6 +144,19 @@ export class Viewer {
   private geometryCutoff=false;
   private readonly mapDistanceCutoff=new MapDistanceCutoff();
   private readonly mapBackfaces=new MapBackfaceCulling();
+  private streamThrottle=false;
+  private streamIntervalMs=100;
+  private nextStreamUpdate=-Infinity;
+  setStreamThrottleEnabled(enabled:boolean){this.streamThrottle=enabled;this.nextStreamUpdate=-Infinity;}
+  setStreamIntervalMs(ms:number){
+    if(!Number.isFinite(ms)||ms<0)return;
+    this.streamIntervalMs=ms;this.nextStreamUpdate=-Infinity;
+  }
+  private updateMapStream(now:number){
+    if(!this.mapStream||this.streamThrottle&&now<this.nextStreamUpdate)return;
+    this.mapStream.update(this.mapStreamFocus??this.camera.position,this.camera);
+    this.nextStreamUpdate=now+this.streamIntervalMs;
+  }
   setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
   private updateCutoff(){this.mapDistanceCutoff.enabled.value=this.geometryCutoff&&!(this.inspection.enabled&&this.inspectResident)?1:0;}
   setGeometryCutoffEnabled(enabled:boolean){this.geometryCutoff=enabled;this.mapStream?.setGeometryCutoff(enabled);this.updateCutoff();}
@@ -156,6 +169,7 @@ export class Viewer {
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
+    `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
     ...this.rayOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
@@ -311,7 +325,7 @@ export class Viewer {
       }
       this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
       this.mapDistanceCutoff.radius.value=this.mapStreamRange;
-      this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
+      this.profiler.measure('Streaming CPU', () => this.updateMapStream(now));
       this.profiler.measure('Occlusion CPU',()=>this.rayOcclusion.prepare(this.camera,this.staticMapRoot));
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
@@ -829,6 +843,7 @@ export class Viewer {
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setShadowRange(this.lighting.shadows || this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
+    this.nextStreamUpdate=-Infinity;
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
       try {

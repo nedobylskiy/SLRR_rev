@@ -74,3 +74,15 @@ two passes. No FPS improvement is assumed: compare the same view and lighting
 settings. For isolated measurement leave raycast occlusion off: its conservative
 blocker policy currently accepts only DoubleSide surfaces, so enabling back-face
 culling can reduce the set of ray occluders.
+
+## Streamer interval experiment
+
+Enable **Limit streamer update rate** and enter **Streamer interval (ms)**
+(default 100). With the checkbox off, streaming updates every render frame.
+Zero also means every frame. The next frame applies changes to either control.
+Between updates rendering reuses the existing instance lists: proximity scans,
+visibility selection, queued chunk preparation and installation of loaded models
+all wait for the next update. Resource requests already in flight still complete
+asynchronously. Long intervals can make object appearance and camera turns lag.
+There is no catch-up loop after a slow frame. The graphics report records the
+selected interval; physics and rendering continue every frame.
