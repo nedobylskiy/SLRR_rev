@@ -127,10 +127,53 @@ test('instances of one model are culled independently without unloading and came
   stream.setRange(100); stream.update(focus, camera);
   assert.equal(stream.visible, 1); assert.equal(loads, 1);
   stream.setShadowRange(30); stream.update(focus, camera);
-  assert.equal(stream.visible, 2, 'nearby off-screen casters remain available to the shadow pass');
+  assert.equal(stream.visible, 1, 'shadow support does not expand the main color list');
+  assert.equal(stream.auxiliaryVisible,1,'nearby off-screen instances remain available separately');
   stream.setShadowRange(0); stream.update(focus, camera);
   assert.equal(stream.visible, 1, 'disabling shadows restores normal camera culling');
+  assert.equal(stream.auxiliaryVisible,0);
   stream.dispose();
+});
+
+test('auxiliary caster batches preserve palettes, swap with the view and release without disposing shared geometry',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3(),camera=new PerspectiveCamera(60,1,.1,200);
+  camera.lookAt(0,0,-1);stream.setShadowRange(30);
+  const geometry=new BoxGeometry(),material=new MeshBasicMaterial();let disposed=0;geometry.addEventListener('dispose',()=>disposed++);
+  stream.add([-20,20,80].map((z,i)=>({position:new Vector3(0,0,z),matrix:new Matrix4().makeTranslation(0,0,z),paintColor:[0xff0000,0x0000ff,0x00ff00][i]})),async()=>{
+    const mesh=new Mesh(geometry,material);mesh.castShadow=true;return [mesh];
+  });
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  const main=parent.children.find(m=>!m.userData.streamAuxiliary) as InstancedMesh;
+  const auxiliary=parent.children.find(m=>m.userData.streamAuxiliary) as InstancedMesh;
+  assert.equal(main.count,1);assert.equal(auxiliary.count,1);assert.equal(auxiliary.castShadow,true);
+  assert.equal(auxiliary.geometry,main.geometry);assert.equal(auxiliary.material,main.material);
+  const matrix=new Matrix4(),color=new Color();auxiliary.getMatrixAt(0,matrix);auxiliary.getColorAt(0,color);
+  assert.equal(matrix.elements[14],20);assert.equal(color.getHex(),0x0000ff);
+  const version=auxiliary.instanceMatrix.version;stream.update(focus,camera);assert.equal(auxiliary.instanceMatrix.version,version);
+  camera.lookAt(0,0,1);stream.update(focus,camera);
+  assert.equal(main.count,2);assert.equal(auxiliary.count,1);auxiliary.getMatrixAt(0,matrix);assert.equal(matrix.elements[14],-20);
+  stream.setInspectResident(true);stream.update(focus,camera);assert.equal(main.count,3);assert.equal(auxiliary.count,0,'inspection does not duplicate casters');
+  assert.equal(disposed,0);stream.dispose();assert.equal(disposed,1);assert.equal(parent.children.length,0);
+});
+
+test('chunk shadow reserve stays separate and is released when switching representations',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3(),camera=new PerspectiveCamera(60,1,.1,100);
+  camera.position.set(0,5,0);camera.lookAt(0,0,-30);
+  const geometry=new PlaneGeometry(512,512,16,16);geometry.rotateX(-Math.PI/2);
+  stream.add([{position:new Vector3(),matrix:new Matrix4(),bounds:{minX:-256,maxX:256,minZ:-256,maxZ:256}}],async()=>{
+    const mesh=new Mesh(geometry,new MeshBasicMaterial());mesh.castShadow=true;return [mesh];
+  });
+  stream.setGeometryCutoff(true);stream.setShadowRange(100);
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  const auxiliary=parent.children.filter(m=>m.userData.streamAuxiliary) as InstancedMesh[];
+  assert.ok(auxiliary.some(m=>m.count>0));
+  for(const extra of auxiliary.filter(m=>m.count>0)){
+    const main=parent.children.find((m:any)=>!m.userData.streamAuxiliary&&m.geometry===extra.geometry) as InstancedMesh;
+    assert.ok(main);assert.equal(main.count,0,'the same chunk instance cannot enter both passes');
+  }
+  stream.setGeometryCutoff(false);stream.update(focus,camera);
+  assert.equal(parent.children.length,1);assert.ok(auxiliary.every(m=>m.parent===null));
+  stream.dispose();assert.equal(parent.children.length,0);
 });
 
 test('instance frustum tests include parent transforms and mesh bounds away from their origin', async () => {

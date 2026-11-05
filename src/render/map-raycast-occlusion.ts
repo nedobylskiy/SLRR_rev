@@ -16,6 +16,7 @@ export class MapRaycastOcclusion {
   enabled=false;
   budgetMs=2;
   private main=false;
+  private mainColor=false;
   private shadow=false;
   private states=new Map<InstancedMesh,SourceState>();
   private geometries=new WeakMap<BufferGeometry,OccluderGeometry>();
@@ -39,6 +40,9 @@ export class MapRaycastOcclusion {
   constructor(renderer:WebGLRenderer){
     const direct=renderer.renderBufferDirect.bind(renderer);
     renderer.renderBufferDirect=(camera,scene,geometry,material,object,group)=>{
+      // Streamer shadow reserves are pass-specific even when ray culling is off.
+      // The nested shadowMap.render scope must still draw these casters.
+      if(this.mainColor&&!this.shadow&&object.userData.streamAuxiliary)return;
       if(object.userData.rayOcclusionProxy){if(!this.main||this.shadow)return;}
       else if(this.main&&!this.shadow&&(this.states.get(object as InstancedMesh)?.hidden??0)>0)return;
       return direct(camera,scene,geometry,material,object,group);
@@ -48,8 +52,8 @@ export class MapRaycastOcclusion {
   }
   setEnabled(enabled:boolean){this.enabled=enabled;if(!enabled)this.reset();}
   renderMain<T>(bypass:boolean,work:()=>T):T {
-    const previous=this.main;this.main=this.enabled&&!bypass;
-    try{return work();}finally{this.main=previous;}
+    const previous=this.main,color=this.mainColor;this.main=this.enabled&&!bypass;this.mainColor=true;
+    try{return work();}finally{this.main=previous;this.mainColor=color;}
   }
   private remove(source:InstancedMesh){
     const state=this.states.get(source);if(!state)return;
@@ -90,7 +94,7 @@ export class MapRaycastOcclusion {
       for(const x of [-1,1])for(const y of [-1,1]){this.point.set(x,y,-1).applyMatrix4(camera.projectionMatrixInverse);cosine=Math.min(cosine,Math.abs(this.point.z)/this.point.length());}
       this.nearSafe=('near' in camera?Number(camera.near):.1)/Math.max(.001,cosine)+1e-5;
     }
-    const sources=root.children.filter((object):object is InstancedMesh=>object instanceof InstancedMesh&&!object.userData.rayOcclusionProxy&&object.visible&&object.count>0&&object.layers.test(camera.layers));
+    const sources=root.children.filter((object):object is InstancedMesh=>object instanceof InstancedMesh&&!object.userData.streamAuxiliary&&!object.userData.rayOcclusionProxy&&object.visible&&object.count>0&&object.layers.test(camera.layers));
     const seen=new Set(sources);let changed=this.dirty,prepared=false;
     for(const source of [...this.states.keys()])if(!seen.has(source)){this.remove(source);changed=true;}
     for(const source of sources){

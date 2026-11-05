@@ -178,6 +178,7 @@ export class Viewer {
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
+    `Auxiliary map caster instances (excluded from main color): ${this.mapStream?.auxiliaryVisible??0}`,
     ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
     ...this.rayOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,

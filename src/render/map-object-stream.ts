@@ -16,6 +16,7 @@ interface StreamType {
   baseMeshes?:InstancedMesh[];
   chunkMeshes?:InstancedMesh[];
   meshDrawn:Map<InstancedMesh,number[]>;
+  auxiliary:Map<InstancedMesh,InstancedMesh>;
   chunkBounds:Map<InstancedMesh,Map<number,Box3>>;
   loading: boolean;
   failed: boolean;
@@ -74,7 +75,7 @@ export class MapObjectStream {
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
     this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
-      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),chunkBounds:new Map() });
+      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map() });
     this.dirty = true;
   }
 
@@ -142,46 +143,65 @@ export class MapObjectStream {
 
   private draw(type: StreamType, focus: Vector3, cull: boolean) {
     const visible = type.candidates; visible.length = 0;
+    const auxiliary:number[]=[];
     type.primaryVisible=0;
     for (const index of type.active) {
       let primary=distanceTo(type.placements[index], focus)<=this.distance;
       if (primary && cull) {
         let bounds = type.instanceBounds.get(index);
         if (!bounds) { bounds = type.localBounds!.clone().applyMatrix4(type.placements[index].matrix); type.instanceBounds.set(index, bounds); }
-        // Off-screen objects near the car may still cast visible sun shadows.
-        if (!this.frustum.intersectsSphere(bounds)
-          && (!this.shadowRange || distanceTo(type.placements[index], focus) > this.shadowRange)) primary=false;
+        if (!this.frustum.intersectsSphere(bounds)) primary=false;
       }
       if(primary)type.primaryVisible++;
+      if(this.shadowRange>0&&distanceTo(type.placements[index],focus)<=Math.min(this.distance,this.shadowRange))auxiliary.push(index);
       if(!primary&&!this.inspectResident)continue;
       visible.push(index);
     }
     let changed=visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index);
     for (const mesh of type.meshes!) {
       let selected=visible;
+      let extra=auxiliary;
       if(this.geometryCutoff&&!this.inspectResident){
         if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
         const cache=type.chunkBounds.get(mesh)??new Map<number,Box3>();type.chunkBounds.set(mesh,cache);
-        selected=visible.filter(index=>{
+        const accepts=(index:number,shadow:boolean)=>{
           let box=cache.get(index);
           if(!box){box=mesh.geometry.boundingBox!.clone().applyMatrix4(type.placements[index].matrix);cache.set(index,box);}
           const distance=Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z));
-          return distance<=this.distance&&(!cull||this.frustum.intersectsBox(box)||(this.shadowRange>0&&distance<=this.shadowRange));
-        });
+          return distance<=this.distance&&(shadow?distance<=this.shadowRange:!cull||this.frustum.intersectsBox(box));
+        };
+        selected=visible.filter(index=>accepts(index,false));
+        extra=auxiliary.filter(index=>accepts(index,true));
       }
-      const previous=type.meshDrawn.get(mesh);
-      if(!previous||selected.length!==previous.length||selected.some((index,slot)=>previous[slot]!==index)){
-        changed=true;
-        for (let slot = 0; slot < selected.length; slot++) {
-          const placement = type.placements[selected[slot]];
-          mesh.setMatrixAt(slot, placement.matrix);
-          if (mesh.instanceColor) mesh.setColorAt(slot, this.instanceColor.setHex(placement.paintColor ?? 0xffffff));
+      if(extra.length){const mainSet=new Set(selected);extra=extra.filter(index=>!mainSet.has(index));}
+      const batches:[InstancedMesh,number[]][]=[[mesh,selected]];
+      let proxy=type.auxiliary.get(mesh);
+      if(extra.length&&!proxy){
+        proxy=new InstancedMesh(mesh.geometry,mesh.material,type.placements.length);
+        proxy.name=`${mesh.name} / auxiliary casters`;proxy.renderOrder=mesh.renderOrder;
+        proxy.castShadow=mesh.castShadow;proxy.receiveShadow=mesh.receiveShadow;proxy.matrixAutoUpdate=false;
+        proxy.userData.streamAuxiliary=true;proxy.count=0;proxy.visible=false;
+        if(mesh.instanceColor)proxy.setColorAt(0,this.instanceColor.setHex(0xffffff));
+        type.auxiliary.set(mesh,proxy);this.parent.add(proxy);
+        const release=()=>{proxy!.removeFromParent();proxy!.dispose();type.meshDrawn.delete(proxy!);type.auxiliary.delete(mesh);mesh.removeEventListener('dispose',release);};
+        mesh.addEventListener('dispose',release);
+      }
+      if(proxy)batches.push([proxy,extra]);
+      for(const [batch,indices] of batches){
+        const previous=type.meshDrawn.get(batch);
+        if(!previous||indices.length!==previous.length||indices.some((index,slot)=>previous[slot]!==index)){
+          changed=true;
+          for (let slot = 0; slot < indices.length; slot++) {
+            const placement = type.placements[indices[slot]];
+            batch.setMatrixAt(slot, placement.matrix);
+            if (batch.instanceColor) batch.setColorAt(slot, this.instanceColor.setHex(placement.paintColor ?? 0xffffff));
+          }
+          if (batch.instanceColor) batch.instanceColor.needsUpdate = true;
+          batch.count = indices.length; batch.instanceMatrix.needsUpdate = true;
+          // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
+          batch.computeBoundingSphere(); batch.visible = batch.count > 0;
+          type.meshDrawn.set(batch,[...indices]);
         }
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        mesh.count = selected.length; mesh.instanceMatrix.needsUpdate = true;
-        // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
-        mesh.computeBoundingSphere(); mesh.visible = mesh.count > 0;
-        type.meshDrawn.set(mesh,[...selected]);
       }
     }
     if(changed)this.revision++;
@@ -266,6 +286,7 @@ export class MapObjectStream {
   get active() { return this.types.reduce((sum, type) => sum + type.active.length, 0); }
   get visible() { return this.types.reduce((sum, type) => sum + type.drawn.length, 0); }
   get primaryVisible() { return this.types.reduce((sum,type)=>sum+type.primaryVisible,0); }
+  get auxiliaryVisible(){return this.types.reduce((sum,type)=>sum+[...type.auxiliary.values()].reduce((n,m)=>n+m.count,0),0);}
   get total() { return this.types.reduce((sum, type) => sum + type.placements.length, 0); }
   private release(type: StreamType) {
     if (type.meshes?.length) this.revision++;
