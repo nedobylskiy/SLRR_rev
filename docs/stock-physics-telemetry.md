@@ -5,13 +5,16 @@
 The full recorder still crashes the original game without a script error after
 the import/mass fixes. It is not qualified for unattended capture. The user's
 experimental installation now uses
-`tools/stock-telemetry/diagnostics/stage2/PhysicsTelemetry.java`: one guarded RPM
-read per track visit, with log markers before/after the getter. The complete
+`tools/stock-telemetry/diagnostics/stage3/PhysicsTelemetry.java`: one guarded RPM
+read followed by one speed read per track visit, with markers around each getter. The complete
 recorder remains separate. Stage 0 (empty hooks) was confirmed by the user to
 run without crashing and correctly produced no telemetry output. The user also
 found the stage1 literal marker, confirming that the Track hook and System.log
 can run. The unusual filename observed from an earlier run is not proof of memory
 corruption; the actual logging route remains a separate investigation.
+Stage 2 was confirmed by the user's original-game log: car check and both RPM
+markers appeared, with `rpm=0.000`. This confirms return from that one call,
+not a running-engine RPM measurement or behavior on every chassis.
 
 Enable each next step only after an original-game run confirms the previous one:
 
@@ -19,16 +22,17 @@ Enable each next step only after an original-game run confirms the previous one:
 2. **Stage 1:** the provided stage1 variant logs one literal line per track visit,
    without inspecting the Vehicle argument.
 3. **Stage 2:** null-check car/chassis and read getRPM once, with before/after
-   markers. Then add clock/throttle, speed, gear and control reads individually.
+   markers. **Stage 3:** append one Vehicle.getSpeed read. Then add clock/throttle,
+   gear and control reads individually.
 4. Leave metadata, mass, ratios and engine/dyno traversal disabled until basic
    samples work. Split those sections into individual marked probes too.
 
 When switching variants, preserve the installed source and generated
 `sl/Scripts/game/PhysicsTelemetry.class`, then invalidate that generated class
 so the game recompiles the new source on a full restart. Never change the
-Steam installation as part of these experiments. Stage 2 is enabled; an
+Steam installation as part of these experiments. Stage 3 is enabled; an
 original-game rerun is pending. Expected final marker:
-`SLRR_TELEMETRY_PROBE stage=2 after=getRPM rpm=...`.
+`SLRR_TELEMETRY_PROBE stage=3 after=getSpeed speed_mps=...`.
 
 ## Full recorder (not yet qualified in the original runtime)
 
