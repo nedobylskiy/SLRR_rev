@@ -61,7 +61,7 @@ native resource flag or a blanket filter on untextured models.
 
 ## Map back-face experiment
 
-**Back-face culling (map)** is off by default for A/B comparison. It switches
+**Back-face culling (map)** is on by default and can be toggled for A/B comparison. It switches
 opaque static map materials to FrontSide only when every nondegenerate triangle
 agrees with the authored normals. Mixed or uncertain winding, alpha cutouts and
 transparent layers remain DoubleSide. Future streamed models use the selected
@@ -77,8 +77,8 @@ culling can reduce the set of ray occluders.
 
 ## Streamer interval experiment
 
-Enable **Limit streamer update rate** and enter **Streamer interval (ms)**
-(default 100). With the checkbox off, streaming updates every render frame.
+**Limit streamer update rate** is enabled by default with **Streamer interval (ms)**
+set to 100. With the checkbox off, streaming updates every render frame.
 Zero also means every frame. The next frame applies changes to either control.
 Between updates rendering reuses the existing instance lists: proximity scans,
 visibility selection, queued chunk preparation and installation of loaded models

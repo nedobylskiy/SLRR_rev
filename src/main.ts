@@ -311,10 +311,10 @@ farPlaneCheck.type='checkbox';farPlaneLabel.prepend(farPlaneCheck);mapDebugOptio
 farPlaneLabel.title='Limit the primary camera far clipping plane to the streaming radius. The inspection camera retains its full range. Disable to restore the game camera range.';
 farPlaneCheck.onchange=()=>viewer?.setFarPlaneEnabled(farPlaneCheck.checked);
 const streamThrottleLabel=textElement('label','Limit streamer update rate'),streamThrottleCheck=document.createElement('input');
-streamThrottleCheck.type='checkbox';streamThrottleLabel.prepend(streamThrottleCheck);mapDebugOptions.append(streamThrottleLabel);
+streamThrottleCheck.type='checkbox';streamThrottleCheck.checked=true;streamThrottleLabel.prepend(streamThrottleCheck);mapDebugOptions.append(streamThrottleLabel);
 streamThrottleLabel.title='Reuse the prepared map instance lists between updates. Larger intervals also delay visibility changes and installation of loaded objects.';
 const streamIntervalLabel=textElement('label','Streamer interval (ms)'),streamIntervalInput=document.createElement('input');
-streamIntervalInput.type='number';streamIntervalInput.min='0';streamIntervalInput.step='1';streamIntervalInput.value='100';streamIntervalInput.disabled=true;
+streamIntervalInput.type='number';streamIntervalInput.min='0';streamIntervalInput.step='1';streamIntervalInput.value='100';
 streamIntervalInput.style.width='75px';streamIntervalLabel.append(streamIntervalInput);mapDebugOptions.append(streamIntervalLabel);
 streamThrottleCheck.onchange=()=>{streamIntervalInput.disabled=!streamThrottleCheck.checked;viewer?.setStreamThrottleEnabled(streamThrottleCheck.checked);};
 streamIntervalInput.onchange=()=>{if(streamIntervalInput.value!==''&&streamIntervalInput.checkValidity())viewer?.setStreamIntervalMs(Number(streamIntervalInput.value));};
@@ -332,7 +332,7 @@ cutoffCheck.type='checkbox';cutoffLabel.prepend(cutoffCheck);mapDebugOptions.app
 cutoffLabel.title='Split large static meshes into 64 m cells and cut at the streaming radius. Cells prepare once when enabled. Physics stays unchanged.';
 cutoffCheck.onchange=()=>viewer?.setGeometryCutoffEnabled(cutoffCheck.checked);
 const backfaceLabel=textElement('label','Back-face culling (map)'),backfaceCheck=document.createElement('input');
-backfaceCheck.type='checkbox';backfaceLabel.prepend(backfaceCheck);mapDebugOptions.append(backfaceLabel);
+backfaceCheck.type='checkbox';backfaceCheck.checked=true;backfaceLabel.prepend(backfaceCheck);mapDebugOptions.append(backfaceLabel);
 backfaceLabel.title='Experimental: cull reverse faces of opaque static map meshes with consistent winding. Foliage, transparency and shadow casters stay two-sided.';
 backfaceCheck.onchange=()=>viewer?.setMapBackfaceCullingEnabled(backfaceCheck.checked);
 graphicsDetailsCheck.type='checkbox';graphicsDetailsLabel.prepend(graphicsDetailsCheck);mapDebugOptions.append(graphicsDetailsLabel);
@@ -383,7 +383,7 @@ shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOpti
 shadowsLabel.title = 'Renderer sun shadows near the car (additional GPU cost)';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
 const bakedLightmapsLabel = textElement('label', 'Baked lightmaps'), bakedLightmapsCheck = document.createElement('input');
-bakedLightmapsCheck.type = 'checkbox'; bakedLightmapsLabel.prepend(bakedLightmapsCheck); mapDebugOptions.append(bakedLightmapsLabel);
+bakedLightmapsCheck.type = 'checkbox'; bakedLightmapsCheck.checked = true; bakedLightmapsLabel.prepend(bakedLightmapsCheck); mapDebugOptions.append(bakedLightmapsLabel);
 bakedLightmapsLabel.title = 'Authored SCX lighting; surfaces without a lightmap use cached static-map shadows. Independent of dynamic shadows.';
 bakedLightmapsCheck.onchange = () => viewer?.setBakedLightmapsEnabled(bakedLightmapsCheck.checked);
 const reflectionsLabel = textElement('label', 'Real reflections'), reflectionsCheck = document.createElement('input');

@@ -144,7 +144,7 @@ export class Viewer {
   private geometryCutoff=false;
   private readonly mapDistanceCutoff=new MapDistanceCutoff();
   private readonly mapBackfaces=new MapBackfaceCulling();
-  private streamThrottle=false;
+  private streamThrottle=true;
   private streamIntervalMs=100;
   private nextStreamUpdate=-Infinity;
   private farPlaneEnabled=false;
@@ -284,6 +284,8 @@ export class Viewer {
     this.profiler = new FrameProfiler(this.renderer);
     this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
     this.rayOcclusion=new MapRaycastOcclusion(this.renderer);
+    this.mapBackfaces.setEnabled(true);
+    this.setBakedLightmapsEnabled(true);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
