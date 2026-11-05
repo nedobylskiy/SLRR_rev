@@ -104,6 +104,10 @@ test('SCX v4 uses the secondary diffuse map only when the primary map is absent'
   const bridge = parseScx(fixture([[0x06000001, 3]], 0xa0000000)).meshes[0];
   assert.equal(bridge.materialFlags, 0xa0000000);
   assert.equal(bridge.paintMask, false, 'bridge alpha cuts holes instead of filling them with paint');
+  assert.equal(parseScx(fixture([[0x06000001,0]],0x40000000)).meshes[0].paintMask,false,
+    'Baiern badge alpha cuts away the decal rectangle instead of revealing paint inside it');
+  assert.equal(parseScx(fixture([[0x06000001,0]],0xc0000000)).meshes[0].paintMask,false,
+    'lighting-atlas materials can also request surface alpha');
   assert.equal(parseScx(fixture([[0x06000001, 3]], 0x80000000)).meshes[0].paintMask, true);
   assert.equal(parseScx(fixture([[0x06000001, 3], [0x06000000, 1]])).meshes[0].paintMask, false);
   assert.equal(parseScx(fixture([[0x06000000, 1], [0x06000001, 3]])).meshes[0].paintMask, false);

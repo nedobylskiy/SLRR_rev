@@ -146,9 +146,10 @@ export function parseScx(bytes: Uint8Array): ScxModel {
               // Keep DiffuseMap authoritative when both entries are present, regardless of their order.
               if (type === 0x06000000 || (type === 0x06000001 && current.textureIndex === undefined)) {
                 current.textureIndex = index; current.textureMap = map;
-                // V4 bridge/truss materials use the same map slot as painted
-                // facades, but bit 29 makes alpha surface coverage instead of paint.
-                current.paintMask = type === 0x06000001 && !(current.materialFlags! & 0x20000000);
+                // V4 cutout/blended surfaces share the diffuse-mix slot with
+                // paint masks (e.g. bridge trusses and Baiern trunk badges).
+                // Bits 29/30 require surface alpha rather than paint underneath.
+                current.paintMask = type === 0x06000001 && !(current.materialFlags! & 0x60000000);
               }
               if (type === 0x06000007 && index !== 0xffffffff) { current.lightmapIndex = index; current.lightmapMap = map; }
               if(type===0x06000004&&index!==0xffffffff){current.illuminationIndex=index;current.illuminationMap=map;}
