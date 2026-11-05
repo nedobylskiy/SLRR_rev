@@ -1,7 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, Texture, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream } from '../src/render/map-object-stream';
+
+test('large static surfaces submit nearby cells and restore the intact mesh when cutoff is disabled',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),geometry=new PlaneGeometry(512,512,32,32);
+  geometry.rotateX(-Math.PI/2);const originalIndices=Array.from(geometry.index!.array),texture=new Texture(),material=new MeshBasicMaterial({map:texture});
+  let textureDisposals=0;texture.addEventListener('dispose',()=>textureDisposals++);
+  stream.add([{position:new Vector3(),matrix:new Matrix4(),bounds:{minX:-256,maxX:256,minZ:-256,maxZ:256}}],async()=>[new Mesh(geometry,material)]);
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());
+  const original=parent.children[0];stream.setGeometryCutoff(true);stream.update(new Vector3());
+  const selected=parent.children.filter((m:any)=>m.visible) as InstancedMesh[];
+  assert.ok(parent.children.length>selected.length);assert.ok(selected.length>1);
+  const triangles=selected.reduce((n,m)=>n+m.geometry.index!.count/3*m.count,0);
+  assert.ok(triangles<geometry.index!.count/3,'far cell indices never enter the draw');
+  for(const mesh of selected)assert.equal(mesh.material,material);
+  assert.deepEqual(Array.from(geometry.index!.array),originalIndices);
+  stream.setInspectResident(true);stream.update(new Vector3());assert.ok(parent.children.every((m:any)=>m.visible));
+  stream.setInspectResident(false);stream.setGeometryCutoff(false);stream.update(new Vector3());
+  assert.equal(parent.children.length,1);assert.equal(parent.children[0],original);assert.ok(original.visible);
+  stream.setGeometryCutoff(true);stream.update(new Vector3());assert.ok(parent.children.length>1,'cached cells can upload again');
+  assert.equal(textureDisposals,0,'switching representations must retain shared textures');
+  stream.dispose();assert.equal(parent.children.length,0);assert.equal(textureDisposals,1);
+});
+
+test('chunk instance compaction preserves the selected placement matrix and palette',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100),geometry=new PlaneGeometry(512,512,16,16);
+  geometry.rotateX(-Math.PI/2);
+  stream.add([0,180].map((x,i)=>({position:new Vector3(x,0,0),matrix:new Matrix4().makeTranslation(x,0,0),
+    bounds:{minX:x-256,maxX:x+256,minZ:-256,maxZ:256},paintColor:i?0x0000ff:0xff0000})),async()=>[new Mesh(geometry,new MeshBasicMaterial())]);
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());
+  stream.setGeometryCutoff(true);stream.update(new Vector3());
+  const chunk=parent.children.find((m:any)=>m.visible&&m.geometry.boundingBox.max.x<=-192&&m.geometry.boundingBox.min.z===0) as InstancedMesh;
+  assert.ok(chunk);assert.equal(chunk.count,1);
+  const matrix=new Matrix4(),color=new Color();chunk.getMatrixAt(0,matrix);chunk.getColorAt(0,color);
+  assert.equal(matrix.elements[12],180);assert.equal(color.getHex(),0x0000ff);stream.dispose();
+});
 
 test('resident inspection reveals off-screen instances without loading around the observer',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,100),focus=new Vector3();

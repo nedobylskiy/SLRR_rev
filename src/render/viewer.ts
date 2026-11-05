@@ -4,6 +4,7 @@ import { ptxTexture } from './ptx-texture';
 import { TextureSourceCache } from './texture-source-cache';
 import { GraphicsDiagnostics } from './graphics-diagnostics';
 import { InspectionCamera } from './inspection-camera';
+import { MapDistanceCutoff } from './map-distance-cutoff';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap } from './baked-lightmap';
@@ -135,14 +136,19 @@ export class Viewer {
   private inspectResident=false;
   private mapPackPath?:string;
   private collisionOnlyMapMeshes=0;
+  private geometryCutoff=false;
+  private readonly mapDistanceCutoff=new MapDistanceCutoff();
+  private updateCutoff(){this.mapDistanceCutoff.enabled.value=this.geometryCutoff&&!(this.inspection.enabled&&this.inspectResident)?1:0;}
+  setGeometryCutoffEnabled(enabled:boolean){this.geometryCutoff=enabled;this.mapStream?.setGeometryCutoff(enabled);this.updateCutoff();}
   setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
-  setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);this.mapStream?.setInspectResident(enabled&&this.inspectResident);}
-  setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);}
+  setInspectionCameraEnabled(enabled:boolean){this.inspection.setEnabled(enabled,this.controls.target);this.mapStream?.setInspectResident(enabled&&this.inspectResident);this.updateCutoff();}
+  setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);this.updateCutoff();}
   resetInspectionCamera(){this.inspection.reset(this.controls.target);}
   graphicsDebugLines(){return [
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
+    ...(this.mapStream?[this.mapStream.chunkInfo]:[]),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
       `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
     ...this.graphicsDiagnostics.lines(this.scene)];}
@@ -293,6 +299,8 @@ export class Viewer {
         if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
         if (this.controls.enabled) this.controls.update();
       }
+      this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
+      this.mapDistanceCutoff.radius.value=this.mapStreamRange;
       this.profiler.measure('Streaming CPU', () => this.mapStream?.update(this.mapStreamFocus ?? this.camera.position, this.camera));
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
@@ -804,6 +812,7 @@ export class Viewer {
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
+    stream.setGeometryCutoff(this.geometryCutoff);
     stream.setShadowRange(this.lighting.shadows || this.bakedLightmaps.value ? 150 : 0);
     this.mapStream = stream;
     for (const { source, id } of ids) {
@@ -1296,6 +1305,7 @@ export class Viewer {
       const material = new THREE.MeshStandardMaterial({ color: new THREE.Color(color[0], color[1], color[2]), roughness: 0.65, metalness: 0.12, side: THREE.DoubleSide, opacity, transparent: opacity < 1, depthWrite: opacity === 1 });
       this.lighting.configureMaterial(material, !!part.colors, !!part.paintMask || scxUsesVertexPaintMask(model.version, part.materialFlags),
         part.paintMask ? paintColor === undefined ? material.color.clone() : new THREE.Color(paintColor & 0xffffff) : undefined);
+      if(mapSurface)this.mapDistanceCutoff.configure(material);
       const mesh = new THREE.Mesh(geometry, material); mesh.name = part.name; target.add(mesh);
       mesh.castShadow = opacity === 1; mesh.receiveShadow = true;
       const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
@@ -1349,6 +1359,7 @@ export class Viewer {
             const layer = new THREE.Mesh(layerGeometry, layerMaterial);
             secondLayer = layer;
             this.lighting.configureMaterial(layerMaterial, !!part.colors);
+            if(mapSurface)this.mapDistanceCutoff.configure(layerMaterial);
             layer.receiveShadow = true;
             layer.name = `${part.name} / layer2`;
             layer.renderOrder = 1;

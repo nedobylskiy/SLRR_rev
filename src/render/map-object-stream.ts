@@ -1,5 +1,6 @@
-import { Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
+import { Box3, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
 import { MapMaterialPool } from './map-material-pool';
+import { splitMapGeometry } from './map-geometry-chunks';
 
 export interface StreamPlacement { matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
@@ -12,6 +13,10 @@ interface StreamType {
   load: (wanted: () => boolean) => Promise<Mesh[]>;
   priority: number;
   meshes?: InstancedMesh[];
+  baseMeshes?:InstancedMesh[];
+  chunkMeshes?:InstancedMesh[];
+  meshDrawn:Map<InstancedMesh,number[]>;
+  chunkBounds:Map<InstancedMesh,Map<number,Box3>>;
   loading: boolean;
   failed: boolean;
   active: number[];
@@ -44,6 +49,17 @@ export class MapObjectStream {
   private readonly instanceColor = new Color();
   private readonly materials = new MapMaterialPool();
   private inspectResident=false;
+  private geometryCutoff=false;
+  private prepareChunks=new Set<StreamType>();
+  setGeometryCutoff(enabled:boolean){
+    this.geometryCutoff=enabled;this.prepareChunks.clear();
+    for(const type of this.types)if(type.meshes){
+      if(enabled&&!type.chunkMeshes)this.prepareChunks.add(type);
+      else this.selectMeshes(type);
+    }
+    this.viewDirty=true;
+  }
+  get chunkInfo(){return `Geometry cutoff: ${this.geometryCutoff?'on':'off'} · 64 m cells · preparation queue ${this.prepareChunks.size} · chunk batches ${this.types.reduce((n,t)=>n+(t.chunkMeshes?.filter(m=>m.userData.mapChunk).length??0),0)}`;}
   setInspectResident(enabled:boolean){this.inspectResident=enabled;this.viewDirty=true;}
   constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
 
@@ -58,12 +74,14 @@ export class MapObjectStream {
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>) {
     this.types.push({ placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
-      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0 });
+      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),chunkBounds:new Map() });
     this.dirty = true;
   }
 
   update(camera: Vector3, view?: Camera) {
     if (this.disposed) return;
+    const next=this.prepareChunks.values().next().value;
+    if(next){this.prepareChunks.delete(next);if(next.meshes&&this.geometryCutoff)this.selectMeshes(next);}
     const cell = `${Math.floor(camera.x / 25)},${Math.floor(camera.z / 25)}`;
     if (cell !== this.lastCell || this.dirty) {
       this.lastCell = cell; this.dirty = false;
@@ -138,21 +156,36 @@ export class MapObjectStream {
       if(!primary&&!this.inspectResident)continue;
       visible.push(index);
     }
-    if (visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index)) {
-      this.revision++;
-      for (const mesh of type.meshes!) {
-        for (let slot = 0; slot < visible.length; slot++) {
-          const placement = type.placements[visible[slot]];
+    let changed=visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index);
+    for (const mesh of type.meshes!) {
+      let selected=visible;
+      if(this.geometryCutoff&&!this.inspectResident){
+        if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
+        const cache=type.chunkBounds.get(mesh)??new Map<number,Box3>();type.chunkBounds.set(mesh,cache);
+        selected=visible.filter(index=>{
+          let box=cache.get(index);
+          if(!box){box=mesh.geometry.boundingBox!.clone().applyMatrix4(type.placements[index].matrix);cache.set(index,box);}
+          const distance=Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z));
+          return distance<=this.distance&&(!cull||this.frustum.intersectsBox(box)||(this.shadowRange>0&&distance<=this.shadowRange));
+        });
+      }
+      const previous=type.meshDrawn.get(mesh);
+      if(!previous||selected.length!==previous.length||selected.some((index,slot)=>previous[slot]!==index)){
+        changed=true;
+        for (let slot = 0; slot < selected.length; slot++) {
+          const placement = type.placements[selected[slot]];
           mesh.setMatrixAt(slot, placement.matrix);
           if (mesh.instanceColor) mesh.setColorAt(slot, this.instanceColor.setHex(placement.paintColor ?? 0xffffff));
         }
         if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-        mesh.count = visible.length; mesh.instanceMatrix.needsUpdate = true;
+        mesh.count = selected.length; mesh.instanceMatrix.needsUpdate = true;
         // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
         mesh.computeBoundingSphere(); mesh.visible = mesh.count > 0;
+        type.meshDrawn.set(mesh,[...selected]);
       }
-      const old = type.drawn; type.drawn = visible; type.candidates = old;
     }
+    if(changed)this.revision++;
+    const old = type.drawn; type.drawn = visible; type.candidates = old;
     type.boundsDirty = false;
   }
 
@@ -200,10 +233,34 @@ export class MapObjectStream {
         mesh.matrixAutoUpdate = false;
         this.parent.add(mesh); return mesh;
       });
+      type.baseMeshes=type.meshes;
+      if(this.geometryCutoff)this.prepareChunks.add(type);
       type.loading = false;
       // Pending placements already describe the current focus. Completing one
       // model must not rescan the entire city index on the next frame.
     }).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); });
+  }
+
+  private selectMeshes(type:StreamType){
+    if(!type.baseMeshes)return;
+    if(this.geometryCutoff&&!type.chunkMeshes)type.chunkMeshes=type.baseMeshes.flatMap(base=>{
+      const geometries=splitMapGeometry(base.geometry);
+      if(geometries.length===1&&geometries[0]===base.geometry)return [base];
+      return geometries.map((geometry,index)=>{
+        const mesh=new InstancedMesh(geometry,base.material,type.placements.length);
+        mesh.name=`${base.name} / chunk ${index}`;mesh.renderOrder=base.renderOrder;
+        mesh.castShadow=base.castShadow;mesh.receiveShadow=base.receiveShadow;mesh.matrixAutoUpdate=false;
+        mesh.userData.mapChunk=true;mesh.count=0;mesh.visible=false;
+        if(base.instanceColor)mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));return mesh;
+      });
+    });
+    const selected=this.geometryCutoff?type.chunkMeshes!:type.baseMeshes;
+    const retained=new Set(selected);
+    for(const mesh of type.meshes??[])if(!retained.has(mesh)){
+      mesh.removeFromParent();mesh.geometry.dispose();mesh.dispose();
+    }
+    type.meshes=selected;for(const mesh of selected)this.parent.add(mesh);
+    type.meshDrawn.clear();type.boundsDirty=true;this.revision++;
   }
 
   get active() { return this.types.reduce((sum, type) => sum + type.active.length, 0); }
@@ -213,7 +270,8 @@ export class MapObjectStream {
   private release(type: StreamType) {
     if (type.meshes?.length) this.revision++;
     const geometries = new Set(), materials = new Set(), textures = new Set<Texture>();
-    for (const mesh of type.meshes ?? []) {
+    this.prepareChunks.delete(type);
+    for (const mesh of new Set([...(type.baseMeshes??[]),...(type.chunkMeshes??[]),...(type.meshes??[])])) {
       mesh.removeFromParent(); mesh.dispose(); geometries.add(mesh.geometry);
       for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) materials.add(material);
     }
@@ -226,6 +284,7 @@ export class MapObjectStream {
     for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
     for (const texture of textures) texture.dispose();
     type.meshes = undefined; type.unusedSince = undefined; type.localBounds = undefined;
+    type.baseMeshes=type.chunkMeshes=undefined;type.meshDrawn.clear();type.chunkBounds.clear();
     type.drawn.length = type.candidates.length = 0; type.instanceBounds.clear();
   }
   dispose() { this.disposed = true; for (const type of this.types) this.release(type); this.types = []; this.ordered = []; }
