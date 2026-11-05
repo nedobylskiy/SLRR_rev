@@ -8,6 +8,7 @@ import { MechanicalSystem } from './mechanical-system';
 import type { TireSurface } from './map-terrain';
 import { DEFAULT_TIRE_MODEL, tireForces, type TireModelSettings } from './tire-model';
 import type { WheelRefState } from '../runtime/wheel-ref-native';
+import { applyExperimentalHubPose } from './hub-geometry';
 
 export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; mayReach?(bounds: Box3): boolean; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
 export interface TireContactState { contact: boolean; force: number; contactPoint: Vector3; contactNormal: Vector3; forward: Vector3; slipSpeed: number; lateralSpeed: number; slip: number; surface: TireSurface }
@@ -189,6 +190,8 @@ export class Suspension3D {
       const offset = new Vector3().setFromMatrixPosition(w.frame).sub(w.center).applyQuaternion(rotation);
       const position = w.hardpoint.clone().addScaledVector(down, w.length).add(offset);
       const wheelSteer = ackermannSteerAngle(this.steer, w.center.x, this.root.definition.config.ackermann ?? 2, w.steering);
+      if (w.mountCondition === 1 && applyExperimentalHubPose(this.root, index, w.length, wheelSteer, w.spin * sign)) continue;
+      w.part.armTravelTransform = undefined;
       const unsteered = damaged.clone().multiply(w.frame).setPosition(position);
       const carrier = unsteered.clone().multiply(new Matrix4().makeRotationY(wheelSteer));
       const steeringTransform = carrier.clone().multiply(unsteered.clone().invert());
@@ -196,6 +199,7 @@ export class Suspension3D {
       w.part.steeringTransform.copy(steeringTransform);
       const travel = carrier.multiply(w.frame.clone().invert());
       for (const moving of this.movingParts[index]) if (moving.part.parent === this.root) {
+        moving.part.armTravelTransform = undefined;
         moving.part.local.copy(travel).multiply(moving.base);
         moving.part.steeringTransform.copy(steeringTransform);
       }

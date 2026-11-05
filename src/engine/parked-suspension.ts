@@ -2,6 +2,8 @@ import { Matrix4 } from 'three';
 import type { EnginePart } from './world';
 import { vehicleAssemblyCenter, vehicleAssemblyMass } from './vehicle-3d';
 import { parkedSpringLength, suspensionAnchorLength } from './suspension-geometry';
+import { applyExperimentalHubPose } from './hub-geometry';
+import { ackermannSteerAngle } from './suspension-3d';
 
 /** Reset hardware to attachment frames before applying parked steering and travel. */
 export function resetParkedRunningGear(root: EnginePart): void {
@@ -12,7 +14,7 @@ export function resetParkedRunningGear(root: EnginePart): void {
   }
 }
 
-export function settleParkedSuspension(root: EnginePart): boolean {
+export function settleParkedSuspension(root: EnginePart, steering = 0): boolean {
   const config = root.definition.config;
   if (config.wheels.length !== 4) return false;
   const mass = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);
@@ -36,6 +38,13 @@ export function settleParkedSuspension(root: EnginePart): boolean {
     if (!(type >= 101 && type <= 104 || type >= 201 && type <= 204 || type >= 301 && type <= 304)) continue;
     const shift=shifts[type % 100 - 1];
     if(shift!==undefined)part.local.premultiply(new Matrix4().makeTranslation(0,shift,0));
+  }
+  for (let index = 0; index < 4; index++) {
+    const shift = shifts[index];
+    if (shift === undefined) continue;
+    const angle = ackermannSteerAngle(Math.max(-1, Math.min(1, steering)) * (config.maxSteer ?? 0.6),
+      frames[index].elements[12], config.ackermann ?? 2, config.wheels[index].parameters[0] ?? 0);
+    applyExperimentalHubPose(root, index, suspensionAnchorLength(config.wheels[index]) - root.wheelFrameOffsetY - shift, angle);
   }
   return shifts.some(shift=>shift!==undefined);
 }

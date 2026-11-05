@@ -63,6 +63,8 @@ export class EnginePart {
   readonly local = new Matrix4();
   /** Steering in parent axes, separate from suspension travel for linked arms. */
   readonly steeringTransform = new Matrix4();
+  /** Experimental unsteered arm carrier, independent of hub tilt and wheel spin. */
+  armTravelTransform?: Matrix4;
   readonly renderAdjustment = new Matrix4();
   readonly slotPositions = new Map<number, Triple>();
   readonly slotRotations = new Map<number, Triple>();
@@ -87,6 +89,7 @@ export class EngineWorld {
   lightMask = 0;
   javaPowertrain?: JavaStockSelection['powertrain'];
   wheelRefs: (WheelRefState | undefined)[] = [];
+  experimentalHubGeometry = false;
   create(definition: PartDefinition) {
     if (this.disposed) throw new Error('World disposed');
     if (this.parts.size >= 10000) throw new Error('World part limit');
@@ -102,6 +105,7 @@ export class EngineWorld {
     if (!a || !b) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(a)).multiply(child.slotFrame(b).invert());
     child.steeringTransform.identity();
+    child.armTravelTransform = undefined;
     child.parent = parent; child.parentSlot = parentSlot; child.ownSlot = ownSlot; parent.children.set(parentSlot, child);
   }
   refreshAttachment(child: EnginePart) {
@@ -113,6 +117,7 @@ export class EngineWorld {
     if (!mount || !mate) throw new Error('Missing attachment slot');
     child.local.copy(parent.slotFrame(mount)).multiply(child.slotFrame(mate).invert());
     child.steeringTransform.identity();
+    child.armTravelTransform = undefined;
   }
   detach(child: EnginePart) {
     if (this.parts.get(child.id) !== child || this.disposed) throw new Error('Part outside live world');

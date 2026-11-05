@@ -167,6 +167,11 @@ export class Viewer {
     this.nextStreamUpdate=now+this.streamIntervalMs;
   }
   setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
+  private experimentalHubGeometry = false;
+  setExperimentalHubGeometry(enabled: boolean) {
+    this.experimentalHubGeometry = enabled;
+    for (const part of this.proxies.keys()) part.world.experimentalHubGeometry = enabled;
+  }
   private updateCutoff(){this.mapDistanceCutoff.enabled.value=this.geometryCutoff&&!(this.inspection.enabled&&this.inspectResident)?1:0;}
   setGeometryCutoffEnabled(enabled:boolean){this.geometryCutoff=enabled;this.mapStream?.setGeometryCutoff(enabled);this.updateCutoff();}
   setGraphicsDiagnosticsEnabled(enabled:boolean){this.graphicsDiagnostics.enabled=enabled;this.profiler.setDetailedGpu(enabled);}
@@ -180,6 +185,7 @@ export class Viewer {
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
+    `Experimental hub geometry: ${this.experimentalHubGeometry?'on':'off'} (pose only; supported independent arm/hub 0/-1; unsupported corners retain legacy pose)`,
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
     `Auxiliary map caster instances (excluded from main color): ${this.mapStream?.auxiliaryVisible??0}`,
@@ -757,6 +763,7 @@ export class Viewer {
     return { id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
   }
   async showWorld(world: EngineWorld, assets: Assets, keepScene = false, publishTogether = false): Promise<string[]> {
+    world.experimentalHubGeometry = this.experimentalHubGeometry;
     if (!keepScene) this.clear();
     const generation = this.generation, warnings: string[] = [];
     const staged: THREE.Group[] = [];

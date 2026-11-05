@@ -2,6 +2,9 @@
 
 For subsequent upstream changes and suspension research, see the
 [2026-11-05 audit](physics-upstream-audit-2026-11-05.md).
+Current branch work: [hub pose experiment](experimental-hub-geometry.md),
+[original-game telemetry](stock-physics-telemetry.md), and
+[reported physics tasks](physics-backlog.md).
 
 This branch adapts the recovered scalar calculations from
 [nicolas-found42/sl-remastered, commit 7aa574d26098e288367a3707f0b7ac7bb892ebbe](https://github.com/nicolas-found42/sl-remastered/tree/7aa574d26098e288367a3707f0b7ac7bb892ebbe).

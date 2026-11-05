@@ -491,6 +491,11 @@ steeringRestore.onclick = () => {
 };
 steeringLabel.append(steeringReadout, steeringRange, steeringRestore); suspensionDebugPanel.append(steeringLabel);
 const suspensionReset = textElement('button', 'Reset suspension alignment');
+const hubGeometryLabel = textElement('label', 'Experimental hub geometry'), hubGeometryCheck = document.createElement('input');
+hubGeometryCheck.type = 'checkbox'; hubGeometryLabel.prepend(hubGeometryCheck);
+hubGeometryLabel.title = 'Test native arm-circle and hub modes 0/-1. Unsupported corners use the existing pose. Driving forces are unchanged.';
+hubGeometryCheck.onchange = () => viewer?.setExperimentalHubGeometry(hubGeometryCheck.checked);
+suspensionDebugPanel.append(hubGeometryLabel);
 const suspensionHeightPreset = textElement('button', 'Use base height (+0.165 m)');
 suspensionHeightPreset.onclick = () => {
   suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0;
