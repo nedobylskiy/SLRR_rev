@@ -1,5 +1,6 @@
 {
   "name": "slrr-independent-engine",
+  "description": "An open-source engine remaster of Street Legal Racing: Redline, rebuilt for the browser with WebGL 2.",
   "version": "0.1.0",
   "private": true,
   "type": "module",
