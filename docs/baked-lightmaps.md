@@ -33,12 +33,14 @@ scene disposal, stream eviction and cancelled stream loads.
 
 Surfaces without an authored lightmap now receive a separate cached static-map
 shadow projection. TestTrack's external SCX/SCY resources have no lightmap slots,
-so its tree/building shadows require this fallback. It uses the map's directional
-light when present, otherwise the scene sun direction. The 2048px projection
+so its tree/building shadows require this fallback. It uses the current scene sun
+direction, shared with dynamic shadows, rather than the fixed map RPK light. The 2048px projection
 covers a 320m square near the vehicle/camera; source alpha cutouts are retained.
 Only streamed static map geometry is captured, never vehicle parts. It refreshes
 after moving 40m or changing streamed geometry/light direction, throttled to once
-per second for stationary streaming. It does not run a new capture every frame.
+per second for stationary streaming. Movement and sun-direction changes bypass
+that streaming throttle (direction tolerance: squared vector difference 1e-5).
+It does not run a new capture every frame.
 
 This is our cached shadow implementation, not a recovered native baker or a
 decoder for original embedded shadow atlases. Original baked SCX textures keep

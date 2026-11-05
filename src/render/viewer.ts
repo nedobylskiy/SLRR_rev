@@ -253,7 +253,6 @@ export class Viewer {
   private bakedLightmaps = { value: 0 };
   private staticMapShadows = new StaticMapShadows();
   private staticMapRoot?: THREE.Group;
-  private staticMapDirection?: THREE.Vector3;
   setBakedLightmapsEnabled(enabled: boolean) {
     this.bakedLightmaps.value = this.staticMapShadows.enabled.value = enabled ? 1 : 0;
     this.mapStream?.setShadowRange(enabled || this.lighting.shadows ? 150 : 0);
@@ -351,7 +350,7 @@ export class Viewer {
       this.inspection.helpers.visible=false;
       try {
         this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
-          this.mapStreamFocus ?? this.controls.target,this.staticMapDirection ?? this.lighting.direction,this.mapStream?.revision ?? 0,now)));
+          this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.revision ?? 0,now)));
         this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
           this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
       } finally {this.inspection.helpers.visible=this.inspection.enabled;}
@@ -369,7 +368,7 @@ export class Viewer {
     this.collisionOnlyMapMeshes=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
-    this.staticMapShadows.reset();this.staticMapRoot=undefined;this.staticMapDirection=undefined;
+    this.staticMapShadows.reset();this.staticMapRoot=undefined;
     this.vehicleReflections.reset();
     this.sunFlareRevision++;
     this.sunFlare?.removeFromParent(); this.sunFlare = undefined;
@@ -799,10 +798,6 @@ export class Viewer {
     if (!keepWorld) this.clear(); const generation = this.generation;
     this.mapPackPath=packPath;
     const pack = await assets.pack(packPath), warnings: string[] = [];
-    const staticSun = pack.entries.find(entry => entry.type===13
-      && entryProperties(entry).some(property => property.key==='type' && property.value==='directional'));
-    const staticLight = staticSun && parseResourceLight(staticSun);
-    this.staticMapDirection = staticLight ? new THREE.Vector3(...staticLight.direction).normalize().negate() : undefined;
     const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
     const ground = groundEntry && groundRenderDefinition(groundEntry);
     let room: typeof ground;

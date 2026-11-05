@@ -73,7 +73,7 @@ if (slrrStaticEnabled > 0.5 && slrrStaticAvailable > 0.5) {
     const moved = !this.focus || this.focus.distanceToSquared(focus)>40*40;
     const turned = this.direction.distanceToSquared(direction)>1e-5;
     if (!moved && !turned && this.revision===revision) return;
-    if (this.available.value && now-this.updated<1000 && !moved) return;
+    if (this.available.value && now-this.updated<1000 && !moved && !turned) return;
     this.target ??= new WebGLRenderTarget(2048,2048,{minFilter:NearestFilter,magFilter:NearestFilter});
     this.camera.position.copy(focus).addScaledVector(direction,350);
     this.camera.lookAt(focus);this.camera.updateMatrixWorld(true);

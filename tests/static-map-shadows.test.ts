@@ -20,13 +20,22 @@ test('static shadow cache excludes vehicles, preserves cutouts and restores rend
       if(fail)throw new Error('capture failed');
     },
   };
-  const update = (now:number,revision=1,focus=new Vector3())=>cache.update(renderer as any,root,focus,new Vector3(1,2,1).normalize(),revision,now);
+  const direction=new Vector3(1,2,1).normalize();
+  const update = (now:number,revision=1,focus=new Vector3())=>cache.update(renderer as any,root,focus,direction,revision,now);
   update(0);assert.equal(captures,0);
   cache.enabled.value=1;update(0);assert.equal(captures,1);assert.equal(cache.available.value,1);
   update(2000);assert.equal(captures,1,'stationary static scene reuses its projection');
   update(2001,2);assert.equal(captures,2,'new streamed geometry invalidates the cache');
   update(2100,3);assert.equal(captures,2,'streaming captures are throttled');
   update(3100,3);assert.equal(captures,3);
+  direction.set(-1,2,1).normalize();update(3150,3);
+  assert.equal(captures,4,'sun turns bypass the streaming throttle to follow dynamic shadows');
+  const sunProjection=cache.matrix.value.clone();
+  const projectedOrigin=new Vector3().applyMatrix4(sunProjection),projectedAlongSun=direction.clone().applyMatrix4(sunProjection);
+  assert.ok(Math.abs(projectedOrigin.x-projectedAlongSun.x)<1e-10);
+  assert.ok(Math.abs(projectedOrigin.y-projectedAlongSun.y)<1e-10,'cached projection looks along the current sun direction');
+  direction.x+=1e-6;direction.normalize();update(3200,3);
+  assert.equal(captures,4,'sub-tolerance sun jitter does not recapture every frame');
   assert.equal(root.parent,scene);assert.equal(tree.material,source);assert.equal(tree.visible,true);
   assert.equal(renderer.autoClear,false);assert.equal(renderer.shadowMap.autoUpdate,true);
   fail=true;
