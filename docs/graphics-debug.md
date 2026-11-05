@@ -116,3 +116,15 @@ renders. Static map surfaces and Java scenery do not cast into the dynamic sun
 shadow map; they still receive vehicle shadows. The cached bake uses a separate
 static-caster flag, preserved through instancing, auxiliary batches and chunks.
 Enabling dynamic shadows alone does not add a static-map reserve.
+
+## Real reflections
+
+The local 128px cubemap captures six faces at most four times per second, with
+vehicle groups hidden during capture. Vehicle shaders sample it in world space
+in their authored reflection stage, retaining SCX reflection strength and paint
+detail masks. This contribution is independent of **Dynamic lighting** and does
+not replace the PBR environment map or add a second PBR reflection contribution.
+Until the first successful capture, the authored/global 2D reflection remains
+active. Disabling the feature clears the local uniforms and restores that path.
+The capture far plane is 5000 m so distant sky shells can enter the cubemap;
+capture still uses the already streamed geometry and requests no extra objects.

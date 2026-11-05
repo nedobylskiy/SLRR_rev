@@ -35,7 +35,7 @@ test('authored detail blends over paint while reflections remain an independent 
 
 test('local reflections throttle capture, hide vehicles only during capture and release their environment', () => {
   const system = new VehicleReflections(), material = new MeshStandardMaterial(), group = new Group();
-  material.userData.vehicleReflective = true;
+  configureVehicleMaterial(material,{reflectionIndex:1},{environment:{value:null},available:{value:0},dynamic:{value:1}});
   const original = new Texture(); material.envMap = original; material.envMapIntensity = 0.4;
   group.add(new Mesh(new BoxGeometry(), material));
   const update = CubeCamera.prototype.update;
@@ -44,9 +44,13 @@ test('local reflections throttle capture, hide vehicles only during capture and 
   try {
     system.enabled = true;
     for (const now of [0, 100, 250]) system.update({} as any, new Scene(), new Vector3(), [group], now);
-    assert.equal(captures, 2); assert.equal(group.visible, true); assert.notEqual(material.envMap, original);
-    assert.equal(material.envMapIntensity, 0.5);
+    assert.equal(captures, 2); assert.equal(group.visible, true); assert.equal(material.envMap, original);
+    assert.ok(material.userData.vehicleLocalReflection.map.value);
+    assert.equal(material.userData.vehicleLocalReflection.available.value,1);
+    assert.equal(material.envMapIntensity, 0.4);
     system.reset(); assert.equal(material.envMap, original); assert.equal(material.envMapIntensity, 0.4);
+    assert.equal(material.userData.vehicleLocalReflection.map.value,null);
+    assert.equal(material.userData.vehicleLocalReflection.available.value,0);
     CubeCamera.prototype.update = function () { throw new Error('capture failed'); };
     assert.throws(() => system.update({} as any, new Scene(), new Vector3(), [group], 500), /capture failed/);
     assert.equal(group.visible, true);
@@ -91,6 +95,6 @@ test('stock masked paint material suppresses environment reflections on opaque d
   const shader = { uniforms: {}, vertexShader: '#include <common>\n#include <begin_vertex>',
     fragmentShader: '#include <common>\n#include <map_fragment>\n#include <lights_fragment_end>\n#include <opaque_fragment>' };
   material.onBeforeCompile(shader as any, {} as any);
-  assert.match(shader.fragmentShader, /slrrRealReflections\) \* \(1.0 - slrrDetailColor.a\)/);
+  assert.match(shader.fragmentShader, /slrrLocalWeight\) \* \(1.0 - slrrDetailColor.a\)/);
   assert.match(shader.fragmentShader, /reflectedLight.indirectSpecular \*= 1.0 - slrrDetailColor.a/);
 });

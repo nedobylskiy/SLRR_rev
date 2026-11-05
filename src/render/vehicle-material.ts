@@ -4,6 +4,9 @@ import type { ScxMesh } from '../formats/scx';
 export interface VehicleReflectionUniforms {
   environment: { value: Texture | null }; available: { value: number }; dynamic: { value: number };
 }
+export interface LocalVehicleReflection {
+  map:{value:Texture|null};available:{value:number};
+}
 /** Original authored diffuse mix and additive 2D reflection pass; no tinting of the whole car atlas. */
 export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBasicMaterial, mesh: Pick<ScxMesh, 'reflectionIndex' | 'reflectionStrength' | 'reflectionMap' | 'materialType'>,
   uniforms: VehicleReflectionUniforms, detail?: Texture, reflection?: Texture) {
@@ -12,6 +15,8 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
   const masked = mesh.materialType === 0x15 && !!detail;
   const painted = !!material.userData.paintDefault;
   const reflected = mesh.reflectionIndex !== undefined || !!reflection || painted;
+  const local:LocalVehicleReflection={map:{value:null},available:{value:0}};
+  if(reflected)material.userData.vehicleLocalReflection=local;
   if (reflected && 'roughness' in material) {
     material.userData.vehicleReflective = true;
     material.roughness = 0.24; material.metalness = 0.25; material.envMapIntensity = 0;
@@ -27,6 +32,8 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
     const generated = !mesh.reflectionMap || mesh.reflectionMap.channel === 0xfffffffe || painted && !reflection;
     shader.uniforms.slrrReflectionAvailable = reflection ? { value: 1 } : generated ? uniforms.available : { value: 0 };
     shader.uniforms.slrrRealReflections = uniforms.dynamic;
+    shader.uniforms.slrrLocalReflection=local.map;
+    shader.uniforms.slrrLocalReflectionAvailable=local.available;
     const map = mesh.reflectionMap;
     shader.uniforms.slrrReflectionTransform = { value: new Vector4(map?.scaleU ?? 1, map?.scaleV ?? 1, map?.offsetU ?? 0, map?.offsetV ?? 0) };
     if (detail) {
@@ -42,13 +49,18 @@ export function configureVehicleMaterial(material: MeshStandardMaterial | MeshBa
       if (authored) shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nattribute vec2 slrrReflectionUv; varying vec2 vSlrrReflectionUv;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSlrrReflectionUv = slrrReflectionUv;');
-      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D slrrReflection; uniform float slrrReflectionAvailable; uniform float slrrRealReflections; uniform vec4 slrrReflectionTransform;' + (authored ? ' varying vec2 vSlrrReflectionUv;' : ''))
+      shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform sampler2D slrrReflection; uniform samplerCube slrrLocalReflection; uniform float slrrLocalReflectionAvailable; uniform float slrrReflectionAvailable; uniform float slrrRealReflections; uniform vec4 slrrReflectionTransform;' + (authored ? ' varying vec2 vSlrrReflectionUv;' : ''))
         .replace('#include <opaque_fragment>', `vec3 slrrRay = reflect(normalize(-vViewPosition), normal);
           float slrrYaw = atan(viewMatrix[0][2], viewMatrix[2][2]);
           vec2 slrrEnvUv = ${authored ? 'vSlrrReflectionUv' : 'vec2(slrrRay.x * 0.5 - slrrYaw / 6.28318530718, -slrrRay.y * 0.5 + 0.5)'};
           slrrEnvUv = slrrEnvUv * slrrReflectionTransform.xy + slrrReflectionTransform.zw;
           vec3 slrrEnvironment = texture2D(slrrReflection, slrrEnvUv).rgb;
-          float slrrReflectionWeight = ${strength.toFixed(6)} * slrrReflectionAvailable * (1.0 - slrrRealReflections)${masked ? " * (1.0 - slrrDetailColor.a)" : ""};
+          float slrrLocalWeight=slrrRealReflections*slrrLocalReflectionAvailable;
+          if(slrrLocalWeight>0.0) {
+            vec3 slrrWorldRay=inverseTransformDirection(slrrRay,viewMatrix);
+            slrrEnvironment=textureCube(slrrLocalReflection,slrrWorldRay).rgb;
+          }
+          float slrrReflectionWeight = ${strength.toFixed(6)} * mix(slrrReflectionAvailable,1.0,slrrLocalWeight)${masked ? " * (1.0 - slrrDetailColor.a)" : ""};
           ${painted ? 'outgoingLight = mix(outgoingLight, slrrEnvironment, slrrReflectionWeight * 0.5);' : 'outgoingLight += slrrEnvironment * slrrReflectionWeight;'}
           #include <opaque_fragment>`);
     }
