@@ -35,6 +35,14 @@ test('parked ride height follows installed Java springs and CFG mass rather than
   const settled = front.local.clone();
   resetParkedRunningGear(root); settleParkedSuspension(root);
   assert.deepEqual(front.local, settled, 'settling is repeatable and does not ratchet the suspension each frame');
+  root.wheelFrameOffsetY=.165;
+  resetParkedRunningGear(root);settleParkedSuspension(root);
+  assert.deepEqual(front.local,settled,'loaded native spring pose replaces the calibrated fallback height instead of adding another 16.5 cm');
+  const last=world.wheelRefs[3];world.wheelRefs[3]=undefined;
+  resetParkedRunningGear(root);assert.ok(settleParkedSuspension(root));
+  assert.deepEqual(front.local,settled,'a missing fourth spring must not disable the other three corners');
+  assert.ok(Math.abs(root.children.get(104)!.local.elements[13]-(-.630+.165))<1e-10);
+  world.wheelRefs[3]=last;
   const anchor = suspensionAnchorLength(root.definition.config.wheels[0]);
   world.wheelRefs[0]!.restLength -= 0.02;
   resetParkedRunningGear(root); settleParkedSuspension(root);

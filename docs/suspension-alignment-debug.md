@@ -49,6 +49,17 @@ for an uncalibrated audit. Steering uses the same corrected carrier as the hub
 and wheel. Sliders stay at zero so calibration is not applied a second time.
 This is an explicit measured calibration, not a recovered original-game formula.
 
+For parked Java vehicles, the +0.165 m mount height is the fallback rest pose.
+When a corner has valid spring force/rest-length data, the native loaded pose
+(`CFG spring anchor − loaded spring length`) replaces that vertical fallback;
+adding both previously lowered complete cars by another 0.165 m relative to
+incomplete copies of the same model. Each corner settles independently, so a
+missing spring does not disable the other three. Lateral and per-corner offsets
+remain in their mounting frames. Parked floor-contact caching also tracks the
+wheel contact frames and tire radii, and WheelRefs are refreshed from the live
+Java chassis. Rebound/tuning or late component initialization can therefore
+update contact without requiring a new Java placement command.
+
 **Use base height (+0.165 m)** clears the extra visual Y offsets. Zero sliders
 therefore keep the corrected assembly height; setting +0.165 again would add it
 a second time visually.

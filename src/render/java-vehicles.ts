@@ -23,7 +23,7 @@ export class JavaSceneVehicles {
   private loading = false;
   private disposed = false;
   private terrain?: Pick<MapTerrain, 'height'>;
-  private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number }>();
+  private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number; contacts:string }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
     private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>,
     private readonly report: (message: string) => void,
@@ -109,7 +109,10 @@ export class JavaSceneVehicles {
   }
 
   private sync(node: GameObject, built: BuiltVehicle, ref: JavaValue): void {
-    const chassis = this.result.gameTypes.get(this.result.jvm.get(ref, 'chassis'));
+    const chassisRef=this.result.jvm.get(ref,'chassis');
+    const chassis = this.result.gameTypes.get(chassisRef);
+    // WheelRef instances can appear/rebind after the assembly was first shown.
+    built.world.wheelRefs=built.root.definition.config.wheels.map((_,index)=>this.result.chassis.wheelState(chassisRef,index));
     // Chassis.setState is used for the dealer's rotating display stand.
     const pose = chassis && chassis.poseRevision > node.poseRevision ? chassis : node;
     built.root.local.copy(poseMatrix({ position: [pose.position.x, pose.position.y, pose.position.z],
@@ -122,16 +125,23 @@ export class JavaSceneVehicles {
     // Static displays have no driving solver, so resolve wheel penetration here.
     let lift = suspended ? -Infinity : 0;
     const settled = this.settled.get(built);
-    const needsContact = this.terrain && (settled?.pose !== pose || settled.revision !== pose.poseRevision);
-    if (needsContact) for (const slot of built.root.definition.config.slots) {
+    const contacts:{center:Vector3;radius:number}[]=[];
+    const contactKey:number[]=[];
+    for (const slot of built.root.definition.config.slots) {
       if (slot.type === undefined || slot.type < 101 || slot.type > 199 || !built.root.children.has(slot.id)) continue;
       const wheel = built.root.definition.config.wheels[slot.type - 101];
       if (!wheel?.radius) continue;
       const part = built.root.children.get(slot.id)!;
       const own = part.definition.config.slots.find(own => own.id === part.ownSlot);
       const frame = own ? part.local.clone().multiply(part.slotFrame(own)) : built.root.slotFrame(slot);
-      const center = new Vector3().setFromMatrixPosition(frame).applyMatrix4(built.root.local);
+      const center = new Vector3().setFromMatrixPosition(frame);
       const radius = wheel.radius * (built.world.wheelRefs[slot.type - 101]?.radius ?? 0.32865) / 0.32865;
+      contactKey.push(center.x,center.y,center.z,radius);
+      contacts.push({center:center.applyMatrix4(built.root.local),radius});
+    }
+    const contactSignature=contactKey.join(',');
+    const needsContact=this.terrain&&(settled?.pose!==pose||settled.revision!==pose.poseRevision||settled.contacts!==contactSignature);
+    if(needsContact)for(const {center,radius} of contacts){
       // Search the placement's floor, not furniture/ceilings above its origin.
       const ground = this.terrain!.height(center.x, center.z, pose.position.y);
       if (Number.isFinite(ground) && ground > -999) lift = Math.max(lift, ground - (center.y - radius));
@@ -140,7 +150,7 @@ export class JavaSceneVehicles {
       pose.setMatrix({ ...pose.position, y: pose.position.y + lift }, pose.orientation);
       built.root.local.elements[13] += lift;
     }
-    if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision });
+    if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision,contacts:contactSignature });
     for (const part of built.world.parts.values()) {
       // Java camera look commands address the installed part, not its chassis.
       // Publish the attachment transform without generating a new placement command.
