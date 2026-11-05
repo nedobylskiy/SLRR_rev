@@ -1,5 +1,7 @@
 # SLRR · WebGL Engine Remaster
 
+![Street Legal Racing: Redline WebGL remaster demo](docs/media/slrr-webgl-demo.gif)
+
 An open-source engine remaster of **Street Legal Racing: Redline**, rebuilt for the browser with WebGL 2. Written in TypeScript with an optional C++/WebAssembly physics backend, it brings the original game's assets and scripts to a modern web runtime.
 
 The remaster is in active development.
