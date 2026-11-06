@@ -10,6 +10,7 @@ import { PanelActivity } from './panel-activity';
 import { DeformedFrame } from './deformed-frame';
 import { slotMatrix } from './slot-frames';
 import { FixedClock } from '../runtime/fixed-clock';
+import { DriveTelemetry } from './drive-telemetry';
 import type { MapCollision } from './map-collision';
 
 interface ReleaseGuard { axis: 0 | 1 | 2; sign: number; minimum: Float64Array; frame: Matrix4; inverse: Matrix4; normal: Vector3 }
@@ -50,6 +51,8 @@ function basis(panel: DeformablePanel) {
 
 /** Full rigid chassis motion with ray suspension and separate deformable or rigid detachable parts. */
 export class Vehicle3D extends CarCrashDemo {
+  readonly telemetry = new DriveTelemetry(this);
+  get physicsDt() { return this.clock.dt; }
   readonly timings = { suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceUpdates: 0 };
   readonly body: RigidBody3D;
   collisionCue?: { speed: number; impulse: number; position: Vector3 };
@@ -229,6 +232,7 @@ export class Vehicle3D extends CarCrashDemo {
     else super.applyImpulse(j, point);
   }
   override reset(speed = 0) {
+    this.telemetry?.stop('vehicle_reset');
     super.reset(speed);
     this.collisionCue = undefined;
     if (!this.body) return;
@@ -549,6 +553,7 @@ export class Vehicle3D extends CarCrashDemo {
       // changes above still rebuild immediately, removing detached-part ghost faces.
       this.suspension.sync();
       this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega);
+      this.telemetry.tick(dt, input);
       this.timings.other += performance.now() - sectionStart;
     });
   }

@@ -1,0 +1,2 @@
+# Preserve the original log bytes used by manifest SHA-256 checks.
+*/telemetry.txt -text whitespace=cr-at-eol

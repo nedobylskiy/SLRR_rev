@@ -1,0 +1,3 @@
+"session","model","engine","samples","duration_s","median_interval_s","max_rpm","max_speed_kph","transmission_config","mass_native_raw","P_turbo_max","P_turbo_waste","rpm_turbo_mul","rpm_turbo_opt","rpm_turbo_range","ended","shifts"
+"1","Einvagen 110 GTK","Einvagen 110 GT/GTK block","686","69.24900000000001","0.10099999999999909","6309.669","151.56719999999999","1","1327.101","0.000","0.000","0.000","0.000","0.000","true","10"
+"2","Einvagen 110 GTK","Einvagen 110 GT/GTK block","606","61.260999999999996","0.10099999999999909","6323.117","184.3128","1","1340.601","3.099","0.620","1.000","4250.000","2750.000","true","12"

@@ -1,5 +1,11 @@
 # Physics recovered from sl-remastered
 
+For subsequent upstream changes and suspension research, see the
+[2026-11-05 audit](physics-upstream-audit-2026-11-05.md).
+Current branch work: [hub pose experiment](experimental-hub-geometry.md),
+[original-game telemetry](stock-physics-telemetry.md), and
+[reported physics tasks](physics-backlog.md).
+
 This branch adapts the recovered scalar calculations from
 [nicolas-found42/sl-remastered, commit 7aa574d26098e288367a3707f0b7ac7bb892ebbe](https://github.com/nicolas-found42/sl-remastered/tree/7aa574d26098e288367a3707f0b7ac7bb892ebbe).
 It continues to execute the installed game's Java source. The Java Block, DynoData,
@@ -53,8 +59,8 @@ use explicit float32 rounding where practical. The golden combustion witness the
 uses a numerical tolerance, not bit equality.
 
 The host still integrates rigid bodies and wheel angular motion in SI units. Its
-engine inertia conversion (`0.28 + Java inertia * 0.01`), transmission inertia conversion
-(`CFG enginepower[4] * 0.01`), clutch torque-capacity adapter and wheel inertia of 1.6
+engine inertia conversion (`0.28 + Java inertia * 0.01`), effective driven-shaft inertia
+(`1 / sum(driveShare² / wheelInertia)`), fallback clutch friction and wheel inertia of 1.6
 are host adaptations, not recovered stock constants. They are isolated in
 MechanicalSystem/Suspension3D. The original low-speed launch-force multiplier is bypassed
 when the executed engine has a native dyno curve. Complete drivetrain timestep/unit
@@ -62,6 +68,12 @@ qualification against the executable is still required before claiming driving p
 Automatic shift policy, starter/idle stabilization, turbo spool audio/telemetry, and
 surface classification retain existing host behavior. Suspension contacts still use
 our terrain sampler, contact-force caps and bump-stop safety response.
+
+The [telemetry coupling correction](engine-telemetry-calibration.md) replaces the
+native-curve path's torque ceiling with direct recovered inertia exchange, uses
+consistent flywheel inertia with the clutch open/closed, and adds automatic idle
+release. This removes compulsory clutch slip in the captured engine configurations;
+it does not establish matching road acceleration or native unit conversion.
 
 The upstream repository also contains a multi-body contact/constraint solver, compound
 inertia construction, part refresh/damage propagation, brake thermal failure and full

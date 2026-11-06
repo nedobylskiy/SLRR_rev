@@ -136,7 +136,7 @@ export class JavaSceneVehicles {
     if (runningGearChanged) {
       resetParkedRunningGear(built.root);
       if (steering !== undefined) applyDisplaySteering(built.root, steering);
-      settleParkedSuspension(built.root);
+      settleParkedSuspension(built.root, steering);
     }
     const suspended = built.root.definition.config.wheels.length === 4
       && built.world.wheelRefs.some(wheel => wheel && wheel.force > 0 && wheel.restLength > 0);
@@ -200,8 +200,9 @@ export class JavaSceneVehicles {
   /** Mutable inputs only: chassis motion and visibility do not invalidate suspension. */
   private geometrySignature(built: BuiltVehicle): string {
     const root = built.root;
-    return JSON.stringify([root.definition.config.wheels,
-      built.world.wheelRefs.map(wheel => wheel && [wheel.force, wheel.restLength, wheel.minLength, wheel.maxLength, wheel.radius]),
+    return JSON.stringify([built.world.experimentalHubGeometry, root.definition.config.wheels,
+      built.world.wheelRefs.map(wheel => wheel && [wheel.force, wheel.restLength, wheel.minLength, wheel.maxLength, wheel.radius,
+        wheel.arm, wheel.hub, wheel.orientation, wheel.position, wheel.oppositeWheel]),
       [...built.world.parts.values()].map(part => [part.id, part.parent?.id, part.parentSlot, part.ownSlot,
         part === root ? null : part.local.elements, part.wheelFrameOffsetY, part.wheelFrameOffsets,
         [...part.slotPositions], [...part.slotRotations], part.definition.config.slots, part.definition.config.bodies])]);

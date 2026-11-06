@@ -8,6 +8,8 @@ import { MechanicalSystem } from './mechanical-system';
 import type { TireSurface } from './map-terrain';
 import { DEFAULT_TIRE_MODEL, tireForces, type TireModelSettings } from './tire-model';
 import type { WheelRefState } from '../runtime/wheel-ref-native';
+import { applyExperimentalHubPose } from './hub-geometry';
+import { HOST_WHEEL_INERTIA } from './wheel-inertia';
 
 export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; mayReach?(bounds: Box3): boolean; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
 export interface TireContactState { contact: boolean; force: number; contactPoint: Vector3; contactNormal: Vector3; forward: Vector3; slipSpeed: number; lateralSpeed: number; slip: number; surface: TireSurface }
@@ -138,7 +140,7 @@ export class Suspension3D {
           if ('slip' in tyre) w.nativeSlip = tyre.slip as {longitudinal:number;angle:number};
           if (native) {
             // Recovered predictor prevents the tire reaction crossing zero slip.
-            const predicted = updateSlip((w.omega-tyre.longitudinal*w.radius/1.6*dt)*w.radius,longitudinal,w.lateralSpeed,dt,w.nativeSlip);
+            const predicted = updateSlip((w.omega-tyre.longitudinal*w.radius/HOST_WHEEL_INERTIA*dt)*w.radius,longitudinal,w.lateralSpeed,dt,w.nativeSlip);
             if (predicted.longitudinal*w.nativeSlip.longitudinal<0)
               tyre.longitudinal *= Math.abs(w.nativeSlip.longitudinal/(predicted.longitudinal-w.nativeSlip.longitudinal));
           }
@@ -146,7 +148,7 @@ export class Suspension3D {
           this.body.addForce(force, patch);
           const brakeTorque = braking && !native ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
           const rollingTorque = w.originalTyre ? Math.sign(w.omega) * w.force * w.radius * (this.tireModel.model === 'sl2' ? w.originalTyre.rollResistance*0.01 : w.originalTyre.rollResistance - 0.003625) : 0;
-          w.omega += (drive - force.dot(forward) * w.radius - brakeTorque - rollingTorque - w.omega * 0.15) / 1.6 * dt;
+          w.omega += (drive - force.dot(forward) * w.radius - brakeTorque - rollingTorque - w.omega * 0.15) / HOST_WHEEL_INERTIA * dt;
           if (native) {
             const config=this.root.definition.config, inertia=config.enginePower?.[5] ?? 50;
             const [brakeStrength,handbrakeStrength]=config.brakePower ?? [1000,2000];
@@ -162,7 +164,7 @@ export class Suspension3D {
       else if (this.mechanics) {
         w.nativeSlip = {longitudinal:0,angle:0};
         const brakeTorque = input.brake || drivetrain!.directionBrake ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
-        w.omega += (drivetrain!.torque[index] - brakeTorque - w.omega * 0.25) / 1.6 * dt; w.spin += w.omega * dt; w.slip = 0;
+        w.omega += (drivetrain!.torque[index] - brakeTorque - w.omega * 0.25) / HOST_WHEEL_INERTIA * dt; w.spin += w.omega * dt; w.slip = 0;
       }
     }
     if (this.mechanics) for (const first of [0, 2]) {
@@ -189,6 +191,8 @@ export class Suspension3D {
       const offset = new Vector3().setFromMatrixPosition(w.frame).sub(w.center).applyQuaternion(rotation);
       const position = w.hardpoint.clone().addScaledVector(down, w.length).add(offset);
       const wheelSteer = ackermannSteerAngle(this.steer, w.center.x, this.root.definition.config.ackermann ?? 2, w.steering);
+      if (w.mountCondition === 1 && applyExperimentalHubPose(this.root, index, w.length, wheelSteer, w.spin * sign)) continue;
+      w.part.armTravelTransform = undefined;
       const unsteered = damaged.clone().multiply(w.frame).setPosition(position);
       const carrier = unsteered.clone().multiply(new Matrix4().makeRotationY(wheelSteer));
       const steeringTransform = carrier.clone().multiply(unsteered.clone().invert());
@@ -196,6 +200,7 @@ export class Suspension3D {
       w.part.steeringTransform.copy(steeringTransform);
       const travel = carrier.multiply(w.frame.clone().invert());
       for (const moving of this.movingParts[index]) if (moving.part.parent === this.root) {
+        moving.part.armTravelTransform = undefined;
         moving.part.local.copy(travel).multiply(moving.base);
         moving.part.steeringTransform.copy(steeringTransform);
       }
