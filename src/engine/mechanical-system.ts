@@ -1,5 +1,6 @@
 import { clutchExchange, engineLimiter, engineTemperatureStep } from './native-vehicle-physics';
 import type { EnginePart } from './world';
+import { HOST_WHEEL_INERTIA } from './wheel-inertia';
 
 // Shared provisional drive response, fitted to the original stock-car road tests.
 // The native game's converter/traction calculations are not yet available.
@@ -34,6 +35,7 @@ export class MechanicalSystem {
   idleRpm: number;
   redlineRpm: number;
   running = true;
+  starting = false;
   gear = 0;
   power = 0;
   boost = 0;
@@ -44,6 +46,8 @@ export class MechanicalSystem {
   private lastDown = false;
   private lastNeutral = false;
   private lastStart = false;
+  private starterRequestSeconds = 0;
+  get shifting() { return this.shiftTimer > 0; }
   constructor(readonly root: EnginePart) {
     for (const part of root.world.parts.values()) {
       const profile = part.definition.mechanics;
@@ -91,7 +95,13 @@ export class MechanicalSystem {
     const health = this.health(part);
     return { force: (values?.force ?? 0) * health, damping: (values?.damping ?? 0) * health };
   }
-  reset() { this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
+  reset() { this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
+  private updateIgnition(gas: number) {
+    if (this.running && this.rpm < Math.max(250,this.idleRpm*0.35)) this.running = false;
+    else if (!this.running && this.power>0 && this.rpm >= Math.max(500,this.idleRpm*0.65)
+      && (this.starting || this.manual && gas>0)) this.running = true;
+    if (this.running) { this.starting = false; this.starterRequestSeconds = 0; }
+  }
   setTuning(idleRpm: number, redlineRpm: number) {
     if (!Number.isFinite(idleRpm) || idleRpm < 150 || idleRpm > 2500 || !Number.isFinite(redlineRpm) || redlineRpm < 3000 || redlineRpm > 12000) throw new Error('Engine tuning outside original Block.java slider range');
     this.idleRpm = idleRpm; this.redlineRpm = redlineRpm;
@@ -138,11 +148,10 @@ export class MechanicalSystem {
     const ratios = this.ratios(), final = nativeParameters?.rearend_ratio ?? values.end_ratio ?? 1, shares = this.driveShares();
     this.power = Math.min(...[this.block, this.crank, this.head, this.transmission, this.clutch, this.fuel].map(p => this.health(p)));
     const start = !!input.start;
-    if (start && !this.lastStart && !this.running && this.power > 0 && (this.gear === 0 || input.clutch || !this.manual)) {
-      this.rpm = Math.max(200, idle * 0.8);
-      this.running = true;
-    }
+    if (start && !this.lastStart && !this.running && this.power > 0) this.starterRequestSeconds = 2;
     this.lastStart = start;
+    this.starting = !this.running && this.power>0 && (gas>0.1 || this.starterRequestSeconds>0);
+    this.starterRequestSeconds = Math.max(0,this.starterRequestSeconds-dt);
     this.shiftTimer = Math.max(0, this.shiftTimer - dt);
     const up = !!input.gearUp, down = !!input.gearDown, neutral = !!input.neutral;
     if (neutral && !this.lastNeutral) { this.gear = 0; this.shiftTimer = 0; }
@@ -183,7 +192,10 @@ export class MechanicalSystem {
     const lowRpmCombustion = Math.max(0, Math.min(1, (this.rpm - 200) / 450));
     const limiter = this.root.world.javaPowertrain?.curve ? engineLimiter(this.rpm,this.previousRpm,limit) : 1;
     this.previousRpm = this.rpm;
-    const engineTorque = firing ? (this.estimateFlywheelTorqueAt(this.rpm) * gas * (this.root.world.javaPowertrain?.curve ? 2 : 1) + idleControl) * lowRpmCombustion * this.power * limiter : 0;
+    // The starter is a separate motor: it can transmit torque through a closed
+    // clutch before combustion catches. Native starter units remain host-adapted.
+    const starterTorque = this.starting ? Math.max(0,nativeParameters?.starter_torque ?? values.starter_torque ?? 40)*this.power : 0;
+    const engineTorque = (firing ? (this.estimateFlywheelTorqueAt(this.rpm) * gas * (this.root.world.javaPowertrain?.curve ? 2 : 1) + idleControl) * lowRpmCombustion * this.power * limiter : 0) + starterTorque;
     if (this.root.world.javaPowertrain && this.running) this.temperature = engineTemperatureStep(this.temperature,20,
       Math.max(0.01,nativeParameters?.engine_mass ?? 100)*8000,this.estimateFlywheelTorqueAt(this.rpm)*gas,
       roadSpeedMps,this.root.world.javaPowertrain.cooling ?? [10,50,0.01],dt);
@@ -198,24 +210,38 @@ export class MechanicalSystem {
     const stallCapacity = Math.max(0, this.estimateFlywheelTorqueAt(limit * 0.6)) * 1.8;
     const manualCapacity = gas > 0 ? Math.min(stallCapacity * launch, Math.max(0, this.estimateFlywheelTorqueAt(this.rpm)) * (0.95 + gas * 0.2)) : 120;
     const automaticCapacity = gas > 0 ? stallCapacity * launch : 90 * Math.min(1, Math.abs(shaftOmega) / Math.max(1, omega));
+    // Torque-derived friction remains only in the non-native fallback below.
     const capacity = clutchOpen ? 0 : (this.manual ? manualCapacity : automaticCapacity) * (this.clutch ? this.health(this.clutch) : 1);
     const clutchTorque = Math.max(-capacity, Math.min(capacity, (omega - shaftOmega) * 9));
-    const inertia = 0.28 + Math.max(0, this.crank?.definition.mechanics?.values.inertia ?? 0) * 0.01;
+    // Use the same flywheel inertia with the clutch open and closed.
+    const inertia = 0.28 + Math.max(0, nativeParameters?.engine_inertia ?? this.crank?.definition.mechanics?.values.inertia ?? 0) * 0.01;
     if (this.root.world.javaPowertrain?.curve && totalRatio && !clutchOpen) {
       // The host integrates SI torques; native CFG inertia values use its own
       // scale. Keep that conversion here rather than changing recovered math.
-      const engineInertia = 0.28 + Math.max(0,nativeParameters?.engine_inertia ?? 0)*0.01;
-      const transmissionInertia = (this.root.definition.config.enginePower?.[4] ?? 640)*0.01;
+      const engineInertia = inertia;
+      // The weighted shaft speed must use the same inertias as the wheels
+      // receiving its impulse: d(meanOmega) = sum(share² / Iwheel) * impulse.
+      // Converting CFG enginepower[4] independently amplified the returned
+      // angular impulse and made the closed loop create energy on some cars.
+      const transmissionInertia = 1/shares.reduce((sum,share)=>sum+share*share/HOST_WHEEL_INERTIA,0);
       const exchangeInput = {engineSpeed:omega,wheelSpeed:mean,engineImpulse:(engineTorque-drag)*dt,
         engineInertia,transmissionInertia,engineInertiaFactor:1,gearRatio:ratio,finalDrive:final,
         clutch:0,previousDisplayedSpeed:omega,drivenWeightSum:1};
       const closed = clutchExchange(exchangeInput);
       const uncoupled = omega+exchangeInput.engineImpulse/engineInertia;
-      const demand = Math.abs(closed.engineSpeed-uncoupled)*engineInertia/dt;
-      const grip = demand>0 ? Math.max(0,Math.min(1,Math.min(capacity,nativeParameters?.ClutchF ?? capacity)/demand)) : 1;
+      // Recovered exchange is governed by clutch engagement and both inertias.
+      // ClutchF is not a demonstrated SI torque ceiling. Treating its stock 500
+      // as Nm made high-torque engines slip indefinitely even on a closed clutch.
+      let grip = this.clutch ? this.health(this.clutch) : 1;
+      // Automatic clutch control releases before the engine is pulled below
+      // idle. Manual clutch mode must retain the possibility of a stalled launch.
+      if (!this.manual && closed.engineSpeed < uncoupled) {
+        const idleFloor = idle * 0.85 * Math.PI / 30;
+        grip = Math.min(grip, Math.max(0, uncoupled-idleFloor)/(uncoupled-closed.engineSpeed));
+      }
       const exchange = clutchExchange({...exchangeInput,clutch:1-grip});
       this.rpm = Math.max(0,exchange.engineSpeed*30/Math.PI);
-      if (this.running && this.rpm < Math.max(250,idle*0.35)) this.running=false;
+      this.updateIgnition(gas);
       return {torque:shares.map(share=>exchange.wheelDeltaPerDriveWeight*transmissionInertia/dt*share),directionBrake};
     }
     const minimumRpm = this.running && !this.manual && idle >= 650 ? idle * 0.65 : 0;
@@ -224,8 +250,7 @@ export class MechanicalSystem {
       const engagedRpm = Math.max(idle, Math.abs(roadMean * totalRatio) * 30 / Math.PI);
       this.rpm += (engagedRpm - this.rpm) * (1 - Math.exp(-dt / 0.07));
     }
-    if (this.running && this.rpm < Math.max(250, idle * 0.35)) this.running = false;
-    else if (!this.running && this.manual && this.rpm > Math.max(500, idle * 0.65) && gas > 0 && this.power > 0) this.running = true;
+    this.updateIgnition(gas);
     const speedKph = Math.abs(roadSpeedMps) * 3.6;
     const assist = Math.max(0, Math.min(1, (TRANSFER_FADE_END_KPH - speedKph) / (TRANSFER_FADE_END_KPH - TRANSFER_FADE_START_KPH)));
     const transfer = CRUISE_TRANSFER + (LOW_SPEED_TRANSFER - CRUISE_TRANSFER) * assist;

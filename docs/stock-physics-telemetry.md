@@ -1,5 +1,8 @@
 # Original-game physics telemetry
 
+For button-triggered recording in the remaster and exporting compatible files,
+see [Remaster physics telemetry](remaster-physics-telemetry.md).
+
 ## Validated v2 capture corpus
 
 The original game successfully recorded short-field v2 telemetry across five

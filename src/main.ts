@@ -7,6 +7,7 @@ import { JavaPartPreviews } from './render/java-part-previews';
 import { JavaMouse } from './render/java-mouse';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
+import { replaceGarageCarTree } from './runtime/debug-garage-car';
 import { parseRpk, entryProperties } from './formats/rpk';
 import { parseScx } from './formats/scx';
 import { parseTufa } from './formats/tufa';
@@ -127,11 +128,24 @@ async function runGameBoot() {
     const partPreviews = new JavaPartPreviews(gameOsd.stage, result, source, viewer,
       message => appendJavaEvent({ level: 'error', message }));
     let animating = false, loadingTrack = false,animationSkipped=0,animateStartTime=0;
+    let replacingGarageCar = false;
+    garageCarButton.onclick = async () => {
+      if (replacingGarageCar || loadingTrack) return;
+      replacingGarageCar = true; garageCarButton.disabled = true;
+      status('Assembling Einvagen 110 GTK…');
+      try {
+        while (animating) await new Promise(resolve => window.setTimeout(resolve,10));
+        await replaceGarageCarTree(result,source);
+        loadedTrackKey = ''; pendingTrackKey = '';
+        status('Garage car replaced: Einvagen 110 GTK');
+      } catch (error) { status('Car replacement failed',true); appendJavaEvent({level:'error',message:String(error)}); }
+      finally { replacingGarageCar = false; garageCarButton.disabled = false; }
+    };
     let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
     let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
-      if (animating){animationSkipped++;return;}
+      if (animating || replacingGarageCar){animationSkipped++;return;}
       animating = true;
       const animateStart = performance.now();
       animateStartTime=animateStart;
@@ -235,6 +249,9 @@ async function runGameBoot() {
     };
 
     const checkActiveTrack = () => {
+      const actual = result.jvm.get(jv('class','java.game.GameLogic'),'actualState');
+      garageCarButton.hidden = actual.value == null || !result.jvm.isInstance(actual,'java.game.Garage');
+      if (replacingGarageCar) return;
       const selected = activeJavaTrack(result);
       if (!selected || !source.byPath.has(selected.mapPack)) {
         sceneVehicles.update(null);
@@ -265,6 +282,7 @@ async function runGameBoot() {
     };
     const trackPoll = window.setInterval(()=>viewer?.profiler.measure('Java scene poll CPU',checkActiveTrack), 150);
     disposeJavaScene = () => {
+      garageCarButton.hidden = true; garageCarButton.onclick = null;
       mapDebugPanel.hidden = true;
       viewer?.setJavaSceneCamera(undefined);
       viewer?.setPerformanceContext(undefined);
@@ -311,7 +329,10 @@ const hoodButton = textElement('button', 'Hood impact test'); hoodButton.classNa
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
-mapDebugPanel.append(textElement('summary', 'Graphics / map debug'));
+const garageCarButton = textElement('button','Replace car: Einvagen 110 GTK') as HTMLButtonElement;
+garageCarButton.hidden = true;
+garageCarButton.title = 'Replace the current garage car tree with a complete stock 110 GTK for testing';
+mapDebugPanel.append(textElement('summary', 'Graphics / map debug'),garageCarButton);
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
 const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
@@ -529,6 +550,40 @@ const vehicleTeleportButton = textElement('button', 'Move car to (0, 1, 0)');
 vehicleTeleportButton.title = 'Teleport the car to the city center and reset its motion';
 vehicleTeleportButton.onclick = () => mapDebugSession?.teleport(new Vector3(0, 1, 0), 0);
 vehicleDebugPanel.append(vehicleTeleportButton);
+const telemetryStart = textElement('button', 'Start physics recording') as HTMLButtonElement;
+const telemetryStop = textElement('button', 'Stop & download telemetry') as HTMLButtonElement;
+const telemetryDownload = textElement('button', 'Download last recording') as HTMLButtonElement;
+const telemetryStatus = textElement('p', 'Physics recording off · 100 ms interval');
+vehicleDebugPanel.append(telemetryStart, telemetryStop, telemetryDownload, telemetryStatus);
+let recordingRequested = false;
+let lastDriveRecording: { text: string; filename: string } | undefined;
+const downloadDriveRecording = () => {
+  if (!lastDriveRecording) return;
+  const url = URL.createObjectURL(new Blob([lastDriveRecording.text], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = lastDriveRecording.filename;
+  document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+function finishDriveRecording(reason: string) {
+  if (!recordingRequested) return;
+  recordingRequested = false;
+  const recorder = mapDebugSession?.telemetry;
+  if (!recorder) return;
+  recorder.stop(reason);
+  lastDriveRecording = { text: recorder.text(), filename: `slrr-remaster-physics-${new Date().toISOString().replace(/[:.]/g,'-')}.txt` };
+  telemetryStatus.textContent = `Saved ${recorder.status.samples} samples · ${recorder.status.seconds.toFixed(1)} s · ${recorder.status.reason}`;
+  telemetryStart.disabled = !recorder.status.available; telemetryStop.disabled = true; telemetryDownload.disabled = false;
+  downloadDriveRecording();
+}
+telemetryStart.onclick = () => {
+  const recorder = mapDebugSession?.telemetry;
+  if (!recorder?.status.available) return;
+  recorder.start(mapDebugSession!.telemetryContext()); recordingRequested = true;
+  mapDebugSession!.focusControls();
+  telemetryStart.disabled = true; telemetryStop.disabled = false;
+  telemetryStatus.textContent = 'Recording physics · 100 ms interval';
+};
+telemetryStop.onclick = () => finishDriveRecording('button');
+telemetryDownload.onclick = downloadDriveRecording;
 const vehicleDebugTelemetry = textElement('pre', '', 'vehicle-debug-telemetry'), vehicleDebugTree = textElement('pre', '', 'vehicle-debug-tree');
 vehicleDebugPanel.append(vehicleDebugTelemetry, vehicleDebugTree); el('scene-help').before(vehicleDebugPanel);
 let vehicleDebugTimer: number | undefined;
@@ -541,6 +596,11 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     return [row, ...[...part.children.values()].flatMap(child => tree(child, depth + 1))];
   };
   const refreshCore = () => {
+    const recording = session.telemetry?.status;
+    if (recordingRequested && !recording?.recording) finishDriveRecording(recording?.reason || 'session_ended');
+    telemetryStart.disabled = !recording?.available || !!recording?.recording;
+    telemetryStop.disabled = !recording?.recording; telemetryDownload.disabled = !lastDriveRecording;
+    if (recording?.recording) telemetryStatus.textContent = `Recording physics · ${recording.samples} samples · ${recording.seconds.toFixed(1)} s`;
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
@@ -550,7 +610,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
       ...(javaLoop ? [javaLoop()] : []),
       `Position (m) X ${state.position.x.toFixed(1)} · Y ${state.position.y.toFixed(1)} · Z ${state.position.z.toFixed(1)}`,
       `Speed ${state.speedKmh} km/h · RPM ${state.rpm} · gear ${state.gear < 0 ? 'R' : state.gear || 'N'}`,
-      `Engine ${state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,
+      `Engine ${state.engineStarting ? 'starter' : state.engineRunning ? `${Math.round(state.enginePower * 100)}%` : 'stalled · throttle to start'} · boost ${state.boost.toFixed(2)} bar · slip ${Math.round(state.wheelSlip * 100)}%`,
       `Wheels on ground ${state.wheelContacts}/4 · chassis ${state.chassis}% · block ${state.engineBlock}% · transmission avg ${state.transmission}% · parts ${state.parts.length}`,
     ].join('\n');
     vehicleDebugTree.textContent = tree(root).join('\n');
@@ -559,6 +619,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
   refresh(); vehicleDebugTimer = window.setInterval(refresh, 200);
 }
 function clearVehicleDebug() {
+  finishDriveRecording('scene_change');
   if (vehicleDebugTimer !== undefined) window.clearInterval(vehicleDebugTimer);
   vehicleDebugTimer = undefined; mapDebugSession = undefined; vehicleDebugPanel.hidden = true; vehicleDebugPanel.open = false;
 }
