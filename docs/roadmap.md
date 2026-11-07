@@ -55,6 +55,10 @@ Readiness: two independent client sessions and a server, identical machine assem
 
 Cache static per-placement world-space bounding boxes across streamer slot changes, keep them resident on the GPU, and submit active placement indices instead of rebuilding and uploading every box on each Hi-Z pass. Replace matrix-string placement identities with stable IDs. First measure the individual CPU stages; the observed 14.2 ms peak in GPU occlusion CPU has not yet been attributed to box preparation. Detailed tasks and acceptance criteria: [map render cost](map-render-performance.md#planned-hi-z-caching-and-profiling).
 
+## Investigate panel wake-up during high-speed driving
+
+Pending (2026-11-08): determine why soft-body panels wake during fast driving without a collision. Record the wake reason per panel (explicit impulse, chassis acceleration/shock, terrain/obstacle threat, mount movement, contact or other trigger), correlate with speed, suspension motion and active-panel steps, and check thresholds/hysteresis. Compare an intact car on a smooth road with the same car at low speed; distinguish actual physical excitation from false wake-ups and from extra fixed substeps after a slow render frame. Do not lower solver quality or suppress legitimate impacts before identifying the trigger. Evidence: driving captures `2026-11-07T23-18-27-802Z`, `23-20-15-132Z`, `23-21-27-582Z`, `23-22-17-521Z`. This is follow-up work after the current rendering optimization pass, not an implemented fix.
+
 ## Research blockers
 
 The exact leak point in the old EXE has not been determined. Examined EXE without PDB. The intended complete original source has not been received from the community. The embedded map geometry/physics and animation formats are not supported. The full semantics of TREE and native API have not been restored. These are ongoing unfinished works, and not grounds to present the project as a finished game.
