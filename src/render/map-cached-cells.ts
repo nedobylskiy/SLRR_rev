@@ -2,9 +2,10 @@ import {allocateMapPlacementIds,setMapPlacementIds} from './map-placement-ids';
 import {Box3,Color,Frustum,Group,InstancedMesh,Mesh,Vector3} from 'three';
 import type {StreamPlacement} from './map-object-stream';
 
-interface Cell {bounds:Box3;indices:number[];meshes:InstancedMesh[];primary:boolean;active:boolean}
+interface Cell {bounds:Box3;indices:number[];meshes:InstancedMesh[];primary:boolean;active:boolean;shadow:boolean;casts:boolean}
 /** Immutable instance buffers: switching cells never compacts or uploads matrices. */
 export class MapCachedCells {
+  shadowRevision=0;
   private readonly cells:Cell[]=[];
   private readonly color=new Color();
   constructor(private readonly parent:Group,parts:Mesh[],placements:StreamPlacement[],readonly size:number,placementIds:readonly number[]=allocateMapPlacementIds(placements.length)){
@@ -29,10 +30,10 @@ export class MapCachedCells {
         mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;
         mesh.computeBoundingBox();mesh.computeBoundingSphere();parent.add(mesh);meshes.push(mesh);
       }
-      this.cells.push({bounds,indices,meshes,primary:false,active:false});
+      this.cells.push({bounds,indices,meshes,primary:false,active:false,shadow:false,casts:meshes.some(mesh=>mesh.userData.staticMapCaster??mesh.castShadow)});
     }
   }
-  update(focus:Vector3,range:number,frustum:Frustum|undefined,shadowRange:number,inspect:boolean,hidden:boolean){
+  update(focus:Vector3,range:number,frustum:Frustum|undefined,shadowRange:number,inspect:boolean,hidden:boolean,onChange?:(mesh:InstancedMesh)=>void){
     let changed=false;
     for(const cell of this.cells){
       const b=cell.bounds;
@@ -41,9 +42,11 @@ export class MapCachedCells {
       const primary=!hidden&&nearby&&(inspect||!frustum||frustum.intersectsBox(b));
       const reserve=!hidden&&nearby&&shadowRange>0&&distance<=shadowRange;
       const active=primary||reserve;
+      const shadow=reserve&&cell.casts;if(cell.shadow!==shadow){cell.shadow=shadow;this.shadowRevision++;}
       if(cell.primary!==primary||cell.active!==active)changed=true;
       cell.primary=primary;cell.active=active;
       for(const mesh of cell.meshes){
+        if(mesh.visible!==active||mesh.userData.streamAuxiliary!==!primary)onChange?.(mesh);
         mesh.visible=active;mesh.userData.streamAuxiliary=!primary;
         // Cached GPU buffers remain owned here. Off cells must also leave Three's
         // scene traversal/matrix updates, not merely skip their final draw calls.
@@ -52,7 +55,7 @@ export class MapCachedCells {
     }
     return changed;
   }
-  hide(){for(const cell of this.cells){cell.primary=cell.active=false;for(const mesh of cell.meshes){mesh.visible=false;mesh.removeFromParent();}}}
+  hide(){for(const cell of this.cells){if(cell.shadow){cell.shadow=false;this.shadowRevision++;}cell.primary=cell.active=false;for(const mesh of cell.meshes){mesh.visible=false;mesh.removeFromParent();}}}
   get cellCount(){return this.cells.length;}
   get batchCount(){return this.cells.reduce((n,c)=>n+c.meshes.length,0);}
   get visibleCells(){return this.cells.filter(c=>c.primary).length;}

@@ -260,3 +260,36 @@ test('visible GPU proxy buffers survive all-visible/all-hidden masks and semanti
   mesh.removeFromParent();api.collect(root);mesh.dispose();assert.equal(replacementDisposed,1);assert.equal(disposed,1);cull.dispose();
   mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();
 });
+
+
+test('incremental source collection touches only changed batches and preserves untouched masks/resources',()=>{
+  const root=new Group(),cull=new MapGpuOcclusion({shadowMap:{render:()=>{}}} as unknown as WebGLRenderer),api=cull as any;
+  const meshes=Array.from({length:3},(_,i)=>{
+    const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),2);mesh.count=2;
+    mesh.userData.mapOcclusionRole=i===0?'structure':'prop';setMapPlacementIds(mesh,allocateMapPlacementIds(2));
+    mesh.setMatrixAt(0,new Matrix4().makeTranslation(i*5,0,-10));mesh.setMatrixAt(1,new Matrix4().makeTranslation(i*5+2,0,-10));mesh.instanceMatrix.needsUpdate=true;root.add(mesh);return mesh;
+  });
+  api.collect(root);const unchanged=api.states.get(meshes[0]),changed=api.states.get(meshes[1]);
+  api.apply({items:[{state:changed,slot:0},{state:changed,slot:1}],bytes:new Uint8Array([0,0,0,0,255,0,0,0])});
+  const ids=meshes[1].userData.mapPlacementIds;setMapPlacementIds(meshes[1],[ids[1],ids[0]]);
+  meshes[1].setMatrixAt(0,new Matrix4().makeTranslation(7,0,-10));meshes[1].setMatrixAt(1,new Matrix4().makeTranslation(5,0,-10));meshes[1].instanceMatrix.needsUpdate=true;
+  cull.workProfile.setEnabled(true);api.collect(root,[meshes[1]]);let work=cull.workProfile.drain();
+  assert.equal(work.sources_seen_count,1);assert.equal(work.incremental_collects_count,1);assert.equal(api.states.get(meshes[0]),unchanged);
+  assert.equal(api.states.get(meshes[1]).visibleSlots.has(1),false);
+  meshes[1].visible=false;api.collect(root,[meshes[1]]);assert.equal(api.states.has(meshes[1]),false);assert.equal(api.states.size,2);
+  meshes[1].visible=true;api.collect(root,[meshes[1]]);assert.equal(api.states.get(meshes[1]).hidden,1);assert.equal(api.states.size,3);
+  cull.dispose();for(const mesh of meshes){mesh.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();}
+});
+
+test('prepare accepts contiguous deltas but uses full collection after missing changes or bypass',()=>{
+  const root=new Group(),mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),1);root.add(mesh);
+  const cull=new MapGpuOcclusion({shadowMap:{render:()=>{}},getContext:()=>({isContextLost:()=>false})} as unknown as WebGLRenderer),api=cull as any,camera=new PerspectiveCamera();
+  cull.freeze=true;api.submissions=1;cull.workProfile.setEnabled(true);
+  cull.prepare(camera,root,false,0,{fromRevision:0,revision:0,full:true,meshes:[]});assert.equal(cull.workProfile.drain().full_collects_count,1);
+  mesh.instanceMatrix.needsUpdate=true;cull.prepare(camera,root,false,1,{fromRevision:0,revision:1,full:false,meshes:[mesh]});
+  let work=cull.workProfile.drain();assert.equal(work.incremental_collects_count,1);assert.equal(work.full_collects_count,undefined);
+  cull.prepare(camera,root,false,3,{fromRevision:2,revision:3,full:false,meshes:[]});assert.equal(cull.workProfile.drain().full_collects_count,1);
+  cull.prepare(camera,root,true,4,{fromRevision:3,revision:4,full:false,meshes:[]});
+  cull.prepare(camera,root,false,5,{fromRevision:4,revision:5,full:false,meshes:[]});assert.equal(cull.workProfile.drain().full_collects_count,1);
+  cull.dispose();mesh.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();
+});

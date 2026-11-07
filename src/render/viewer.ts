@@ -245,9 +245,11 @@ export class Viewer {
     this.streamIntervalMs=ms;this.nextStreamUpdate=-Infinity;
   }
   private updateMapStream(now:number){
-    if(!this.mapStream||this.streamThrottle&&now<this.nextStreamUpdate)return;
-    this.mapStream.update(this.mapStreamFocus??this.camera.position,this.camera);
-    this.nextStreamUpdate=now+this.streamIntervalMs;
+    if(!this.mapStream)return;
+    const continuation=this.streamThrottle&&now<this.nextStreamUpdate;
+    if(continuation&&!this.mapStream.hasPendingWork)return;
+    this.mapStream.update(this.mapStreamFocus??this.camera.position,this.camera,continuation);
+    if(!continuation)this.nextStreamUpdate=now+this.streamIntervalMs;
   }
   setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
   private experimentalHubGeometry = false;
@@ -287,7 +289,7 @@ export class Viewer {
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
   get fps() { return Math.round(1000 / this.frameDuration); }
-  get streamInfo() { return this.mapStream ? `Map instances: submitted ${this.mapStream.visible} · resident ${this.mapStream.active} · indexed ${this.mapStream.total}` : ''; }
+  get streamInfo() { return this.mapStream ? `Map instances: submitted ${this.mapStream.visible} · resident ${this.mapStream.active} · indexed ${this.mapStream.total} · ${this.mapStream.queueInfo}` : ''; }
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
@@ -474,7 +476,7 @@ export class Viewer {
       this.inspection.helpers.visible=false;
       try {
         this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
-          this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.revision ?? 0,now)));
+          this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.shadowRevision ?? 0,now)));
         this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
           this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
       } finally {this.inspection.helpers.visible=this.inspection.enabled;}
@@ -482,7 +484,7 @@ export class Viewer {
         group.position.copy(renderCamera.position).add(offset);
       if(this.sunFlare)this.sunFlare.position.copy(renderCamera.position).addScaledVector(this.lighting.direction,500);
       this.gpuOcclusion.observerView=this.inspection.enabled;
-      this.profiler.measure('GPU occlusion CPU',()=>this.graphicsDiagnostics.pass('GPU occlusion',()=>this.gpuOcclusion.prepare(this.camera,this.staticMapRoot,this.geometryCutoff||this.inspection.enabled&&this.inspectResident||this.rayOcclusion.enabled,this.mapStream?.revision??0)));
+      this.profiler.measure('GPU occlusion CPU',()=>this.graphicsDiagnostics.pass('GPU occlusion',()=>this.gpuOcclusion.prepare(this.camera,this.staticMapRoot,this.geometryCutoff||this.inspection.enabled&&this.inspectResident||this.rayOcclusion.enabled,this.mapStream?.revision??0,this.mapStream?.consumeOcclusionChanges())));
       this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>
         this.gpuOcclusion.renderMain(()=>this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera),this.earlyMapCulling?this.staticMapRoot:undefined))));
       this.profiler.measure('GPU occlusion debug CPU',()=>this.gpuOcclusion.renderDebug(renderCamera));
@@ -1006,6 +1008,7 @@ export class Viewer {
     this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
+    stream.frameBudgetMs=2;
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setStaticBatching(this.staticBatching);

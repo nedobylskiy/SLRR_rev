@@ -17,6 +17,7 @@ function distanceTo(placement: StreamPlacement, camera: Vector3) {
 export {isMapTreeAlias} from './map-object-category';
 import {mapObjectCategories,type MapObjectCategory} from './map-object-category';
 
+export interface MapStreamChanges {fromRevision:number;revision:number;full:boolean;meshes:readonly InstancedMesh[]}
 interface StreamType {
   preload:boolean;
   globalCompiled?:boolean;
@@ -25,6 +26,8 @@ interface StreamType {
   category?:MapObjectCategory;
   placements: StreamPlacement[];
   placementIds:number[];
+  shadowSelection?:Set<number>;
+  cachedShadowRevision?:number;
   load: (wanted: () => boolean) => Promise<Mesh[]>;
   priority: number;
   meshes?: InstancedMesh[];
@@ -54,6 +57,22 @@ interface StreamType {
 export class MapObjectStream {
   readonly workProfile=new CpuWorkProfile();
   revision = 0;
+  shadowRevision=0;
+  private occlusionDirty=new Set<InstancedMesh>();
+  private occlusionFull=true;
+  private occlusionConsumedRevision=0;
+  consumeOcclusionChanges():MapStreamChanges{
+    const changes={fromRevision:this.occlusionConsumedRevision,revision:this.revision,full:this.occlusionFull,meshes:[...this.occlusionDirty]};
+    this.occlusionDirty.clear();this.occlusionFull=false;this.occlusionConsumedRevision=this.revision;return changes;
+  }
+  private invalidateOcclusion(){this.occlusionFull=true;this.revision++;this.shadowRevision++;}
+  private markOcclusion=(mesh:InstancedMesh)=>{this.occlusionDirty.add(mesh);};
+  /** Cooperative limit between whole model groups; Infinity retains synchronous tooling/tests. */
+  frameBudgetMs=Infinity;
+  private readonly scanQueue=new Set<StreamType>();
+  private readonly drawQueue=new Set<StreamType>();
+  get hasPendingWork(){return this.scanQueue.size>0||this.drawQueue.size>0;}
+  get queueInfo(){return `budget ${Number.isFinite(this.frameBudgetMs)?this.frameBudgetMs+' ms':'unlimited'} · scan queue ${this.scanQueue.size} · draw queue ${this.drawQueue.size}`;}
   private types: StreamType[] = [];
   private ordered: StreamType[] = [];
   private lastCell = '';
@@ -90,7 +109,7 @@ export class MapObjectStream {
     if(size!==this.cachedCellSize){this.cellGeneration++;for(const t of this.types){t.cachedCells?.dispose();t.cachedCells=undefined;}}
     this.cachedCellSize=size;this.cachedCellsEnabled=enabled;
     if(!enabled)for(const t of this.types){t.cachedCells?.hide();t.meshDrawn.clear();t.boundsDirty=true;}
-    this.dirty=this.viewDirty=true;this.revision++;
+    this.dirty=this.viewDirty=true;this.invalidateOcclusion();
     if(enabled)await this.prepareCachedCells();
   }
   async prepareCachedCells(){
@@ -103,7 +122,7 @@ export class MapObjectStream {
       for(;;){const type=queue.shift();if(!type||this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
         if(!type.baseMeshes&&!type.failed)await (type.loadPromise??this.load(type,true));
         if(this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
-        if(type.baseMeshes&&!type.cachedCells){type.cachedCells=new MapCachedCells(this.parent,type.baseMeshes,type.placements,size,type.placementIds);this.viewDirty=true;this.revision++;}
+        if(type.baseMeshes&&!type.cachedCells){type.cachedCells=new MapCachedCells(this.parent,type.baseMeshes,type.placements,size,type.placementIds);this.viewDirty=true;this.invalidateOcclusion();}
       }
     };
     const work=Promise.all(Array.from({length:4},prepare)).then(()=>{});this.cellPreparation=work;
@@ -128,7 +147,7 @@ export class MapObjectStream {
       if(type.globalCompiled){type.pending=[];type.drawn=[];type.candidates=[];type.primaryVisible=0;this.prepareBatches.delete(type);this.prepareChunks.delete(type);}
       type.boundsDirty=true;
     }
-    this.dirty=this.viewDirty=true;this.revision++;
+    this.dirty=this.viewDirty=true;this.invalidateOcclusion();
   }
   get globalFacadeInfo(){const g=this.globalFacades;return `Global facade batches: ${g?'on':'off'}${g?` · source parts ${g.sources.size} / copies ${g.sourceCopies} → batches ${g.meshes.length} · visible ${g.visibleBatches} · ${g.triangles.toLocaleString('en-US')} triangles cached · buffers ${(g.geometryBytes/1048576).toFixed(1)} MiB · uncombined sources ${g.skippedSources}`:''}`;}
   private useCached(type:StreamType){return this.cachedCellsEnabled&&!!type.category&&!!type.cachedCells;}
@@ -157,7 +176,7 @@ export class MapObjectStream {
   }
   get chunkInfo(){return `Geometry cutoff: ${this.geometryCutoff?'on':'off'} · 64 m cells · preparation queue ${this.prepareChunks.size} · chunk batches ${this.types.reduce((n,t)=>n+(t.chunkMeshes?.filter(m=>m.userData.mapChunk).length??0),0)}`;}
   setInspectResident(enabled:boolean){this.inspectResident=enabled;this.viewDirty=true;}
-  constructor(private readonly parent: Group, private distance = 500, readonly budget = 48) {}
+  constructor(private readonly parent: Group, private distance = 500, readonly budget = 48,private readonly clock=()=>performance.now()) {}
 
   setRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
@@ -165,6 +184,7 @@ export class MapObjectStream {
   }
 
   setShadowRange(value: number) {
+    if(value!==this.shadowRange)this.shadowRevision++;
     this.shadowRange = value; this.viewDirty = true;
   }
 
@@ -174,9 +194,12 @@ export class MapObjectStream {
     this.dirty = true;
   }
 
-  update(camera: Vector3, view?: Camera) {
+  update(camera: Vector3, view?: Camera,continuation=false) {
     if (this.disposed) return;
+    const started=this.clock(),deadline=started+this.frameBudgetMs;
     const profile=this.workProfile;let stamp=profile.start();profile.add("updates_count");
+    if(continuation)profile.add("continuation_updates_count");
+    if(!continuation){
     const pending=this.prepareBatches.values().next().value;
     if(pending&&this.mergeStatic&&!this.geometryCutoff){
       this.prepareBatches.delete(pending);
@@ -198,32 +221,27 @@ export class MapObjectStream {
     if (cell !== this.lastCell || this.dirty) {
       profile.add("residency_scans_count");
       this.lastCell = cell; this.dirty = false;
-      for (const type of this.types) {
-        if(type.globalCompiled||this.useCached(type)){type.pending=[];continue;}
-        profile.add("residency_distance_tests_count",type.active.length+type.placements.length);
-        for (let slot = type.active.length - 1; slot >= 0; slot--) {
-          const index = type.active[slot];
-          if (distanceTo(type.placements[index], camera) > this.distance + 100) this.remove(type, slot);
-        }
-        const nearby: { index: number; distance: number }[] = [];
-        for (let index = 0; index < type.placements.length; index++) {
-          const distance = distanceTo(type.placements[index], camera);
-          if (distance <= this.distance && !type.slots.has(index)) nearby.push({ index, distance });
-        }
-        nearby.sort((a, b) => a.distance - b.distance);
-        type.pending = nearby.map(v => v.index);
-        type.priority = nearby[0]?.distance ?? Infinity;
-      }
-      this.ordered = this.types.filter(t=>!t.globalCompiled).sort((a, b) => a.priority - b.priority);
+      for(const type of this.types)this.scanQueue.add(type);
     }
+    }
+    // Do not restart queued jobs on camera changes: each group uses the latest focus.
+    let scans=0;
+    const scanDeadline=started+this.frameBudgetMs*.35;
+    for(const type of this.scanQueue){
+      if(scans&&this.clock()>=scanDeadline)break;
+      this.scanQueue.delete(type);this.scanType(type,camera);scans++;
+    }
+    if(scans)this.ordered=this.types.filter(t=>!t.globalCompiled).sort((a,b)=>a.priority-b.priority);
+    profile.add('scan_groups_processed_count',scans);
     profile.end("residency_scan_sort_ms",stamp);stamp=profile.start();
+    if(!continuation){
     const ordered = this.ordered;
     let available = 4 - this.types.filter(type => type.loading).length;
     for (const type of ordered) if (available > 0 && type.pending.length && !type.meshes && !type.loading && !type.failed) {
       profile.add("loads_started_count");this.load(type); available--;
     }
     for (const type of this.types) {
-      if (type.preload || this.cachedCellsEnabled&&type.category || type.active.length || type.pending.length || type.loading) type.unusedSince = undefined;
+      if (type.preload || this.scanQueue.has(type) || this.cachedCellsEnabled&&type.category || type.active.length || type.pending.length || type.loading) type.unusedSince = undefined;
       else if (type.meshes) {
         type.unusedSince ??= performance.now();
         if (performance.now() - type.unusedSince > 5000) this.release(type);
@@ -244,22 +262,51 @@ export class MapObjectStream {
       if (!remaining) break;
     }
     profile.end("activate_ms",stamp);stamp=profile.start();
+    }
     let viewChanged = this.viewDirty || this.hadView !== !!view || !this.lastFocus.equals(camera);
     if (view) {
       view.updateWorldMatrix(true, false); this.parent.updateWorldMatrix(true, false);
       this.projection.multiplyMatrices(view.projectionMatrix, view.matrixWorldInverse).multiply(this.parent.matrixWorld);
       viewChanged ||= !this.projection.equals(this.lastProjection);
-      this.lastProjection.copy(this.projection);
+      if(!continuation)this.lastProjection.copy(this.projection);
       this.frustum.setFromProjectionMatrix(this.projection);
     }
-    this.hadView = !!view; this.lastFocus.copy(camera); this.viewDirty = false;
+    if(!continuation){this.hadView = !!view; this.lastFocus.copy(camera); this.viewDirty = false;}
     profile.end("view_frustum_ms",stamp);stamp=profile.start();
     // Residency and rendering are independent: keep nearby off-screen instances
     // in RAM, but submit only the visible ones, even for a city-wide model type.
-    for (const type of this.types) if (type.meshes && (viewChanged || type.boundsDirty)) this.draw(type, camera, !!view);
+    for(const type of this.types)if(type.meshes&&(!continuation&&viewChanged||type.boundsDirty))this.drawQueue.add(type);
+    let drawn=0;
+    for(const type of this.drawQueue){
+      if(drawn&&this.clock()>=deadline)break;
+      this.drawQueue.delete(type);if(!type.meshes)continue;
+      this.draw(type,camera,!!view);drawn++;
+    }
+    profile.add('draw_groups_processed_count',drawn);
+    profile.add('scan_queue_remaining_count',this.scanQueue.size);profile.add('draw_queue_remaining_count',this.drawQueue.size);
+    if(this.hasPendingWork)profile.add('budget_yields_count');
     profile.end("draw_batches_ms",stamp);stamp=profile.start();
-    if(this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange))this.revision++;
+    if(!continuation&&this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange,this.markOcclusion))this.revision++;
     profile.end("global_facades_ms",stamp);
+  }
+
+  private scanType(type:StreamType,camera:Vector3){
+    if(type.globalCompiled||this.useCached(type)){type.pending=[];return;}
+    this.workProfile.add('residency_distance_tests_count',type.active.length+type.placements.length);
+    for(let slot=type.active.length-1;slot>=0;slot--)if(distanceTo(type.placements[type.active[slot]],camera)>this.distance+100)this.remove(type,slot);
+    const nearby:{index:number;distance:number}[]=[];
+    for(let index=0;index<type.placements.length;index++){
+      const distance=distanceTo(type.placements[index],camera);
+      if(distance<=this.distance&&!type.slots.has(index))nearby.push({index,distance});
+    }
+    nearby.sort((a,b)=>a.distance-b.distance);type.pending=nearby.map(v=>v.index);type.priority=nearby[0]?.distance??Infinity;
+  }
+
+  private updateShadowSelection(type:StreamType,indices:readonly number[]){
+    const previous=type.shadowSelection;
+    if(previous&&previous.size===indices.length&&indices.every(index=>previous.has(index)))return;
+    type.shadowSelection=new Set(indices);
+    if(previous?.size||indices.length){this.shadowRevision++;this.workProfile.add('shadow_invalidations_count');}
   }
 
   private draw(type: StreamType, focus: Vector3, cull: boolean) {
@@ -272,8 +319,9 @@ export class MapObjectStream {
       for(const mesh of [...type.meshes!,...type.lodMeshes.values(),...type.auxiliary.values()])mesh.visible=false;
       const cache=type.cachedCells!;
       const cachedStart=profile.start();
-      if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category)))this.revision++;
+      if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category),this.markOcclusion))this.revision++;
       profile.end("cached_cells_ms",cachedStart);
+      if(type.cachedShadowRevision!==cache.shadowRevision){type.cachedShadowRevision=cache.shadowRevision;this.shadowRevision++;profile.add('shadow_invalidations_count');}
       type.primaryVisible=cache.visibleInstances;type.boundsDirty=false;return;
     }
     type.cachedCells?.hide();
@@ -296,6 +344,8 @@ export class MapObjectStream {
       if(!primary&&!this.inspectResident)continue;
       visible.push(index);
     }
+    const casts=type.meshes!.some(mesh=>mesh.userData.staticMapCaster??mesh.castShadow);
+    this.updateShadowSelection(type,casts?auxiliary:[]);
     let changed=visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index);
     profile.end("placement_visibility_ms",selectStart);
     for (const mesh of type.meshes!) {
@@ -371,6 +421,7 @@ export class MapObjectStream {
             if (batch.instanceColor) batch.setColorAt(slot, this.instanceColor.setHex(placement.paintColor ?? 0xffffff));
           }
           if (batch.instanceColor) batch.instanceColor.needsUpdate = true;
+          this.markOcclusion(batch);
           batch.count = indices.length; batch.instanceMatrix.needsUpdate = true;
           // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
           profile.end("matrix_packing_ms",packStart);const sphereStart=profile.start();
@@ -460,7 +511,7 @@ export class MapObjectStream {
       mesh.removeFromParent();mesh.dispose();
     }
     type.meshes=selected;for(const mesh of selected)this.parent.add(mesh);
-    type.meshDrawn.clear();type.boundsDirty=true;this.revision++;
+    type.meshDrawn.clear();type.boundsDirty=true;this.invalidateOcclusion();
   }
 
   get active() { return this.types.reduce((sum, type) => sum + (this.useCached(type)?type.placements.length:type.active.length), 0); }
@@ -469,7 +520,8 @@ export class MapObjectStream {
   get auxiliaryVisible(){return this.types.reduce((sum,type)=>sum+(this.useCached(type)?type.cachedCells!.auxiliaryInstances:[...type.auxiliary.values()].reduce((n,m)=>n+m.count,0)),0);}
   get total() { return this.types.reduce((sum, type) => sum + type.placements.length, 0); }
   private release(type: StreamType) {
-    if (type.meshes?.length) this.revision++;
+    this.scanQueue.delete(type);this.drawQueue.delete(type);
+    if (type.meshes?.length) this.invalidateOcclusion();
     type.cachedCells?.dispose();type.cachedCells=undefined;
     const geometries = new Set(), materials = new Set(), textures = new Set<Texture>();
     this.prepareChunks.delete(type);
@@ -487,8 +539,8 @@ export class MapObjectStream {
     for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
     for (const texture of textures) texture.dispose();
     type.meshes = undefined; type.unusedSince = undefined; type.localBounds = undefined;
-    type.baseMeshes=type.chunkMeshes=type.mergedMeshes=undefined;type.meshDrawn.clear();type.chunkBounds.clear();type.farSlots.clear();
+    type.baseMeshes=type.chunkMeshes=type.mergedMeshes=undefined;type.shadowSelection=undefined;type.cachedShadowRevision=undefined;type.meshDrawn.clear();type.chunkBounds.clear();type.farSlots.clear();
     type.drawn.length = type.candidates.length = 0; type.instanceBounds.clear();
   }
-  dispose() { this.disposed = true; this.globalFacades?.dispose();this.globalFacades=undefined;for (const type of this.types) this.release(type);this.lod.dispose(); this.types = []; this.ordered = []; }
+  dispose() { this.disposed = true;this.occlusionDirty.clear();this.scanQueue.clear();this.drawQueue.clear(); this.globalFacades?.dispose();this.globalFacades=undefined;for (const type of this.types) this.release(type);this.lod.dispose(); this.types = []; this.ordered = []; }
 }

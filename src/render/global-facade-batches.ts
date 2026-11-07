@@ -51,12 +51,13 @@ export class GlobalFacadeBatches {
       for(const source of this.sources){source.userData.globalFacadeSource=true;source.visible=false;source.removeFromParent();}
     }catch(error){for(const entry of pending.values())for(const g of entry.geometries)g.dispose();this.dispose();throw error;}
   }
-  update(frustum?:Frustum,focus?:Vector3,shadowRange=0){
+  update(frustum?:Frustum,focus?:Vector3,shadowRange=0,onChange?:(mesh:InstancedMesh)=>void){
     let changed=false;
     for(const mesh of this.meshes){
       const box=mesh.geometry.boundingBox!,primary=!frustum||frustum.intersectsBox(box);
       const distance=focus?Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z)):Infinity;
       const visible=primary||shadowRange>0&&distance<=shadowRange;
+      if(mesh.visible!==visible||mesh.userData.streamAuxiliary!==!primary){changed=true;onChange?.(mesh);}
       mesh.userData.streamAuxiliary=!primary;
       if(mesh.visible!==visible)changed=true;mesh.visible=visible;
       if(visible){if(mesh.parent!==this.parent)this.parent.add(mesh);}else mesh.removeFromParent();}

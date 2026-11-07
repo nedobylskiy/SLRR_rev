@@ -440,3 +440,75 @@ test('stream placements receive unique numeric IDs shared by their parts and ret
   for(const mesh of root.children.filter(m=>m.visible&&m.userData.cachedMapCell))assert.deepEqual(mesh.userData.mapPlacementIds,ids);
   stream.dispose();
 });
+
+
+test('budgeted draw queue keeps old batches until atomic commit and uses the newest camera without starving groups',async()=>{
+  let elapsed=0;
+  const root=new Group(),stream=new MapObjectStream(root,100,48,()=>elapsed);
+  for(let i=0;i<3;i++)stream.add([{matrix:new Matrix4().makeTranslation(i-1,0,-10),position:new Vector3(i-1,0,-10)}],async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);
+  stream.update(new Vector3());await Promise.resolve();await Promise.resolve();stream.update(new Vector3());
+  const meshes=root.children.filter(m=>m instanceof InstancedMesh) as InstancedMesh[];assert.equal(meshes.length,3);
+  const before=meshes.map(mesh=>({version:mesh.instanceMatrix.version,ids:mesh.userData.mapPlacementIds}));
+  const api=stream as any,draw=api.draw.bind(stream),visited=new Set<unknown>();
+  api.draw=(type:unknown,focus:Vector3,cull:boolean)=>{visited.add(type);draw(type,focus,cull);elapsed+=1.2;};
+  stream.frameBudgetMs=2;stream.workProfile.setEnabled(true);
+  const camera=new PerspectiveCamera(60,1,.1,100);camera.rotation.y=Math.PI;camera.updateMatrixWorld();
+  stream.update(new Vector3(),camera);
+  assert.equal(visited.size,2);assert.equal(stream.hasPendingWork,true);
+  assert.equal(meshes.filter(mesh=>mesh.count===1).length,1,'unprocessed batch stays drawable');
+  meshes.forEach((mesh,i)=>{if(mesh.count===1){assert.equal(mesh.instanceMatrix.version,before[i].version);assert.equal(mesh.userData.mapPlacementIds,before[i].ids);}else assert.equal(mesh.userData.mapPlacementIds.length,mesh.count);});
+  camera.rotation.y=0;camera.updateMatrixWorld();stream.update(new Vector3(),camera,true);
+  assert.equal(visited.size,3);assert.equal(stream.hasPendingWork,false);assert.equal(meshes.filter(mesh=>mesh.count===1).length,1,'deferred group uses current camera instead of the queued camera');
+  stream.update(new Vector3(),camera);while(stream.hasPendingWork)stream.update(new Vector3(),camera,true);
+  assert.equal(meshes.filter(mesh=>mesh.count===1).length,3);
+  for(const mesh of meshes)assert.equal(mesh.userData.mapPlacementIds.length,mesh.count);
+  assert.ok(stream.workProfile.drain().budget_yields_count>=1);
+  stream.dispose();assert.equal(stream.hasPendingWork,false);
+});
+
+test('residency scan queue spans frames fairly and evaluates deferred groups at the latest focus',()=>{
+  let elapsed=0;
+  const stream=new MapObjectStream(new Group(),100,48,()=>elapsed),api=stream as any;
+  for(let i=0;i<6;i++)stream.add([{matrix:new Matrix4(),position:new Vector3()}],async()=>[]);
+  const scan=api.scanType.bind(stream),seen:{type:unknown;x:number}[]=[];
+  api.scanType=(type:unknown,focus:Vector3)=>{seen.push({type,x:focus.x});scan(type,focus);elapsed+=.45;};
+  stream.frameBudgetMs=2;stream.update(new Vector3());assert.equal(seen.length,2);assert.equal(stream.hasPendingWork,true);
+  for(let i=0;i<10&&stream.hasPendingWork;i++)stream.update(new Vector3(10,0,0),undefined,true);
+  assert.equal(stream.hasPendingWork,false);assert.equal(seen.length,6);assert.equal(new Set(seen.map(s=>s.type)).size,6);
+  assert.ok(seen.slice(2).every(s=>s.x===10));stream.dispose();
+});
+
+
+test('stream change feed publishes only changed batches with contiguous revisions and explicit representation invalidations',async()=>{
+  const root=new Group(),stream=new MapObjectStream(root,100),camera=new PerspectiveCamera(60,1,.1,100);
+  camera.updateMatrixWorld();assert.equal(stream.consumeOcclusionChanges().full,true);
+  for(let i=0;i<2;i++)stream.add([{matrix:new Matrix4().makeTranslation(i,0,-10),position:new Vector3(i,0,-10)}],async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())],'trees');
+  stream.update(new Vector3(),camera);await Promise.resolve();await Promise.resolve();stream.update(new Vector3(),camera);
+  const delta=stream.consumeOcclusionChanges();assert.equal(delta.full,false);assert.equal(delta.meshes.length,2);assert.equal(delta.fromRevision,0);assert.equal(delta.revision,stream.revision);
+  stream.update(new Vector3(),camera);const empty=stream.consumeOcclusionChanges();assert.equal(empty.meshes.length,0);assert.equal(empty.fromRevision,delta.revision);
+  camera.rotation.y=Math.PI;camera.updateMatrixWorld();stream.update(new Vector3(),camera);
+  const hidden=stream.consumeOcclusionChanges();assert.equal(hidden.meshes.length,2);assert.ok(hidden.meshes.every(mesh=>!mesh.visible));assert.equal(hidden.fromRevision,empty.revision);
+  await stream.setCachedCells(true,64);assert.equal(stream.consumeOcclusionChanges().full,true);
+  stream.update(new Vector3(),camera);stream.consumeOcclusionChanges();
+  camera.rotation.y=0;camera.updateMatrixWorld();stream.update(new Vector3(),camera);
+  const shownCells=stream.consumeOcclusionChanges();assert.equal(shownCells.full,false);assert.equal(shownCells.meshes.length,2);assert.ok(shownCells.meshes.every(mesh=>mesh.userData.cachedMapCell&&mesh.visible));
+  stream.setTreesHidden(true);stream.update(new Vector3(),camera);const hiddenCells=stream.consumeOcclusionChanges();assert.equal(hiddenCells.full,false);assert.equal(hiddenCells.meshes.length,2);assert.ok(hiddenCells.meshes.every(mesh=>!mesh.visible));stream.dispose();
+});
+
+
+for(const cachedCells of [false,true])test(`static shadow revision ignores camera-only batch swaps (${cachedCells?'cached cells':'regular instances'})`,async()=>{
+  const root=new Group(),stream=new MapObjectStream(root,500),camera=new PerspectiveCamera(60,1,.1,1000);
+  camera.updateMatrixWorld();stream.setShadowRange(150);
+  stream.add([{matrix:new Matrix4().makeTranslation(0,0,-10),position:new Vector3(0,0,-10)},{matrix:new Matrix4().makeTranslation(200,0,-10),position:new Vector3(200,0,-10)}],async()=>{
+    const mesh=new Mesh(new BoxGeometry(),new MeshBasicMaterial());mesh.userData.staticMapCaster=true;return [mesh];
+  },'trees');
+  if(cachedCells)await stream.setCachedCells(true,64);
+  stream.update(new Vector3(),camera);await Promise.resolve();await Promise.resolve();stream.update(new Vector3(),camera);
+  const shadow=stream.shadowRevision,revision=stream.revision;assert.ok(shadow>0);
+  for(let i=0;i<6;i++){camera.rotation.y=i%2?0:Math.PI;camera.updateMatrixWorld();stream.update(new Vector3(),camera);assert.equal(stream.shadowRevision,shadow,'primary/caster-reserve swaps retain the cached projection');}
+  assert.ok(stream.revision>revision,'normal streaming/Hi-Z revisions still follow visibility');
+  stream.setTreesHidden(true);stream.update(new Vector3(),camera);assert.ok(stream.shadowRevision>shadow,'removing actual nearby casters invalidates shadows');
+  const hidden=stream.shadowRevision;stream.setTreesHidden(false);stream.update(new Vector3(),camera);assert.ok(stream.shadowRevision>hidden);
+  const shown=stream.shadowRevision;stream.update(new Vector3(300,0,0),camera);assert.ok(stream.shadowRevision>shown,'moving the reserve changes real caster membership');
+  stream.dispose();
+});

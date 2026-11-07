@@ -58,3 +58,14 @@ test('fully compiled facade types stay detached when legacy merge/cutoff switche
   assert.ok(parent.children.every(m=>m.userData.globalFacadeBatch));assert.equal(parent.children.length,1);
   stream.setStaticBatching(false);stream.setGeometryCutoff(false);stream.update(new Vector3());assert.equal(parent.children.length,1);stream.dispose();
 });
+
+
+test('global facade change notifications include primary-to-shadow-only switches without visibility changes',()=>{
+  const parent=new Group(),a=source(new Texture()),batch=new GlobalFacadeBatches(parent,[{mesh:a,placements:[placement(100)]}]);
+  const changes:InstancedMesh[]=[],changed=(mesh:InstancedMesh)=>changes.push(mesh);
+  batch.update(undefined,undefined,0,changed);assert.equal(changes.length,1);changes.length=0;
+  const camera=new PerspectiveCamera(60,1,.1,500);camera.updateMatrixWorld();const frustum=new Frustum().setFromProjectionMatrix(new Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
+  assert.equal(batch.update(frustum,new Vector3(100,0,0),30,changed),true);assert.equal(changes.length,1);assert.equal(changes[0].visible,true);assert.equal(changes[0].userData.streamAuxiliary,true);
+  changes.length=0;batch.update(frustum,new Vector3(100,0,0),30,changed);assert.equal(changes.length,0);
+  batch.dispose();
+});
