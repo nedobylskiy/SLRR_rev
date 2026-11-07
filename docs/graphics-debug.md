@@ -626,3 +626,17 @@ The real-GPU fixture now samples every frame from 24 through 60 with interval 12
 
 
 Live city verification for the material-version correction: primary route pose 60.3 s, independent observer on, hidden-box overlay on, Apply on, interval 12, dynamic shadows on. Two observations reported 499–499 actually hidden instances across the latest 120 main frames, with no WebGL errors. Capture: `Downloads/slrr-route-frame-60.3-1794060315324.png`. Build and 479 Node tests pass; the real-GPU per-frame fixture passes 84/84.
+
+
+### Occlusion candidate coverage and narrow projections
+
+Depth-pass terrain and structures now remain depth-only sources: they are not submitted as visibility candidates and are not included in the red/green candidate box overlay. They still render their normal colour in the main pass; the separate low-resolution depth pass does not produce that colour. Reports expose candidate and depth-only instance counts separately.
+
+The previous single-level Hi-Z query selected a level using the longest side of the projected AABB. For tall narrow props this included large areas outside the box, often sky or gaps, and falsely kept fully hidden poles visible. Inconclusive coarse tiles now descend through the pyramid, visiting only children intersecting the expanded box rectangle. A real finest-level gap keeps the object visible. Work is bounded to 512 visits with a 64-entry stack; exhausting the budget also keeps it visible. This is a GPU-only refinement, without extra depth-image readbacks or CPU rays.
+
+The old nonlinear-depth bias of 0.000002 was also too large at long range with the game's 0.01 m near plane. A target 410 m from the camera behind a wall at 400 m was kept visible. The bias is now four float32 steps below depth 1 (0.00000023841858); the existing 0.35 m world-space box expansion and two-pixel screen expansion remain. Before refinement, tall-pole cases failed 24/120 checks. After refinement but before the bias change, adding distant-wall cases produced 16/240 failures. The final real-GPU fixture passes 264/264 checks, including objects just in front of walls, real openings, tall hidden/exposed poles, near-plane crossings, opaque/shared transparent materials, near planes 0.01/0.1/1 m, and walls at 100/400 m. It observes every frame 24–60 at an update interval of 12.
+
+Build and all 480 Node tests pass, including the depth-only candidate/overlay regression.
+
+
+City route smoke check with the new coverage query, all prop categories enabled, 1920×945, interval 12: 59.39 mean FPS, p95 16.9 ms. Report: `Downloads/slrr-route-result-1794061797298.json`. This is a streamed end-to-end run, not a controlled speed comparison against the previous shader. Streaming CPU averaged 0.72 ms and peaked at 12.3 ms; renderer/resource upload work can also include loading costs. Use equally warmed routes for performance comparisons. On a settled preview at 60.3 s, 724 candidates were tested while 429 depth-only instances were excluded; 484–484 instances remained hidden across 120 frames, also in observer mode. Main-view Apply-on/off captures (`Downloads/slrr-route-frame-60.3-1794061935056.png` and `Downloads/slrr-route-frame-60.3-1794061949573.png`) differ at only five RGB pixels out of 1,814,400. No WebGL errors were reported. The existing two embedded-map-resource decode warnings remain.

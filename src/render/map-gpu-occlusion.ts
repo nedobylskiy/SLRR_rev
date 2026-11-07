@@ -96,8 +96,28 @@ export class MapGpuOcclusion {
       b=clamp((b*.5+.5)*vec2(512.,256.)+vec2(2.),vec2(0.),vec2(511.,255.));
       int level=int(clamp(ceil(log2(max(max(b.x-a.x,b.y-a.y),2.)))-1.,0.,8.));
       float scale=exp2(float(level+1));ivec2 p=ivec2(floor(a/scale)),q=ivec2(floor(b/scale));float farDepth=0.;
-      for(int y=0;y<3;y++)for(int x=0;x<3;x++){ivec2 t=p+ivec2(x,y);if(t.x<=q.x&&t.y<=q.y)farDepth=max(farDepth,depthAt(level,t));}
-      result=vec4(nearDepth>farDepth+0.000002?0.:1.);}`});
+      // Four float32 ULPs below depth 1, rather than a bias spanning tens of
+      // world metres at long range with the original 0.01 m near plane.
+      // A coarse texel can contain sky or an opening OUTSIDE the projected box.
+      // Refine only inconclusive tiles, keeping all intersected pixels conservative.
+      ivec3 stack[64];int size=0;
+      for(int y=0;y<3;y++)for(int x=0;x<3;x++){ivec2 t=p+ivec2(x,y);if(t.x<=q.x&&t.y<=q.y)stack[size++]=ivec3(t,level);}
+      for(int visit=0;visit<512;visit++){
+        if(size==0)break;
+        ivec3 tile=stack[--size];float d=depthAt(tile.z,tile.xy);
+        if(nearDepth>d+0.00000023841858){farDepth=max(farDepth,d);continue;}
+        if(tile.z==0)return; // A real finest-level gap: keep the object visible.
+        int childLevel=tile.z-1;float childScale=exp2(float(childLevel+1));
+        ivec2 childLo=ivec2(floor(a/childScale)),childHi=ivec2(floor(b/childScale));
+        for(int y=0;y<2;y++)for(int x=0;x<2;x++){
+          ivec2 t=tile.xy*2+ivec2(x,y);
+          if(all(greaterThanEqual(t,childLo))&&all(lessThanEqual(t,childHi))){
+            if(size>=64)return;stack[size++]=ivec3(t,childLevel);
+          }
+        }
+      }
+      if(size>0)return; // Bounded work: inconclusive means visible.
+      result=vec4(nearDepth>farDepth+0.00000023841858?0.:1.);}`});
     this.debugMaterial=new RawShaderMaterial({glslVersion:GLSL3,depthTest:false,depthWrite:false,blending:NoBlending,
       uniforms:{source:{value:null},mode:{value:0},nearFar:{value:new Vector2(.1,5000)}},
       vertexShader:`precision highp float; in vec3 position; out vec2 uv; void main(){uv=position.xy*.5+.5;gl_Position=vec4(position.xy,0.,1.);}`,
@@ -202,7 +222,7 @@ export class MapGpuOcclusion {
   private lastPose?:{time:number;position:Vector3;rotation:Quaternion;projection:Matrix4};
   private submit(camera:Camera){
     this.depthNearFar.set('near' in camera?Number(camera.near):.1,'far' in camera?Number(camera.far):5000);
-    const items=[...this.states.values()].flatMap(state=>state.bounds.map((_,slot)=>({state,slot})));
+    const items=[...this.states.values()].filter(state=>!state.depth).flatMap(state=>state.bounds.map((_,slot)=>({state,slot})));
     // Never partially evaluate a source when the bounded result texture is full.
     if(!items.length||items.length>32768)return;
     const height=Math.ceil(items.length*2/1024);
@@ -236,7 +256,7 @@ export class MapGpuOcclusion {
       if(this.debugMode==='boxes'||this.debugMode==='boxes-hidden'){
         const positions:number[]=[],colors:number[]=[];
         const edges=[0,1,0,2,0,4,1,3,1,5,2,3,2,6,3,7,4,5,4,6,5,7,6,7];
-        for(const s of this.states.values())for(let i=0;i<s.bounds.length;i++){
+        for(const s of this.states.values())if(!s.depth)for(let i=0;i<s.bounds.length;i++){
           if(this.debugMode==='boxes-hidden'&&(!s.visibleSlots||s.visibleSlots.has(i)))continue;
           const b=s.bounds[i],color=!s.visibleSlots?[.65,.65,.65]:s.visibleSlots.has(i)?[.1,1,.2]:[1,.08,.04];
           for(const v of edges){positions.push(v&1?b.max.x:b.min.x,v&2?b.max.y:b.min.y,v&4?b.max.z:b.min.z);colors.push(...color);}
@@ -254,9 +274,9 @@ export class MapGpuOcclusion {
       }
     }finally{r.setViewport(viewport);r.setScissor(scissor);r.setScissorTest(scissorTest);r.autoClear=auto;r.info.autoReset=reset;r.shadowMap.enabled=shadows;}
   }
-  stats(){return {enabled:this.enabled,recent_applied_hidden_min:this.recentHidden.length?Math.min(...this.recentHidden):0,recent_applied_hidden_max:this.recentHidden.length?Math.max(...this.recentHidden):0,visibility_camera:'primary',observer_view:this.observerView,bypassed:this.bypassed,apply_results:this.applyResults,debug_mode:this.debugMode,frozen:this.freeze,interval_frames:this.intervalFrames,tested_instances:this.tested,depth_terrain_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='terrain').length,depth_structure_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='structure').length,excluded_prop_batches:[...this.states.values()].filter(s=>s.mesh.userData.mapOcclusionRole==='prop').length,hidden_instances:[...this.states.values()].reduce((n,s)=>n+s.hidden,0),hidden_draws:[...this.states.values()].filter(s=>s.hidden===s.mesh.count).length,latency_frames:this.latency,latency_ms:this.latencyMs,max_latency_ms:this.maxLatency,rejected_results:this.rejected,submissions:this.submissions,depth_draws:this.lastDepthDraws,extra_draws_per_update:this.lastDraws,extra_triangles_per_update:this.lastTriangles,error:this.error};}
+  stats(){return {enabled:this.enabled,recent_applied_hidden_min:this.recentHidden.length?Math.min(...this.recentHidden):0,recent_applied_hidden_max:this.recentHidden.length?Math.max(...this.recentHidden):0,visibility_camera:'primary',observer_view:this.observerView,bypassed:this.bypassed,apply_results:this.applyResults,debug_mode:this.debugMode,frozen:this.freeze,interval_frames:this.intervalFrames,tested_instances:this.tested,depth_only_instances:[...this.states.values()].filter(s=>s.depth).reduce((n,s)=>n+s.mesh.count,0),candidate_instances:[...this.states.values()].filter(s=>!s.depth).reduce((n,s)=>n+s.mesh.count,0),depth_terrain_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='terrain').length,depth_structure_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='structure').length,excluded_prop_batches:[...this.states.values()].filter(s=>s.mesh.userData.mapOcclusionRole==='prop').length,hidden_instances:[...this.states.values()].reduce((n,s)=>n+s.hidden,0),hidden_draws:[...this.states.values()].filter(s=>s.hidden===s.mesh.count).length,latency_frames:this.latency,latency_ms:this.latencyMs,max_latency_ms:this.maxLatency,rejected_results:this.rejected,submissions:this.submissions,depth_draws:this.lastDepthDraws,extra_draws_per_update:this.lastDraws,extra_triangles_per_update:this.lastTriangles,error:this.error};}
   lines(){const s=this.stats();return [`GPU Hi-Z occlusion: ${this.enabled?'on':'off'} · tested ${s.tested_instances} · hidden instances ${s.hidden_instances} / whole draws ${s.hidden_draws} · depth 512×256, every ${this.intervalFrames} frames`,
     `GPU visibility readback: ${s.latency_frames} frames / ${s.latency_ms.toFixed(1)} ms (max ${s.max_latency_ms.toFixed(1)}) · rejected ${s.rejected_results} · extra draws/update ${s.extra_draws_per_update} (depth ${s.depth_draws})${s.error?` · ERROR ${s.error}`:''}`,
-    ...(this.enabled?[`GPU applied visibility (last 120 main frames): hidden instances ${s.recent_applied_hidden_min}–${s.recent_applied_hidden_max}`,`GPU occlusion camera: primary · display ${this.observerView?'observer':'primary'}${this.bypassed?' · BYPASSED (distance cutoff / inspect all / CPU rays)':''}`,`GPU depth sources: terrain ${s.depth_terrain_batches} · structures ${s.depth_structure_batches} · excluded prop batches ${s.excluded_prop_batches}`,`GPU visibility debug: ${this.debugMode}${this.freeze?' (frozen)':''} · apply results ${this.applyResults?'on':'off (measurement only)'} · depth: logarithmic 0–500 m, blue = empty; boxes: red hidden / green visible / gray untested`]:[])];}
+    ...(this.enabled?[`GPU applied visibility (last 120 main frames): hidden instances ${s.recent_applied_hidden_min}–${s.recent_applied_hidden_max}`,`GPU occlusion camera: primary · display ${this.observerView?'observer':'primary'}${this.bypassed?' · BYPASSED (distance cutoff / inspect all / CPU rays)':''}`,`GPU candidates: ${s.candidate_instances} · depth-only instances ${s.depth_only_instances} (not tested)`,`GPU depth sources: terrain ${s.depth_terrain_batches} · structures ${s.depth_structure_batches} · excluded prop batches ${s.excluded_prop_batches}`,`GPU visibility debug: ${this.debugMode}${this.freeze?' (frozen)':''} · apply results ${this.applyResults?'on':'off (measurement only)'} · depth: logarithmic 0–500 m, blue = empty; boxes: red hidden / green visible / gray untested`]:[])];}
   dispose(){this.reset();this.depthTarget.dispose();for(const t of this.levels)t.dispose();this.result.dispose();this.boxes?.dispose();this.quad.geometry.dispose();this.reduce.dispose();this.test.dispose();this.debugMaterial.dispose();this.boxLines.geometry.dispose();this.boxLines.material.dispose();}
 }

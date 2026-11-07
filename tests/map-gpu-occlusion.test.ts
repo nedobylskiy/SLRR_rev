@@ -134,3 +134,17 @@ test('transparent two-pass shader recompilation preserves visibility keys, while
   mesh.instanceMatrix.needsUpdate=true;assert.notEqual(gpuSourceKey(mesh),key);
   mesh.geometry.dispose();material.dispose();mesh.dispose();
 });
+
+
+test('depth-pass instances stay out of candidate counters and bounding-box diagnostics',()=>{
+  const renderer={shadowMap:{enabled:true,render:()=>{}},info:{autoReset:true},autoClear:true,
+    getViewport:(v:any)=>v.set(0,0,1280,720),getScissor:(v:any)=>v.set(0,0,1280,720),getScissorTest:()=>false,
+    setViewport:()=>{},setScissor:()=>{},setScissorTest:()=>{},render:()=>{}} as unknown as WebGLRenderer;
+  const cull=new MapGpuOcclusion(renderer),root=new Group();
+  const wall=new InstancedMesh(new BoxGeometry(10,10,1),new MeshStandardMaterial(),2);wall.userData.mapOcclusionRole='structure';
+  const prop=new InstancedMesh(new BoxGeometry(1,10,1),new MeshStandardMaterial(),3);prop.userData.mapOcclusionRole='prop';root.add(wall,prop);
+  (cull as any).collect(root);cull.enabled=true;cull.debugMode='boxes';cull.renderDebug(new PerspectiveCamera());
+  assert.equal(cull.stats().depth_only_instances,2);assert.equal(cull.stats().candidate_instances,3);
+  assert.equal((cull as any).boxLines.geometry.attributes.position.count,3*24,'only prop boxes are diagnostic candidates');
+  cull.dispose();for(const m of [wall,prop]){m.geometry.dispose();(m.material as MeshStandardMaterial).dispose();m.dispose();}
+});
