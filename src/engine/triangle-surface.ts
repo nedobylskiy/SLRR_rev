@@ -1,14 +1,24 @@
 import { Box3, Matrix4, Triangle, Vector3 } from 'three';
 import type { PanelContact, PanelSurface, Triple } from './deformable-panel';
 
-interface Face { triangle: Triangle; bounds: Box3; normal: Vector3; offset: number; active: boolean }
-interface Branch { bounds: Box3; faces?: Face[]; left?: Branch; right?: Branch }
+/** Exact work counters; timings sample one in 32 enabled queries, without extrapolation. */
+export const createContactProfile=()=>({queries:0,cacheHits:0,cacheMisses:0,branches:0,leaves:0,faceBounds:0,candidates:0,triangleTests:0,hits:0,timedQueries:0,timedCacheMisses:0,queryMs:0,traversalMs:0,narrowMs:0});
+export type ContactProfile=ReturnType<typeof createContactProfile>;
+export interface SurfaceRange {start:number;count:number}
+interface Face { owner?:Branch;triangle: Triangle; bounds: Box3; normal: Vector3; offset: number; active: boolean }
+interface Branch { parent?:Branch;bounds: Box3; faces?: Face[]; left?: Branch; right?: Branch }
 interface QueryCache { revision: number; bounds: Box3; faces: Face[] }
 /** Two-sided swept node/sphere contacts against the assembled body's original triangles, in body space. */
 export class TriangleSurface implements PanelSurface {
+  profile?:ContactProfile;
+  private profileSequence=0;
   private tree: Branch;
   private faces: Face[] = [];
+  private faceSlots:Face[]=[];
+  lastRefitTriangles=0;
+  lastRefitBranches=0;
   private coordinateCount: number;
+  get coordinateLength(){return this.coordinateCount;}
   private inverse = new Matrix4(); private previousInverse = new Matrix4(); private frame = new Matrix4();
   private from = new Vector3(); private to = new Vector3(); private query = new Box3();
   private queries = new WeakMap<Float64Array, QueryCache[]>();
@@ -26,27 +36,39 @@ export class TriangleSurface implements PanelSurface {
       const t = new Triangle(new Vector3().fromArray(triangles, i), new Vector3().fromArray(triangles, i + 3), new Vector3().fromArray(triangles, i + 6));
       if (![...t.a.toArray(), ...t.b.toArray(), ...t.c.toArray()].every(Number.isFinite)) throw new Error('Invalid collision triangle');
       const active = t.getArea() >= 1e-10; if (active) valid++;
-      faces.push({ triangle: t, normal: t.getNormal(new Vector3()), bounds: new Box3().setFromPoints([t.a, t.b, t.c]), offset: i, active });
+      const face={ triangle:t,normal:t.getNormal(new Vector3()),bounds:new Box3().setFromPoints([t.a,t.b,t.c]),offset:i,active };
+      faces.push(face);this.faceSlots.push(face);
     }
     if (!valid) throw new Error('Empty collision surface'); this.tree = this.build(faces);
   }
   setFrames(previous: Matrix4, current: Matrix4) { this.previousInverse.copy(previous).invert(); this.inverse.copy(current).invert(); this.frame.copy(current); }
   /** Same triangle order/topology: update bounds bottom-up without sorting or allocating a new BVH. */
-  refit(triangles: ArrayLike<number>) {
+  refit(triangles: ArrayLike<number>,ranges?:readonly SurfaceRange[]) {
     if (triangles.length !== this.coordinateCount) throw new Error('Refit requires unchanged triangle topology');
-    for (let i = 0; i < triangles.length; i++) if (!Number.isFinite(triangles[i])) throw new Error('Invalid collision triangle');
-    for (const face of this.faces) {
-      const t = face.triangle, i = face.offset;
-      t.a.fromArray(triangles, i); t.b.fromArray(triangles, i + 3); t.c.fromArray(triangles, i + 6);
-      face.active = t.getArea() >= 1e-10; t.getNormal(face.normal); face.bounds.makeEmpty().expandByPoint(t.a).expandByPoint(t.b).expandByPoint(t.c);
+    const work=ranges??[{start:0,count:triangles.length}];
+    // Validate before mutating any faces. Ranges use coordinate offsets, aligned to triangles.
+    for(const {start,count} of work){
+      if(!Number.isInteger(start)||!Number.isInteger(count)||start<0||count<0||start%9||count%9||start+count>triangles.length)throw Error('Invalid refit range');
+      for(let i=start;i<start+count;i++)if(!Number.isFinite(triangles[i]))throw Error('Invalid collision triangle');
     }
-    const visit = (branch: Branch) => {
-      branch.bounds.makeEmpty();
-      if (branch.faces) for (const face of branch.faces) branch.bounds.union(face.bounds);
-      else { visit(branch.left!); visit(branch.right!); branch.bounds.union(branch.left!.bounds).union(branch.right!.bounds); }
+    this.lastRefitTriangles=this.lastRefitBranches=0;
+    if(!work.some(r=>r.count))return;
+    const dirty=ranges?new Set<Branch>():undefined;
+    for(const {start,count} of work)for(let offset=start;offset<start+count;offset+=9){
+      const face=this.faceSlots[offset/9],t=face.triangle;
+      t.a.fromArray(triangles,offset);t.b.fromArray(triangles,offset+3);t.c.fromArray(triangles,offset+6);
+      face.active=t.getArea()>=1e-10;face.bounds.makeEmpty();
+      if(face.active){t.getNormal(face.normal);face.bounds.expandByPoint(t.a).expandByPoint(t.b).expandByPoint(t.c);}
+      this.lastRefitTriangles++;
+      if(dirty)for(let node=face.owner;node&&!dirty.has(node);node=node.parent)dirty.add(node);
+    }
+    const visit=(branch:Branch)=>{
+      if(dirty&&!dirty.has(branch))return;
+      this.lastRefitBranches++;branch.bounds.makeEmpty();
+      if(branch.faces)for(const face of branch.faces)branch.bounds.union(face.bounds);
+      else{visit(branch.left!);visit(branch.right!);branch.bounds.union(branch.left!.bounds).union(branch.right!.bounds);}
     };
-    visit(this.tree);
-    this.revision++;
+    visit(this.tree);this.revision++;
   }
   reset() { this.hits = 0; }
   intersectsWorld(bounds: Box3) { return bounds.clone().applyMatrix4(this.inverse).expandByScalar(this.radius).intersectsBox(this.tree.bounds); }
@@ -57,13 +79,17 @@ export class TriangleSurface implements PanelSurface {
   }
   private build(faces: Face[]): Branch {
     const bounds = new Box3(); faces.forEach(f => bounds.union(f.bounds));
-    if (faces.length <= 8) return { bounds, faces };
+    if (faces.length <= 8) {const leaf={bounds,faces};for(const face of faces)face.owner=leaf;return leaf;}
     const size = bounds.getSize(new Vector3()), axis = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
     faces.sort((a, b) => a.bounds.min[axis] + a.bounds.max[axis] - b.bounds.min[axis] - b.bounds.max[axis]);
-    const mid = Math.floor(faces.length / 2); return { bounds, left: this.build(faces.slice(0, mid)), right: this.build(faces.slice(mid)) };
+    const mid=Math.floor(faces.length/2),branch:Branch={bounds,left:this.build(faces.slice(0,mid)),right:this.build(faces.slice(mid))};
+    branch.left!.parent=branch;branch.right!.parent=branch;return branch;
   }
   project(p: Float64Array, previous: Float64Array, offset: number): PanelContact | undefined {
     if (!this.enabled()) return;
+    const profile=this.profile;
+    const timed=!!profile&&(this.profileSequence++%32===0),started=timed?performance.now():0;
+    if(profile){profile.queries++;if(timed)profile.timedQueries++;}
     const from = this.from.fromArray(previous, offset).applyMatrix4(this.previousInverse), to = this.to.fromArray(p, offset).applyMatrix4(this.inverse);
     const query = this.query.makeEmpty().expandByPoint(from).expandByPoint(to).expandByScalar(this.radius);
     let entries = this.queries.get(previous);
@@ -73,19 +99,25 @@ export class TriangleSurface implements PanelSurface {
     // XPBD visits a node repeatedly within a tick. Reuse only a conservative candidate set;
     // movement outside its body-local bounds or a geometry refit triggers a fresh query.
     if (cache.revision !== this.revision || !cache.bounds.containsBox(query)) {
+      if(profile){profile.cacheMisses++;if(timed)profile.timedCacheMisses++;}
+      const traversalStart=timed?performance.now():0;
       cache.revision = this.revision; cache.bounds.copy(query).expandByScalar(0.02); cache.faces.length = 0;
       const stack = this.stack; stack.length = 0; stack.push(this.tree);
       while (stack.length) {
-        const branch = stack.pop()!;
+        const branch = stack.pop()!;if(profile)profile.branches++;
         if (!cache.bounds.intersectsBox(branch.bounds)) continue;
-        if (branch.faces) { for (const face of branch.faces) if (cache.bounds.intersectsBox(face.bounds)) cache.faces.push(face); }
+        if (branch.faces) { if(profile)profile.leaves++;for (const face of branch.faces){if(profile)profile.faceBounds++;if (cache.bounds.intersectsBox(face.bounds)) cache.faces.push(face);} }
         else { stack.push(branch.right!, branch.left!); }
       }
-    }
+      if(timed)profile!.traversalMs+=performance.now()-traversalStart;
+    }else if(profile)profile.cacheHits++;
+    if(profile)profile.candidates+=cache.faces.length;
+    const narrowStart=timed?performance.now():0;
     let first = Infinity, found = false;
     const hit = this.hit, normal = this.hitNormal;
     for (const { triangle, normal: n, bounds, active } of cache.faces) {
       if (!active || !query.intersectsBox(bounds)) continue;
+      if(profile)profile.triangleTests++;
       const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < 0 ? -1 : 1;
       if (sign * b < this.radius && sign * a > sign * b) {
         const time = Math.max(0, (sign * a - this.radius) / (sign * a - sign * b)), center = this.center.copy(from).lerp(to, time), surface = this.surface.copy(center).addScaledVector(n, -this.delta.subVectors(center, triangle.a).dot(n));
@@ -101,9 +133,12 @@ export class TriangleSurface implements PanelSurface {
       const closest = triangle.closestPointToPoint(to, this.closest), delta = this.delta.subVectors(to, closest), distance = delta.length();
       if (distance < this.radius && first === Infinity) { if (distance > 1e-8) normal.copy(delta).multiplyScalar(1 / distance); else normal.copy(n).multiplyScalar(sign); hit.copy(closest).addScaledVector(normal, this.radius); found = true; }
     }
-    if (!found) return;
+    if(timed)profile!.narrowMs+=performance.now()-narrowStart;
+    if (!found) {if(timed)profile!.queryMs+=performance.now()-started;return;}
+    if(profile)profile.hits++;
     const world = hit.applyMatrix4(this.frame), worldNormal = normal.transformDirection(this.frame);
     world.toArray(p, offset); this.hits++;
+    if(timed)profile!.queryMs+=performance.now()-started;
     return { point: world.toArray() as Triple, normal: worldNormal.toArray() as Triple, velocity: this.velocity(world).toArray() as Triple, restitution: 0.18, friction: 0.55, impulse: this.reaction };
   }
 }

@@ -103,3 +103,34 @@ test('switching TS/WASM preserves state and panel instances own independent memo
     }
   } finally { softBodyRuntime.preference = 'auto'; }
 });
+
+
+test('profiled split constraints/contacts preserve TS and WASM trajectories and expose separate counters',async()=>{
+  assert.equal(await softBodyRuntime.load(bytes),true);
+  for(const backend of ['ts','wasm'] as const){
+    const options:PanelOptions={mass:38.5,mount:[0,1.3,.7],backend};
+    const baseline=new DeformablePanel(samples,options),profiled=new DeformablePanel(samples,options);profiled.profiling=true;
+    for(const panel of [baseline,profiled]){panel.hit(650);panel.colliders.push({min:[-.3,.7,-.5],max:[.3,.9,0]});}
+    for(let i=0;i<100;i++){baseline.advance(2/240);profiled.advance(2/240);assert.deepEqual(profiled.positions,baseline.positions);assert.deepEqual(profiled.velocities,baseline.velocities);assert.equal(profiled.attached,baseline.attached);}
+    assert.equal(profiled.profile.steps,2);assert.ok(profiled.profile.constraints>0);assert.ok(profiled.profile.contacts>0);assert.ok(profiled.profile.integration>0);
+    if(backend==='wasm')assert.ok(profiled.profile.upload>0);else assert.equal(profiled.profile.upload,0);
+    assert.equal(baseline.profile.steps,0,'profiling is opt-in');
+  }
+});
+
+
+test('120 Hz TS/WASM parity and mount overload duration stay measured in seconds',async()=>{
+  assert.equal(await softBodyRuntime.load(bytes),true);
+  for(const frequency of [120,240]){
+    const options:PanelOptions={frequency,mass:38.5,mount:[0,1.3,.7],mountStrength:.000001};
+    const ts=new DeformablePanel(samples,{...options,backend:'ts'}),wasm=new DeformablePanel(samples,{...options,backend:'wasm'});
+    for(const p of [ts,wasm])p.hit(65);
+    let releasedAt=0;
+    for(let tick=1;tick<=20;tick++){
+      ts.advance(1/frequency);wasm.advance(1/frequency);assert.equal(wasm.attached,ts.attached);
+      for(let i=0;i<ts.positions.length;i++)close(wasm.positions[i],ts.positions[i],'frequency positions');
+      if(!releasedAt&&!ts.attached)releasedAt=tick/frequency;
+    }
+    assert.ok(Math.abs(releasedAt-2/240)<1e-12,`release delay at ${frequency} Hz was ${releasedAt}`);
+  }
+});

@@ -60,7 +60,7 @@ void predict(double dt, double gravity, int attached) {
   }
   for (int b = 0; b < beam_count; ++b) beams[b * 6 + 4] = 0;
 }
-void solve(double dt) {
+void solve_constraints(double dt) {
   const double dt2 = dt * dt, inv = inverse_mass;
   for (int index = 0; index < beam_count; ++index) {
     double* b = beams + index * 6;
@@ -82,6 +82,8 @@ void solve(double dt) {
       anchor_lambda[i] += dl; positions[i] += inv * dl;
     }
   }
+}
+void solve_contacts() {
   for (int n = 0; n < nodes; ++n) positions[n * 3 + 1] = max(ground[n], positions[n * 3 + 1]);
   for (int index = 0; index < box_count; ++index) for (int i = 0; i < nodes * 3; i += 3) {
     const double* box = boxes + index * 8;
@@ -114,6 +116,7 @@ void solve(double dt) {
     host_box_contact(i, normal, boundary == box[normal] ? -1 : 1, box[6], box[7]);
   }
 }
+void solve(double dt) { solve_constraints(dt); solve_contacts(); }
 int release_mounts(double dt, double strength) {
   bool release = false;
   for (int index = 0; index < mount_count; ++index) {
@@ -125,7 +128,7 @@ int release_mounts(double dt, double strength) {
       force += norm(anchor_lambda[i], anchor_lambda[i+1], anchor_lambda[i+2]) / (dt*dt);
     }
     m[1] = force; m[2] = force > strength ? m[2] + dt : 0;
-    if (m[2] >= 2 * dt) release = true;
+    if (m[2] >= 2.0 / 240.0) release = true;
   }
   if (release) for (int index = 0; index < mount_count; ++index) mounts[index * mount_stride] = 1;
   return release;

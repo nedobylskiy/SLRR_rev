@@ -1,0 +1,23 @@
+{
+  "capture": "03-emer-automatic",
+  "sessions": [
+    {
+      "id": 1,
+      "role": "setup",
+      "scenario": "Stationary before transmission mode change.",
+      "model": "Emer Nonus Street GT",
+      "engine": "Emer StreetGT engine block",
+      "samples": 26,
+      "transmission_config": "0"
+    },
+    {
+      "id": 2,
+      "role": "reference",
+      "scenario": "Automatic acceleration and subsequent downshifts/stopping, observed in telemetry.",
+      "model": "Emer Nonus Street GT",
+      "engine": "Emer StreetGT engine block",
+      "samples": 559,
+      "transmission_config": "1"
+    }
+  ]
+}

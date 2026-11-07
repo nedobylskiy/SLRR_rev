@@ -28,6 +28,10 @@ export function linkedSlotFrame(part: EnginePart, baseId: number, followSteering
         child.definition.config.slots.some(own => own.id === child.ownSlot) &&
         owner!.definition.config.slots.find(mount => mount.id === child.parentSlot)?.type === type);
       if (carrier) {
+        if (!followSteering && carrier.armTravelTransform) {
+          frame.premultiply(carrier.armTravelTransform);
+          return part.matrix().invert().multiply(owner.matrix()).multiply(frame);
+        }
         const mount = owner.definition.config.slots.find(mount => mount.id === carrier.parentSlot)!;
         const own = carrier.definition.config.slots.find(own => own.id === carrier.ownSlot)!;
         const local = carrier.local.clone();

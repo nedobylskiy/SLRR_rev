@@ -4,9 +4,12 @@ import {GlActivity} from './gl-activity';
 
 /** CPU measurements are submission time; GPU queries complete asynchronously. */
 export class FrameProfiler {
-  private samples = new Map<string, { average: number; peak: number; since: number; last:number;maximum:number;count:number;recent:number[];slot:number }>();
+  private samples = new Map<string, { average: number; peak: number; since: number; last:number;maximum:number;count:number;total:number;recent:number[];slot:number }>();
   private browser=new BrowserPerformance();
   private glActivity:GlActivity;
+  captureCpuFrame=false;
+  private frameCpu=new Map<string,number>();
+  frameTimings(){return Object.fromEntries(this.frameCpu);}
   private frameStart?:number;
   private frameRaf=0;
   private measured=0;
@@ -21,11 +24,19 @@ export class FrameProfiler {
   private readonly visibility=()=>{this.previous=undefined;this.outside.clear();this.skipInterval=true;};
   private readonly gl: WebGL2RenderingContext;
   private readonly timer: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null;
-  private queries: {query:WebGLQuery;name:string}[] = [];
-  private current?: {query:WebGLQuery;name:string};
+  private queries: {query:WebGLQuery;name:string;started:number}[] = [];
+  private current?: {query:WebGLQuery;name:string;started:number};
+  private gpuResults=0;
   detailedGpu = false;
+  resetMeasurements(){
+    this.endGpu();
+    for(const {query} of this.queries)this.gl.deleteQuery(query);
+    this.queries=[];this.samples.clear();this.intervals=[];this.intervalSlot=0;this.previous=undefined;
+    this.outside.clear();this.slow=[];this.gpuResults=0;this.skipInterval=true;
+  }
   setDetailedGpu(enabled:boolean){
     this.detailedGpu=enabled;
+    this.gpuResults=0;
     this.browser.setEnabled(enabled);
     this.glActivity.setEnabled(enabled);
     for(const name of this.samples.keys())if(name.startsWith('GPU'))this.samples.delete(name);
@@ -43,13 +54,18 @@ export class FrameProfiler {
   }
   record(name: string, ms: number) {
     if(!Number.isFinite(ms)||ms<0)return;
+    // GPU timer results resolve later and must never be assigned to this CPU frame.
+    if(this.captureCpuFrame&&this.frameStart!==undefined&&!(name.startsWith('GPU ')&&!name.endsWith('CPU')))
+      this.frameCpu.set(name,(this.frameCpu.get(name)??0)+ms);
     const now = performance.now(), previous = this.samples.get(name);
     const recent=previous?.recent??[],slot=previous?.slot??0;recent[slot]=ms;
     this.samples.set(name, { average: previous ? previous.average + (ms - previous.average) * 0.08 : ms,
       peak: previous && now - previous.since < 2000 ? Math.max(previous.peak, ms) : ms,
       since: previous && now - previous.since < 2000 ? previous.since : now, last:now,
-      maximum:Math.max(previous?.maximum??0,ms),count:(previous?.count??0)+1,recent,slot:(slot+1)%180 });
+      maximum:Math.max(previous?.maximum??0,ms),count:(previous?.count??0)+1,total:(previous?.total??0)+ms,recent,slot:(slot+1)%180 });
   }
+  summary(){return Object.fromEntries([...this.samples].map(([name,s])=>[name,{samples:s.count,mean_ms:s.total/s.count,max_ms:s.maximum,
+    recent_p95_ms:[...s.recent].sort((a,b)=>a-b)[Math.max(0,Math.ceil(s.recent.length*.95)-1)]}]));}
   beginFrame(raf:number){
     const now=performance.now(),previous=this.previous;
     if(previous){
@@ -60,7 +76,7 @@ export class FrameProfiler {
       }
     }
     this.record('RAF scheduling delay (wall)',Math.max(0,now-raf));
-    this.outside.clear();this.frameStart=now;this.frameRaf=raf;this.measured=0;this.sections=new Map();
+    this.outside.clear();this.frameCpu.clear();if(this.captureCpuFrame)this.frameCpu.set('RAF scheduling delay (wall)',Math.max(0,now-raf));this.frameStart=now;this.frameRaf=raf;this.measured=0;this.sections=new Map();
   }
   endFrame(){
     if(this.frameStart===undefined)return;
@@ -97,7 +113,7 @@ export class FrameProfiler {
     }
     this.queries = this.queries.filter(({query,name}) => {
       if (!gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) return true;
-      if (!disjoint) this.record(name, gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6);
+      if (!disjoint) {this.record(name, gl.getQueryParameter(query, gl.QUERY_RESULT) / 1e6);this.gpuResults++;}
       gl.deleteQuery(query); return false;
     });
     // Alternate full-frame and pass samples: WebGL forbids nested timer queries.
@@ -106,7 +122,7 @@ export class FrameProfiler {
   startGpuSection(name: string): WebGLQuery | undefined {
     if (!this.timer || !this.samplingFrame || this.current || this.queries.length>=32) return;
     const query=this.gl.createQuery();
-    if(query){this.gl.beginQuery(this.timer.TIME_ELAPSED_EXT,query);this.current={query,name};return query;}
+    if(query){this.gl.beginQuery(this.timer.TIME_ELAPSED_EXT,query);this.current={query,name,started:performance.now()};return query;}
   }
   finishGpuSection(query: WebGLQuery | undefined,keep=true) {
     if(query && this.current?.query===query){
@@ -136,6 +152,7 @@ export class FrameProfiler {
     if (!this.timer) rows.push('GPU timer unavailable');
     if(this.detailedGpu){
       rows.push(...this.hardwareLines(),`GPU timing: sample every 17 frames · pending queries ${this.queries.length} · disjoint resets ${this.disjointCount} · results are asynchronous`,
+        `GPU query health: ${this.gpuResults} results resolved · oldest pending ${this.queries.length?((performance.now()-Math.min(...this.queries.map(q=>q.started)))/1000).toFixed(1)+'s':'none'} · active ${this.current?.name??'none'}`,
         'Slow frame intervals (worst 12 / 120s; previous callback + between-callback wall gap; GPU samples are not frame-matched):');
       const parts=(entries:Map<string,number>)=>[...entries].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([n,v])=>`${n} ${v.toFixed(1)}`).join('; ')||'none';
       for(const s of this.slow.filter(s=>performance.now()-s.at<120000))rows.push(

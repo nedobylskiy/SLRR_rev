@@ -14,8 +14,7 @@ function textureKey(texture: Texture) {
 
 /** Only used for immutable map surfaces configured by Viewer.append. */
 function key(material: Material): string | undefined {
-  if (!(material instanceof MeshStandardMaterial) || material.transparent || material.userData.slrrPaintMask || material.clippingPlanes?.length
-    || Object.values(material.userData).some(value=>value instanceof Texture)) return;
+  if (!(material instanceof MeshStandardMaterial) || material.userData.slrrUnifiedBuilding || material.transparent || material.clippingPlanes?.length) return;
   const values: Record<string,unknown> = {shader:material.customProgramCacheKey()};
   for (const [name,value] of Object.entries(material)) {
     if (['id','uuid','name','version','userData'].includes(name)) continue;

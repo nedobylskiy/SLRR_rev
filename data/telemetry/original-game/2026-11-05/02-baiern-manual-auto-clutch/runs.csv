@@ -1,0 +1,3 @@
+"session","model","engine","samples","duration_s","median_interval_s","max_rpm","max_speed_kph","transmission_config","mass_native_raw","ended","shifts"
+"1","Baiern CoupeSport 2.5","Baiern KraftWerk 2.5 engine block","11","1.0070000000000014","0.10099999999999909","0","0","1","1486.641","true","0"
+"2","Baiern CoupeSport 2.5","Baiern KraftWerk 2.5 engine block","810","81.84700000000001","0.10099999999999909","7140.594","175.8168","0","1486.641","false","6"

@@ -1,0 +1,14 @@
+{
+  "capture": "01-shimutshibu-automatic",
+  "sessions": [
+    {
+      "id": 1,
+      "role": "reference",
+      "scenario": "Acceleration to observed maximum, followed by hard braking; reported by user.",
+      "model": "Shimutshibu ST9 Challenge",
+      "engine": "Shimutshibu RC-B94S200 block",
+      "samples": 631,
+      "transmission_config": "1"
+    }
+  ]
+}

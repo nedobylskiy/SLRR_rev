@@ -1,3 +1,4 @@
+import type {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import { Box3, Matrix4, Triangle, Vector3 } from 'three';
 import type { ScxModel } from '../formats/scx';
 import { orientedBoxContact, type RigidBody3D } from './rigid-body-3d';
@@ -86,13 +87,16 @@ export class MapCollision {
   }
 
   /** Downward wheel support from original CFG boxes, respecting their object and body poses. */
-  support(x: number, z: number, fromY: number): { height: number; normal: Vector3 } | undefined {
+  support(x: number, z: number, fromY: number,profile?:CpuWorkProfile): { height: number; normal: Vector3 } | undefined {
+    profile?.add('object_support_queries_count');
     const boxes = this.boxCells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
     if (!boxes) return;
     const origin = new Vector3(x, fromY, z), direction = new Vector3(0, -1, 0);
     let best: { height: number; normal: Vector3 } | undefined;
     for (const box of boxes) {
+      profile?.add('object_box_candidates_count');
       if (x < box.bounds.min.x || x > box.bounds.max.x || z < box.bounds.min.z || z > box.bounds.max.z || fromY < box.bounds.min.y) continue;
+      profile?.add('object_box_ray_tests_count');
       const local = origin.clone().applyMatrix4(box.inverse), ray = direction.clone().transformDirection(box.inverse);
       let near = -Infinity, far = Infinity, face = new Vector3();
       for (let axis = 0; axis < 3; axis++) {

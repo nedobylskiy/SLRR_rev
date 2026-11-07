@@ -1,0 +1,23 @@
+{
+  "capture": "04-einvagen-na-turbo",
+  "sessions": [
+    {
+      "id": 1,
+      "role": "reference",
+      "scenario": "Naturally aspirated member of the user-reported paired test.",
+      "model": "Einvagen 110 GTK",
+      "engine": "Einvagen 110 GT/GTK block",
+      "samples": 686,
+      "transmission_config": "1"
+    },
+    {
+      "id": 2,
+      "role": "reference",
+      "scenario": "Turbocharged member; initial temperature, native mass and wear differ.",
+      "model": "Einvagen 110 GTK",
+      "engine": "Einvagen 110 GT/GTK block",
+      "samples": 606,
+      "transmission_config": "1"
+    }
+  ]
+}

@@ -61,5 +61,21 @@ test('installed drivetrain accelerates a supported chassis, lets wheels slip and
   for (let i = 0; i < 720; i++) tick(-1);
   assert.equal(suspension.mechanics!.gear, -1);
   assert.ok(body.position.z > reverseStart + 1, `reverse displacement ${body.position.z - reverseStart}`);
+  // Exercise the native engine path with live tyres and chassis, not a
+  // dynamometer that resets the wheel speeds after each exchange.
+  root.definition.config.enginePower = [100,4,0.00006,0.003,1000,50];
+  const torque = Array.from({length:16},()=>750), watts=torque.map((t,i)=>t*i*500*Math.PI/30);
+  world.javaPowertrain = { curve: {rpmStep:500,torque,watts,nitroTorque:torque,nitroWatts:watts},
+    state: {revision:1,parameters:{engine_inertia:13.5,ClutchF:500,rearend_ratio:3.03},
+      ratios:[0,3.58,2.49,1.66],descendantPartIds:[]} };
+  body.setFrame(new Matrix4().makeTranslation(0,0.9,0)); suspension.reset();
+  for(let i=0;i<480;i++)tick(0);
+  tick(0,false,true);
+  for(let i=0;i<1200;i++) {
+    tick(1);
+    assert.ok(suspension.mechanics!.rpm<8000,`native feedback RPM ${suspension.mechanics!.rpm}`);
+    assert.ok(suspension.wheels.every(w=>Number.isFinite(w.omega) && Math.abs(w.omega)<2000));
+    assert.ok(body.velocity.length()<150);
+  }
   world.dispose();
 });

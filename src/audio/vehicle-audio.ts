@@ -30,12 +30,12 @@ export class VehicleAudio {
   private readonly wheelVoices: (WheelVoices | undefined)[] = [undefined, undefined, undefined, undefined];
   private wind?: LoopVoice;
   private exhaustMinVolume = 0;
-  private wasRunning: boolean;
+  private wasStarting: boolean;
   private sharpSkid = false;
   private lastCollisionAt = -Infinity;
   private disposed = false;
   constructor(private readonly assets: Assets, private readonly car: Vehicle3D, private readonly volumes?: { getVolume(channel: number): number }) {
-    this.wasRunning = car.suspension.mechanics?.running ?? false;
+    this.wasStarting = car.suspension.mechanics?.starting ?? false;
     this.engineBus.connect(this.masterBus);
     this.effectsBus.connect(this.masterBus);
     this.impactLimiter.threshold.value = -7;
@@ -144,11 +144,12 @@ export class VehicleAudio {
     if (this.disposed) return;
     this.listener(camera);
     const mechanics = this.car.suspension.mechanics, rpm = mechanics?.rpm ?? 0, running = mechanics?.running ?? false;
-    if (!paused && running && !this.wasRunning) {
+    const starting = mechanics?.starting ?? false;
+    if (!paused && starting && !this.wasStarting) {
       const enginePosition = mechanics?.block ? new Vector3().setFromMatrixPosition(mechanics.block.matrix()) : this.car.body.position;
       this.oneShot('sound/wav/engine/ignition.wav', 0.75, enginePosition.clone(), 1, this.engineBus);
     }
-    this.wasRunning = running;
+    this.wasStarting = starting;
     this.masterBus.gain.setTargetAtTime(gameSoundVolume, this.context.currentTime, 0.05);
     this.engineBus.gain.setTargetAtTime(paused ? 0 : this.volumes?.getVolume(SOUND_CHANNEL.ENGINE) ?? 1, this.context.currentTime, 0.08);
     this.effectsBus.gain.setTargetAtTime(paused ? 0 : this.volumes?.getVolume(SOUND_CHANNEL.EFFECTS) ?? 1, this.context.currentTime, 0.08);

@@ -1,4 +1,4 @@
-import {Box3,Color,DoubleSide,Frustum,InstancedMesh,LessDepth,LessEqualDepth,Matrix4,MeshStandardMaterial,Plane,Ray,Vector3,type BufferGeometry,type Camera,type Group,type WebGLRenderer} from 'three';
+import {Box3,Color,DoubleSide,FrontSide,Frustum,InstancedMesh,LessDepth,LessEqualDepth,Matrix4,MeshStandardMaterial,Plane,Ray,Vector3,type BufferGeometry,type Camera,type Group,type WebGLRenderer} from 'three';
 import {OccluderGeometry,rayTree,type RayBranch} from './occlusion-rays';
 
 interface Candidate {id:string;source:InstancedMesh;slot:number;bounds:Box3;matrix:Matrix4;inverse:Matrix4;hidden:boolean;proof?:Proof}
@@ -18,11 +18,13 @@ export class MapRaycastOcclusion {
   private main=false;
   private mainColor=false;
   private shadow=false;
+  private hiddenForMain:InstancedMesh[]=[];
   private states=new Map<InstancedMesh,SourceState>();
   private geometries=new WeakMap<BufferGeometry,OccluderGeometry>();
   private pending=new Set<BufferGeometry>();
   private geometryReleases=new Map<BufferGeometry,()=>void>();
   private tree?:RayBranch<Blocker>;
+  private blockerCount=0;
   private targets:Candidate[]=[];
   private cursor=0;
   private remaining=0;
@@ -48,12 +50,22 @@ export class MapRaycastOcclusion {
       return direct(camera,scene,geometry,material,object,group);
     };
     const shadows=renderer.shadowMap.render.bind(renderer.shadowMap);
-    renderer.shadowMap.render=(...args)=>{const previous=this.shadow;this.shadow=true;try{return shadows(...args);}finally{this.shadow=previous;}};
+    renderer.shadowMap.render=(...args)=>{
+      const previous=this.shadow;this.shadow=true;
+      for(const mesh of this.hiddenForMain)mesh.visible=true;
+      try{return shadows(...args);}finally{for(const mesh of this.hiddenForMain)mesh.visible=false;this.shadow=previous;}
+    };
   }
   setEnabled(enabled:boolean){this.enabled=enabled;if(!enabled)this.reset();}
-  renderMain<T>(bypass:boolean,work:()=>T):T {
+  renderMain<T>(bypass:boolean,work:()=>T,root?:Group):T {
     const previous=this.main,color=this.mainColor;this.main=this.enabled&&!bypass;this.mainColor=true;
-    try{return work();}finally{this.main=previous;this.mainColor=color;}
+    const outer=this.hiddenForMain,hidden:InstancedMesh[]=[];this.hiddenForMain=hidden;
+    // Skip render-list and material preparation, not only the final GL draw call.
+    if(root)for(const object of root.children)if(object instanceof InstancedMesh&&object.visible
+      &&(object.userData.streamAuxiliary||this.main&&(this.states.get(object)?.hidden??0)>0)){
+      object.visible=false;hidden.push(object);
+    }
+    try{return work();}finally{for(const mesh of hidden)mesh.visible=true;this.hiddenForMain=outer;this.main=previous;this.mainColor=color;}
   }
   private remove(source:InstancedMesh){
     const state=this.states.get(source);if(!state)return;
@@ -65,12 +77,12 @@ export class MapRaycastOcclusion {
     for(const source of [...this.states.keys()])this.remove(source);
     for(const [geometry,release] of this.geometryReleases)geometry.removeEventListener('dispose',release);
     this.geometryReleases.clear();this.pending.clear();this.geometries=new WeakMap();
-    this.targets=[];this.tree=undefined;this.cursor=this.remaining=0;this.rayCount=this.tested=0;this.lastMs=0;this.cones.clear();
+    this.targets=[];this.blockerCount=0;this.tree=undefined;this.cursor=this.remaining=0;this.rayCount=this.tested=0;this.lastMs=0;this.cones.clear();
     this.dirty=true;
   }
   private blocker(source:InstancedMesh):boolean {
     const material=source.material;if(!(material instanceof MeshStandardMaterial)||material.type!=='MeshStandardMaterial'||!material.visible||!material.colorWrite||!material.depthWrite||!material.depthTest||material.displacementMap||material.transparent||material.opacity<1
-      ||material.alphaTest>0||material.alphaMap||material.alphaHash||material.alphaToCoverage||material.side!==DoubleSide||material.clippingPlanes?.length)return false;
+      ||material.alphaTest>0||material.alphaMap||material.alphaHash||material.alphaToCoverage||material.side!==DoubleSide&&material.side!==FrontSide||material.clippingPlanes?.length)return false;
     const geometry=source.geometry,triangles=(geometry.index?.count??geometry.getAttribute('position').count)/3;
     if(triangles>4096||geometry.groups.length||Object.keys(geometry.morphAttributes).length)return false;
     const size=geometry.boundingBox!.getSize(this.point);
@@ -130,7 +142,7 @@ export class MapRaycastOcclusion {
       this.targets=[...this.states.values()].flatMap(s=>s.candidates);
       const blockers:Blocker[]=[];
       for(const candidate of this.targets){const rays=this.geometries.get(candidate.source.geometry);if(rays&&this.blocker(candidate.source))blockers.push({...candidate,rays});}
-      this.tree=rayTree(blockers);
+      this.blockerCount=blockers.length;this.tree=rayTree(blockers);
     }
     this.retained=0;if(changed)this.cones.clear();
     if(poseChanged||changed)for(const target of this.targets)if(target.hidden){
@@ -160,6 +172,7 @@ export class MapRaycastOcclusion {
       cached.base=new Plane().setFromCoplanarPoints(polygon[0],polygon[1],polygon[2]);
       cached.planes=Array.from({length:polygon.length+1},()=>new Plane());
     }
+    if((blocker.source.material as MeshStandardMaterial).side===FrontSide&&cached.base&&cached.base.distanceToPoint(this.origin)<=this.nearSafe)return false;
     if(cached.stamp!==this.stamp){
       cached.stamp=this.stamp;cached.valid=false;
       if(!cached.base||!cached.polygon||!cached.planes)return false;

@@ -10,6 +10,19 @@ Soft-body physics has an optional [C++ / WebAssembly backend](docs/soft-body-was
 
 The project reads original RPK and SCX v3/v4 assets and provides a resource inspector and WebGL scene. Its RPK/CFG factory assembles a Baiern from 33 base parts; mounts have also been checked on Einvagen, Duhen, Ninja, and Zed. The [driving prototype](docs/mounts-and-driving.md) and [Test Track loader](docs/maps.md) exercise the current physics and rendering systems. The separately published [SLRR-JVM package](https://github.com/nedobylskiy/SLRR-JVM) interprets original `.java` methods with host-provided imports and native functions; the engine can use [SLRR-JVM Decompiler](https://github.com/nedobylskiy/SLRR-JVM-decompiler) to recover missing system sources from TUFA `.class` files. Neither runtime executes `.class` bytecode. See [engine architecture](docs/engine-world.md) for the implemented boundaries; the full Java dialect, native game API, garage, and networked game loop remain open work.
 
+## Projects and research we build on
+
+This remaster builds on the work of the SLRR reverse-engineering and modding community:
+
+- [OpenSLRR](https://github.com/EliasFD3S/openslrr) — a fellow open-source reconstruction of the SLRR engine. We actively exchange code, research findings, and implementation work with OpenSLRR, helping both projects move forward.
+- [sl-remastered](https://github.com/nicolas-found42/sl-remastered) — recovered native engine calculations and research into vehicle physics, tyres, suspension, drivetrain, and combustion. Its scalar physics calculations underpin parts of our TypeScript implementation.
+- [slrr-reverse](https://github.com/EliasFD3S/slrr-reverse) — research and reconstruction of resource formats, TUFA/TREE scripting structures, and native interfaces.
+- [street-legal](https://github.com/nicolas-found42/street-legal) — research into native game behaviour, including chassis updates and the transfer of Java-script parameters into vehicle physics.
+- [io_invo_scx](https://github.com/nonamesex/io_invo_scx) — SCX v3/v4 format references and tooling used to cross-check our independently implemented model parser.
+- [slrr-javas](https://github.com/imagecode-git/slrr-javas) — published game Java sources and documentation of the original scripting environment.
+
+See [sources and licensing notes](docs/sources.md), [third-party notices](THIRD_PARTY_NOTICES.md), and the [physics implementation notes](docs/physics-reverse-port.md) for detailed attribution and implementation scope.
+
 ## Launch
 
 Node.js 22.12+ (tested on 24.13.1):

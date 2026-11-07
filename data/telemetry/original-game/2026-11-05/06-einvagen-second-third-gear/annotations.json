@@ -1,0 +1,42 @@
+{
+  "capture": "06-einvagen-second-third-gear",
+  "sessions": [
+    {
+      "id": 1,
+      "role": "setup",
+      "scenario": "Stationary before changing to manual clutch mode.",
+      "model": "Einvagen 110 GTK",
+      "engine": "Einvagen 110 GT/GTK block",
+      "samples": 16,
+      "transmission_config": "1"
+    },
+    {
+      "id": 2,
+      "role": "diagnostic",
+      "scenario": "User-reported stalled third-gear launch with turbo. RPM falls below idle; no explicit engine-running/stalled state is logged.",
+      "exclude_from_successful_launch_comparison": true,
+      "model": "Einvagen 110 GTK",
+      "engine": "Einvagen 110 GT/GTK block",
+      "samples": 104,
+      "transmission_config": "2"
+    },
+    {
+      "id": 3,
+      "role": "reference",
+      "scenario": "Second-gear launch with turbo, followed by braking.",
+      "model": "Einvagen 110 GTK",
+      "engine": "Einvagen 110 GT/GTK block",
+      "samples": 231,
+      "transmission_config": "2"
+    },
+    {
+      "id": 4,
+      "role": "reference",
+      "scenario": "Second-gear launch without turbo, followed by braking. Wear, initial temperature and native mass differ from turbo run.",
+      "model": "Einvagen 110 GTK",
+      "engine": "Einvagen 110 GT/GTK block",
+      "samples": 252,
+      "transmission_config": "2"
+    }
+  ]
+}

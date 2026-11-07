@@ -60,3 +60,22 @@ test('session maximum survives the short peak window and invalid samples are ign
   assert.ok(p.lines().some(l=>l.startsWith('Probe:')&&l.includes('peak 1.0')&&l.includes('max session 50.0')&&l.includes('samples 2')));
   p.dispose();
 });
+
+test('route summary averages the whole measurement period and reset removes the warmup',()=>{
+  const {profiler:p}=fixture();p.record('Probe',101);for(let i=0;i<200;i++)p.record('Probe',1);
+  const row=p.summary().Probe;assert.equal(row.samples,201);assert.ok(Math.abs(row.mean_ms-301/201)<1e-12);
+  assert.equal(row.max_ms,101);assert.equal(row.recent_p95_ms,1);
+  p.resetMeasurements();assert.deepEqual(p.summary(),{});p.dispose();
+});
+
+
+test('CPU frame snapshots include same-frame nested physics and exclude delayed GPU results and between-frame work',context=>{
+  let now=0;context.mock.method(performance,'now',()=>now);
+  const {profiler:p}=fixture();p.captureCpuFrame=true;p.beginFrame(0);
+  p.measure('Simulation CPU',()=>{p.record('Physics panels',4);now=10;});
+  p.record('GPU main color',50);now=12;p.endFrame();
+  const frame=p.frameTimings();assert.equal(frame['Simulation CPU'],10);assert.equal(frame['Physics panels'],4);assert.equal(frame['Render callback CPU'],12);assert.equal(frame['GPU main color'],undefined);
+  p.record('Outside CPU',99);assert.deepEqual(p.frameTimings(),frame);
+  now=20;p.beginFrame(16);p.endFrame();assert.equal(p.frameTimings()['Physics panels'],undefined);assert.equal(p.frameTimings()['RAF scheduling delay (wall)'],4);
+  p.captureCpuFrame=false;p.beginFrame(20);p.record('Physics panels',8);p.endFrame();assert.deepEqual(p.frameTimings(),{});p.dispose();
+});

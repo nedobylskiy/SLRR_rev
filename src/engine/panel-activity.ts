@@ -1,5 +1,5 @@
 import { Box3, Matrix3, Matrix4, Vector3 } from 'three';
-import { DeformablePanel, type Triple } from './deformable-panel';
+import { DeformablePanel, PANEL_GROUND_CLEARANCE, type Triple } from './deformable-panel';
 import { RigidBody3D } from './rigid-body-3d';
 
 /** A rigid, dent-preserving shape between impacts; XPBD wakes for contacts and attachment loads. */
@@ -31,9 +31,12 @@ export class PanelActivity {
     }
     if (box.intersectsBox(obstacle)) return true;
     if (groundMayReach && !groundMayReach(box)) return false;
+    // Solver contacts settle at +15 mm. A +25 mm wake shell immediately woke
+    // those same quiet nodes again. Allow 1 mm of resting jitter, then wake on
+    // new penetration; impulses, shocks and obstacle tests remain independent.
     for (let i = 0; i < p.length; i += 3) {
       point.fromArray(p, i).applyMatrix4(delta);
-      if (Math.min(p[i + 1], point.y) < this.panel.groundHeight(point.x, point.z, p[i + 1]) + 0.025) return true;
+      if (Math.min(p[i + 1], point.y) < this.panel.groundHeight(point.x, point.z, p[i + 1]) + PANEL_GROUND_CLEARANCE - 0.001) return true;
     }
     return false;
   }

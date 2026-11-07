@@ -23,7 +23,8 @@ export class CarCrashDemo {
   private localCenter: Vector3;
   private referenceInverse: Matrix4;
   private hoodSurface = { project: (p: Float64Array, previous: Float64Array, offset: number) => !this.panel.attached ? this.bodySurface?.project(p, previous, offset) : undefined };
-  constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength'> = {}) {
+  constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength' | 'frequency'> = {}) {
+    this.clock=new FixedClock(material.frequency??240,32);
     if (!hood.parent || hood.world !== root.world) throw new Error('Crash demo needs an installed hood');
     this.parent = hood.parent; this.parentSlot = hood.parentSlot!; this.ownSlot = hood.ownSlot!; this.originalLocal = hood.local.clone();
     this.driving = new DrivingDemo(root);
@@ -68,7 +69,7 @@ export class CarCrashDemo {
     if (!Number.isFinite(speed) || speed < 0 || speed > 20) throw new Error('Invalid launch speed');
     if (!this.hood.parent) this.hood.world.install(this.parent, this.parentSlot, this.hood, this.ownSlot);
     this.hood.local.copy(this.originalLocal); this.driving.reset(); this.driving.speed = speed; this.impactSpeed = 0;
-    this.clock = new FixedClock(240, 32);
+    this.clock = new FixedClock(this.clock.frequency,32);
     this.lateralVelocity.set(0, 0, 0); this.yawVelocity = this.reboundSpeed = 0; this.bodySurface?.reset();
     this.panel.setAnchorFrame(this.hood.matrix().elements); this.panel.reset();
     // A launch starts both the car and its attached mass with the same world velocity.

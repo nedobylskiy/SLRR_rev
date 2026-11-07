@@ -1,3 +1,4 @@
+import {CpuWorkProfile} from '../src/runtime/cpu-work-profile';
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { MapTerrain } from '../src/engine/map-terrain';
@@ -83,4 +84,14 @@ test('panel terrain broad phase rejects clear space but retains slopes, CFG supp
   collision.addBox(new Matrix4().makeRotationY(0.7).setPosition(24, -3, 24), new Vector3(2, 1, 2));
   assert.equal(terrain.mayReach(box(24, -1.98, 24)), true, 'rotated CFG box can support a panel');
   assert.equal(terrain.mayReach(box(24, 1, 24)), false);
+});
+
+
+test('terrain work counters identify lazy build and triangle queries without changing support',()=>{
+  const terrain=new MapTerrain();terrain.add({version:3,warnings:[],meshes:[{name:'road',positions:new Float32Array([0,0,0,1000,0,0,0,0,1000]),normals:new Float32Array(9),uv:new Float32Array(6),indices:new Uint32Array([0,1,2]),diffuse:[1,1,1,1],textureIndex:0}]});
+  const profile=new CpuWorkProfile();profile.setEnabled(true);terrain.queryProfile=profile;
+  assert.equal(terrain.height(2,2,1),0);let row=profile.drain();
+  assert.equal(row.map_samples_count,1);assert.equal(row.map_lazy_builds_count,1);assert.equal(row.map_branches_count,1);assert.equal(row.map_triangle_tests_count,1);
+  assert.equal(terrain.height(2,2,1),0);row=profile.drain();assert.equal(row.map_lazy_builds_count,undefined);
+  terrain.queryProfile=undefined;terrain.height(2,2,1);assert.deepEqual(profile.drain(),{});
 });
