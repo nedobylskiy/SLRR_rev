@@ -1,14 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {BoxGeometry,Color,DoubleSide,FrontSide,BackSide,Group,InstancedMesh,Matrix4,Mesh,MeshStandardMaterial,PlaneGeometry,PerspectiveCamera,Vector3,type WebGLRenderer} from 'three';
-import {MapGpuOcclusion,gpuDepthOccluder,gpuResultUsable,gpuSourceKey} from '../src/render/map-gpu-occlusion';
-
-test('GPU verdict survives long static intervals but rejects camera translation and turn',()=>{
-  assert.ok(gpuResultUsable(35,.4,.005));
-  assert.equal(gpuResultUsable(10000,0,0),true);
-  assert.equal(gpuResultUsable(20,2.1,0),false);
-  assert.equal(gpuResultUsable(20,0,.04),false);
-});
+import {MapGpuOcclusion,gpuDepthOccluder,gpuSourceKey} from '../src/render/map-gpu-occlusion';
 
 test('GPU compacted main pass preserves source casters, colors, exception restoration and stale-source fallback',()=>{
   let duringShadow=()=>{};
@@ -81,7 +74,7 @@ test('observer debug projects boxes with observer camera but decodes depth with 
 });
 
 
-test('last completed visibility stays applied beyond 100 ms and through a pending fence until replacement is ready',()=>{
+test('camera translation, turning and projection changes retain the last verdict until the pending GPU replacement is ready',()=>{
   let ready=false;
   const gl={TIMEOUT_EXPIRED:1,WAIT_FAILED:2,ALREADY_SIGNALED:3,PIXEL_PACK_BUFFER_BINDING:4,PIXEL_PACK_BUFFER:5,
     isContextLost:()=>false,clientWaitSync:()=>ready?3:1,getParameter:()=>null,bindBuffer:()=>{},
@@ -92,10 +85,10 @@ test('last completed visibility stays applied beyond 100 ms and through a pendin
   mesh.setMatrixAt(0,new Matrix4().makeTranslation(0,0,-10));mesh.setMatrixAt(1,new Matrix4().makeTranslation(4,0,-10));mesh.instanceMatrix.needsUpdate=true;
   (cull as any).collect(root);const state=(cull as any).states.get(mesh);
   (cull as any).apply({items:[{state,slot:0},{state,slot:1}],bytes:new Uint8Array([0,0,0,0,255,255,255,255])});
-  (cull as any).lastPose={time:performance.now()-2000,position:camera.position.clone(),rotation:camera.quaternion.clone(),projection:camera.projectionMatrix.clone()};
   cull.enabled=true;cull.intervalFrames=12;cull.freeze=true;(cull as any).submissions=1;
   (cull as any).pending={sync:{},buffer:{},bytes:new Uint8Array(8),items:[{state,slot:0},{state,slot:1}],frame:0,time:performance.now()-2000,position:camera.position.clone(),rotation:camera.quaternion.clone(),projection:camera.projectionMatrix.clone()};
   for(let i=0;i<30;i++){
+    camera.position.x+=3;camera.rotation.y+=.05;camera.fov+=.1;camera.updateProjectionMatrix();
     cull.prepare(camera,root,false,0);assert.equal(cull.stats().hidden_instances,1);
     cull.renderMain(()=>{assert.equal(mesh.visible,false);assert.equal((root.children.find(m=>m.userData.gpuOcclusionProxy) as InstancedMesh).count,1);});
   }
@@ -147,4 +140,28 @@ test('depth-pass instances stay out of candidate counters and bounding-box diagn
   assert.equal(cull.stats().depth_only_instances,2);assert.equal(cull.stats().candidate_instances,3);
   assert.equal((cull as any).boxLines.geometry.attributes.position.count,3*24,'only prop boxes are diagnostic candidates');
   cull.dispose();for(const m of [wall,prop]){m.geometry.dispose();(m.material as MeshStandardMaterial).dispose();m.dispose();}
+});
+
+
+test('hidden placements survive streamer removal/re-entry and pending results follow captured placement identities',()=>{
+  const renderer={shadowMap:{render:()=>{}}} as unknown as WebGLRenderer;
+  const cull=new MapGpuOcclusion(renderer),root=new Group();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),3);root.add(mesh);mesh.count=2;
+  const a=new Matrix4().makeTranslation(0,0,-10),b=new Matrix4().makeTranslation(4,0,-10),c=new Matrix4().makeTranslation(8,0,-10);
+  mesh.setMatrixAt(0,a);mesh.setMatrixAt(1,b);mesh.instanceMatrix.needsUpdate=true;
+  (cull as any).collect(root);const original=(cull as any).states.get(mesh);
+  (cull as any).apply({items:[{state:original,slot:0},{state:original,slot:1}],bytes:new Uint8Array([0,0,0,0,255,255,255,255])});
+  mesh.count=1;mesh.setMatrixAt(0,b);mesh.instanceMatrix.needsUpdate=true;(cull as any).collect(root);
+  assert.equal(cull.stats().hidden_instances,0);
+  mesh.count=0;mesh.visible=false;(cull as any).collect(root);
+  mesh.visible=true;mesh.count=3;mesh.setMatrixAt(0,b);mesh.setMatrixAt(1,c);mesh.setMatrixAt(2,a);mesh.instanceMatrix.needsUpdate=true;(cull as any).collect(root);
+  assert.equal(cull.stats().hidden_instances,1,'re-entered A remains hidden without another shader pass');
+  let state=(cull as any).states.get(mesh);assert.deepEqual([...state.visibleSlots],[0,1]);
+  // The old GPU ticket says A visible, B hidden. Slots have since changed to B,C,A.
+  (cull as any).apply({items:[{state:original,slot:0},{state:original,slot:1}],bytes:new Uint8Array([255,255,255,255,0,0,0,0])});
+  state=(cull as any).states.get(mesh);assert.deepEqual([...state.visibleSlots],[1,2]);
+  assert.equal(cull.stats().hidden_instances,1,'B hidden, unknown C and GPU-visible A shown');
+  cull.renderMain(()=>{assert.equal(mesh.visible,false);const proxy=root.children.find(o=>o.userData.gpuOcclusionProxy) as InstancedMesh;
+    const m=new Matrix4();proxy.getMatrixAt(0,m);assert.equal(m.elements[12],8);proxy.getMatrixAt(1,m);assert.equal(m.elements[12],0);});
+  cull.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
 });

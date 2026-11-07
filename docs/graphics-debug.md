@@ -549,14 +549,14 @@ are outside this prototype's scope.
 
 The update interval is selectable (1, 2, 3, **4 by default**, 6, 8 or 12 rendered frames). Polling a pending fence each frame does not rebuild the depth pyramid. Matrices/colors are compacted only when a result changes. Full sources remain available for shadows and reflections. The experiment bypasses geometry distance cutoff, Inspect all resident instances and simultaneous CPU ray culling. The independent inspection camera displays primary-camera GPU visibility, while depth tests continue using the primary camera. It currently evaluates InstancedMesh map sources; it does not yet reuse the main pass depth target.
 
-Temporal verdicts are heuristic: camera moves over 2 m or turns over 1.5 degrees are discarded; static-camera verdicts have no fixed wall-clock expiration, as are changed source instance buffers and projection matrices. These bounds and the 0.35 m box expansion do **not** guarantee safe temporal occlusion. The user observed visible-object flicker in the moving benchmark, so this is not a production-quality visibility implementation or a proven optimization.
+Completed GPU verdicts persist until another completed GPU pass changes them. Camera translation, rotation, projection changes and readback latency do not reset them or reject completed results. Visibility is stored by exact instance placement rather than mutable buffer slots, including temporary removal/re-entry by the streamer. New placements start visible; changed geometry/material/world placement or an explicit map/feature reset invalidates the associated cache. This temporal reuse can delay revealing newly exposed objects until the next GPU result; it is the selected behavior for this experiment.
 
 Debug controls:
 
 - `GPU occlusion debug view`: original depth, each Hi-Z level, visibility bitmap, all bounding boxes, or hidden boxes only. The depth inset uses logarithmic distance over 0–500 m; blue means empty/far depth. Boxes are red for rejected instances, green for visible and gray for untested.
 - Selecting a debug view enables GPU evaluation and unchecks `Apply GPU occlusion results`: inspect classifications while all normal geometry remains visible.
 - `Apply GPU occlusion results` independently enables/disables actual main-pass compaction. Measurement-only preserves GPU verdicts for inspection.
-- `Freeze GPU occlusion depth` pauses further depth/Hi-Z/visibility submissions after the first capture. It does not force stale verdicts to remain applied to a moving camera.
+- `Freeze GPU occlusion depth` pauses further depth/Hi-Z/visibility submissions after the first capture. The captured verdicts remain applied during camera movement until unfrozen and replaced by a new GPU result.
 - Debug overlays add work and should be off for timed comparisons.
 
 Route JSON now contains `gpu_occlusion`, `average_occlusion_draws`, `average_total_draws` and `average_total_triangles`. Existing `average_draws` remains the main render submission count. `GPU occlusion CPU` includes depth rendering, reduction, flag readback and compaction; compare it **together with** `Render CPU`.
@@ -581,7 +581,7 @@ Visual verification after the correction: route time 18 s has continuous road de
 
 ### Inspecting primary-camera GPU visibility
 
-The independent inspection camera no longer disables GPU occlusion. Depth rendering, box projection, temporal validity and readback always use the primary camera; the observer only changes the displayed viewpoint. Thus moving the observer does not invalidate primary-camera verdicts. World-space diagnostic boxes are drawn with the observer view, while depth visualization uses near/far saved with the depth capture, including when frozen. The report identifies `visibility_camera: primary`, `observer_view` and `bypassed`.
+The independent inspection camera no longer disables GPU occlusion. Depth rendering and box projection always use the primary camera; the observer only changes the displayed viewpoint. Thus moving the observer does not invalidate primary-camera verdicts. World-space diagnostic boxes are drawn with the observer view, while depth visualization uses near/far saved with the depth capture, including when frozen. The report identifies `visibility_camera: primary`, `observer_view` and `bypassed`.
 
 To inspect missing geometry from above, enable GPU Hi-Z and Independent inspection camera, keep Inspect all resident instances off, and enable Apply GPU occlusion results. To inspect classifications without hiding objects, choose Hidden boxes only (which unchecks Apply) and inspect the red boxes. Inspect all resident instances intentionally bypasses occlusion so it can reveal the complete resident set.
 
@@ -640,3 +640,13 @@ Build and all 480 Node tests pass, including the depth-only candidate/overlay re
 
 
 City route smoke check with the new coverage query, all prop categories enabled, 1920×945, interval 12: 59.39 mean FPS, p95 16.9 ms. Report: `Downloads/slrr-route-result-1794061797298.json`. This is a streamed end-to-end run, not a controlled speed comparison against the previous shader. Streaming CPU averaged 0.72 ms and peaked at 12.3 ms; renderer/resource upload work can also include loading costs. Use equally warmed routes for performance comparisons. On a settled preview at 60.3 s, 724 candidates were tested while 429 depth-only instances were excluded; 484–484 instances remained hidden across 120 frames, also in observer mode. Main-view Apply-on/off captures (`Downloads/slrr-route-frame-60.3-1794061935056.png` and `Downloads/slrr-route-frame-60.3-1794061949573.png`) differ at only five RGB pixels out of 1,814,400. No WebGL errors were reported. The existing two embedded-map-resource decode warnings remain.
+
+
+### GPU-owned verdict lifetime during motion
+
+Removed the remaining 2 m / 1.5 degree camera-motion invalidation and projection-change rejection. These could call `showAll` between scheduled GPU passes, even with the depth capture frozen, producing red debug boxes with objects still visible. Camera pose is no longer used to expire masks or reject a completed readback. Only completed shader flags change a known placement's verdict while the feature is active. A weak per-source placement cache survives zero-count/hidden batches and compaction. Pending GPU flags are mapped from the captured placement identities onto current slots, so a reordered buffer cannot apply a verdict to the wrong instance or discard the replacement. A map/feature reset clears the cache; real geometry/material/world-placement changes invalidate the relevant source.
+
+The Node regression now translates, rotates and changes camera projection on every frame while a fence is pending and capture is frozen, then checks that a visible GPU replacement is accepted despite its older camera pose. Another regression removes a hidden placement, removes its whole batch, restores it in a different slot alongside a new placement, and completes an old-slot-order ticket. The real-GPU fixture also exercises moving cameras with simultaneous translation, rotation and projection changes at interval 12.
+
+Validation: 396/396 real-GPU checks pass, including 132 moving-camera cases with interval 12, plus the build and all 480 Node tests. The city repro uses a frozen capture at 60.0 s followed by a seek to 60.1 s: the mask stays applied, with 452 hidden instances at 60.0 s and 446 after six hidden placements leave the stream set at 60.1 s, rather than resetting to zero. The observer view also preserves the frozen mask.
+Returning from 60.1 s to 60.0 s with capture still frozen restores 452 hidden placements (452 → 446 → 452), without another shader submission. Proof capture: `Downloads/slrr-route-frame-60-1794068978241.png`.

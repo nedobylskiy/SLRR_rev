@@ -1,7 +1,8 @@
-import {Box3,BufferGeometry,Color,DataTexture,DepthTexture,Float32BufferAttribute,FloatType,FrontSide,GLSL3,Group,InstancedMesh,LessDepth,LessEqualDepth,LineBasicMaterial,LineSegments,Matrix4,Mesh,MeshBasicMaterial,MeshStandardMaterial,NearestFilter,NoBlending,OrthographicCamera,PlaneGeometry,Quaternion,RawShaderMaterial,RGBAFormat,Scene,UnsignedIntType,Vector2,Vector3,Vector4,WebGLRenderTarget,type Camera,type WebGLRenderer} from 'three';
+import {Box3,BufferGeometry,Color,DataTexture,DepthTexture,Float32BufferAttribute,FloatType,FrontSide,GLSL3,Group,InstancedMesh,LessDepth,LessEqualDepth,LineBasicMaterial,LineSegments,Matrix4,Mesh,MeshBasicMaterial,MeshStandardMaterial,NearestFilter,NoBlending,OrthographicCamera,PlaneGeometry,RawShaderMaterial,RGBAFormat,Scene,UnsignedIntType,Vector2,Vector4,WebGLRenderTarget,type Camera,type WebGLRenderer} from 'three';
 
 interface Source {mesh:InstancedMesh;key:string;world:Matrix4;bounds:Box3[];depth?:InstancedMesh;proxy?:InstancedMesh;kept:string;hidden:number;visibleSlots?:Set<number>;identities?:string[];compatibility?:string}
-interface Ticket {sync:WebGLSync;buffer:WebGLBuffer;bytes:Uint8Array;items:{state:Source;slot:number}[];frame:number;time:number;position:Vector3;rotation:Quaternion;projection:Matrix4}
+interface VerdictCache {compatibility:string;world:Matrix4;placements:Map<string,boolean>}
+interface Ticket {sync:WebGLSync;buffer:WebGLBuffer;bytes:Uint8Array;items:{state:Source;slot:number}[];frame:number;time:number}
 const vertex=`precision highp float; in vec3 position; void main(){gl_Position=vec4(position.xy,0.,1.);}`;
 // Preserve the exact float32 depth through RGBA8, without fractional-depth packing.
 const packing=`
@@ -14,8 +15,6 @@ float unpackDepth(vec4 v){
   return uintBitsToFloat(b.x|(b.y<<8u)|(b.z<<16u)|(b.w<<24u));
 }`;
 
-/** A static scene has no wall-clock expiry. Moving-camera reuse remains heuristic. */
-export function gpuResultUsable(ageMs:number,distance:number,angle:number){return Number.isFinite(ageMs)&&ageMs>=0&&distance<=2&&angle<=Math.PI/120;}
 /** Three increments Material.version for its ordinary double-sided transparent
  * back/front passes. Only semantic depth/geometry state may invalidate visibility. */
 function gpuSurfaceKey(mesh:InstancedMesh){
@@ -55,6 +54,7 @@ export class MapGpuOcclusion {
   private boxLines=new LineSegments(new BufferGeometry(),new LineBasicMaterial({vertexColors:true,depthTest:false,depthWrite:false,toneMapped:false}));
   extraDraws=0;extraTriangles=0;
   private states=new Map<InstancedMesh,Source>();
+  private verdicts=new WeakMap<InstancedMesh,VerdictCache>();
   private depthScene=new Scene();
   private quadScene=new Scene();private quadCamera=new OrthographicCamera(-1,1,1,-1,0,1);
   private quad=new Mesh(new PlaneGeometry(2,2),new RawShaderMaterial());
@@ -68,7 +68,7 @@ export class MapGpuOcclusion {
   private frame=0;private lastSubmit=-Infinity;
   private latency=0;private latencyMs=0;private tested=0;private rejected=0;private submissions=0;private maxLatency=0;
   private lastDepthDraws=0;private lastDraws=0;private lastTriangles=0;private error='';
-  private matrix=new Matrix4();private position=new Vector3();private rotation=new Quaternion();
+  private matrix=new Matrix4();
   constructor(private renderer:WebGLRenderer){
     this.depthTarget.depthTexture=new DepthTexture(512,256,UnsignedIntType);
     this.depthTarget.texture.name='GPU occlusion depth color (unused)';
@@ -147,7 +147,7 @@ export class MapGpuOcclusion {
     try{return work();}finally{for(const m of hidden)m.visible=true;for(const p of proxies)p.removeFromParent();this.hiddenMain=[];}
   }
   private release(s:Source){s.depth?.removeFromParent();s.depth?.dispose();if(s.depth)(s.depth.material as MeshBasicMaterial).dispose();s.proxy?.removeFromParent();s.proxy?.dispose();}
-  reset(){this.cancel();for(const s of this.states.values())this.release(s);this.states.clear();this.recentHidden=[];this.tested=0;this.lastPose=undefined;this.lastStreamRevision=undefined;this.lastSubmit=-Infinity;this.submissions=this.rejected=this.maxLatency=this.latency=this.latencyMs=0;this.extraDraws=this.extraTriangles=0;}
+  reset(){this.cancel();for(const s of this.states.values())this.release(s);this.states.clear();this.verdicts=new WeakMap();this.recentHidden=[];this.tested=0;this.lastStreamRevision=undefined;this.lastSubmit=-Infinity;this.submissions=this.rejected=this.maxLatency=this.latency=this.latencyMs=0;this.extraDraws=this.extraTriangles=0;}
   private cancel(){if(this.pending){const gl=this.renderer.getContext() as WebGL2RenderingContext;gl.deleteSync(this.pending.sync);gl.deleteBuffer(this.pending.buffer);this.pending=undefined;}}
   private showAll(){for(const s of this.states.values()){s.hidden=0;s.proxy?.removeFromParent();s.kept='';}}
   private collect(root:Group){
@@ -161,9 +161,11 @@ export class MapGpuOcclusion {
       if(old?.key===key&&old.world.equals(o.matrixWorld))return;
       const compatibility=gpuSurfaceKey(o);
       const identities=Array.from({length:o.count},(_,slot)=>Array.from(o.instanceMatrix.array.subarray(slot*16,slot*16+16)).join(','));
-      // Buffer slots are transient: retain verdicts by exact placement matrix, not slot number.
-      const retained=old?.hidden&&old.compatibility===compatibility&&old.world.equals(o.matrixWorld)&&old.visibleSlots&&old.identities
-        ?new Map(old.identities.map((id,slot)=>[id,old.visibleSlots!.has(slot)])):undefined;
+      // Keep shader verdicts even when the streamer temporarily removes a placement.
+      let cached=this.verdicts.get(o);
+      if(!cached||cached.compatibility!==compatibility||!cached.world.equals(o.matrixWorld)){
+        cached={compatibility,world:o.matrixWorld.clone(),placements:new Map()};this.verdicts.set(o,cached);
+      }
       if(old)this.release(old);
       if(!o.geometry.boundingBox)o.geometry.computeBoundingBox();
       const bounds:Box3[]=[];
@@ -174,16 +176,33 @@ export class MapGpuOcclusion {
         const depth=new InstancedMesh(o.geometry,material,o.instanceMatrix.count);depth.instanceMatrix.array.set(o.instanceMatrix.array);depth.instanceMatrix.needsUpdate=true;depth.count=o.count;depth.matrixAutoUpdate=false;depth.matrix.copy(o.matrixWorld);depth.frustumCulled=true;state.depth=depth;this.depthScene.add(depth);
       }
       this.states.set(o,state);
-      if(retained)this.updateVisible(state,identities.flatMap((id,slot)=>retained.get(id)===false?[]:[slot]));
+      if(cached.placements.size)this.updateVisible(state,identities.flatMap((id,slot)=>cached.placements.get(id)===false?[]:[slot]));
     });
     for(const [mesh,state] of this.states)if(!seen.has(mesh)){this.release(state);this.states.delete(mesh);}
   }
   private apply(ticket:Ticket){
-    const flags=new Map<Source,number[]>();let complete=true;
-    for(let i=0;i<ticket.items.length;i++){const {state,slot}=ticket.items[i];if(this.states.get(state.mesh)!==state||gpuSourceKey(state.mesh)!==state.key){complete=false;continue;}
-      let kept=flags.get(state);if(!kept){kept=[];flags.set(state,kept);}if(ticket.bytes[i*4]!==0)kept.push(slot);}
-    for(const [s,kept] of flags)this.updateVisible(s,kept);
-    return complete;
+    const affected=new Set<InstancedMesh>(),legacy=new Map<Source,number[]>();
+    for(let i=0;i<ticket.items.length;i++){
+      const {state,slot}=ticket.items[i],visible=ticket.bytes[i*4]!==0;
+      if(state.identities&&state.compatibility){
+        // Results refer to captured placements, never to the streamer's current slot order.
+        if(gpuSurfaceKey(state.mesh)!==state.compatibility||!state.world.equals(state.mesh.matrixWorld))continue;
+        let cached=this.verdicts.get(state.mesh);
+        if(!cached||cached.compatibility!==state.compatibility||!cached.world.equals(state.world)){
+          cached={compatibility:state.compatibility,world:state.world.clone(),placements:new Map()};this.verdicts.set(state.mesh,cached);
+        }
+        cached.placements.set(state.identities[slot],visible);affected.add(state.mesh);
+      }else if(this.states.get(state.mesh)===state&&gpuSourceKey(state.mesh)===state.key){
+        let kept=legacy.get(state);if(!kept){kept=[];legacy.set(state,kept);}if(visible)kept.push(slot);
+      }
+    }
+    for(const mesh of affected){
+      const current=this.states.get(mesh),cached=this.verdicts.get(mesh)!;
+      if(current?.identities&&current.compatibility===cached.compatibility&&current.world.equals(cached.world)&&gpuSourceKey(mesh)===current.key){
+        this.updateVisible(current,current.identities.flatMap((id,slot)=>cached.placements.get(id)===false?[]:[slot]));
+      }
+    }
+    for(const [state,kept] of legacy)this.updateVisible(state,kept);
   }
   private updateVisible(s:Source,kept:number[]){
       s.visibleSlots=new Set(kept);s.hidden=s.mesh.count-kept.length;const key=kept.join(',');
@@ -199,19 +218,18 @@ export class MapGpuOcclusion {
     if(!this.enabled||!root||bypass){this.showAll();this.cancel();return;}
     const gl=this.renderer.getContext() as WebGL2RenderingContext;
     if(gl.isContextLost()){this.reset();return;}
-    camera.updateWorldMatrix(true,false);camera.getWorldPosition(this.position);camera.getWorldQuaternion(this.rotation);
+    camera.updateWorldMatrix(true,false);
     try{
-      // Keep the last completed result through submissions, pending fences and long intervals.
-      // Only actual camera/projection changes invalidate its visibility proof.
-      if(this.lastPose&&(!camera.projectionMatrix.equals(this.lastPose.projection)||!gpuResultUsable(performance.now()-this.lastPose.time,this.position.distanceTo(this.lastPose.position),this.rotation.angleTo(this.lastPose.rotation))))this.showAll();
+      // Last completed GPU verdicts are authoritative until a newer GPU verdict.
+      // Camera movement, projection changes and pending readbacks must not reveal them.
       if(streamRevision!==undefined&&streamRevision!==this.lastStreamRevision){this.collect(root);this.lastStreamRevision=streamRevision;}
       if(this.pending){const t=this.pending,status=gl.clientWaitSync(t.sync,0,0);
         if(status===gl.WAIT_FAILED){this.cancel();this.error='GPU fence failed';return;}
         if(status!==gl.TIMEOUT_EXPIRED){
           this.latency=this.frame-t.frame;this.latencyMs=performance.now()-t.time;this.maxLatency=Math.max(this.maxLatency,this.latencyMs);
-          if(gpuResultUsable(this.latencyMs,this.position.distanceTo(t.position),this.rotation.angleTo(t.rotation))&&camera.projectionMatrix.equals(t.projection)){
-            const previous=gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);gl.bindBuffer(gl.PIXEL_PACK_BUFFER,t.buffer);try{gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,t.bytes);}finally{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,previous);}const updatedAll=this.apply(t);if(updatedAll||!this.lastPose)this.lastPose={time:t.time,position:t.position,rotation:t.rotation,projection:t.projection};
-          }else{this.rejected++;}this.cancel();
+          const previous=gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);gl.bindBuffer(gl.PIXEL_PACK_BUFFER,t.buffer);
+          try{gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,t.bytes);}finally{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,previous);}
+          this.apply(t);this.cancel();
         }
       }
       if(this.pending||this.freeze&&this.submissions>0||this.frame-this.lastSubmit<this.intervalFrames)return;
@@ -219,7 +237,6 @@ export class MapGpuOcclusion {
     }catch(error){this.error=String(error);this.cancel();}
   }
   private lastStreamRevision?:number;
-  private lastPose?:{time:number;position:Vector3;rotation:Quaternion;projection:Matrix4};
   private submit(camera:Camera){
     this.depthNearFar.set('near' in camera?Number(camera.near):.1,'far' in camera?Number(camera.far):5000);
     const items=[...this.states.values()].filter(state=>!state.depth).flatMap(state=>state.bounds.map((_,slot)=>({state,slot})));
@@ -243,7 +260,7 @@ export class MapGpuOcclusion {
       const bytes=new Uint8Array(this.result.width*this.result.height*4),old=gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);
       try{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,buffer);gl.bufferData(gl.PIXEL_PACK_BUFFER,bytes.length,gl.STREAM_READ);gl.readPixels(0,0,this.result.width,this.result.height,gl.RGBA,gl.UNSIGNED_BYTE,0);}catch(e){gl.deleteBuffer(buffer);throw e;}finally{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,old);}
       const sync=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);if(!sync){gl.deleteBuffer(buffer);throw Error('GPU visibility fence allocation failed');}gl.flush();
-      this.pending={sync,buffer,bytes,items,frame:this.frame,time:performance.now(),position:this.position.clone(),rotation:this.rotation.clone(),projection:camera.projectionMatrix.clone()};
+      this.pending={sync,buffer,bytes,items,frame:this.frame,time:performance.now()};
       this.lastSubmit=this.frame;this.tested=items.length;this.submissions++;this.lastDraws=this.extraDraws;this.lastTriangles=this.extraTriangles;
     }finally{r.setRenderTarget(previous,face,mip);r.setViewport(viewport);r.setScissor(scissor);r.setScissorTest(scissorTest);r.autoClear=auto;r.shadowMap.enabled=shadows;r.xr.enabled=xr;}
   }
