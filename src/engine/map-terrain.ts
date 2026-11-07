@@ -1,3 +1,4 @@
+import type {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import { Box3, Vector3 } from 'three';
 import type { ScxModel } from '../formats/scx';
 import type { Terrain } from './suspension-3d';
@@ -18,6 +19,7 @@ interface Cell { faces: Face[]; tree?: Branch }
 
 /** Vertical collision sampling from original map SCX geometry, indexed in 16 m cells. */
 export class MapTerrain implements Terrain {
+  queryProfile?:CpuWorkProfile;
   ramp = false;
   constructor(private readonly objects?: MapCollision) {}
   private readonly cells = new Map<string, Cell>();
@@ -100,20 +102,31 @@ export class MapTerrain implements Terrain {
       }
     return false;
   }
-  sample(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined {
+  sample(x:number,z:number,fromY?:number){
+    if(!this.queryProfile)return this.sampleCore(x,z,fromY);
+    this.queryProfile.add('map_samples_count');
+    return this.queryProfile.measure('map_sample_ms',()=>this.sampleCore(x,z,fromY));
+  }
+  private sampleCore(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined {
     const cell = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
     let best: { height: number; normal: Vector3; surface: TireSurface } | undefined;
     let bestOrder = Infinity;
     const stack = this.stack; stack.length = 0;
-    if (cell) stack.push(cell.tree ??= this.build([...cell.faces]));
+    if(cell){
+      if(!cell.tree){const start=this.queryProfile?.start()??-1;cell.tree=this.build([...cell.faces]);this.queryProfile?.end('map_lazy_build_ms',start);this.queryProfile?.add('map_lazy_builds_count');}
+      stack.push(cell.tree);
+    }else this.queryProfile?.add('map_empty_cells_count');
     while (stack.length) {
-      const branch = stack.pop()!;
+      const branch = stack.pop()!;this.queryProfile?.add('map_branches_count');
       if (x < branch.minX || x > branch.maxX || z < branch.minZ || z > branch.maxZ) continue;
       if (fromY !== undefined && branch.minY > fromY + 0.5 || best && branch.maxY < best.height) continue;
       if (!branch.faces) { stack.push(branch.right!, branch.left!); continue; }
+      this.queryProfile?.add('map_leaves_count');
       for (const f of branch.faces) {
+        this.queryProfile?.add('map_face_bounds_count');
         if (x < f.minX || x > f.maxX || z < f.minZ || z > f.maxZ) continue;
         if (fromY !== undefined && f.minY > fromY + 0.5 || best && f.maxY < best.height) continue;
+        this.queryProfile?.add('map_triangle_tests_count');
         const denominator = f.denominator;
         if (Math.abs(denominator) < 1e-10) continue;
         const u = ((f.bz - f.cz) * (x - f.cx) + (f.cx - f.bx) * (z - f.cz)) / denominator;
@@ -127,7 +140,9 @@ export class MapTerrain implements Terrain {
       }
     }
     if (fromY !== undefined) {
-      const box = this.objects?.support(x, z, fromY + 0.5);
+      const start=this.queryProfile?.start()??-1;
+      const box = this.objects?.support(x, z, fromY + 0.5,this.queryProfile);
+      this.queryProfile?.end('object_support_ms',start);
       if (box && (!best || box.height > best.height)) best = { ...box, surface: 'road' };
     }
     return best;

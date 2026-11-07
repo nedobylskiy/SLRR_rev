@@ -1,3 +1,4 @@
+import {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import { nativeSuspensionForce, nativeTireForces, updateSlip, wheelBrake } from './native-vehicle-physics';
 import { Box3, Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import type { EnginePart } from './world';
@@ -11,7 +12,7 @@ import type { WheelRefState } from '../runtime/wheel-ref-native';
 import { applyExperimentalHubPose } from './hub-geometry';
 import { HOST_WHEEL_INERTIA } from './wheel-inertia';
 
-export interface Terrain { height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; mayReach?(bounds: Box3): boolean; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
+export interface Terrain { queryProfile?:CpuWorkProfile; height(x: number, z: number, fromY?: number): number; normal(x: number, z: number, fromY?: number): Vector3; mayReach?(bounds: Box3): boolean; sample?(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined }
 export interface TireContactState { contact: boolean; force: number; contactPoint: Vector3; contactNormal: Vector3; forward: Vector3; slipSpeed: number; lateralSpeed: number; slip: number; surface: TireSurface }
 /** Legacy contact response retained for comparisons with the tunable model. */
 export function tyreContactForces(normalLoad: number, alignment: number, slipSpeed: number, lateralSpeed: number) {
@@ -30,6 +31,13 @@ export class TestTerrain implements Terrain {
   normal(x: number, z: number) { return this.height(x, z) > 0 ? new Vector3(0, 1, 0.28).normalize() : new Vector3(0, 1, 0); }
 }
 export class Suspension3D {
+  readonly workProfile=new CpuWorkProfile();
+  private terrainQuery<T>(name:string,work:()=>T):T{
+    const profile=this.workProfile;if(!profile.enabled)return work();
+    const previous=this.terrain.queryProfile;this.terrain.queryProfile=profile;
+    profile.add(name+'_count');
+    try{return profile.measure(name+'_ms',work);}finally{this.terrain.queryProfile=previous;}
+  }
   private springMass: number;
   private movingParts: { part: EnginePart; base: Matrix4 }[][] = [[], [], [], []];
   readonly mechanics?: MechanicalSystem;
@@ -100,7 +108,7 @@ export class Suspension3D {
       const k = w.originalTyre?.force ? w.originalTyre.force * support : this.mechanics ? this.mechanics.spring(index) : this.springMass * 9.81 / count / sag;
       const damping = w.originalTyre?.damping[0] ? w.originalTyre.damping[0] * support : this.mechanics ? this.mechanics.damper(index) : 2 * 0.75 * Math.sqrt(k * this.springMass / count);
       let length = w.rest + w.droop;
-      let groundHeight = this.terrain.height(hard.x, hard.z, hard.y);
+      let groundHeight = this.terrainQuery("height",()=>this.terrain.height(hard.x, hard.z, hard.y));
       if (down.y < -0.05) {
         if (groundHeight > -999) {
           // Reject near-vertical upward jumps from overlapping map meshes. Real ramps remain
@@ -115,8 +123,8 @@ export class Suspension3D {
       w.contact = w.part.parent === this.root && w.part.condition > 0 && w.mountCondition > 0 && support > 0 && length < w.rest + w.droop && down.y < -0.05; w.length = Math.max(w.rest - w.bump, Math.min(w.rest + w.droop, length)); w.force = w.slipSpeed = w.lateralSpeed = 0;
       if (w.contact) {
         const patch = hard.clone().addScaledVector(down, length).add(new Vector3(0, -w.radius, 0));
-        const terrainHit = this.terrain.sample?.(patch.x, patch.z, hard.y);
-        const normal = terrainHit?.normal ?? this.terrain.normal(patch.x, patch.z, hard.y), speed = this.body.pointVelocity(hard).dot(normal);
+        const terrainHit = this.terrain.sample?this.terrainQuery("patch_sample",()=>this.terrain.sample!(patch.x,patch.z,hard.y)):undefined;
+        const normal = terrainHit?.normal ?? this.terrainQuery("normal_fallback",()=>this.terrain.normal(patch.x, patch.z, hard.y)), speed = this.body.pointVelocity(hard).dot(normal);
         const springForce = w.originalTyre ? nativeSuspensionForce(length,w.length,speed,w.rest,w.rest+w.droop,k,damping,w.originalTyre.damping[1]*support).force
           : (w.rest-length)*k-damping*speed;
         w.force = Math.max(0,Math.min(this.body.mass*9.81*3,springForce+Math.max(0,w.rest-w.bump-length)*k*8));

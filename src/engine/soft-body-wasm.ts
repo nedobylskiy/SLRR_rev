@@ -8,6 +8,8 @@ interface KernelExports extends WebAssembly.Exports {
   buffer(id: number): number;
   predict(dt: number, gravity: number, attached: number): void;
   solve(dt: number): void;
+  solve_constraints(dt: number): void;
+  solve_contacts(): void;
   release_mounts(dt: number, strength: number): number;
   finish(dt: number, yieldStrain: number): number;
   set_colliders(count: number): number;
@@ -27,7 +29,7 @@ export class SoftBodyKernel {
     const api = new WebAssembly.Instance(module, { env: { exp: Math.exp,
       box_contact: (offset: number, axis: number, sign: number, restitution: number, friction: number) => this.onBoxContact(offset, axis, sign, restitution, friction),
     } }).exports as KernelExports;
-    for (const name of ['abi_version', 'configure', 'buffer', 'predict', 'solve', 'release_mounts', 'finish', 'set_colliders'])
+    for (const name of ['abi_version', 'configure', 'buffer', 'predict', 'solve', 'solve_constraints', 'solve_contacts', 'release_mounts', 'finish', 'set_colliders'])
       if (typeof api[name] !== 'function') throw new Error(`Missing soft-body WASM export: ${name}`);
     if (!(api.memory instanceof WebAssembly.Memory) || api.abi_version?.() !== 1 || api.configure?.(nodes, beams, mounts, mass) !== 1)
       throw new Error('Incompatible soft-body WASM ABI or panel capacity');
@@ -63,6 +65,8 @@ export class SoftBodyKernel {
   }
   predict(dt: number, gravity: number, attached: boolean) { this.api.predict(dt, gravity, Number(attached)); }
   solve(dt: number) { this.api.solve(dt); }
+  solveConstraints(dt:number){this.api.solve_constraints(dt);}
+  solveContacts(){this.api.solve_contacts();}
   release(dt: number, strength: number, mounts: Mount[]) {
     this.api.release_mounts(dt, strength);
     for (let index = 0; index < mounts.length; index++) {

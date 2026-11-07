@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Box3,BoxGeometry,Color,DoubleSide,Group,InstancedMesh,Matrix4,MeshStandardMaterial,PerspectiveCamera,PlaneGeometry,Ray,Vector3} from 'three';
+import {Box3,BoxGeometry,Color,DoubleSide,FrontSide,Group,InstancedMesh,Matrix4,MeshStandardMaterial,PerspectiveCamera,PlaneGeometry,Ray,Vector3} from 'three';
 import {OccluderGeometry,occludedBox} from '../src/render/occlusion-rays';
 import {MapRaycastOcclusion} from '../src/render/map-raycast-occlusion';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
@@ -51,6 +51,30 @@ test('color pass uses compacted visible instances while shadows/reflections keep
   f.draws.length=0;
   f.occlusion.renderMain(true,()=>f.draw(f.target));assert.deepEqual(f.draws,[f.target],'resident inspection bypasses occlusion');
   f.occlusion.reset();assert.equal(f.root.children.some(o=>o.userData.rayOcclusionProxy),false);
+});
+
+test('main list preparation excludes auxiliary and occluded sources; nested shadows and errors restore visibility',()=>{
+  const f=fixture(),reserve=new InstancedMesh(new BoxGeometry(),f.material,1),inactive=new InstancedMesh(new BoxGeometry(),f.material,1);
+  reserve.userData.streamAuxiliary=true;inactive.visible=false;f.root.add(reserve,inactive);f.prepare();
+  f.occlusion.renderMain(false,()=>{
+    assert.equal(reserve.visible,false);assert.equal(f.target.visible,false);assert.equal(inactive.visible,false);
+    f.setShadowWork(()=>{assert.equal(reserve.visible,true);assert.equal(f.target.visible,true);assert.equal(inactive.visible,false);});
+    f.renderer.shadowMap.render();assert.equal(reserve.visible,false);assert.equal(f.target.visible,false);
+  },f.root);
+  assert.equal(reserve.visible,true);assert.equal(f.target.visible,true);assert.equal(inactive.visible,false);
+  assert.throws(()=>f.occlusion.renderMain(false,()=>{throw Error('draw failure');},f.root),/draw failure/);
+  assert.equal(reserve.visible,true);assert.equal(f.target.visible,true);
+  f.occlusion.setEnabled(false);
+  f.occlusion.renderMain(false,()=>{assert.equal(reserve.visible,false);assert.equal(f.target.visible,true);},f.root);
+  f.occlusion.reset();reserve.geometry.dispose();inactive.geometry.dispose();reserve.dispose();inactive.dispose();
+});
+
+test('front-facing opaque walls remain blockers with back-face culling, reversed walls do not',()=>{
+  const f=fixture();f.material.side=FrontSide;f.prepare();
+  assert.ok(f.root.children.some(o=>o.userData.rayOcclusionProxy));
+  f.wall.setMatrixAt(0,new Matrix4().makeRotationY(Math.PI).setPosition(0,0,-5));f.wall.instanceMatrix.needsUpdate=true;f.prepare();
+  assert.equal(f.root.children.some(o=>o.userData.rayOcclusionProxy),false);
+  f.occlusion.reset();
 });
 test('camera changes, removed blockers and alpha-cutout blockers cannot leave stale hidden objects',()=>{
   const f=fixture();f.prepare();assert.ok(f.root.children.some(o=>o.userData.rayOcclusionProxy));

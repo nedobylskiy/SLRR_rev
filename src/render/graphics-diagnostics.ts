@@ -1,5 +1,6 @@
 import { HalfFloatType, FloatType, Texture, Vector2, type Scene, type WebGLRenderer, type Material } from 'three';
 import type { FrameProfiler } from './frame-profiler';
+import { RendererCpuProfiler } from './renderer-cpu-profiler';
 
 export interface DrawWork { draws:number; triangles:number; instances:number }
 const empty=():DrawWork=>({draws:0,triangles:0,instances:0});
@@ -10,12 +11,14 @@ const mib=(bytes:number)=>(bytes/1048576).toFixed(1)+' MiB';
 export function sceneResources(scene:Scene) {
   const buffers=new Set<object>(),sources=new Map<string,Texture>(),materials=new Set<Material>();
   let geometryBytes=0,instanceBytes=0,instanceSlots=0,objects=0,meshes=0,visibleMeshes=0;
+  let instancedMeshes=0;
+  const visibleBatches:{name:string;instances:number;auxiliary:boolean}[]=[];
   const buffer=(attribute:any)=>{
     const storage=attribute?.isInterleavedBufferAttribute?attribute.data:attribute;
     if(!storage?.array||buffers.has(storage))return 0;buffers.add(storage);return storage.array.byteLength;
   };
   scene.traverse((object:any)=>{
-    objects++;if(object.isMesh)meshes++;
+    objects++;if(object.isMesh)meshes++;if(object.isInstancedMesh)instancedMeshes++;
     if(object.geometry){for(const attr of Object.values(object.geometry.attributes))geometryBytes+=buffer(attr);geometryBytes+=buffer(object.geometry.index);}
     if(object.instanceMatrix){instanceBytes+=buffer(object.instanceMatrix)+buffer(object.instanceColor);instanceSlots+=object.instanceMatrix.count;}
     for(const material of object.material?(Array.isArray(object.material)?object.material:[object.material]):[]) {
@@ -26,7 +29,9 @@ export function sceneResources(scene:Scene) {
       }
     }
   });
-  scene.traverseVisible((object:any)=>{if(object.isMesh)visibleMeshes++;});
+  scene.traverseVisible((object:any)=>{if(object.isMesh)visibleMeshes++;
+    if(object.isInstancedMesh&&object.count>0)visibleBatches.push({name:object.name||object.geometry?.name||'unnamed',
+      instances:object.count,auxiliary:!!object.userData.streamAuxiliary});});
   let textureBytes=0;
   const files=new Map<string,{name:string;bytes:number;copies:number;width:number;height:number}>();
   for(const texture of sources.values()) {
@@ -41,7 +46,8 @@ export function sceneResources(scene:Scene) {
     row.bytes+=bytes;row.copies++;files.set(name,row);
   }
   return {geometryBytes,instanceBytes,instanceSlots,textureBytes,materials:materials.size,textures:sources.size,objects,meshes,visibleMeshes,
-    textureFiles:[...files.values()].sort((a,b)=>b.bytes-a.bytes)};
+    textureFiles:[...files.values()].sort((a,b)=>b.bytes-a.bytes),instancedMeshes,
+    visibleBatches:visibleBatches.sort((a,b)=>b.instances-a.instances)};
 }
 
 /** Optional mesh draw inspection. Disabled mode adds only a branch to existing renderer entry points. */
@@ -64,20 +70,27 @@ export class GraphicsDiagnostics {
     const direct=renderer.renderBufferDirect.bind(renderer);
     renderer.renderBufferDirect=(camera,scene,geometry,material,object,group)=>{
       if(!this.enabled)return direct(camera,scene,geometry,material,object,group);
-      const before={...renderer.info.render};
+      // If Three skips shadowMap.render, begin the color query at the first
+      // actual color submission rather than relying on the shadow callback.
+      if(this.phase==='Main color'&&this.colorCpuStart===undefined){
+        this.colorQuery=profiler.detailedGpu?profiler.startGpuSection('GPU main color'):undefined;
+        this.colorStart=this.draws;this.colorCpuStart=performance.now();
+      }
+      const beforeCalls=renderer.info.render.calls,beforeTriangles=renderer.info.render.triangles;
       direct(camera,scene,geometry,material,object,group);
-      const draws=renderer.info.render.calls-before.calls;if(!draws)return;
+      const draws=renderer.info.render.calls-beforeCalls;if(!draws)return;
       this.draws+=draws;
       const target=renderer.getRenderTarget();
       const targets=this.targets.get(this.phase)??new Set<string>();
       targets.add(target?`${target.width}×${target.height}${'isWebGLCubeRenderTarget' in target?' cube':''}`:'screen');
       this.targets.set(this.phase,targets);
-      const work={draws,triangles:renderer.info.render.triangles-before.triangles,
+      const work={draws,triangles:renderer.info.render.triangles-beforeTriangles,
         instances:draws*((object as any).isInstancedMesh?(object as any).count:1)};
       const kind=material.transparent?'blend':material.alphaTest?'cutout':'opaque';
       this.accumulate(this.passes,`${this.phase} / ${kind}`,work);
       this.accumulate(this.objects,`${this.phase}: ${object.name||geometry.name||object.type}`,work);
     };
+    new RendererCpuProfiler(renderer,profiler,()=>this.enabled&&this.phase==='Main color');
     const shadows=renderer.shadowMap.render.bind(renderer.shadowMap);
     renderer.shadowMap.render=(...args)=>{
       if(!this.enabled||this.phase!=='Main color')return shadows(...args);
@@ -127,6 +140,9 @@ export class GraphicsDiagnostics {
       `Drawing buffer: ${this.size.x} × ${this.size.y} (${(this.size.x*this.size.y/1e6).toFixed(2)} MP), DPR ${this.renderer.getPixelRatio()}`,
       `Programs: ${this.renderer.info.programs?.length??0} · resident materials: ${m.materials}`,
       `Scene graph: objects ${m.objects} · meshes ${m.meshes} · visible hierarchy meshes ${m.visibleMeshes} (before camera culling)`,
+      `Instancing: ${m.instancedMeshes} resident batches · ${m.visibleBatches.filter(b=>!b.auxiliary).length} visible main batches · ${m.visibleBatches.filter(b=>b.auxiliary).length} visible auxiliary batches (before camera culling)`,
+      'Largest visible instance batches (one draw per geometry/material group; repeated instances share geometry):',
+      ...m.visibleBatches.slice(0,8).map(b=>`${b.instances} instances · ${b.name}${b.auxiliary?' · shadow auxiliary':''}`),
       `All instrumented passes this frame: ${totals.draws} draws · ${totals.triangles.toLocaleString('en-US')} triangles · ${totals.instances} instance submissions`,
       `Render targets observed: ${[...this.targets].map(([name,sizes])=>`${name}: ${[...sizes].join(', ')}`).join(' · ')}`,
       `Referenced buffers: geometry ${mib(m.geometryBytes)} · instances ${mib(m.instanceBytes)} (${m.instanceSlots} slots)`,
@@ -143,6 +159,7 @@ export class GraphicsDiagnostics {
       'Triangles are submitted work, not visible pixels. Cutout overdraw and cache reuse are not measured.',
       'Mesh counters exclude custom raw draws (e.g. flares). GPU timings are async samples; missing passes may be idle.',
       'Reflection totals include six cube faces and any shadow rendering performed for them.',
+      'Renderer CPU breakdown samples one main render in 17; traversal includes culling/list building and geometry preparation, draw submission includes material/program/GL work and diagnostic hooks. Remaining includes lights, callbacks, background and renderer housekeeping; nested timings overlap other profiler rows.',
     ];
   }
 }

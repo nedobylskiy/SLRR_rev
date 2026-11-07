@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Box3, Matrix4, Vector3 } from 'three';
+import { Box3, BufferGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
+import {PanelView} from '../src/render/panel-view';
 import { RigidBody3D, boxContact, orientedBoxContact } from '../src/engine/rigid-body-3d';
 import { Vehicle3D } from '../src/engine/vehicle-3d';
 import { EngineWorld } from '../src/engine/world';
@@ -8,7 +9,7 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
-function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4]) {
+function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4],frequency=240) {
   const world = new EngineWorld(), slots = [101, 102, 103, 104].map((type, i) => `slot 0 0 0 0 0 0 ${20 + i}\nslottype ${type}`).join('\n');
   const wheels = [[-0.7, -1.3], [0.7, -1.3], [-0.7, 1.3], [0.7, 1.3]].map(([x, z], i) => `type 10 sphere 0.3\nspring 0.29 0.1 0.05\nwheel ${x} -0.6 ${z} 0 0 0 ${i < 2 ? 1 : 0} 0 1 0`).join('\n');
   const create = (id: number, file: string, cfg: string) => world.create({ key: { pack: 'test.rpk', id }, alias: file, cfgPath: file, config: parsePartConfig(cfg) });
@@ -39,7 +40,7 @@ function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicl
     crank.definition.mechanics = { kind: 'engine', source: 'crank.java', values: { stroke: 90 } }; world.install(block, 33, crank, 1);
   }
   const samples = [-0.7, 0.04, -0.7, 0.7, 0.04, -0.7, -0.7, 0.04, 0.7, 0.7, 0.04, 0.7];
-  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain);
+  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain,undefined,frequency);
   const box = (x: number, y: number, z: number) => { const a: number[] = []; for (const px of [-x, x]) for (const py of [-y, y]) for (const pz of [-z, z]) a.push(px, py, pz); return a; };
   demo.register(door, box(0.04, 0.4, 0.6), []); demo.register(lamp, box(0.15, 0.15, 0.15), []); demo.reset();
   if (mechanical) {
@@ -50,6 +51,91 @@ function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicl
   }
   return { world, root, hood, door, lamp, demo, struts, sway, block, crank };
 }
+
+test('route inputs run once per fixed tick and assembly export excludes animated local travel',()=>{
+  const {demo,world,root}=setup(true),part=[...root.children.values()].find(p=>p.definition.mechanics?.kind==='suspension')!;
+  const assembly=demo.assemblyLocal(part);part.local.makeTranslation(9,8,7);
+  assert.deepEqual(demo.assemblyLocal(part),assembly);
+  const times:number[]=[];
+  demo.replayInput=time=>{times.push(time);return neutral;};
+  demo.advance(4/240,{throttle:1,steer:1,brake:true});
+  assert.equal(times.length,4);times.forEach((time,i)=>assert.ok(Math.abs(time-i/240)<1e-12));
+  assert.equal(demo.simulationTime,4/240);assert.equal(demo.suspension.steer,0);
+  demo.dispose();world.dispose();
+});
+
+test('recorded poses carry world-space panels before their first upload and subsequent rigid draws',()=>{
+  for(const uploadFirst of [false,true]){
+    const {demo,world,hood,root}=setup(true),samples=[-.7,.04,-.7,.7,.04,-.7,-.7,.04,.7,.7,.04,.7];
+    const geometry=new BufferGeometry();geometry.setAttribute('position',new Float32BufferAttribute(samples,3));geometry.computeVertexNormals();
+    const group=new Group();group.matrixAutoUpdate=false;const material=new MeshBasicMaterial();group.add(new Mesh(geometry,material));
+    const view=new PanelView(group,demo.panel,[samples]),initial=hood.matrix();
+    if(uploadFirst)view.update(initial,true);
+    const original=Array.from(geometry.getAttribute('position').array),clock=demo.simulationTime;
+    for(let step=1;step<=3;step++){
+      const next=new Matrix4().makeRotationY(.4*step).setPosition(20*step,3*step,-10*step);
+      demo.body.setFrame(next);root.local.copy(next);demo.suspension.sync();demo.syncRecordedPose();
+      view.update(hood.matrix(),true);
+      const delta=hood.matrix().multiply(initial.clone().invert());
+      for(let i=0;i<original.length;i+=3){
+        const expected=new Vector3().fromArray(original,i).applyMatrix4(delta);
+        const actual=new Vector3().fromBufferAttribute(geometry.getAttribute('position'),i/3).applyMatrix4(group.matrix);
+        assert.ok(actual.distanceTo(expected)<1e-4,`panel follows recorded frame (initial upload: ${uploadFirst})`);
+      }
+      assert.ok(demo.soft.get(hood)!.activity.frame.equals(hood.matrix()));
+      assert.equal(demo.simulationTime,clock,'render replay must not advance vehicle physics');
+    }
+    view.dispose();geometry.dispose();material.dispose();demo.dispose();world.dispose();
+  }
+});
+
+test('checkpoint restore precedes physics frame capture and does not create a teleport impact',()=>{
+  const {demo,root,world}=setup(true);demo.disableObstacle();
+  const target=new Matrix4().makeRotationY(.7).setPosition(30,50,-20);
+  const expectedCenter=demo.body.center.clone().applyMatrix4(target);
+  demo.beforeReplayTick=time=>{if(time!==0)return;demo.body.setFrame(target);root.local.copy(target);demo.syncRecordedPose();};
+  demo.advance(1/240,neutral);
+  assert.ok(demo.body.position.distanceTo(expectedCenter)<.001,'restored frame is used for this tick');
+  assert.equal(root.condition,1);assert.ok([...demo.soft.values()].every(s=>!s.activity.deforming));
+  assert.equal(demo.impactSpeed,0);assert.equal(demo.timings.activePanels,0);
+  demo.dispose();world.dispose();
+});
+
+test('10–20 FPS and 150–200 ms frames keep physics at real time with the same fixed-tick trajectory',()=>{
+  const reference=setup(true);reference.demo.disableObstacle();
+  for(let tick=0;tick<288;tick++)reference.demo.advance(1/240,neutral);
+  for(const duration of [.05,.1,.15,.2]){
+    const state=setup(true);state.demo.disableObstacle();
+    for(let frame=0;frame<Math.round(1.2/duration);frame++){
+      const result=state.demo.advance(duration,neutral);
+      assert.equal(result.backlogTicks,0,`frame ${duration}s must not hit the old 8-tick cap`);
+    }
+    assert.ok(Math.abs(state.demo.simulationTime-1.2)<1e-12);
+    assert.ok(Math.abs(state.demo.simulationTargetSeconds-1.2)<1e-12);
+    assert.ok(state.demo.body.position.distanceTo(reference.demo.body.position)<1e-10);
+    assert.ok(state.demo.body.orientation.angleTo(reference.demo.body.orientation)<1e-7);
+    for(const [part,soft] of state.demo.soft){
+      const other=[...reference.demo.soft.values()].find(s=>s.part.definition.alias===part.definition.alias)!;
+      for(let i=0;i<soft.panel.positions.length;i++)assert.ok(Math.abs(soft.panel.positions[i]-other.panel.positions[i])<1e-10);
+    }
+    state.demo.dispose();state.world.dispose();
+  }
+  reference.demo.dispose();reference.world.dispose();
+});
+
+test('a long foreground stall retains bounded catch-up debt without losing simulation time',()=>{
+  const {demo,world}=setup(true);demo.disableObstacle();
+  const frame=demo.advance(.6,neutral);
+  assert.equal(frame.steps,64);assert.equal(frame.backlogTicks,80);
+  assert.ok(Math.abs(demo.simulationTargetSeconds-.6)<1e-12);
+  assert.ok(Math.abs(demo.simulationPendingSeconds-80/240)<1e-12);
+  assert.equal(demo.advance(0,neutral).backlogTicks,16);
+  assert.equal(demo.advance(0,neutral).backlogTicks,0);
+  assert.ok(Math.abs(demo.simulationTime-.6)<1e-12);
+  assert.ok(demo.simulationPendingSeconds<1e-12);
+  demo.reset();assert.equal(demo.maxPhysicsSteps,64);assert.equal(demo.simulationTime,0);assert.equal(demo.simulationTargetSeconds,0);
+  demo.dispose();world.dispose();
+});
 
 test('driving and active body deformation are invariant to terrain elevation below zero', () => {
   const createAt = (elevation: number) => {
@@ -462,3 +548,114 @@ test('alignment failure starts below 10 percent support health and zero-health p
 
 
 
+
+
+test('sleeping detached panels do not request collision-surface refits while attached panels deform',()=>{
+  const {world,root,demo,hood,door}=setup();demo.disableObstacle();
+  const triangles=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2];
+  const samples:number[]=[];for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangles);demo.setBodyTriangles(triangles);demo.reset();
+  world.detach(hood);demo.panel.mounts.forEach(m=>m.broken=true);
+  for(let i=0;i<demo.panel.positions.length;i+=3){demo.panel.positions[i]+=5;demo.panel.positions[i+1]+=2;}
+  const state=demo.soft.get(hood)!;
+  for(let tick=0;tick<6*240&&!state.activity.resting;tick++)demo.advance(1/240,neutral);
+  assert.ok(state.activity.resting);
+  const geometry=demo as unknown as {updateSurface():void},update=geometry.updateSurface.bind(demo);let refits=0;
+  geometry.updateSurface=()=>{refits++;update();};
+  const positions=demo.panel.positions.slice();
+  for(let tick=0;tick<120;tick++){demo.soft.get(door)!.activity.wake();demo.advance(1/240,neutral);}
+  assert.equal(refits,0,'no awake loose consumer needs the current body triangle mesh');
+  assert.deepEqual(demo.panel.positions,positions);
+  state.activity.freeBody!.impulse(new Vector3(20,100,0));demo.advance(1/240,neutral);
+  assert.ok(refits>0,'waking debris receives fresh body geometry before its contact queries');
+  world.dispose();
+});
+
+
+test('recording aggregates profiled panel phases across every fixed substep and exports actual vehicle CPU frames',()=>{
+  const {demo,world,hood}=setup(true);demo.disableObstacle();demo.panel.hit(20);
+  demo.telemetry.start();demo.advance(4/240,neutral);
+  assert.equal(demo.timings.ticks,4);assert.ok(demo.timings.activePanels>=4);
+  assert.ok(demo.timings.panelConstraints>0);assert.ok(demo.timings.panelContacts>0);assert.ok(demo.timings.nodeSteps>=4*demo.panel.positions.length/3);
+  demo.telemetry.recordPerformanceFrame(100,{'Render callback CPU':25},false,{stream_matrices_written_count:7,hiz_collect_ms:2});demo.telemetry.stop();
+  const line=demo.telemetry.text().split('\n').find(l=>l.startsWith('SLRR_FRAME|v=1|'))!;
+  const row=JSON.parse(line.slice('SLRR_FRAME|v=1|'.length));assert.equal(row.physics_ticks,4);assert.equal(row.constraints_ms,demo.timings.panelConstraints);assert.equal(row.active_panel_steps,demo.timings.activePanels);
+  assert.equal(row.suspension_height_count,16);assert.ok(row.suspension_height_ms>=0);
+  assert.equal(demo.suspension.terrain.queryProfile,undefined,'query scope restored after suspension calls');
+  assert.equal(row.stream_matrices_written_count,7);assert.equal(row.hiz_collect_ms,2);
+  assert.deepEqual(demo.suspension.workProfile.drain(),{});
+  assert.equal(row.wasm_panels+row.ts_panels,demo.soft.size);assert.equal(row.cpu_render_callback_cpu_ms,25);
+  demo.advance(1/240,neutral);assert.equal(demo.timings.panelConstraints,0,'no detailed timers when recording is off');
+  world.dispose();
+});
+
+
+test('detaching body geometry keeps the existing collision BVH and disables its triangle slots',()=>{
+  const {demo,world,root,door}=setup();const triangle=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2];
+  const samples:number[]=[];for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangle);demo.register(door,samples,triangle);demo.setBodyTriangles([...triangle,...triangle]);
+  const original=demo.bodySurface!,update=()=>{(demo as unknown as {updateSurface():void}).updateSurface();};
+  update();assert.equal(demo.bodySurface,original);const tree=(original as any).tree;
+  world.detach(door);update();assert.equal(demo.bodySurface,original);assert.equal((original as any).tree,tree);
+  assert.equal(original.coordinateLength,18);assert.equal(demo.timings.surfaceBuilds,0);assert.equal(demo.timings.surfaceRefits,2);
+  assert.equal((original as any).faces.filter((f:any)=>f.active).length,1,'only the connected chassis triangle remains active');
+  world.dispose();
+});
+
+
+test('collision skin cache survives rigid motion and updates only changed part ranges, including removal and restoration',()=>{
+  const {demo,world,root,door}=setup();const triangle=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2];
+  const samples:number[]=[];for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangle);demo.register(door,samples,triangle);demo.setBodyTriangles([...triangle,...triangle]);
+  const chassis=demo.soft.get(root)!.panel,side=demo.soft.get(door)!.panel,skinRoot=chassis.skin.bind(chassis),skinDoor=side.skin.bind(side);
+  let rootCalls=0,doorCalls=0;chassis.skin=(...args)=>{rootCalls++;skinRoot(...args);};side.skin=(...args)=>{doorCalls++;skinDoor(...args);};
+  const update=()=>{(demo as unknown as {updateSurface():void}).updateSurface();};
+  update();assert.equal(rootCalls,3);assert.equal(doorCalls,3);update();assert.equal(rootCalls,3);assert.equal(doorCalls,3);
+  root.local.makeRotationY(.7).setPosition(20,2,-30);demo.body.setFrame(root.matrix());demo.syncRecordedPose();update();
+  assert.equal(rootCalls,3,'whole-car translation/rotation must not skin cached local geometry');assert.equal(doorCalls,3);
+  const geometry=(demo as unknown as {geometry:{part:typeof root;bindings:any[]}[];surfaceCoordinates:number[]});
+  const expected=[0,0,0];skinRoot(geometry.geometry.find(g=>g.part===root)!.bindings[0],expected);
+  const localPoint=new Vector3().fromArray(expected).applyMatrix4(root.matrix().invert());
+  assert.ok(localPoint.distanceTo(new Vector3().fromArray(geometry.surfaceCoordinates))<1e-10,'cached coordinates match an explicit rotated world-space skin');
+  door.local.elements[12]+=.1;demo.syncRecordedPose();update();assert.equal(rootCalls,3);assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
+  chassis.positions[0]-=.2;chassis.shapeVersion++;update();assert.equal(rootCalls,6);assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
+  world.detach(door);update();assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
+  world.install(root,602,door,1);demo.syncRecordedPose();update();assert.equal(doorCalls,9,'restored geometry must be regenerated');
+  demo.reset();update();assert.ok(rootCalls>6,'reset invalidates the cache');world.dispose();
+});
+
+
+test('120 Hz vehicle keeps all soft panels in step, preserves its rate on reset and retains bounded time debt',()=>{
+  const {demo,world}=setup(false,undefined,120);demo.disableObstacle();
+  assert.equal(demo.physicsDt,1/120);assert.equal(demo.maxPhysicsSteps,32);
+  for(const s of demo.soft.values())assert.equal(s.panel.clock.frequency,120);
+  demo.advance(1/60,neutral);assert.equal(demo.timings.ticks,2);
+  for(const s of demo.soft.values())assert.equal(s.panel.clock.tick,2);
+  demo.reset();assert.equal(demo.clock.frequency,120);for(const s of demo.soft.values())assert.equal(s.panel.clock.frequency,120);
+  const result=demo.advance(.6,neutral);assert.equal(result.steps,32);assert.equal(result.backlogTicks,40);
+  assert.equal(demo.advance(0,neutral).backlogTicks,8);assert.equal(demo.advance(0,neutral).backlogTicks,0);
+  assert.ok(Math.abs(demo.simulationTime-.6)<1e-12);world.dispose();
+});
+
+test('120 Hz collision simulation has the same fixed-step trajectory at different render cadences',()=>{
+  const a=setup(false,undefined,120),b=setup(false,undefined,120);
+  a.demo.reset(15);b.demo.reset(15);
+  for(let i=0;i<180;i++)a.demo.advance(2/120,neutral);
+  for(let i=0;i<90;i++)b.demo.advance(4/120,neutral);
+  assert.ok(a.demo.body.position.distanceTo(b.demo.body.position)<1e-10);
+  assert.ok(a.demo.body.velocity.distanceTo(b.demo.body.velocity)<1e-10);
+  for(const [part,state] of a.demo.soft){const other=[...b.demo.soft.values()].find(s=>s.part.definition.alias===part.definition.alias)!;assert.deepEqual(state.panel.positions,other.panel.positions);}
+  a.world.dispose();b.world.dispose();
+});
+
+test('120 Hz keeps collision-geometry refresh cadence at 60 Hz',()=>{
+  const {demo,root,world,hood,door}=setup(false,undefined,120);demo.disableObstacle();
+  const triangles=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2],samples:number[]=[];
+  for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangles);demo.setBodyTriangles(triangles);world.detach(hood);demo.panel.mounts.forEach(m=>m.broken=true);
+  for(let i=0;i<demo.panel.positions.length;i+=3){demo.panel.positions[i]+=5;demo.panel.positions[i+1]+=10;}
+  const internals=demo as unknown as {updateSurface():void},update=internals.updateSurface.bind(demo),ticks:number[]=[];
+  internals.updateSurface=()=>{ticks.push(demo.clock.tick+1);update();};
+  for(let i=0;i<12;i++){demo.soft.get(door)!.activity.wake();demo.soft.get(hood)!.activity.wake();demo.advance(1/120,neutral);}
+  assert.deepEqual(ticks,[1,3,5,7,9,11]);world.dispose();
+});

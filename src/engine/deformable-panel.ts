@@ -1,10 +1,13 @@
+import {REFERENCE_PHYSICS_HZ,XPBD_ITERATIONS,MOUNT_RELEASE_DELAY_S} from './physics-timing';
 import { FixedClock } from '../runtime/fixed-clock';
 import { softBodyRuntime, type SoftBodyBackend, type SoftBodyKernel } from './soft-body-wasm';
+
+export const PANEL_GROUND_CLEARANCE=.015;
 
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
-export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
+export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
 export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; collider?: boolean; impulse?: (impulse: Triple, point: Triple) => void }
@@ -14,11 +17,13 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 /** Generated two-layer cage; XPBD distance/anchor constraints, plastic rest lengths and force-driven mount failure. */
 export class DeformablePanel {
   private readonly kernel?: SoftBodyKernel;
+  profiling=false;
+  readonly profile={constraints:0,contacts:0,upload:0,integration:0,steps:0,surfaceMs:0,groundMs:0};
   get backend(): 'ts' | 'wasm' { return this.kernel && (this.options.backend ?? softBodyRuntime.preference) !== 'ts' ? 'wasm' : 'ts'; }
   readonly nx: number; readonly nz: number; readonly thickness: number;
   readonly positions: Float64Array; readonly rest: Float64Array; readonly velocities: Float64Array;
   readonly beams: Beam[] = []; readonly mounts: PanelMount[] = [];
-  clock = new FixedClock(240, 32);
+  clock:FixedClock;
   private previous: Float64Array; private anchorLambda: Float64Array;
   private incoming: Float64Array;
   private ground: Float64Array;
@@ -38,6 +43,7 @@ export class DeformablePanel {
   shapeVersion = 0;
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
+    this.clock=new FixedClock(options.frequency??REFERENCE_PHYSICS_HZ,32);
     [this.nx, this.nz] = options.resolution ?? [7, 9];
     if (![this.nx, this.nz].every(v => Number.isInteger(v) && v >= 3 && v <= 16)) throw new Error('Invalid cage resolution');
     if (options.gravity !== undefined && (!Number.isFinite(options.gravity) || options.gravity < 0)) throw new Error('Invalid panel gravity');
@@ -133,7 +139,7 @@ export class DeformablePanel {
   reset() {
     this.resetVersion++;
     this.shapeVersion++;
-    this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(240, 32);
+    this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(this.clock.frequency,32);
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
     this.contacts = 0;
@@ -179,7 +185,10 @@ export class DeformablePanel {
     for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) corrected[axis] += this.velocities[i + axis] / count;
     for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) this.velocities[i + axis] += velocity[axis] - corrected[axis];
   }
-  advance(seconds: number) { return this.clock.advance(seconds, (_, dt) => this.step(dt)); }
+  advance(seconds: number) {
+    if(this.profiling)Object.assign(this.profile,{constraints:0,contacts:0,upload:0,integration:0,steps:0,surfaceMs:0,groundMs:0});
+    return this.clock.advance(seconds, (_, dt) => this.step(dt));
+  }
   /** Carry the existing (possibly dented) cage as one rigid shape. Plastic lengths stay intact. */
   advanceRigid(seconds: number, transform: ArrayLike<number>, velocity: Triple, omega: Triple, center: Triple) {
     if (transform.length !== 16 || ![...Array.from(transform), ...velocity, ...omega, ...center].every(Number.isFinite)) throw new Error('Invalid rigid panel motion');
@@ -198,6 +207,7 @@ export class DeformablePanel {
     });
   }
   private step(dt: number) {
+    const profile=this.profiling?this.profile:undefined;let stamp=profile?performance.now():0;if(profile)profile.steps++;
     const kernel = this.backend === 'wasm' ? this.kernel : undefined;
     const nativeBoxes = kernel?.uploadColliders(this.colliders) ?? false;
     this.collisionImpact = undefined;
@@ -205,6 +215,7 @@ export class DeformablePanel {
     const attached = this.attached;
     if (kernel) {
       kernel.upload(this.beams, this.mounts);
+      if(profile){profile.upload+=performance.now()-stamp;stamp=performance.now();}
       kernel.predict(dt, this.options.gravity ?? 9.81, attached);
     } else {
       this.previous.set(p); this.anchorLambda.fill(0);
@@ -215,16 +226,21 @@ export class DeformablePanel {
       }
       this.anchorVelocities.fill(0);
     }
+    if(profile){profile.integration+=performance.now()-stamp;stamp=performance.now();}
     // Sample once per node/tick, rather than querying the map in every XPBD
     // iteration. Use the previous height to select the reachable road/deck.
+    const groundStart=profile?performance.now():0;
     for (let i = 0; i < p.length; i += 3)
-      this.ground[i / 3] = this.groundHeight(p[i], p[i + 2], this.previous[i + 1]) + 0.015;
+      this.ground[i / 3] = this.groundHeight(p[i], p[i + 2], this.previous[i + 1]) + PANEL_GROUND_CLEARANCE;
+    if(profile)profile.groundMs+=performance.now()-groundStart;
     const incoming = this.incoming, contacts = this.stepContacts; contacts.clear();
     if (!kernel) for (let i = 0; i < p.length; i++) incoming[i] = (p[i] - this.previous[i]) / dt;
-    const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
+    const surfaces = () => { const start=profile?performance.now():0;for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } if(profile)profile.surfaceMs+=performance.now()-start; };
     if (!kernel) for (const b of this.beams) b.lambda = 0;
-    for (let iteration = 0; iteration < 12; iteration++) {
-      if (kernel) kernel.solve(dt);
+    if(profile)profile.contacts+=performance.now()-stamp;
+    for (let iteration = 0; iteration < XPBD_ITERATIONS; iteration++) {
+      if(profile)stamp=performance.now();
+      if (kernel) {if(profile)kernel.solveConstraints(dt);else kernel.solve(dt);}
       else {
         for (const b of this.beams) {
           const a = b.a * 3, c = b.b * 3, dx = p[a] - p[c], dy = p[a + 1] - p[c + 1], dz = p[a + 2] - p[c + 2], length = Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -236,23 +252,29 @@ export class DeformablePanel {
           const i = n * 3 + axis, alpha = 1e-7 / dt2, dl = (-(p[i] - this.rest[i]) - alpha * this.anchorLambda[i]) / (inv + alpha);
           this.anchorLambda[i] += dl; p[i] += inv * dl;
         }
-        for (let i = 1; i < p.length; i += 3) p[i] = Math.max(this.ground[(i - 1) / 3], p[i]);
       }
+      if(profile){profile.constraints+=performance.now()-stamp;stamp=performance.now();}
+      if(kernel){if(profile)kernel.solveContacts();}
+      else for(let i=1;i<p.length;i+=3)p[i]=Math.max(this.ground[(i-1)/3],p[i]);
       if (!nativeBoxes) for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
       if (iteration === 0 || iteration === 4 || iteration === 8 || iteration === 11) surfaces();
+      if(profile)profile.contacts+=performance.now()-stamp;
     }
+    if(profile)stamp=performance.now();
     if (kernel) kernel.release(dt, this.mountStrength, this.mounts);
     else {
       let release = false;
       for (const m of this.mounts) if (!m.broken) {
         m.force = m.nodes.reduce((sum, n) => sum + Math.hypot(this.anchorLambda[n * 3], this.anchorLambda[n * 3 + 1], this.anchorLambda[n * 3 + 2]) / dt2, 0);
         m.overload = m.force > this.mountStrength ? m.overload + dt : 0;
-        if (m.overload >= 2 * dt) release = true;
+        if (m.overload >= MOUNT_RELEASE_DELAY_S) release = true;
       }
       // The clamps represent one part attachment: a failed clamp releases the whole panel.
       if (release) for (const m of this.mounts) m.broken = true;
     }
-    if (attached && !this.attached) surfaces(); // Sweep the release step too, before its history is discarded.
+    if(profile){profile.integration+=performance.now()-stamp;stamp=performance.now();}
+    if (attached && !this.attached) surfaces();
+    if(profile){profile.contacts+=performance.now()-stamp;stamp=performance.now();} // Sweep the release step too, before its history is discarded.
     if (kernel) kernel.finish(dt, this.yieldStrain, this.beams);
     else {
       for (const b of this.beams) {
@@ -261,6 +283,7 @@ export class DeformablePanel {
       }
       for (let i = 0; i < p.length; i++) { this.velocities[i] = (p[i] - this.previous[i]) / dt; if (!Number.isFinite(p[i])) throw new Error('Non-finite panel state'); }
     }
+    if(profile){profile.integration+=performance.now()-stamp;stamp=performance.now();}
     this.contacts = contacts.size;
     for (const [i, contact] of contacts) {
       const n = contact.normal, surface = contact.velocity ?? [0, 0, 0];
@@ -276,7 +299,9 @@ export class DeformablePanel {
         this.collisionImpact = { speed: -before, impulse: Math.hypot(...impulse), point: [...contact.point] };
       contact.impulse?.(impulse, contact.point);
     }
-    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= this.ground[i / 3] + 0.000001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+    const groundDecay=Math.pow(.96,dt*REFERENCE_PHYSICS_HZ);
+    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= this.ground[i / 3] + 0.000001) { this.velocities[i] *= groundDecay; this.velocities[i + 2] *= groundDecay; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+    if(profile)profile.contacts+=performance.now()-stamp;
     this.shapeVersion++;
   }
   private contactBox(i: number, box: PanelCollider) {
