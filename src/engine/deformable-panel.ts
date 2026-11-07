@@ -18,7 +18,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export class DeformablePanel {
   private readonly kernel?: SoftBodyKernel;
   profiling=false;
-  readonly profile={constraints:0,contacts:0,upload:0,integration:0,steps:0};
+  readonly profile={constraints:0,contacts:0,upload:0,integration:0,steps:0,surfaceMs:0,groundMs:0};
   get backend(): 'ts' | 'wasm' { return this.kernel && (this.options.backend ?? softBodyRuntime.preference) !== 'ts' ? 'wasm' : 'ts'; }
   readonly nx: number; readonly nz: number; readonly thickness: number;
   readonly positions: Float64Array; readonly rest: Float64Array; readonly velocities: Float64Array;
@@ -186,7 +186,7 @@ export class DeformablePanel {
     for (let i = 0; i < this.velocities.length; i += 3) for (let axis = 0; axis < 3; axis++) this.velocities[i + axis] += velocity[axis] - corrected[axis];
   }
   advance(seconds: number) {
-    if(this.profiling)Object.assign(this.profile,{constraints:0,contacts:0,upload:0,integration:0,steps:0});
+    if(this.profiling)Object.assign(this.profile,{constraints:0,contacts:0,upload:0,integration:0,steps:0,surfaceMs:0,groundMs:0});
     return this.clock.advance(seconds, (_, dt) => this.step(dt));
   }
   /** Carry the existing (possibly dented) cage as one rigid shape. Plastic lengths stay intact. */
@@ -229,11 +229,13 @@ export class DeformablePanel {
     if(profile){profile.integration+=performance.now()-stamp;stamp=performance.now();}
     // Sample once per node/tick, rather than querying the map in every XPBD
     // iteration. Use the previous height to select the reachable road/deck.
+    const groundStart=profile?performance.now():0;
     for (let i = 0; i < p.length; i += 3)
       this.ground[i / 3] = this.groundHeight(p[i], p[i + 2], this.previous[i + 1]) + PANEL_GROUND_CLEARANCE;
+    if(profile)profile.groundMs+=performance.now()-groundStart;
     const incoming = this.incoming, contacts = this.stepContacts; contacts.clear();
     if (!kernel) for (let i = 0; i < p.length; i++) incoming[i] = (p[i] - this.previous[i]) / dt;
-    const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
+    const surfaces = () => { const start=profile?performance.now():0;for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } if(profile)profile.surfaceMs+=performance.now()-start; };
     if (!kernel) for (const b of this.beams) b.lambda = 0;
     if(profile)profile.contacts+=performance.now()-stamp;
     for (let iteration = 0; iteration < XPBD_ITERATIONS; iteration++) {

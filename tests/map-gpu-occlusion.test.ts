@@ -1,3 +1,4 @@
+import {allocateMapPlacementIds,setMapPlacementIds} from '../src/render/map-placement-ids';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {BoxGeometry,Color,DoubleSide,FrontSide,BackSide,Group,InstancedMesh,Matrix4,Mesh,MeshStandardMaterial,PlaneGeometry,PerspectiveCamera,Vector3,type WebGLRenderer} from 'three';
@@ -164,4 +165,98 @@ test('hidden placements survive streamer removal/re-entry and pending results fo
   cull.renderMain(()=>{assert.equal(mesh.visible,false);const proxy=root.children.find(o=>o.userData.gpuOcclusionProxy) as InstancedMesh;
     const m=new Matrix4();proxy.getMatrixAt(0,m);assert.equal(m.elements[12],8);proxy.getMatrixAt(1,m);assert.equal(m.elements[12],0);});
   cull.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
+});
+
+
+test('static placement boxes and GPU packing survive repeated passes and stream reorder',()=>{
+  const cull=new MapGpuOcclusion({shadowMap:{render:()=>{}}} as unknown as WebGLRenderer),root=new Group();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),2);root.add(mesh);
+  const a=new Matrix4().makeTranslation(1,2,-10),b=new Matrix4().makeTranslation(4,5,-20);
+  mesh.setMatrixAt(0,a);mesh.setMatrixAt(1,b);mesh.instanceMatrix.needsUpdate=true;
+  cull.workProfile.setEnabled(true);
+  const internals=cull as any;internals.collect(root);
+  assert.equal(cull.workProfile.drain().bounds_built_count,2);
+  const first=internals.states.get(mesh),items=internals.prepareCandidates(),texture=internals.boxes,version=texture.version;
+  assert.equal(internals.prepareCandidates(),items);
+  assert.equal(texture.version,version,'unchanged candidates do not upload boxes again');
+  internals.collect(root);assert.equal(internals.prepareCandidates(),items);
+  mesh.setMatrixAt(0,b);mesh.setMatrixAt(1,a);mesh.instanceMatrix.needsUpdate=true;internals.collect(root);
+  const reordered=internals.states.get(mesh);
+  assert.equal(reordered.bounds[0],first.bounds[1]);assert.equal(reordered.bounds[1],first.bounds[0]);
+  assert.notEqual(internals.prepareCandidates(),items);assert.ok(texture.version>version);
+  assert.equal(items[0].state,first,'pending GPU ticket retains its original immutable slot mapping');
+  const work=cull.workProfile.drain();assert.equal(work.bounds_reused_count,2);assert.equal(work.bounds_uploads_count,2);
+  assert.ok(work.collect_ms>=0&&work.pack_bounds_ms>=0);
+  mesh.position.x=20;internals.collect(root);
+  assert.notEqual(internals.states.get(mesh).bounds[0],reordered.bounds[0],'world transform invalidates cache');
+  cull.reset();assert.equal(internals.prepareCandidates().length,0);cull.dispose();
+  mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
+});
+
+
+test('numeric placement IDs distinguish coincident objects, preserve verdicts across slot changes and reject old transforms',()=>{
+  const cull=new MapGpuOcclusion({shadowMap:{render:()=>{}}} as unknown as WebGLRenderer),root=new Group();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),2);root.add(mesh);
+  const ids=allocateMapPlacementIds(2),matrix=new Matrix4().makeTranslation(0,0,-10);
+  assert.notEqual(ids[0],ids[1]);mesh.setMatrixAt(0,matrix);mesh.setMatrixAt(1,matrix);mesh.instanceMatrix.needsUpdate=true;setMapPlacementIds(mesh,ids);
+  cull.workProfile.setEnabled(true);const api=cull as any;api.collect(root);const first=api.states.get(mesh);
+  assert.deepEqual(first.identities,ids);api.apply({items:[{state:first,slot:0},{state:first,slot:1}],bytes:new Uint8Array([0,0,0,0,255,0,0,0])});
+  assert.equal(first.hidden,1);assert.equal(first.visibleSlots.has(0),false);assert.equal(first.visibleSlots.has(1),true);
+  setMapPlacementIds(mesh,[ids[1],ids[0]]);mesh.instanceMatrix.needsUpdate=true;api.collect(root);
+  const reordered=api.states.get(mesh);assert.equal(reordered.hidden,1);assert.equal(reordered.visibleSlots.has(1),false);
+  assert.equal(reordered.bounds[1],first.bounds[0]);
+  mesh.removeFromParent();api.collect(root);root.add(mesh);api.collect(root);
+  assert.equal(api.states.get(mesh).hidden,1,'temporary removal preserves the last shader verdict');
+  mesh.setMatrixAt(1,new Matrix4().makeTranslation(50,0,-10));mesh.instanceMatrix.needsUpdate=true;api.collect(root);
+  const moved=api.states.get(mesh);assert.equal(moved.hidden,0,'changed transform invalidates this placement only');
+  assert.notEqual(moved.bounds[1],first.bounds[0]);assert.ok(moved.bounds[1].min.x>40);
+  api.apply({items:[{state:first,slot:0},{state:first,slot:1}],bytes:new Uint8Array([0,0,0,0,255,0,0,0])});
+  assert.equal(moved.hidden,0,'pending result for an old transform cannot hide the moved placement');
+  const work=cull.workProfile.drain();assert.ok(work.numeric_identity_instances_count>0);assert.equal(work.fallback_matrix_identity_instances_count,undefined);
+  cull.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
+});
+
+
+test('depth GPU resources survive stream compaction, color changes and temporary absence, and dispose with their source',()=>{
+  const cull=new MapGpuOcclusion({shadowMap:{render:()=>{}}} as unknown as WebGLRenderer),root=new Group();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),4);mesh.count=2;mesh.userData.mapOcclusionRole='structure';root.add(mesh);
+  const ids=allocateMapPlacementIds(2);setMapPlacementIds(mesh,ids);
+  mesh.setMatrixAt(0,new Matrix4().makeTranslation(0,0,-10));mesh.setMatrixAt(1,new Matrix4().makeTranslation(50,0,-10));mesh.instanceMatrix.needsUpdate=true;
+  cull.workProfile.setEnabled(true);const api=cull as any;api.collect(root);
+  const first=api.states.get(mesh),depth=first.depth,material=depth.material;let disposed=0,materialDisposed=0;
+  depth.addEventListener('dispose',()=>disposed++);material.addEventListener('dispose',()=>materialDisposed++);
+  const uploadVersion=depth.instanceMatrix.version;
+  mesh.setColorAt(0,new Color('red'));mesh.instanceColor!.needsUpdate=true;api.collect(root);
+  assert.equal(api.states.get(mesh).depth,depth);assert.equal(depth.instanceMatrix.version,uploadVersion,'palette changes do not reupload depth matrices');
+  mesh.count=1;mesh.setMatrixAt(0,new Matrix4().makeTranslation(50,0,-10));mesh.instanceMatrix.needsUpdate=true;setMapPlacementIds(mesh,[ids[1]]);api.collect(root);
+  const current=api.states.get(mesh);assert.equal(current.depth,depth);assert.equal(depth.material,material);assert.equal(depth.count,1);
+  assert.ok(depth.boundingSphere.center.x>40,'aggregate depth bounds follow the compacted matrices');
+  assert.deepEqual(first.identities,ids,'old ticket metadata remains an immutable snapshot');assert.deepEqual(current.identities,[ids[1]]);
+  mesh.removeFromParent();api.collect(root);assert.equal(depth.parent,null);assert.equal(disposed,0);
+  root.add(mesh);api.collect(root);assert.equal(api.states.get(mesh).depth,depth);assert.equal(depth.parent,api.depthScene);
+  assert.equal(api.prepareCandidates().length,0,'depth sources never enter the candidate buffer');
+  const work=cull.workProfile.drain();assert.equal(work.depth_proxies_created_count,1);assert.ok(work.depth_proxies_reused_count>=2);assert.equal(work.sources_resumed_count,1);
+  mesh.dispose();assert.equal(disposed,1);assert.equal(materialDisposed,1);assert.equal(api.states.has(mesh),false);assert.equal(api.dormant.size,0);
+  cull.dispose();assert.equal(disposed,1);mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();
+});
+
+test('visible GPU proxy buffers survive all-visible/all-hidden masks and semantic changes release incompatible resources',()=>{
+  const cull=new MapGpuOcclusion({shadowMap:{render:()=>{}}} as unknown as WebGLRenderer),root=new Group();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),2);root.add(mesh);
+  setMapPlacementIds(mesh,allocateMapPlacementIds(2));mesh.setMatrixAt(0,new Matrix4());mesh.setMatrixAt(1,new Matrix4().makeTranslation(4,0,0));mesh.instanceMatrix.needsUpdate=true;
+  const api=cull as any;api.collect(root);let state=api.states.get(mesh);
+  const apply=(a:number,b:number)=>api.apply({items:[{state,slot:0},{state,slot:1}],bytes:new Uint8Array([a,0,0,0,b,0,0,0])});
+  apply(0,255);const proxy=state.proxy;let disposed=0;proxy.addEventListener('dispose',()=>disposed++);
+  apply(255,255);assert.equal(state.proxy,proxy);assert.equal(proxy.count,0);assert.equal(state.hidden,0);
+  apply(0,0);assert.equal(state.proxy,proxy);assert.equal(proxy.count,0);assert.equal(state.hidden,2);
+  apply(255,0);assert.equal(state.proxy,proxy);assert.equal(proxy.count,1);assert.equal(disposed,0);
+  mesh.setColorAt(0,new Color('blue'));mesh.instanceColor!.needsUpdate=true;api.collect(root);
+  state=api.states.get(mesh);assert.equal(state.proxy,proxy);assert.equal(state.hidden,1);
+  (mesh.material as MeshStandardMaterial).side=BackSide;api.collect(root);assert.equal(disposed,1,'semantic changes release incompatible proxies');
+  state=api.states.get(mesh);assert.equal(state.hidden,0);apply(0,255);const replacement=state.proxy;assert.notEqual(replacement,proxy);
+  let replacementDisposed=0;replacement.addEventListener('dispose',()=>replacementDisposed++);
+  mesh.removeFromParent();api.collect(root);assert.equal(replacementDisposed,0);assert.equal(api.prepareCandidates().length,0);
+  root.add(mesh);api.collect(root);assert.equal(api.prepareCandidates().length,2);assert.equal(api.states.get(mesh).proxy,replacement);
+  mesh.removeFromParent();api.collect(root);mesh.dispose();assert.equal(replacementDisposed,1);assert.equal(disposed,1);cull.dispose();
+  mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();
 });

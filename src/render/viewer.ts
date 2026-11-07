@@ -429,6 +429,8 @@ export class Viewer {
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
       this.profiler.captureCpuFrame=!!this.renderRecorder?.status.recording;
+      this.mapStream?.workProfile.setEnabled(this.profiler.captureCpuFrame);
+      this.gpuOcclusion.workProfile.setEnabled(this.profiler.captureCpuFrame);
       this.profiler.beginFrame(now);
       try {
       if (document.hidden) this.previousFrame = undefined;
@@ -489,7 +491,11 @@ export class Viewer {
         this.profiler.endGpu();this.profiler.endFrame();
         if(this.renderRecorder?.status.recording){const size=this.renderer.getDrawingBufferSize(new THREE.Vector2());
           this.renderRecorder.recordRenderFrame(now,{...this.renderer.info.render,width:size.x,height:size.y},document.hidden);
-          this.renderRecorder.recordPerformanceFrame(now,this.profiler.frameTimings(),document.hidden);}
+          const timings=this.profiler.frameTimings(),workFields:Record<string,number>={};
+          // Completed async stream finalization belongs to the interval since the previous drain.
+          for(const [prefix,work] of [['stream_',this.mapStream?.workProfile],['hiz_',this.gpuOcclusion.workProfile]] as const)
+            if(work)for(const [key,value] of Object.entries(work.drain()))workFields[prefix+key]=value;
+          this.renderRecorder.recordPerformanceFrame(now,timings,document.hidden,workFields);}
         this.afterFrame?.();
         const capture=this.frameCapture;if(capture){this.frameCapture=undefined;
           this.renderer.domElement.toBlob(blob=>blob?capture.resolve(blob):capture.reject(Error('Frame capture failed')),'image/png');}

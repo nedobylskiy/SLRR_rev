@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Matrix4, Vector3 } from 'three';
-import { TriangleSurface } from '../src/engine/triangle-surface';
+import { TriangleSurface, createContactProfile } from '../src/engine/triangle-surface';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const plane = [-10, 0.5, -10, 10, 0.5, -10, 10, 0.5, 10, -10, 0.5, -10, 10, 0.5, 10, -10, 0.5, 10];
@@ -83,4 +83,25 @@ test('partial refit updates sparse triangle ranges and ancestor bounds with the 
   const bounds=(sparse as any).tree.bounds.clone();
   assert.throws(()=>sparse.refit(coords,[{start:0,count:9},{start:1,count:9}]),/range/);assert.deepEqual((sparse as any).tree.bounds,bounds);
   sparse.refit(moved,[]);assert.equal(sparse.lastRefitTriangles,0);assert.equal(sparse.lastRefitBranches,0);
+});
+
+
+test('contact profiling counts BVH work and cache reuse without changing projections',()=>{
+  const measured=surface(),baseline=surface(),profile=createContactProfile();measured.profile=profile;
+  const previous=new Float64Array([0,1,0]);
+  for(let i=0;i<64;i++){
+    const a=new Float64Array([0,-1,0]),b=a.slice();
+    const hit=measured.project(a,previous,0),expected=baseline.project(b,previous,0);
+    assert.deepEqual(a,b);assert.deepEqual(hit?.normal,expected?.normal);
+  }
+  assert.equal(profile.queries,64);assert.equal(profile.hits,64);
+  assert.equal(profile.cacheMisses,1);assert.equal(profile.cacheHits,63);
+  assert.equal(profile.branches,1);assert.equal(profile.leaves,1);assert.equal(profile.faceBounds,2);
+  assert.equal(profile.candidates,128);assert.equal(profile.triangleTests,128);
+  assert.equal(profile.timedQueries,2);assert.equal(profile.timedCacheMisses,1);
+  for(const key of ['queryMs','traversalMs','narrowMs'] as const)assert.ok(Number.isFinite(profile[key])&&profile[key]>=0);
+  measured.refit(plane);measured.project(new Float64Array([0,-1,0]),previous,0);
+  assert.equal(profile.cacheMisses,2,'geometry revision forces a new tree query');
+  const saved={...profile};measured.profile=undefined;measured.project(new Float64Array([0,-1,0]),previous,0);
+  assert.deepEqual(profile,saved,'normal gameplay does not collect counters or timers');
 });

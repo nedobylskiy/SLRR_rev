@@ -1,3 +1,5 @@
+import {allocateMapPlacementIds,setMapPlacementIds} from './map-placement-ids';
+import {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import {GlobalFacadeBatches} from './global-facade-batches';
 import {MapCachedCells} from './map-cached-cells';
 import { Box3, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
@@ -22,6 +24,7 @@ interface StreamType {
   loadPromise?:Promise<void>;
   category?:MapObjectCategory;
   placements: StreamPlacement[];
+  placementIds:number[];
   load: (wanted: () => boolean) => Promise<Mesh[]>;
   priority: number;
   meshes?: InstancedMesh[];
@@ -49,6 +52,7 @@ interface StreamType {
 
 /** Keeps map-object geometry near the camera and uploads a bounded number of new instances per frame. */
 export class MapObjectStream {
+  readonly workProfile=new CpuWorkProfile();
   revision = 0;
   private types: StreamType[] = [];
   private ordered: StreamType[] = [];
@@ -99,7 +103,7 @@ export class MapObjectStream {
       for(;;){const type=queue.shift();if(!type||this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
         if(!type.baseMeshes&&!type.failed)await (type.loadPromise??this.load(type,true));
         if(this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
-        if(type.baseMeshes&&!type.cachedCells){type.cachedCells=new MapCachedCells(this.parent,type.baseMeshes,type.placements,size);this.viewDirty=true;this.revision++;}
+        if(type.baseMeshes&&!type.cachedCells){type.cachedCells=new MapCachedCells(this.parent,type.baseMeshes,type.placements,size,type.placementIds);this.viewDirty=true;this.revision++;}
       }
     };
     const work=Promise.all(Array.from({length:4},prepare)).then(()=>{});this.cellPreparation=work;
@@ -165,13 +169,14 @@ export class MapObjectStream {
   }
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false) {
-    this.types.push({ preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
+    this.types.push({ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
       drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),farSlots:new Set() });
     this.dirty = true;
   }
 
   update(camera: Vector3, view?: Camera) {
     if (this.disposed) return;
+    const profile=this.workProfile;let stamp=profile.start();profile.add("updates_count");
     const pending=this.prepareBatches.values().next().value;
     if(pending&&this.mergeStatic&&!this.geometryCutoff){
       this.prepareBatches.delete(pending);
@@ -188,11 +193,14 @@ export class MapObjectStream {
     }
     const next=this.prepareChunks.values().next().value;
     if(next){this.prepareChunks.delete(next);if(next.meshes&&this.geometryCutoff)this.selectMeshes(next);}
+    profile.end("prepare_geometry_ms",stamp);stamp=profile.start();
     const cell = `${Math.floor(camera.x / 25)},${Math.floor(camera.z / 25)}`;
     if (cell !== this.lastCell || this.dirty) {
+      profile.add("residency_scans_count");
       this.lastCell = cell; this.dirty = false;
       for (const type of this.types) {
         if(type.globalCompiled||this.useCached(type)){type.pending=[];continue;}
+        profile.add("residency_distance_tests_count",type.active.length+type.placements.length);
         for (let slot = type.active.length - 1; slot >= 0; slot--) {
           const index = type.active[slot];
           if (distanceTo(type.placements[index], camera) > this.distance + 100) this.remove(type, slot);
@@ -208,10 +216,11 @@ export class MapObjectStream {
       }
       this.ordered = this.types.filter(t=>!t.globalCompiled).sort((a, b) => a.priority - b.priority);
     }
+    profile.end("residency_scan_sort_ms",stamp);stamp=profile.start();
     const ordered = this.ordered;
     let available = 4 - this.types.filter(type => type.loading).length;
     for (const type of ordered) if (available > 0 && type.pending.length && !type.meshes && !type.loading && !type.failed) {
-      this.load(type); available--;
+      profile.add("loads_started_count");this.load(type); available--;
     }
     for (const type of this.types) {
       if (type.preload || this.cachedCellsEnabled&&type.category || type.active.length || type.pending.length || type.loading) type.unusedSince = undefined;
@@ -220,6 +229,7 @@ export class MapObjectStream {
         if (performance.now() - type.unusedSince > 5000) this.release(type);
       }
     }
+    profile.end("dispatch_disposal_ms",stamp);stamp=profile.start();
     let remaining = this.budget;
     for (const type of ordered) {
       if (!type.meshes||type.globalCompiled||this.useCached(type)) continue;
@@ -229,10 +239,11 @@ export class MapObjectStream {
         const slot = type.active.length;
         type.active.push(index); type.slots.set(index, slot);
         type.boundsDirty = true;
-        remaining--;
+        profile.add("placements_activated_count");remaining--;
       }
       if (!remaining) break;
     }
+    profile.end("activate_ms",stamp);stamp=profile.start();
     let viewChanged = this.viewDirty || this.hadView !== !!view || !this.lastFocus.equals(camera);
     if (view) {
       view.updateWorldMatrix(true, false); this.parent.updateWorldMatrix(true, false);
@@ -242,13 +253,17 @@ export class MapObjectStream {
       this.frustum.setFromProjectionMatrix(this.projection);
     }
     this.hadView = !!view; this.lastFocus.copy(camera); this.viewDirty = false;
+    profile.end("view_frustum_ms",stamp);stamp=profile.start();
     // Residency and rendering are independent: keep nearby off-screen instances
     // in RAM, but submit only the visible ones, even for a city-wide model type.
     for (const type of this.types) if (type.meshes && (viewChanged || type.boundsDirty)) this.draw(type, camera, !!view);
+    profile.end("draw_batches_ms",stamp);stamp=profile.start();
     if(this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange))this.revision++;
+    profile.end("global_facades_ms",stamp);
   }
 
   private draw(type: StreamType, focus: Vector3, cull: boolean) {
+    const profile=this.workProfile;const selectStart=profile.start();profile.add("types_drawn_count");
     if(type.globalCompiled){
       for(const mesh of [...type.meshes!,...type.auxiliary.values(),...type.lodMeshes.values()]){mesh.visible=false;mesh.removeFromParent();}
       type.boundsDirty=false;return;
@@ -256,13 +271,16 @@ export class MapObjectStream {
     if(this.useCached(type)){
       for(const mesh of [...type.meshes!,...type.lodMeshes.values(),...type.auxiliary.values()])mesh.visible=false;
       const cache=type.cachedCells!;
+      const cachedStart=profile.start();
       if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category)))this.revision++;
+      profile.end("cached_cells_ms",cachedStart);
       type.primaryVisible=cache.visibleInstances;type.boundsDirty=false;return;
     }
     type.cachedCells?.hide();
     const visible = type.candidates; visible.length = 0;
     const auxiliary:number[]=[];
     type.primaryVisible=0;
+    profile.add("visibility_placements_count",type.active.length);
     for (const index of type.active) {
       if(type.category&&this.hiddenCategories.has(type.category))continue;
       let primary=distanceTo(type.placements[index], focus)<=this.distance;
@@ -279,8 +297,10 @@ export class MapObjectStream {
       visible.push(index);
     }
     let changed=visible.length !== type.drawn.length || visible.some((index, slot) => type.drawn[slot] !== index);
+    profile.end("placement_visibility_ms",selectStart);
     for (const mesh of type.meshes!) {
       if(mesh.userData.globalFacadeSource){mesh.visible=false;mesh.removeFromParent();continue;}
+      const partStart=profile.start();profile.add("parts_selected_count");
       let selected=visible;
       let extra=auxiliary;
       if(this.tightFrustum&&cull&&!this.inspectResident&&!this.geometryCutoff){
@@ -338,9 +358,12 @@ export class MapObjectStream {
         mesh.addEventListener('dispose',release);
       }
       if(proxy)batches.push([proxy,extra]);
+      profile.end("part_selection_ms",partStart);
       for(const [batch,indices] of batches){
         const previous=type.meshDrawn.get(batch);
         if(!previous||indices.length!==previous.length||indices.some((index,slot)=>previous[slot]!==index)){
+          const packStart=profile.start();
+          setMapPlacementIds(batch,indices.map(index=>type.placementIds[index]));profile.add("batches_repacked_count");profile.add("matrices_written_count",indices.length);
           changed=true;
           for (let slot = 0; slot < indices.length; slot++) {
             const placement = type.placements[indices[slot]];
@@ -350,7 +373,8 @@ export class MapObjectStream {
           if (batch.instanceColor) batch.instanceColor.needsUpdate = true;
           batch.count = indices.length; batch.instanceMatrix.needsUpdate = true;
           // setMatrixAt/count do not invalidate Three's cached aggregate sphere.
-          batch.computeBoundingSphere(); batch.visible = batch.count > 0;
+          profile.end("matrix_packing_ms",packStart);const sphereStart=profile.start();
+          batch.computeBoundingSphere();profile.end("bounding_spheres_ms",sphereStart); batch.visible = batch.count > 0;
           type.meshDrawn.set(batch,[...indices]);
         }
       }
@@ -372,7 +396,8 @@ export class MapObjectStream {
   private load(type: StreamType,precache=false):Promise<void> {
     type.loading = true;
     const wanted = () => !this.disposed && (type.preload || precache&&this.cachedCellsEnabled || type.pending.length > 0 || type.active.length > 0);
-    const work=type.load(wanted).then(parts => {
+    const work=type.load(wanted).then(parts => this.workProfile.measure("async_finalize_ms",()=>{
+      this.workProfile.add("loads_completed_count");
       type.loading = false;
       if (!wanted()) {
         const textures = new Set<Texture>();
@@ -411,7 +436,7 @@ export class MapObjectStream {
       type.loading = false;
       // Pending placements already describe the current focus. Completing one
       // model must not rescan the entire city index on the next frame.
-    }).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); }).finally(()=>{type.loadPromise=undefined;});
+    })).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); }).finally(()=>{type.loadPromise=undefined;});
     type.loadPromise=work;return work;
   }
 

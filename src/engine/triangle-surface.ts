@@ -1,12 +1,17 @@
 import { Box3, Matrix4, Triangle, Vector3 } from 'three';
 import type { PanelContact, PanelSurface, Triple } from './deformable-panel';
 
+/** Exact work counters; timings sample one in 32 enabled queries, without extrapolation. */
+export const createContactProfile=()=>({queries:0,cacheHits:0,cacheMisses:0,branches:0,leaves:0,faceBounds:0,candidates:0,triangleTests:0,hits:0,timedQueries:0,timedCacheMisses:0,queryMs:0,traversalMs:0,narrowMs:0});
+export type ContactProfile=ReturnType<typeof createContactProfile>;
 export interface SurfaceRange {start:number;count:number}
 interface Face { owner?:Branch;triangle: Triangle; bounds: Box3; normal: Vector3; offset: number; active: boolean }
 interface Branch { parent?:Branch;bounds: Box3; faces?: Face[]; left?: Branch; right?: Branch }
 interface QueryCache { revision: number; bounds: Box3; faces: Face[] }
 /** Two-sided swept node/sphere contacts against the assembled body's original triangles, in body space. */
 export class TriangleSurface implements PanelSurface {
+  profile?:ContactProfile;
+  private profileSequence=0;
   private tree: Branch;
   private faces: Face[] = [];
   private faceSlots:Face[]=[];
@@ -82,6 +87,9 @@ export class TriangleSurface implements PanelSurface {
   }
   project(p: Float64Array, previous: Float64Array, offset: number): PanelContact | undefined {
     if (!this.enabled()) return;
+    const profile=this.profile;
+    const timed=!!profile&&(this.profileSequence++%32===0),started=timed?performance.now():0;
+    if(profile){profile.queries++;if(timed)profile.timedQueries++;}
     const from = this.from.fromArray(previous, offset).applyMatrix4(this.previousInverse), to = this.to.fromArray(p, offset).applyMatrix4(this.inverse);
     const query = this.query.makeEmpty().expandByPoint(from).expandByPoint(to).expandByScalar(this.radius);
     let entries = this.queries.get(previous);
@@ -91,19 +99,25 @@ export class TriangleSurface implements PanelSurface {
     // XPBD visits a node repeatedly within a tick. Reuse only a conservative candidate set;
     // movement outside its body-local bounds or a geometry refit triggers a fresh query.
     if (cache.revision !== this.revision || !cache.bounds.containsBox(query)) {
+      if(profile){profile.cacheMisses++;if(timed)profile.timedCacheMisses++;}
+      const traversalStart=timed?performance.now():0;
       cache.revision = this.revision; cache.bounds.copy(query).expandByScalar(0.02); cache.faces.length = 0;
       const stack = this.stack; stack.length = 0; stack.push(this.tree);
       while (stack.length) {
-        const branch = stack.pop()!;
+        const branch = stack.pop()!;if(profile)profile.branches++;
         if (!cache.bounds.intersectsBox(branch.bounds)) continue;
-        if (branch.faces) { for (const face of branch.faces) if (cache.bounds.intersectsBox(face.bounds)) cache.faces.push(face); }
+        if (branch.faces) { if(profile)profile.leaves++;for (const face of branch.faces){if(profile)profile.faceBounds++;if (cache.bounds.intersectsBox(face.bounds)) cache.faces.push(face);} }
         else { stack.push(branch.right!, branch.left!); }
       }
-    }
+      if(timed)profile!.traversalMs+=performance.now()-traversalStart;
+    }else if(profile)profile.cacheHits++;
+    if(profile)profile.candidates+=cache.faces.length;
+    const narrowStart=timed?performance.now():0;
     let first = Infinity, found = false;
     const hit = this.hit, normal = this.hitNormal;
     for (const { triangle, normal: n, bounds, active } of cache.faces) {
       if (!active || !query.intersectsBox(bounds)) continue;
+      if(profile)profile.triangleTests++;
       const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < 0 ? -1 : 1;
       if (sign * b < this.radius && sign * a > sign * b) {
         const time = Math.max(0, (sign * a - this.radius) / (sign * a - sign * b)), center = this.center.copy(from).lerp(to, time), surface = this.surface.copy(center).addScaledVector(n, -this.delta.subVectors(center, triangle.a).dot(n));
@@ -119,9 +133,12 @@ export class TriangleSurface implements PanelSurface {
       const closest = triangle.closestPointToPoint(to, this.closest), delta = this.delta.subVectors(to, closest), distance = delta.length();
       if (distance < this.radius && first === Infinity) { if (distance > 1e-8) normal.copy(delta).multiplyScalar(1 / distance); else normal.copy(n).multiplyScalar(sign); hit.copy(closest).addScaledVector(normal, this.radius); found = true; }
     }
-    if (!found) return;
+    if(timed)profile!.narrowMs+=performance.now()-narrowStart;
+    if (!found) {if(timed)profile!.queryMs+=performance.now()-started;return;}
+    if(profile)profile.hits++;
     const world = hit.applyMatrix4(this.frame), worldNormal = normal.transformDirection(this.frame);
     world.toArray(p, offset); this.hits++;
+    if(timed)profile!.queryMs+=performance.now()-started;
     return { point: world.toArray() as Triple, normal: worldNormal.toArray() as Triple, velocity: this.velocity(world).toArray() as Triple, restitution: 0.18, friction: 0.55, impulse: this.reaction };
   }
 }

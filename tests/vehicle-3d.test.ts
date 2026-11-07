@@ -577,9 +577,13 @@ test('recording aggregates profiled panel phases across every fixed substep and 
   demo.telemetry.start();demo.advance(4/240,neutral);
   assert.equal(demo.timings.ticks,4);assert.ok(demo.timings.activePanels>=4);
   assert.ok(demo.timings.panelConstraints>0);assert.ok(demo.timings.panelContacts>0);assert.ok(demo.timings.nodeSteps>=4*demo.panel.positions.length/3);
-  demo.telemetry.recordPerformanceFrame(100,{'Render callback CPU':25});demo.telemetry.stop();
+  demo.telemetry.recordPerformanceFrame(100,{'Render callback CPU':25},false,{stream_matrices_written_count:7,hiz_collect_ms:2});demo.telemetry.stop();
   const line=demo.telemetry.text().split('\n').find(l=>l.startsWith('SLRR_FRAME|v=1|'))!;
   const row=JSON.parse(line.slice('SLRR_FRAME|v=1|'.length));assert.equal(row.physics_ticks,4);assert.equal(row.constraints_ms,demo.timings.panelConstraints);assert.equal(row.active_panel_steps,demo.timings.activePanels);
+  assert.equal(row.suspension_height_count,16);assert.ok(row.suspension_height_ms>=0);
+  assert.equal(demo.suspension.terrain.queryProfile,undefined,'query scope restored after suspension calls');
+  assert.equal(row.stream_matrices_written_count,7);assert.equal(row.hiz_collect_ms,2);
+  assert.deepEqual(demo.suspension.workProfile.drain(),{});
   assert.equal(row.wasm_panels+row.ts_panels,demo.soft.size);assert.equal(row.cpu_render_callback_cpu_ms,25);
   demo.advance(1/240,neutral);assert.equal(demo.timings.panelConstraints,0,'no detailed timers when recording is off');
   world.dispose();

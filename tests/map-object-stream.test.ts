@@ -411,3 +411,32 @@ test('pinned prepared models load before playback and retain resources outside t
   await stream.preparePinnedModels();assert.equal(loads,1);stream.update(new Vector3());now=10000;stream.update(new Vector3());assert.equal(disposed,0);
   stream.update(new Vector3(1000,0,0));assert.equal(stream.visible,1);assert.equal(loads,1);stream.dispose();assert.equal(disposed,1);
 });
+
+
+test('stream CPU trace separates async finalization and residency/draw work',async()=>{
+  const root=new Group(),stream=new MapObjectStream(root,100);stream.workProfile.setEnabled(true);
+  stream.add([{matrix:new Matrix4(),position:new Vector3()}],async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);
+  stream.update(new Vector3());await Promise.resolve();await Promise.resolve();stream.update(new Vector3());
+  const row=stream.workProfile.drain();
+  assert.equal(row.loads_started_count,1);assert.equal(row.loads_completed_count,1);assert.equal(row.updates_count,2);
+  assert.ok(row.async_finalize_ms>=0&&row.residency_scan_sort_ms>=0&&row.draw_batches_ms>=0);
+  assert.ok(row.matrices_written_count>=1);stream.dispose();
+});
+
+
+test('stream placements receive unique numeric IDs shared by their parts and retained across cached cell rebuilds',async()=>{
+  const root=new Group(),stream=new MapObjectStream(root,100);
+  const placement={matrix:new Matrix4(),position:new Vector3()};
+  stream.add([placement,placement],async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial()),new Mesh(new BoxGeometry(),new MeshBasicMaterial())],'trees');
+  stream.update(new Vector3());await Promise.resolve();await Promise.resolve();stream.update(new Vector3());
+  const meshes=root.children.filter(m=>m instanceof InstancedMesh&&m.visible) as InstancedMesh[];
+  assert.equal(meshes.length,2);const ids=meshes[0].userData.mapPlacementIds;
+  assert.equal(ids.length,2);assert.notEqual(ids[0],ids[1],'even repeated placement references represent distinct map entries');
+  assert.deepEqual(meshes[1].userData.mapPlacementIds,ids);
+  await stream.setCachedCells(true,64);stream.update(new Vector3());
+  const cached=root.children.filter(m=>m instanceof InstancedMesh&&m.visible&&m.userData.cachedMapCell);
+  assert.equal(cached.length,2);for(const mesh of cached)assert.deepEqual(mesh.userData.mapPlacementIds,ids);
+  await stream.setCachedCells(true,128);stream.update(new Vector3());
+  for(const mesh of root.children.filter(m=>m.visible&&m.userData.cachedMapCell))assert.deepEqual(mesh.userData.mapPlacementIds,ids);
+  stream.dispose();
+});

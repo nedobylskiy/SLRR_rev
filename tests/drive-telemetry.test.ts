@@ -77,8 +77,9 @@ test('per-frame CPU trace shares the download, preserves stalls, resets on resta
   const timed=vehicle as typeof vehicle & {advanceVersion:number;timings:Record<string,number>;simulationPendingSeconds:number;soft:Map<unknown,unknown>};
   Object.assign(timed,{advanceVersion:0,timings:{ticks:0,activePanels:0,nodeSteps:0,beamIterations:0,surfaceUpdates:0,surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,contacts:0,panelSurface:0,panels:0,other:0,suspension:0},simulationPendingSeconds:.02,soft:new Map()});
   recorder.recordPerformanceFrame(0,{});assert.equal(recorder.text(),'');
+  Object.assign(timed,{contactProfile:{queries:64,cacheHits:63,timedQueries:2,queryMs:.5}});
   recorder.start();recorder.tick(.1,input);timed.advanceVersion++;
-  Object.assign(timed.timings,{ticks:4,panelConstraints:2,panelContacts:3,panelSurface:4});
+  Object.assign(timed.timings,{ticks:4,panelConstraints:2,panelContacts:3,panelSurface:4,panelSurfaceContacts:1.2,panelGround:.3});
   recorder.recordPerformanceFrame(100,{ 'Vehicle render geometry CPU':5,'Render callback CPU':20 });
   timed.advanceVersion++;Object.assign(timed.timings,{ticks:64,panelConstraints:100});
   recorder.recordPerformanceFrame(600,{'Render callback CPU':450});
@@ -87,6 +88,8 @@ test('per-frame CPU trace shares the download, preserves stalls, resets on resta
   recorder.recordPerformanceFrame(10000,{},true);recorder.recordPerformanceFrame(10020,{});
   recorder.stop();const text=recorder.text();
   const frames=text.split('\n').filter(l=>l.startsWith('SLRR_FRAME|v=1|')).map(l=>JSON.parse(l.slice('SLRR_FRAME|v=1|'.length)));
+  assert.equal(frames[0].contact_queries,64);assert.equal(frames[0].contact_queryMs,.5);assert.equal(frames[0].panel_surface_contacts_ms,1.2);assert.equal(frames[0].panel_ground_sampling_ms,.3);
+  assert.equal(frames[2].contact_queries,0);assert.equal(frames[2].panel_surface_contacts_ms,0);
   assert.equal(frames.length,4);assert.equal(recorder.status.frames,4);
   assert.equal(frames[0].constraints_ms,2);assert.equal(frames[0].panel_contacts_ms,3);assert.equal(frames[0].body_collision_geometry_ms,4);
   assert.equal(frames[0].cpu_vehicle_render_geometry_cpu_ms,5);assert.equal(frames[1].frame_interval_ms,500);assert.equal(frames[1].physics_ticks,64);

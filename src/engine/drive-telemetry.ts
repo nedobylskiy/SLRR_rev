@@ -21,7 +21,8 @@ export class DriveTelemetry {
   private lastAdvance=-1;
   private wallStart=0;
   readonly maxFrames=36000;
-  recordPerformanceFrame(now:number,cpu:Record<string,number>,hidden=false){
+  private cpuFieldNames=new Map<string,string>();
+  recordPerformanceFrame(now:number,cpu:Record<string,number>,hidden=false,work:Record<string,number>={}){
     if(!this.session||this.session.ended||hidden){this.frameTime=undefined;return;}
     const previous=this.frameTime;this.frameTime=now;
     const v=this.vehicle,fresh=v.advanceVersion!==this.lastAdvance;this.lastAdvance=v.advanceVersion;
@@ -33,7 +34,16 @@ export class DriveTelemetry {
       constraints_ms:t.panelConstraints,panel_contacts_ms:t.panelContacts,wasm_upload_ms:t.panelUpload,
       integration_finalize_ms:t.panelIntegration,loose_contacts_ms:t.looseContacts,chassis_contacts_ms:t.contacts,
       body_collision_geometry_ms:t.panelSurface,physics_panels_ms:t.panels,physics_other_ms:t.other,physics_suspension_ms:t.suspension};
-    for(const [name,value] of Object.entries(cpu))row['cpu_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/_$/,'')+'_ms']=value;
+    row.panel_surface_contacts_ms=t.panelSurfaceContacts;row.panel_ground_sampling_ms=t.panelGround;
+    for(const key in v.contactProfile){const name=key as keyof typeof v.contactProfile;row['contact_'+key]=fresh?v.contactProfile[name]:0;}
+    Object.assign(row,work);
+    const suspensionWork=v.suspension.workProfile?.drain()??{};
+    for(const key in suspensionWork)row['suspension_'+key]=fresh?suspensionWork[key]:0;
+    for(const name in cpu){
+      let field=this.cpuFieldNames.get(name);
+      if(!field){field='cpu_'+name.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/_$/,'')+'_ms';this.cpuFieldNames.set(name,field);}
+      row[field]=cpu[name];
+    }
     let sleeping=0,loose=0,wasm=0,ts=0;
     for(const state of v.soft.values()){if(state.panel.backend==='wasm')wasm++;else ts++;if(!state.root&&!state.part.parent){loose++;if(state.activity.resting)sleeping++;}}
     Object.assign(row,{sleeping_debris:sleeping,loose_panels:loose,wasm_panels:wasm,ts_panels:ts});
@@ -74,7 +84,7 @@ export class DriveTelemetry {
       ...Object.fromEntries(Array.from({length:name.length},(_,i) => [`${prefix}_code_${i}`,name.charCodeAt(i)])) });
     const values = m.transmission?.definition.mechanics?.values ?? {};
     this.session = { ended: false, metadata: { source: 'redline-rebuilt', recorder_features: 'host_physics_v1 frame_cpu_v1',
-      started_utc: new Date().toISOString(), frame_cpu_version:1,frame_limit:this.maxFrames,interval_s: 0.1, physics_dt_s: v.physicsDt,physics_hz:1/v.physicsDt,xpbd_iterations:XPBD_ITERATIONS,collision_geometry_hz:COLLISION_GEOMETRY_HZ,mount_release_delay_s:MOUNT_RELEASE_DELAY_S,reference_physics_hz:REFERENCE_PHYSICS_HZ,
+      started_utc: new Date().toISOString(), frame_cpu_version:1,work_profile_version:1,contact_profile_version:1,contact_timing_stride:32,frame_limit:this.maxFrames,interval_s: 0.1, physics_dt_s: v.physicsDt,physics_hz:1/v.physicsDt,xpbd_iterations:XPBD_ITERATIONS,collision_geometry_hz:COLLISION_GEOMETRY_HZ,mount_release_delay_s:MOUNT_RELEASE_DELAY_S,reference_physics_hz:REFERENCE_PHYSICS_HZ,
       ...names('model',v.root.definition.alias), ...names('vehicle',v.root.definition.alias),
       chassis_pack: v.root.definition.key.pack, chassis_type: v.root.definition.key.id,
       mass_kg: v.body.mass, mass_source: 'host_rigid_body_kg', idle_rpm: m.idleRpm, redline_rpm: m.redlineRpm,

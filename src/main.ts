@@ -469,13 +469,15 @@ graphicsCopy.type='button';graphicsCopy.onclick=()=>{
 };
 mapDebugOptions.append(graphicsCopy);
 window.setInterval(()=>{
+  // Keep capture independent of expensive scene reports and DOM reconstruction.
+  if(recordingRequested)return;
   if(benchmarkRunning){
     viewer?.profiler.measure('Graphics debug UI CPU',()=>{
       const text=viewer?.benchmarkDebugLines().join('\n')??'';
       graphicsReport.textContent=text;routeLiveMetrics.textContent=text;
     });return;
   }
-  if(mapDebugPanel.hidden)return;
+  if(mapDebugPanel.hidden||!mapDebugPanel.open)return;
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
   graphicsReport.textContent=[
     ...(graphicsDetailsCheck.checked?viewer?.profiler.lines().filter(line=>line.startsWith('GPU'))??[]:[]),
@@ -676,10 +678,11 @@ function finishDriveRecording(reason: string) {
 telemetryStart.onclick = () => {
   const recorder = mapDebugSession?.telemetry;
   if (!recorder?.status.available) return;
-  recorder.start({...mapDebugSession!.telemetryContext(),viewport_expanded:Number(document.body.classList.contains('viewport-expanded'))}); recordingRequested = true;
+  recorder.start({...mapDebugSession!.telemetryContext(),viewport_expanded:Number(document.body.classList.contains('viewport-expanded')),diagnostic_panels_suspended:1}); recordingRequested = true;
   mapDebugSession!.focusControls();
   telemetryStart.disabled = true; telemetryStop.disabled = false;
-  telemetryStatus.textContent = 'Recording physics · 100 ms samples + CPU timing every frame';
+  telemetryStatus.textContent = 'Recording physics · CPU timing every frame · diagnostic panels paused';
+  vehicleDebugTelemetry.textContent='Detailed panels paused during capture; per-frame CPU timing remains active.';
 };
 telemetryStop.onclick = () => finishDriveRecording('button');
 telemetryDownload.onclick = downloadDriveRecording;
@@ -694,12 +697,18 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     const row = `${prefix}${part.definition.alias} [0x${part.definition.key.id.toString(16)}] · ${slot} · wear ${Math.round(part.condition * 100)}%`;
     return [row, ...[...part.children.values()].flatMap(child => tree(child, depth + 1))];
   };
+  let lastRecordingUi=-Infinity;
   const refreshCore = () => {
     const recording = session.telemetry?.status;
     if (recordingRequested && !recording?.recording) finishDriveRecording(recording?.reason || 'session_ended');
+    if(recording?.recording){
+      const now=performance.now();if(now-lastRecordingUi<1000)return;lastRecordingUi=now;
+    }
     telemetryStart.disabled = !recording?.available || !!recording?.recording;
     telemetryStop.disabled = !recording?.recording; telemetryDownload.disabled = !lastDriveRecording;
     if (recording?.recording) telemetryStatus.textContent = `Recording physics · ${recording.samples} samples · ${recording.frames} CPU frames · ${recording.seconds.toFixed(1)} s`;
+    if(recording?.recording)return; // CPU samples continue; detailed panels resume after capture.
+    if(!vehicleDebugPanel.open)return;
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,

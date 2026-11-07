@@ -4,7 +4,7 @@ import { CarCrashDemo } from './car-crash-demo';
 import { RigidBody3D, boxContact, orientedBoxContact } from './rigid-body-3d';
 import { Suspension3D, TestTerrain, type Terrain } from './suspension-3d';
 import { DeformablePanel, type PanelBinding, type Triple } from './deformable-panel';
-import { TriangleSurface, type SurfaceRange } from './triangle-surface';
+import { TriangleSurface, createContactProfile, type SurfaceRange } from './triangle-surface';
 import type { EnginePart } from './world';
 import type { DrivingInput } from './driving-demo';
 import { PanelActivity } from './panel-activity';
@@ -81,7 +81,8 @@ export class Vehicle3D extends CarCrashDemo {
   }
   advanceVersion=0;
   private profileFrame=false;
-  readonly timings = { nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 };
+  readonly contactProfile=createContactProfile();
+  readonly timings = { panelSurfaceContacts:0,panelGround:0,nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 };
   readonly body: RigidBody3D;
   collisionCue?: { speed: number; impulse: number; position: Vector3 };
   private spawn?: { position: Vector3; yaw: number };
@@ -263,6 +264,7 @@ export class Vehicle3D extends CarCrashDemo {
         this.bodySurface.refit(triangles,all?undefined:ranges);this.timings.surfaceRefits++;this.timings.surfaceTriangles+=this.bodySurface.lastRefitTriangles;this.timings.surfaceUpdates++;
       }
     }else{super.setBodyTriangles(triangles,true);this.rigidSurface=this.bodySurface;this.timings.surfaceBuilds++;this.timings.surfaceTriangles+=count/9;this.timings.surfaceUpdates++;}
+    if(this.bodySurface)this.bodySurface.profile=this.profileFrame?this.contactProfile:undefined;
     this.surfaceTick=this.clock.tick+1;this.timings.panelSurface+=performance.now()-started;
   }
   private connected(part: EnginePart) { for (let p: EnginePart | undefined = part; p; p = p.parent) if (p === this.root) return true; return false; }
@@ -453,7 +455,10 @@ export class Vehicle3D extends CarCrashDemo {
     this.collisionCue = undefined;
     this.advanceVersion++;
     this.profileFrame=this.telemetry.status.recording;
-    Object.assign(this.timings, { nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 });
+    this.suspension.workProfile.setEnabled(this.profileFrame);
+    for(const key of Object.keys(this.contactProfile) as (keyof typeof this.contactProfile)[])this.contactProfile[key]=0;
+    if(this.bodySurface)this.bodySurface.profile=this.profileFrame?this.contactProfile:undefined;
+    Object.assign(this.timings, { panelSurfaceContacts:0,panelGround:0,nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 });
     return this.clock.advance(seconds, tick => {
       // Restore a reference checkpoint before sampling previous frames or detecting shocks.
       this.beforeReplayTick?.((tick-1)*this.clock.dt);
@@ -540,7 +545,7 @@ export class Vehicle3D extends CarCrashDemo {
         const solveStart = performance.now();
         s.panel.profiling=this.profileFrame;
         s.panel.advance(dt);
-        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*XPBD_ITERATIONS*p.steps;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;}
+        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*XPBD_ITERATIONS*p.steps;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;this.timings.panelSurfaceContacts+=p.surfaceMs;this.timings.panelGround+=p.groundMs;}
         if (attached) this.surfaceDirty = true;
         this.timings.panelSolve += performance.now() - solveStart;
         if (attached && s.panel.collisionImpact) {

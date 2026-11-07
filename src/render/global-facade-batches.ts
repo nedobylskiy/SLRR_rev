@@ -1,3 +1,4 @@
+import {allocateMapPlacementIds,setMapPlacementIds} from './map-placement-ids';
 import {Color,InstancedMesh,Matrix4,MeshStandardMaterial,Vector3,type Group,type BufferGeometry,type Frustum} from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import type {StreamPlacement} from './map-object-stream';
@@ -21,6 +22,7 @@ export class GlobalFacadeBatches {
       mesh.matrixAutoUpdate=false;mesh.castShadow=entry.source.castShadow;mesh.receiveShadow=entry.source.receiveShadow;
       mesh.layers.mask=entry.source.layers.mask;mesh.renderOrder=entry.source.renderOrder;
       mesh.userData={staticMapCaster:entry.source.userData.staticMapCaster,globalFacadeBatch:true,mapOcclusionRole:'structure'};
+      setMapPlacementIds(mesh,allocateMapPlacementIds(1));
       mesh.visible=false;mesh.computeBoundingBox();mesh.computeBoundingSphere();this.meshes.push(mesh);
       this.triangles+=(geometry.index?.count??geometry.getAttribute('position').count)/3;
       this.geometryBytes+=Object.values(geometry.attributes).reduce((n,a)=>n+a.array.byteLength,0)+(geometry.index?.array.byteLength??0);

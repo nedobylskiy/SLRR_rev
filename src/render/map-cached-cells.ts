@@ -1,3 +1,4 @@
+import {allocateMapPlacementIds,setMapPlacementIds} from './map-placement-ids';
 import {Box3,Color,Frustum,Group,InstancedMesh,Mesh,Vector3} from 'three';
 import type {StreamPlacement} from './map-object-stream';
 
@@ -6,7 +7,7 @@ interface Cell {bounds:Box3;indices:number[];meshes:InstancedMesh[];primary:bool
 export class MapCachedCells {
   private readonly cells:Cell[]=[];
   private readonly color=new Color();
-  constructor(private readonly parent:Group,parts:Mesh[],placements:StreamPlacement[],readonly size:number){
+  constructor(private readonly parent:Group,parts:Mesh[],placements:StreamPlacement[],readonly size:number,placementIds:readonly number[]=allocateMapPlacementIds(placements.length)){
     const grid=new Map<string,number[]>();
     placements.forEach((p,i)=>{const key=`${Math.floor(p.position.x/size)},${Math.floor(p.position.z/size)}`;
       const indices=grid.get(key)??[];indices.push(i);grid.set(key,indices);});
@@ -19,6 +20,7 @@ export class MapCachedCells {
         mesh.name=`${part.name} / cached cell ${key}`;mesh.renderOrder=part.renderOrder;
         mesh.castShadow=part.castShadow;mesh.receiveShadow=part.receiveShadow;mesh.layers.mask=part.layers.mask;
         mesh.userData={...part.userData,cachedMapCell:true};mesh.matrixAutoUpdate=false;mesh.visible=false;
+        setMapPlacementIds(mesh,indices.map(index=>placementIds[index]));
         indices.forEach((index,slot)=>{
           mesh.setMatrixAt(slot,placements[index].matrix);
           if(painted)mesh.setColorAt(slot,this.color.setHex(placements[index].paintColor??0xffffff));

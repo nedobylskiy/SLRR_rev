@@ -96,3 +96,39 @@ This writes `.frames.csv` and `.frames-summary.json` beside the input file. An o
 Incremental geometry counters: `collision_triangles_updated` counts regenerated/refitted faces, `collision_parts_updated` counts changed part ranges (including removals), and `collision_vertices_skinned` counts collision skinning calls. They exclude unchanged cached geometry and are separate from rendered triangle counts.
 
 On the physics-frequency experiment branch, verify `physics_hz=120` / `physics_dt_s=0.008333333333333333` in new captures. The experiment keeps 12 XPBD iterations and 60 Hz collision geometry updates; metadata records these explicitly.
+
+
+During driving capture, automatic graphics reports, vehicle diagnostics and the part tree are suspended. Only the recording counter refreshes once per second; per-frame CPU measurements and 10 Hz physics samples remain active. Metadata includes `diagnostic_panels_suspended=1`. Closed graphics/vehicle panels also skip their expensive contents outside capture. Explicit report copying and enabled detailed GPU/GL instrumentation still have overhead; capture is not an overhead-free baseline. CPU field names are normalized once and reused throughout capture.
+
+
+Contact/BVH profiling (`contact_profile_version=1`)
+
+Start and stop the usual physics recording; no extra checkbox is required. Per-frame fields aggregate all fixed substeps. A frame without a vehicle advance exports zero contact work.
+
+- `panel_surface_contacts_ms`: complete time in soft-panel surface projection batches, including chassis triangle queries and guard surfaces. Nested inside `panel_contacts_ms`.
+- `panel_ground_sampling_ms`: complete time sampling map support heights for soft-panel nodes, also nested inside panel contacts. This does not include suspension-wheel ground queries.
+- `contact_queries`: enabled triangle-surface projection calls for the vehicle body BVH (including rigid detached-part queries).
+- `contact_cacheHits`, `contact_cacheMisses`: reuse vs refresh of conservative per-node candidate lists.
+- `contact_branches`: popped BVH nodes, including rejected bounds; `contact_leaves`: intersecting leaf nodes; `contact_faceBounds`: face-bound tests in leaves.
+- `contact_candidates`: cached candidate entries examined, accumulated over calls; `contact_triangleTests`: active candidates passing the current query bounds and entering geometric contact math; `contact_hits`: calls producing a contact. These are work counts, not distinct objects.
+- `contact_timedQueries`, `contact_timedCacheMisses`: timed query samples and timed samples requiring traversal. Sampling persists across frames, one in 32 enabled calls (`contact_timing_stride=32`).
+- `contact_queryMs`, `contact_traversalMs`, `contact_narrowMs`: raw accumulated CPU milliseconds ONLY for those sampled calls. Traversal includes candidate-cache refresh and BVH traversal; narrow phase includes candidate rejection and triangle math. Query time includes transforms/cache checks and successful-contact preparation. Do not treat these as full-frame totals or add them to panel contact totals. Sampling may not represent rare events; use exact batch totals and work counters alongside the sampled timings.
+
+Profiling is off outside capture. The counters cover `TriangleSurface` body collision queries, not all terrain/map acceleration structures. Panel height sampling has a separate aggregate timer; finer terrain/suspension counters can follow if that timer identifies a bottleneck. TS and WASM solver paths use the same instrumented JS body-surface queries. Physics algorithms and memory layouts are unchanged.
+
+
+Streaming, Hi-Z and suspension work (`work_profile_version=1`)
+
+The ordinary physics capture now exports the following flat numeric fields. All `_ms` fields below are measured CPU durations; `_count` fields are work counts, not milliseconds. Collection is enabled only while recording. The reporter exports every field to CSV without a schema change. Missing work fields on a frame mean no captured work for that stage; unlike the fixed physics fields, optional work fields may be absent.
+
+- `stream_prepare_geometry_ms`, `stream_residency_scan_sort_ms`, `stream_dispatch_disposal_ms`, `stream_activate_ms`, `stream_view_frustum_ms`, `stream_draw_batches_ms`, `stream_global_facades_ms`: sequential stages of the stream update.
+- `stream_placement_visibility_ms`, `stream_cached_cells_ms`, `stream_part_selection_ms`, `stream_matrix_packing_ms`, `stream_bounding_spheres_ms`: detail inside draw batches, not extra costs to add to their parent.
+- Stream counts include `updates`, `residency_scans`, `residency_distance_tests`, `placements_activated`, `types_drawn`, `visibility_placements`, `parts_selected`, `batches_repacked`, `matrices_written`, `loads_started`, `loads_completed` (each with `_count`).
+- `stream_async_finalize_ms`: synchronous finalization of a completed model-load promise, including material sharing/instance construction or cancelled-load disposal. This work occurs between callbacks and is carried to the next captured frame. It excludes the unresolved promise/I/O wait and loader-internal parsing before the completion handler; it is NOT nested inside that next frame's stream-update CPU total. Timing across the capture start/stop boundary is intentionally not preserved.
+- `hiz_collect_ms`: source collection, including nested `collect_world_matrices_ms`, `collect_keys_identities_ms`, `collect_bounds_ms`, `depth_proxy_setup_ms` (all with `hiz_` prefix). Counts include `sources_seen`, `sources_rebuilt`, `bounds_reused`, `bounds_built`.
+- `hiz_pack_bounds_ms`, `hiz_depth_submit_ms`, `hiz_hiz_reduce_submit_ms`, `hiz_visibility_submit_ms`, `hiz_pbo_fence_setup_ms`, `hiz_fence_poll_ms`, `hiz_readback_copy_ms`, `hiz_apply_verdicts_ms`, `hiz_compact_visible_ms`: preparation/submission/readback stages. Compaction is nested inside collect/apply. Counts include `bounds_uploads` (texture marked for upload), `bounds_packed`, `tests_submitted`, `readback_bytes`.
+- `hiz_main_proxy_setup_ms`, `hiz_main_proxy_restore_ms`: visibility-proxy switching around the main render, excluding the render itself; nested inside Render CPU rather than GPU occlusion CPU. Depth/reduction/test timings measure CPU submission, NOT GPU completion. Existing GPU timers remain separate.
+- `suspension_height_ms`, `suspension_patch_sample_ms`, `suspension_normal_fallback_ms` and matching `_count` fields: complete wheel height/patch/normal calls. Only these scoped calls enable the terrain counters, so chassis, soft-panel and unrelated map queries do not contaminate the suspension measurement.
+- `suspension_map_sample_ms`, `suspension_map_lazy_build_ms`, `suspension_object_support_ms`: nested map query details. Counts include `map_samples`, `map_empty_cells`, `map_lazy_builds`, `map_branches`, `map_leaves`, `map_face_bounds`, `map_triangle_tests`, `object_support_queries`, `object_box_candidates`, `object_box_ray_tests`.
+
+A stage can include allocation/GC or scheduling pauses inside its measured wall interval. Large time with ordinary work counts is a reason to inspect a browser performance trace, not proof that the underlying geometry algorithm performed more work. Nested times must not be summed with parent totals. Streaming/GPU verdict algorithms and physics response are unchanged.

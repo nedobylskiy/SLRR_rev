@@ -21,7 +21,7 @@ export function summarizePhysicsFrames(frames:Record<string,number>[]){
     over_50_ms:intervals.filter(v=>v>50).length,over_100_ms:intervals.filter(v=>v>100).length,
     // RAF intervals precede the work in that row. Preserve neighbours for correct attribution.
     worst_frames:frames.map((frame,index)=>({frame,previous:frames[index-1]??null})).sort((a,b)=>b.frame.frame_interval_ms-a.frame.frame_interval_ms).slice(0,20),
-    notes:['All durations are CPU milliseconds, not GPU execution time.','frame_interval_ms is the RAF timestamp delta before this callback; inspect both the row and its previous callback.','Physics panels, solve+contacts, simulation+visuals and render callback are nested totals; do not add them to their inner stages.','Timers are opt-in and introduce measurement overhead; 240 Hz and 12 iterations are unchanged.']};
+    notes:['All durations are CPU milliseconds, not GPU execution time.','frame_interval_ms is the RAF timestamp delta before this callback; inspect both the row and its previous callback.','Physics panels, solve+contacts, simulation+visuals and render callback are nested totals; do not add them to their inner stages.','Timers are opt-in and introduce measurement overhead; read physics_dt_s and session metadata for the simulation rate. Contact *Ms fields are raw sampled milliseconds (one query in 32), not full-frame totals; do not add or extrapolate them as exact costs.']};
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(!process.argv[2])throw Error('Usage: npx tsx tools/report-physics-frames.ts recording.txt [output-prefix]');
