@@ -1,3 +1,4 @@
+import {parseScxAsync} from './formats/scx-worker-client';
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
@@ -9,7 +10,7 @@ import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
 import { replaceGarageCarTree } from './runtime/debug-garage-car';
 import { parseRpk, entryProperties } from './formats/rpk';
-import { parseScx } from './formats/scx';
+
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
@@ -1153,7 +1154,7 @@ async function companionTextures(path: string) {
 }
 
 async function showModel(path: string, textures: string[] = [], request = sequence) {
-  const model = parseScx(await assets.read(path));
+  const model = await parseScxAsync(await assets.read(path));
   if (request !== sequence) return;
   el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
   const resolvedTextures = textures.length ? textures : await companionTextures(path);

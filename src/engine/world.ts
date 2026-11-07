@@ -1,9 +1,10 @@
+import {parseScxAsync} from '../formats/scx-worker-client';
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Assets, normalizePath } from '../assets';
 import { entryProperties } from '../formats/rpk';
 import { parsePartConfig, secondaryRenders, type CfgPose, type CfgSlot, type PartConfig, type Triple } from '../formats/cfg';
 import { FixedClock } from '../runtime/fixed-clock';
-import { parseScx } from '../formats/scx';
+
 import { slotMatrix, wheelFrameMatrix, SUSPENSION_ATTACHMENT_OFFSETS, type WheelFrameOffsets } from './slot-frames';
 import { SCX_TO_WORLD } from './model-transform';
 import { poseMatrix } from './transforms';
@@ -400,7 +401,7 @@ export class PartFactory {
         const { lower, upper } = anchors;
         const axis = upper.sub(lower), length = axis.length();
         if (length < 0.01) continue;
-        const geometry = parseScx(await this.assets.read(model.path)), renderPose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);
+        const geometry = await parseScxAsync(await this.assets.read(model.path)), renderPose = part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose);
         let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
         for (const mesh of geometry.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {
           const point = new Vector3().fromArray(mesh.positions, i).multiplyScalar(SCX_TO_WORLD);
