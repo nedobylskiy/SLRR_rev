@@ -1,3 +1,4 @@
+import {parseScxAsync} from '../formats/scx-worker-client';
 import {DRIVING_PHYSICS_HZ,XPBD_ITERATIONS} from '../engine/physics-timing';
 import {planBuildingBatches,isBuildingAlias,configureBuildingArrayMaterial} from './building-material-batch';
 import {BuildingTextureArrays} from './building-texture-array';
@@ -29,7 +30,7 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel, ScxMesh } from '../formats/scx';
 import type { Assets } from '../assets';
-import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
+import { scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { loadPartCollision } from '../engine/part-collision';
@@ -652,7 +653,7 @@ export class Viewer {
           replacementPacks: overrides.resourceReplacementPacks,
           sourcePacks: overrides.resourceReplacementSourcePacks,
         } : undefined);
-        const parsed = parseScx(await assets.read(model.path));
+        const parsed = await parseScxAsync(await assets.read(model.path));
         const template = new THREE.Group();
         const warnings = await this.append(parsed, assets, model.textures, template, generation);
         if (isSkyDome) template.traverse(object => {
@@ -820,14 +821,14 @@ export class Viewer {
         const paint = await partPaint(part, assets);
         const group = new THREE.Group(); group.matrixAutoUpdate = false;
         group.matrix.copy(modelMatrix(part.matrix(), partRenderPose(part))); root.add(group);
-        await this.append(parseScx(await assets.read(model.path)), assets, model.textures, group, generation, false, () => true, undefined, paint);
+        await this.append(await parseScxAsync(await assets.read(model.path)), assets, model.textures, group, generation, false, () => true, undefined, paint);
         const pose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
         for (const extra of part.definition.additionalModels ?? []) {
           const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
           sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
           sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
           group.add(sub);
-          const extraModel = parseScx(await assets.read(extra.model.path));
+          const extraModel = await parseScxAsync(await assets.read(extra.model.path));
           bindLinkedRender(sub, extra.links, extraModel, extra.pose, extra.linkRules);
           await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
         }
@@ -910,7 +911,7 @@ export class Viewer {
       const model = part.definition.model;
       if (!model) continue;
       const paint = await partPaint(part, assets);
-      const parsed = parseScx(await assets.read(model.path));
+      const parsed = await parseScxAsync(await assets.read(model.path));
       const collision = await loadPartCollision(assets, part.definition);
       if (generation !== this.generation || world.disposed) return warnings;
       const group = new THREE.Group(); group.name = `${part.id}: ${part.definition.alias}`;
@@ -927,7 +928,7 @@ export class Viewer {
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
         submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
         group.add(submodel);
-        const extraModel = parseScx(await assets.read(extra.model.path));
+        const extraModel = await parseScxAsync(await assets.read(extra.model.path));
         bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
         warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint, true));
         if (generation !== this.generation) return warnings;
@@ -972,7 +973,7 @@ export class Viewer {
         && render.entry.type === 14 && entryProperties(render.entry).some(property => property.key === 'mesh')
         && !groundRenderHasChildren(pack, ground.renderId)) {
         const resource = await assets.modelForResource(packPath, ground.renderId);
-        const model = parseScx(await assets.read(resource.path));
+        const model = await parseScxAsync(await assets.read(resource.path));
         if (groundRenderIsRoom(pack, ground.renderId, model)) room = ground;
       }
     }
@@ -1033,7 +1034,7 @@ export class Viewer {
             point.fromArray(mesh.normals, i).transformDirection(transform).toArray(mesh.normals, i);
           return parsed;
         };
-        const parsed = placeGround(parseScx(await assets.read(resource.path)));
+        const parsed = placeGround(await parseScxAsync(await assets.read(resource.path)));
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
         collision.add(parsed);
@@ -1049,7 +1050,7 @@ export class Viewer {
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
             if (!wanted()) return [];
             const template = new THREE.Group();
-            const model = placeGround(parseScx(await assets.read(resource.path)));
+            const model = placeGround(await parseScxAsync(await assets.read(resource.path)));
             if (!wanted()) return [];
             warnings.push(...await this.append(model, assets, resource.textures, template, generation, true, wanted));
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
@@ -1133,7 +1134,7 @@ export class Viewer {
       stream.add(batch.placements, async wanted => {
       const model = await assets.modelForResource(batch.pack, batch.id);
       if (!wanted()) return [];
-      const parsed = parseScx(await assets.read(model.path)), component = new THREE.Group();
+      const parsed = await parseScxAsync(await assets.read(model.path)), component = new THREE.Group();
       if (!wanted()) return [];
       warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted));
       for (const part of component.children) if (part instanceof THREE.Mesh) {
@@ -1177,7 +1178,7 @@ export class Viewer {
   async hood(definition: PartDefinition, assets: Assets, telemetry: (text: string) => void) {
     this.clear(); const generation = this.generation;
     if (!definition.model) throw new Error('Hood model missing');
-    const parsed = parseScx(await assets.read(definition.model.path));
+    const parsed = await parseScxAsync(await assets.read(definition.model.path));
     if (generation !== this.generation) return;
     const transform = modelMatrix(new THREE.Matrix4().makeTranslation(0, 1.25, 0), definition.config.renderPose && poseMatrix(definition.config.renderPose));
     for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {

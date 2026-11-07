@@ -1,7 +1,8 @@
+import {parseScxAsync} from '../formats/scx-worker-client';
 import type { JavaValue } from 'slrr-jvm';
 import type { Assets } from '../assets';
 import type { BootResult } from '../runtime/game-boot';
-import { parseScx, type ScxMesh } from '../formats/scx';
+import { type ScxMesh } from '../formats/scx';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { normalizePath } from '../assets';
 import { readExeCursor, stockCursorIndex } from '../formats/exe-cursor';
@@ -186,7 +187,7 @@ export class JavaMouse {
     const identity = this.result.resolveResourceIdentity(id);
     if (!identity) throw new Error(`Cursor font resource ${id} has no identity`);
     const model = await this.assets.modelForResource(identity.pack, identity.id);
-    const mesh = parseScx(await this.assets.read(model.path)).meshes[0];
+    const mesh = (await parseScxAsync(await this.assets.read(model.path))).meshes[0];
     const rect = pointerUv(mesh, character);
     if (!(rect.width > 0 && rect.height > 0)) return 'default';
     const path = model.textures[mesh.textureIndex];

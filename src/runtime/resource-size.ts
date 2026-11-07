@@ -1,8 +1,9 @@
+import {parseScxAsync} from '../formats/scx-worker-client';
 import { Box3, Vector3 } from 'three';
 import type { Assets } from '../assets';
 import { normalizePath } from '../assets';
 import { parsePartConfig, secondaryRenders } from '../formats/cfg';
-import { parseScx } from '../formats/scx';
+
 import { poseMatrix } from '../engine/transforms';
 import type { GameTypeNative } from './game-type-native';
 import type { JavaValue } from 'slrr-jvm';
@@ -29,7 +30,7 @@ export function resourceBoundsReader(assets: Assets, resources: () => GameTypeNa
           const resource = await assets.resource(pack, render.resource);
           if (resource.entry.type === 13) continue;
           const source = await assets.modelForResource(pack, render.resource);
-          const model = parseScx(await assets.read(normalizePath(source.path)));
+          const model = await parseScxAsync(await assets.read(normalizePath(source.path)));
           const transform = render.pose && poseMatrix(render.pose);
           for (const mesh of model.meshes) for (let i = 0; i < mesh.positions.length; i += 3) {
             point.fromArray(mesh.positions, i).multiplyScalar(0.01);
