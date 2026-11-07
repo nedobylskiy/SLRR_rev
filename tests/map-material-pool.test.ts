@@ -4,7 +4,7 @@ import {BoxGeometry,Color,Mesh,MeshStandardMaterial,Texture} from 'three';
 import {MapMaterialPool} from '../src/render/map-material-pool';
 import {SceneLighting} from '../src/render/scene-lighting';
 
-test('painted facades keep their original material and texture ownership instead of entering the pool',()=>{
+test('painted facades with different captured fallback colors keep separate material state',()=>{
   const pool=new MapMaterialPool(),lighting=new SceneLighting(),texture=new Texture();
   const parts=[0xff0000,0x0000ff].map(color=>{
     const material=new MeshStandardMaterial({map:texture.clone()});
@@ -14,7 +14,19 @@ test('painted facades keep their original material and texture ownership instead
   const originals=parts.map(p=>p.material);pool.acquire(parts);
   assert.equal(parts[0].material,originals[0]);assert.equal(parts[1].material,originals[1]);
   assert.notEqual(parts[0].material,parts[1].material);
-  for(const part of parts){assert.equal(pool.release(part.material),false);part.material.map!.dispose();part.material.dispose();}
+  for(const part of parts)assert.equal(pool.release(part.material),true);
+});
+
+test('equal painted facades and authored lightmaps share state without losing texture ownership',()=>{
+  const pool=new MapMaterialPool(),lighting=new SceneLighting(),diffuse=new Texture(),bake=new Texture();
+  const parts=[0,1].map(()=>{
+    const material=new MeshStandardMaterial({map:diffuse.clone()});
+    lighting.configureMaterial(material,true,true,new Color(.2,.4,.6));
+    material.userData.bakedLightmapTexture=bake.clone();return new Mesh(new BoxGeometry(),material);
+  });
+  let releases=0;parts[0].material.userData.bakedLightmapTexture.addEventListener('dispose',()=>releases++);
+  pool.acquire([parts[0]]);pool.acquire([parts[1]]);assert.equal(parts[0].material,parts[1].material);
+  pool.release(parts[0].material);assert.equal(releases,0);pool.release(parts[1].material);assert.equal(releases,1);
 });
 
 test('equal static surfaces share material state until the last model evicts',()=>{

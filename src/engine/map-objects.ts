@@ -15,6 +15,12 @@ export function mapRenderResource(render: PartConfig['renders'][number], variant
   return render.variants?.length ? render.variants[variant % render.variants.length] : render.resource;
 }
 
+/** Stock daytime-only map mode: exclude explicit alternate night resources.
+ * Do not blanket-filter CFG flags=4: flags also control unrelated components. */
+export function isNightMapRenderResource(alias:string):boolean {
+  return /(?:^|[\\/ _-])night(?:$|[\\/ _.-])/i.test(alias);
+}
+
 /** Object instances exist in the map's source RDB even when omitted from its compiled RPK. */
 export function mapObjectPlacements(rdb: string, pack: RpkPack): MapObjectPlacement[] {
   const files = parseRdb(rdb), byName = new Map(files.map(file => [file.name.toLowerCase(), file]));

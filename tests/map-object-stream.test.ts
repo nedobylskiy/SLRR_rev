@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
-import { MapObjectStream } from '../src/render/map-object-stream';
+import { MapObjectStream, isMapTreeAlias } from '../src/render/map-object-stream';
+
+test('repeated tree parts share one instanced batch per geometry/material',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,500);
+  const trunk=new Mesh(new BoxGeometry(),new MeshBasicMaterial()),leaves=new Mesh(new BoxGeometry(),new MeshBasicMaterial());
+  trunk.name='map object tree: trunk';leaves.name='map object tree: leaves';
+  const placements=Array.from({length:50},(_,i)=>({position:new Vector3(i,0,-20),matrix:new Matrix4().makeTranslation(i,0,-20)}));
+  stream.add(placements,async()=>[trunk,leaves]);
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());stream.update(new Vector3());
+  assert.equal(parent.children.length,2);
+  for(const mesh of parent.children as InstancedMesh[]) {
+    assert.ok(mesh.isInstancedMesh);assert.equal(mesh.count,50);
+    assert.ok(mesh.geometry===trunk.geometry||mesh.geometry===leaves.geometry);
+    const matrix=new Matrix4();mesh.getMatrixAt(49,matrix);assert.equal(matrix.elements[12],49);
+  }
+  stream.dispose();
+});
 
 test('large static surfaces submit nearby cells and restore the intact mesh when cutoff is disabled',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,100),geometry=new PlaneGeometry(512,512,32,32);
@@ -302,6 +318,22 @@ test('map objects load near the camera, enter over successive frames and leave b
   parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
 });
 
+test('per-part frustum drops only the off-screen component and retains its shadow reserve',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,200),camera=new PerspectiveCamera(60,1,.1,500);
+  camera.updateMatrixWorld();
+  const near=new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial()),far=new Mesh(new BoxGeometry(2,2,2),new MeshBasicMaterial());
+  near.name='near component';far.name='off-screen component';far.geometry.translate(100,0,0);
+  stream.setShadowRange(150);stream.add([{position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)}],async()=>[near,far]);
+  stream.update(new Vector3(),camera);await Promise.resolve();stream.update(new Vector3(),camera);
+  const part=parent.children.find(m=>m.name===far.name) as InstancedMesh;
+  assert.equal(part.count,0);assert.equal((parent.children.find(m=>m.name===near.name) as InstancedMesh).count,1);
+  const reserve=parent.children.find(m=>m.name===`${far.name} / auxiliary casters`) as InstancedMesh;
+  assert.equal(reserve.count,1);assert.ok(reserve.userData.streamAuxiliary);
+  stream.setTightFrustum(false);stream.update(new Vector3(),camera);assert.equal(part.count,1);assert.equal(reserve.count,0);
+  stream.setTightFrustum(true);stream.setInspectResident(true);stream.update(new Vector3(),camera);assert.equal(part.count,1);
+  stream.dispose();
+});
+
 test('all nearby object types load after the concurrent-load slots are freed', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100);
   const loads = Array(6).fill(0);
@@ -325,4 +357,57 @@ test('all nearby object types load after the concurrent-load slots are freed', a
 
   stream.dispose();
   parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
+});
+
+test('tree toggle hides trunks, foliage and auxiliary casters, then restores resident instances',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,200),camera=new PerspectiveCamera(60,1,.1,500);
+  camera.updateMatrixWorld();stream.setShadowRange(150);
+  const placement={position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)};
+  const trunk=new Mesh(new BoxGeometry(),new MeshBasicMaterial());trunk.name='trunk';
+  const leaves=new Mesh(new BoxGeometry(),new MeshBasicMaterial());leaves.name='leaves';leaves.geometry.translate(100,0,0);
+  stream.add([placement],async()=>[trunk,leaves],true);
+  stream.add([placement],async()=>{const mesh=new Mesh(new BoxGeometry(),new MeshBasicMaterial());mesh.name='building';return [mesh];});
+  stream.update(new Vector3(),camera);await Promise.resolve();stream.update(new Vector3(),camera);
+  const count=(name:string)=>(parent.children.find(m=>m.name===name) as InstancedMesh).count;
+  assert.equal(count('trunk'),1);assert.equal(count('leaves / auxiliary casters'),1);
+  stream.setTreesHidden(true);stream.setInspectResident(true);stream.update(new Vector3(),camera);
+  for(const mesh of parent.children as InstancedMesh[])if(mesh.name!=='building'){assert.equal(mesh.count,0);assert.equal(mesh.visible,false);}
+  assert.equal(count('building'),1);assert.equal(stream.active,2,'toggle preserves residency');
+  stream.setTreesHidden(false);stream.update(new Vector3(),camera);
+  assert.equal(count('trunk'),1);assert.equal(count('leaves'),1);stream.dispose();
+  assert.ok(isMapTreeAlias('fa06a'));assert.ok(isMapTreeAlias('fa12a'));assert.ok(isMapTreeAlias('tree_obj'));
+  assert.equal(isMapTreeAlias('lamp_base'),false);assert.equal(isMapTreeAlias('facade'),false);
+});
+
+test('street furniture categories toggle independently, including late loads and shadow reserves',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,200),camera=new PerspectiveCamera(60,1,.1,500);
+  camera.updateMatrixWorld();stream.setShadowRange(150);
+  const placement={position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)};
+  for(const category of ['streetlights','bins','small-props',undefined] as const){
+    stream.add([placement],async()=>{
+      const mesh=new Mesh(new BoxGeometry(),new MeshBasicMaterial());mesh.name=category??'building';
+      if(category==='streetlights')mesh.geometry.translate(100,0,0);
+      return [mesh];
+    },category);
+  }
+  stream.setCategoryHidden('bins',true); // Set before async model load completes.
+  stream.update(new Vector3(),camera);await Promise.resolve();stream.update(new Vector3(),camera);
+  const count=(name:string)=>(parent.children.find(m=>m.name===name) as InstancedMesh).count;
+  assert.equal(count('bins'),0);assert.equal(count('small-props'),1);assert.equal(count('building'),1);
+  assert.equal(count('streetlights / auxiliary casters'),1);
+  stream.setCategoryHidden('streetlights',true);stream.setInspectResident(true);stream.update(new Vector3(),camera);
+  assert.equal(count('streetlights'),0);assert.equal(count('streetlights / auxiliary casters'),0);
+  stream.setCategoryHidden('bins',false);stream.setCategoryHidden('small-props',true);stream.update(new Vector3(),camera);
+  assert.equal(count('bins'),1);assert.equal(count('small-props'),0);assert.equal(count('building'),1);
+  assert.equal(stream.active,4);stream.dispose();
+});
+
+test('pinned prepared models load before playback and retain resources outside the streaming radius',async context=>{
+  let now=0,loads=0,disposed=0;context.mock.method(performance,'now',()=>now);
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  stream.add([{position:new Vector3(1000,0,0),matrix:new Matrix4().makeTranslation(1000,0,0)}],async wanted=>{
+    assert.equal(wanted(),true);loads++;const geometry=new BoxGeometry();geometry.addEventListener('dispose',()=>disposed++);return [new Mesh(geometry,new MeshBasicMaterial())];
+  },false,true);
+  await stream.preparePinnedModels();assert.equal(loads,1);stream.update(new Vector3());now=10000;stream.update(new Vector3());assert.equal(disposed,0);
+  stream.update(new Vector3(1000,0,0));assert.equal(stream.visible,1);assert.equal(loads,1);stream.dispose();assert.equal(disposed,1);
 });

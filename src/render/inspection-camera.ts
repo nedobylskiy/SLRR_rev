@@ -10,6 +10,7 @@ export class InspectionCamera {
   private controls:OrbitControls;
   private surface:HTMLDivElement;
   enabled=false;
+  replay=false;
   constructor(container:HTMLElement,private primary:PerspectiveCamera) {
     this.surface=document.createElement('div');this.surface.className='graphics-inspection-surface';
     Object.assign(this.surface.style,{position:'absolute',inset:'0',display:'none',zIndex:'2'});
@@ -32,7 +33,7 @@ export class InspectionCamera {
   reset(target:Vector3){this.camera.copy(this.primary);this.controls.target.copy(target);this.controls.update();}
   update(width:number,height:number,focus:Vector3,range:number) {
     if(!this.enabled)return;
-    this.camera.aspect=width/Math.max(1,height);this.camera.updateProjectionMatrix();this.controls.update();
+    this.camera.aspect=width/Math.max(1,height);this.camera.updateProjectionMatrix();if(!this.replay)this.controls.update();
     this.primary.updateMatrixWorld();this.helper.update();this.ring.position.copy(focus);this.ring.scale.set(range,1,range);
   }
 }

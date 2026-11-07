@@ -3,6 +3,8 @@ export class FixedClock {
   private accumulator = 0;
   tick = 0;
   readonly dt: number;
+  get pendingSeconds(){return this.accumulator;}
+  get requestedSeconds(){return this.tick*this.dt+this.accumulator;}
   constructor(readonly frequency = 60, readonly maxSteps = 8) {
     if (!Number.isFinite(frequency) || frequency <= 0 || !Number.isInteger(maxSteps) || maxSteps < 1) throw new Error('Invalid fixed clock parameters');
     this.dt = 1 / frequency;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Box3, Matrix4, Vector3 } from 'three';
+import { Box3, BufferGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
+import {PanelView} from '../src/render/panel-view';
 import { RigidBody3D, boxContact, orientedBoxContact } from '../src/engine/rigid-body-3d';
 import { Vehicle3D } from '../src/engine/vehicle-3d';
 import { EngineWorld } from '../src/engine/world';
@@ -50,6 +51,91 @@ function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicl
   }
   return { world, root, hood, door, lamp, demo, struts, sway, block, crank };
 }
+
+test('route inputs run once per fixed tick and assembly export excludes animated local travel',()=>{
+  const {demo,world,root}=setup(true),part=[...root.children.values()].find(p=>p.definition.mechanics?.kind==='suspension')!;
+  const assembly=demo.assemblyLocal(part);part.local.makeTranslation(9,8,7);
+  assert.deepEqual(demo.assemblyLocal(part),assembly);
+  const times:number[]=[];
+  demo.replayInput=time=>{times.push(time);return neutral;};
+  demo.advance(4/240,{throttle:1,steer:1,brake:true});
+  assert.equal(times.length,4);times.forEach((time,i)=>assert.ok(Math.abs(time-i/240)<1e-12));
+  assert.equal(demo.simulationTime,4/240);assert.equal(demo.suspension.steer,0);
+  demo.dispose();world.dispose();
+});
+
+test('recorded poses carry world-space panels before their first upload and subsequent rigid draws',()=>{
+  for(const uploadFirst of [false,true]){
+    const {demo,world,hood,root}=setup(true),samples=[-.7,.04,-.7,.7,.04,-.7,-.7,.04,.7,.7,.04,.7];
+    const geometry=new BufferGeometry();geometry.setAttribute('position',new Float32BufferAttribute(samples,3));geometry.computeVertexNormals();
+    const group=new Group();group.matrixAutoUpdate=false;const material=new MeshBasicMaterial();group.add(new Mesh(geometry,material));
+    const view=new PanelView(group,demo.panel,[samples]),initial=hood.matrix();
+    if(uploadFirst)view.update(initial,true);
+    const original=Array.from(geometry.getAttribute('position').array),clock=demo.simulationTime;
+    for(let step=1;step<=3;step++){
+      const next=new Matrix4().makeRotationY(.4*step).setPosition(20*step,3*step,-10*step);
+      demo.body.setFrame(next);root.local.copy(next);demo.suspension.sync();demo.syncRecordedPose();
+      view.update(hood.matrix(),true);
+      const delta=hood.matrix().multiply(initial.clone().invert());
+      for(let i=0;i<original.length;i+=3){
+        const expected=new Vector3().fromArray(original,i).applyMatrix4(delta);
+        const actual=new Vector3().fromBufferAttribute(geometry.getAttribute('position'),i/3).applyMatrix4(group.matrix);
+        assert.ok(actual.distanceTo(expected)<1e-4,`panel follows recorded frame (initial upload: ${uploadFirst})`);
+      }
+      assert.ok(demo.soft.get(hood)!.activity.frame.equals(hood.matrix()));
+      assert.equal(demo.simulationTime,clock,'render replay must not advance vehicle physics');
+    }
+    view.dispose();geometry.dispose();material.dispose();demo.dispose();world.dispose();
+  }
+});
+
+test('checkpoint restore precedes physics frame capture and does not create a teleport impact',()=>{
+  const {demo,root,world}=setup(true);demo.disableObstacle();
+  const target=new Matrix4().makeRotationY(.7).setPosition(30,50,-20);
+  const expectedCenter=demo.body.center.clone().applyMatrix4(target);
+  demo.beforeReplayTick=time=>{if(time!==0)return;demo.body.setFrame(target);root.local.copy(target);demo.syncRecordedPose();};
+  demo.advance(1/240,neutral);
+  assert.ok(demo.body.position.distanceTo(expectedCenter)<.001,'restored frame is used for this tick');
+  assert.equal(root.condition,1);assert.ok([...demo.soft.values()].every(s=>!s.activity.deforming));
+  assert.equal(demo.impactSpeed,0);assert.equal(demo.timings.activePanels,0);
+  demo.dispose();world.dispose();
+});
+
+test('10–20 FPS and 150–200 ms frames keep physics at real time with the same fixed-tick trajectory',()=>{
+  const reference=setup(true);reference.demo.disableObstacle();
+  for(let tick=0;tick<288;tick++)reference.demo.advance(1/240,neutral);
+  for(const duration of [.05,.1,.15,.2]){
+    const state=setup(true);state.demo.disableObstacle();
+    for(let frame=0;frame<Math.round(1.2/duration);frame++){
+      const result=state.demo.advance(duration,neutral);
+      assert.equal(result.backlogTicks,0,`frame ${duration}s must not hit the old 8-tick cap`);
+    }
+    assert.ok(Math.abs(state.demo.simulationTime-1.2)<1e-12);
+    assert.ok(Math.abs(state.demo.simulationTargetSeconds-1.2)<1e-12);
+    assert.ok(state.demo.body.position.distanceTo(reference.demo.body.position)<1e-10);
+    assert.ok(state.demo.body.orientation.angleTo(reference.demo.body.orientation)<1e-7);
+    for(const [part,soft] of state.demo.soft){
+      const other=[...reference.demo.soft.values()].find(s=>s.part.definition.alias===part.definition.alias)!;
+      for(let i=0;i<soft.panel.positions.length;i++)assert.ok(Math.abs(soft.panel.positions[i]-other.panel.positions[i])<1e-10);
+    }
+    state.demo.dispose();state.world.dispose();
+  }
+  reference.demo.dispose();reference.world.dispose();
+});
+
+test('a long foreground stall retains bounded catch-up debt without losing simulation time',()=>{
+  const {demo,world}=setup(true);demo.disableObstacle();
+  const frame=demo.advance(.6,neutral);
+  assert.equal(frame.steps,64);assert.equal(frame.backlogTicks,80);
+  assert.ok(Math.abs(demo.simulationTargetSeconds-.6)<1e-12);
+  assert.ok(Math.abs(demo.simulationPendingSeconds-80/240)<1e-12);
+  assert.equal(demo.advance(0,neutral).backlogTicks,16);
+  assert.equal(demo.advance(0,neutral).backlogTicks,0);
+  assert.ok(Math.abs(demo.simulationTime-.6)<1e-12);
+  assert.ok(demo.simulationPendingSeconds<1e-12);
+  demo.reset();assert.equal(demo.maxPhysicsSteps,64);assert.equal(demo.simulationTime,0);assert.equal(demo.simulationTargetSeconds,0);
+  demo.dispose();world.dispose();
+});
 
 test('driving and active body deformation are invariant to terrain elevation below zero', () => {
   const createAt = (elevation: number) => {

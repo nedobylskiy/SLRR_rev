@@ -53,6 +53,31 @@ function basis(panel: DeformablePanel) {
 export class Vehicle3D extends CarCrashDemo {
   readonly telemetry = new DriveTelemetry(this);
   get physicsDt() { return this.clock.dt; }
+  get simulationTime(){return this.clock.tick*this.clock.dt;}
+  get simulationPendingSeconds(){return this.clock.pendingSeconds;}
+  get simulationTargetSeconds(){return this.clock.requestedSeconds;}
+  get maxPhysicsSteps(){return this.clock.maxSteps;}
+  replayInput?: (time:number)=>DrivingInput;
+  beforeReplayTick?: (time:number)=>void;
+  /** Capture the assembly before suspension travel/spin, so replay does not apply them twice. */
+  assemblyLocal(part:EnginePart){
+    const saved=this.originalTree.find(row=>row.part===part);
+    return part!==this.root&&saved&&saved.parent===part.parent?saved.local.clone():part.local.clone();
+  }
+  /** Recorded body motion must also carry the world-space panel cages while the solver is paused. */
+  syncRecordedPose(){
+    for(const state of this.soft.values()){
+      const frame=state.part.matrix();
+      state.panel.setAnchorFrame(frame.elements);
+      state.activity.carry(state.panel.clock.dt,frame,this.body);
+    }
+    for(const state of this.rigid.values())if(state.part.parent){
+      const frame=state.part.matrix();state.body.setFrame(frame);state.previous.copy(frame);
+      state.body.velocity.copy(this.body.pointVelocity(state.body.position));state.body.setAngularVelocity(this.body.omega);
+    }
+    const frame=this.root.matrix();this.bodySurface?.setFrames(frame,frame);
+    this.lastVelocity.copy(this.body.velocity);this.lastOmega.copy(this.body.omega);
+  }
   readonly timings = { suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceUpdates: 0 };
   readonly body: RigidBody3D;
   collisionCue?: { speed: number; impulse: number; position: Vector3 };
@@ -159,7 +184,7 @@ export class Vehicle3D extends CarCrashDemo {
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
     super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 60000 });
-    this.clock = new FixedClock(240, 8);
+    this.clock = new FixedClock(240, 64);
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);
     this.body = new RigidBody3D(total, chassisBounds, center); this.body.setFrame(root.matrix()); this.suspension = new Suspension3D(root, this.body, this.terrain);
@@ -243,7 +268,7 @@ export class Vehicle3D extends CarCrashDemo {
       this.driving.yaw = this.spawn.yaw;
       this.driving.sync();
     }
-    this.clock = new FixedClock(240, 8);
+    this.clock = new FixedClock(240, 64);
     for (const s of this.originalTree) if (s.parent && s.part.parent !== s.parent) { if (s.part.parent) this.root.world.detach(s.part); this.root.world.install(s.parent, s.parentSlot!, s.part, s.ownSlot!); }
     for (const s of this.originalTree) if (s.part !== this.root) s.part.local.copy(s.local);
     for (const s of this.originalTree) s.part.condition = 1;
@@ -407,11 +432,14 @@ export class Vehicle3D extends CarCrashDemo {
     this.collisionCue = undefined;
     Object.assign(this.timings, { suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceUpdates: 0 });
     return this.clock.advance(seconds, tick => {
+      // Restore a reference checkpoint before sampling previous frames or detecting shocks.
+      this.beforeReplayTick?.((tick-1)*this.clock.dt);
       let sectionStart = performance.now();
       this.timings.ticks++;
       const dt = this.clock.dt, previous = this.root.matrix();
       let detached = this.releaseFailedWheels();
-      this.suspension.step(dt, input); this.body.integrate(dt);
+      const tickInput=this.replayInput?.((tick-1)*dt)??input;
+      this.suspension.step(dt, tickInput); this.body.integrate(dt);
       this.timings.suspension += performance.now() - sectionStart; sectionStart = performance.now();
       const incomingVelocity = this.body.velocity.clone(), incomingOmega = this.body.omega, predicted = this.body.matrix();
       const obstacle = new Box3(new Vector3(...this.obstacle.min), new Vector3(...this.obstacle.max));
@@ -553,7 +581,7 @@ export class Vehicle3D extends CarCrashDemo {
       // changes above still rebuild immediately, removing detached-part ghost faces.
       this.suspension.sync();
       this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega);
-      this.telemetry.tick(dt, input);
+      this.telemetry.tick(dt, tickInput);
       this.timings.other += performance.now() - sectionStart;
     });
   }

@@ -16,6 +16,7 @@ import { Viewer } from './render/viewer';
 import { defaultSuspensionDebug, type SuspensionDebugSettings } from './render/suspension-debug';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
+import {parseRouteBenchmark,restoreRouteVehicle,type RouteBenchmark,type RouteMode} from './engine/route-benchmark';
 import { Vector3 } from 'three';
 import { mountMainMenu } from './osd/main-menu';
 import { OsdLayer } from './osd/osd-layer';
@@ -45,6 +46,8 @@ let localInstallation = false;
 let engineWorld: EngineWorld | undefined;
 let engineRoot: EnginePart | undefined, disposeDriving: (() => void) | undefined;
 let beforeDrivingDetails = '';
+let benchmarkRunning=false;
+let routePreviewSession:ReturnType<Viewer['playRouteBenchmark']>|undefined;
 let disposeOsdMenu: (() => void) | undefined;
 let music: MusicEngine | undefined, disconnectMusic: (() => void) | undefined;
 const javaConsole = document.createElement('section');
@@ -335,7 +338,71 @@ garageCarButton.title = 'Replace the current garage car tree with a complete sto
 mapDebugPanel.append(textElement('summary', 'Graphics / map debug'),garageCarButton);
 const mapDebugData = textElement('pre', '', 'map-debug-data'); mapDebugPanel.append(mapDebugData);
 const mapDebugOptions = textElement('div', '', 'map-debug-options');
+const hideTreesLabel=textElement('label','Hide trees'),hideTreesCheck=document.createElement('input');
+hideTreesCheck.type='checkbox';hideTreesLabel.prepend(hideTreesCheck);mapDebugOptions.append(hideTreesLabel);
+hideTreesLabel.title='Hide stock tree trunks and foliage in all render passes for performance comparisons. Tree collision stays active.';
+hideTreesCheck.onchange=()=>viewer?.setMapTreesHidden(hideTreesCheck.checked);
+for(const [category,title,description] of [
+  ['streetlights','Hide streetlights / poles','Streetlights, their attached components, traffic lights and utility poles.'],
+  ['bins','Hide trash bins','Stock trash bins, including separate lids.'],
+  ['small-props','Hide other small props','Signs, adverts, benches, hydrants, crates, containers, barriers and other known stock street furniture. Buildings and roads stay visible.'],
+] as const){
+  const label=textElement('label',title),check=document.createElement('input');
+  check.type='checkbox';label.prepend(check);label.title=`${description} Hide in all render passes; collision stays active.`;
+  check.onchange=()=>viewer?.setMapObjectCategoryHidden(category,check.checked);mapDebugOptions.append(label);
+}
+const cachedCellsLabel=textElement('label','Precached object cells'),cachedCellsCheck=document.createElement('input');
+cachedCellsCheck.type='checkbox';cachedCellsLabel.prepend(cachedCellsCheck);mapDebugOptions.append(cachedCellsLabel);
+cachedCellsLabel.title='Experimental: prepare fixed instance buffers for trees and street furniture once; switch whole cells without per-object instance compaction. Buildings and roads retain ordinary streaming.';
+const cellSizeLabel=textElement('label','Object cell size (m)'),cellSizeSelect=document.createElement('select');
+for(const size of [64,128]){const option=document.createElement('option');option.value=String(size);option.textContent=String(size);cellSizeSelect.append(option);}
+cellSizeSelect.value='128';cellSizeLabel.append(cellSizeSelect);mapDebugOptions.append(cellSizeLabel);
+const cachedCellsStatus=textElement('span','');mapDebugOptions.append(cachedCellsStatus);
+const updateCachedCells=async()=>{
+  cachedCellsCheck.disabled=cellSizeSelect.disabled=true;cachedCellsStatus.textContent='Preparing object cells…';
+  try{await viewer?.setPrecachedObjectCells(cachedCellsCheck.checked,Number(cellSizeSelect.value));cachedCellsStatus.textContent='';}
+  catch(error){cachedCellsStatus.textContent=String(error);}
+  finally{cachedCellsCheck.disabled=cellSizeSelect.disabled=false;}
+};
+cachedCellsCheck.onchange=()=>{void updateCachedCells();};
+cellSizeSelect.onchange=()=>{void updateCachedCells();};
+const unifiedBuildingsStorageKey='slrr.graphics.unifiedBuildingMaterials.v1';
+const unifiedBuildingsLabel=textElement('label','Unified building materials'),unifiedBuildingsCheck=document.createElement('input');
+try{unifiedBuildingsCheck.checked=localStorage.getItem(unifiedBuildingsStorageKey)==='1';}catch{ /* Keep the default when browser storage is unavailable. */ }
+unifiedBuildingsCheck.type='checkbox';unifiedBuildingsLabel.prepend(unifiedBuildingsCheck);mapDebugOptions.append(unifiedBuildingsLabel);
+unifiedBuildingsLabel.title='Experimental: merge compatible opaque parts of each building model using a shared texture-array material. Saved in this browser. Re-enter the map, reload the page or rerun the benchmark after changing this setting. Transparent and unsupported surfaces stay original.';
+const unifiedBuildingsStatus=textElement('span','');mapDebugOptions.append(unifiedBuildingsStatus);
+unifiedBuildingsCheck.onchange=()=>{
+  try{localStorage.setItem(unifiedBuildingsStorageKey,unifiedBuildingsCheck.checked?'1':'0');}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked);unifiedBuildingsStatus.textContent='Saved · re-enter map / reload page / Run benchmark to apply';
+};
+const globalFacadesStorageKey='slrr.graphics.globalFacadeBatches.v1';
+const globalFacadesLabel=textElement('label','Global facade batches'),globalFacadesCheck=document.createElement('input');
+try{globalFacadesCheck.checked=localStorage.getItem(globalFacadesStorageKey)==='1';}catch{ /* Optional preference. */ }
+globalFacadesCheck.type='checkbox';globalFacadesLabel.prepend(globalFacadesCheck);mapDebugOptions.append(globalFacadesLabel);
+globalFacadesLabel.title='Experimental CPU tradeoff: expand all prepared opaque facade instances into large static batches by shared material once at map load. No per-facade distance/frustum selection. Requires Unified building materials; more off-screen triangles and memory. Re-enter map or rerun benchmark to apply.';
+const applyGlobalFacadesPreference=()=>{
+  if(globalFacadesCheck.checked){unifiedBuildingsCheck.checked=true;viewer?.setUnifiedBuildingMaterials(true);try{localStorage.setItem(unifiedBuildingsStorageKey,'1');}catch{}}
+  unifiedBuildingsCheck.disabled=globalFacadesCheck.checked;viewer?.setGlobalFacadeBatching(globalFacadesCheck.checked);
+};
+applyGlobalFacadesPreference();
+globalFacadesCheck.onchange=()=>{
+  try{localStorage.setItem(globalFacadesStorageKey,globalFacadesCheck.checked?'1':'0');}catch{}
+  applyGlobalFacadesPreference();unifiedBuildingsStatus.textContent='Saved · re-enter map / reload page / Run benchmark to apply';
+};
+const staticBatchLabel=textElement('label','Merge static map geometry'),staticBatchCheck=document.createElement('input');
+staticBatchCheck.type='checkbox';staticBatchLabel.prepend(staticBatchCheck);mapDebugOptions.append(staticBatchLabel);
+staticBatchLabel.title='Experimental: combine compatible opaque parts by material and 128 m cell within each streamed model. Original geometry stays cached for comparison.';
+staticBatchCheck.onchange=()=>viewer?.setStaticBatchingEnabled(staticBatchCheck.checked);
+const autoLodLabel=textElement('label','Generated map LOD'),autoLodCheck=document.createElement('input');
+autoLodCheck.type='checkbox';autoLodLabel.prepend(autoLodCheck);mapDebugOptions.append(autoLodLabel);
+autoLodLabel.title='Experimental: quality-checked closed opaque surfaces only, far at 200 m / near 160 m. Open facades, cutout foliage and unsupported extra UV channels stay original.';
+autoLodCheck.onchange=()=>viewer?.setAutoMapLodEnabled(autoLodCheck.checked);
 const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
+const tightFrustumLabel=textElement('label','Per-part frustum culling'),tightFrustumCheck=document.createElement('input');
+tightFrustumCheck.type='checkbox';tightFrustumCheck.checked=true;tightFrustumLabel.prepend(tightFrustumCheck);mapDebugOptions.append(tightFrustumLabel);
+tightFrustumLabel.title='Check each mesh part against the camera frustum after the coarse model check. Off-screen parts stay available for shadows and reflections.';
+tightFrustumCheck.onchange=()=>viewer?.setTightMapFrustumEnabled(tightFrustumCheck.checked);
 farPlaneCheck.type='checkbox';farPlaneLabel.prepend(farPlaneCheck);mapDebugOptions.append(farPlaneLabel);
 farPlaneLabel.title='Limit the primary camera far clipping plane to the streaming radius. The inspection camera retains its full range. Disable to restore the game camera range.';
 farPlaneCheck.onchange=()=>viewer?.setFarPlaneEnabled(farPlaneCheck.checked);
@@ -353,6 +420,20 @@ const rayOcclusionLabel=textElement('label','Raycast occlusion culling'),rayOccl
 rayOcclusionCheck.type='checkbox';rayOcclusionLabel.prepend(rayOcclusionCheck);mapDebugOptions.append(rayOcclusionLabel);
 rayOcclusionLabel.title='Experimental CPU rays against opaque visual triangles. Only proven convex coverage hides a box. Shadows and reflections retain full geometry.';
 rayOcclusionCheck.onchange=()=>viewer?.setRaycastOcclusionEnabled(rayOcclusionCheck.checked);
+const gpuOcclusionLabel=textElement('label','GPU Hi-Z occlusion'),gpuOcclusionCheck=document.createElement('input');
+gpuOcclusionCheck.type='checkbox';gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
+gpuOcclusionLabel.title='Experimental GPU bounding-box visibility flags with asynchronous readback. Preserves shadows. Always tests primary-camera visibility, including in the observer view. Bypassed with Inspect all resident instances, distance cutoff or CPU rays. Camera motion may cause delayed visibility.';
+gpuOcclusionCheck.onchange=()=>{viewer?.setGpuOcclusionEnabled(gpuOcclusionCheck.checked);if(gpuOcclusionCheck.checked)rayOcclusionCheck.checked=false;};
+const gpuIntervalLabel=textElement('label','GPU occlusion interval (frames)'),gpuInterval=document.createElement('select');
+for(const frames of [1,2,3,4,6,8,12]){const option=document.createElement('option');option.value=String(frames);option.textContent=String(frames);gpuInterval.append(option);}gpuInterval.value='4';
+gpuIntervalLabel.append(gpuInterval);mapDebugOptions.append(gpuIntervalLabel);gpuInterval.onchange=()=>viewer?.setGpuOcclusionInterval(Number(gpuInterval.value));
+const gpuApplyLabel=textElement('label','Apply GPU occlusion results'),gpuApply=document.createElement('input');gpuApply.type='checkbox';gpuApply.checked=true;
+gpuApplyLabel.prepend(gpuApply);mapDebugOptions.append(gpuApplyLabel);gpuApply.onchange=()=>viewer?.setGpuOcclusionApply(gpuApply.checked);
+const gpuDebugLabel=textElement('label','GPU occlusion debug view'),gpuDebug=document.createElement('select');
+for(const [value,label] of [['off','Off'],['depth','Depth 512 × 256'],...Array.from({length:9},(_,i)=>['hiz-'+i,'Hi-Z '+i+' (max depth)']),['flags','Visibility flags'],['boxes','Bounding boxes'],['boxes-hidden','Hidden boxes only']]){const option=document.createElement('option');option.value=value;option.textContent=label;gpuDebug.append(option);}
+gpuDebugLabel.append(gpuDebug);mapDebugOptions.append(gpuDebugLabel);
+gpuDebug.onchange=()=>{if(gpuDebug.value!=='off'){if(!gpuOcclusionCheck.checked){gpuOcclusionCheck.checked=true;viewer?.setGpuOcclusionEnabled(true);}gpuApply.checked=false;viewer?.setGpuOcclusionApply(false);}viewer?.setGpuOcclusionDebug(gpuDebug.value);};
+const gpuFreezeLabel=textElement('label','Freeze GPU occlusion depth'),gpuFreeze=document.createElement('input');gpuFreeze.type='checkbox';gpuFreezeLabel.prepend(gpuFreeze);mapDebugOptions.append(gpuFreezeLabel);gpuFreeze.onchange=()=>viewer?.setGpuOcclusionFreeze(gpuFreeze.checked);
 const rayBudgetLabel=textElement('label','Ray budget (ms)'),rayBudgetInput=document.createElement('input');
 rayBudgetInput.type='number';rayBudgetInput.min='.5';rayBudgetInput.max='8';rayBudgetInput.step='.5';rayBudgetInput.value='2';
 rayBudgetInput.style.width='55px';rayBudgetLabel.append(rayBudgetInput);mapDebugOptions.append(rayBudgetLabel);
@@ -388,6 +469,12 @@ graphicsCopy.type='button';graphicsCopy.onclick=()=>{
 };
 mapDebugOptions.append(graphicsCopy);
 window.setInterval(()=>{
+  if(benchmarkRunning){
+    viewer?.profiler.measure('Graphics debug UI CPU',()=>{
+      const text=viewer?.benchmarkDebugLines().join('\n')??'';
+      graphicsReport.textContent=text;routeLiveMetrics.textContent=text;
+    });return;
+  }
   if(mapDebugPanel.hidden)return;
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
   graphicsReport.textContent=[
@@ -553,8 +640,19 @@ vehicleDebugPanel.append(vehicleTeleportButton);
 const telemetryStart = textElement('button', 'Start physics recording') as HTMLButtonElement;
 const telemetryStop = textElement('button', 'Stop & download telemetry') as HTMLButtonElement;
 const telemetryDownload = textElement('button', 'Download last recording') as HTMLButtonElement;
+const routeDownload = textElement('button', 'Download route benchmark') as HTMLButtonElement;
+routeDownload.disabled=true;
 const telemetryStatus = textElement('p', 'Physics recording off · 100 ms interval');
-vehicleDebugPanel.append(telemetryStart, telemetryStop, telemetryDownload, telemetryStatus);
+vehicleDebugPanel.append(telemetryStart, telemetryStop, telemetryDownload, routeDownload, telemetryStatus);
+let lastRouteRecording:string|undefined;
+function downloadText(text:string,filename:string,type='application/json'){
+  downloadBlob(new Blob([text],{type}),filename);
+}
+function downloadBlob(blob:Blob,filename:string){
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+routeDownload.onclick=()=>{if(lastRouteRecording)downloadText(lastRouteRecording,`slrr-route-${Date.now()}.json`);};
 let recordingRequested = false;
 let lastDriveRecording: { text: string; filename: string } | undefined;
 const downloadDriveRecording = () => {
@@ -569,6 +667,7 @@ function finishDriveRecording(reason: string) {
   const recorder = mapDebugSession?.telemetry;
   if (!recorder) return;
   recorder.stop(reason);
+  lastRouteRecording=recorder.benchmarkText();routeDownload.disabled=!lastRouteRecording;
   lastDriveRecording = { text: recorder.text(), filename: `slrr-remaster-physics-${new Date().toISOString().replace(/[:.]/g,'-')}.txt` };
   telemetryStatus.textContent = `Saved ${recorder.status.samples} samples · ${recorder.status.seconds.toFixed(1)} s · ${recorder.status.reason}`;
   telemetryStart.disabled = !recorder.status.available; telemetryStop.disabled = true; telemetryDownload.disabled = false;
@@ -577,7 +676,7 @@ function finishDriveRecording(reason: string) {
 telemetryStart.onclick = () => {
   const recorder = mapDebugSession?.telemetry;
   if (!recorder?.status.available) return;
-  recorder.start(mapDebugSession!.telemetryContext()); recordingRequested = true;
+  recorder.start({...mapDebugSession!.telemetryContext(),viewport_expanded:Number(document.body.classList.contains('viewport-expanded'))}); recordingRequested = true;
   mapDebugSession!.focusControls();
   telemetryStart.disabled = true; telemetryStop.disabled = false;
   telemetryStatus.textContent = 'Recording physics · 100 ms interval';
@@ -754,6 +853,68 @@ function showMusicState(state: MusicState) {
   playSong.title = state.blocked ? 'Browser requires a click before music can play' : state.error ?? '';
 }
 el('memory-lab').before(worldButton, driveButton, mapButton, trackDriveButton);
+const benchmarkPanel=document.createElement('details');benchmarkPanel.className='route-benchmark-panel';
+benchmarkPanel.append(textElement('summary','Route benchmark'));
+const routeFile=document.createElement('input');routeFile.type='file';routeFile.accept='.json,application/json';
+const routeMode=document.createElement('select');
+const routeProfileLabel=textElement('label','Map render profile'),routeProfile=document.createElement('select');
+for(const [value,label] of [['optimized','Optimized'],['baseline','Baseline']]){const option=document.createElement('option');option.value=value;option.textContent=label;routeProfile.append(option);}
+routeProfileLabel.append(routeProfile);
+routeProfile.onchange=()=>{tightFrustumCheck.checked=routeProfile.value==='optimized';};
+for(const [value,label] of [['render','Render recorded route'],['physics','Physics along route (100 ms sync)'],['free-physics','Free physics controls (stop at 2 m drift)']]){
+  const option=document.createElement('option');option.value=value;option.textContent=label;routeMode.append(option);
+}
+const routeRun=textElement('button','Run benchmark') as HTMLButtonElement,routeStop=textElement('button','Stop') as HTMLButtonElement;
+const routeLoopLabel=textElement('label','Loop'),routeLoop=document.createElement('input');routeLoop.type='checkbox';routeLoopLabel.prepend(routeLoop);
+routeLoopLabel.title='Repeat without reloading the map. Reports cover one completed lap; Stop or Preview frame ends playback. Physics drift failures do not repeat.';
+const routeReport=textElement('button','Download benchmark report') as HTMLButtonElement,routeStatus=textElement('p','Load a recorded route JSON. Original game assets must be mounted.');
+const routeLiveMetrics=textElement('pre','','map-debug-data');
+const routeSeekLabel=textElement('label','Preview time (s)'),routeSeekInput=document.createElement('input');
+routeSeekInput.type='number';routeSeekInput.min='0';routeSeekInput.step='.1';routeSeekInput.value='0';routeSeekInput.style.width='70px';routeSeekLabel.append(routeSeekInput);
+const routeSeek=textElement('button','Preview frame') as HTMLButtonElement,routeScreenshot=textElement('button','Download preview screenshot') as HTMLButtonElement;
+routeSeek.disabled=true;routeScreenshot.disabled=true;
+routeSeek.onclick=()=>{if(!routePreviewSession)return;routePreviewSession.seek(Number(routeSeekInput.value));routeReport.disabled=true;routeScreenshot.disabled=false;};
+routeScreenshot.onclick=async()=>{if(!viewer)return;try{downloadBlob(await viewer.captureFrame(),`slrr-route-frame-${routeSeekInput.value}-${Date.now()}.png`);}catch(error){routeStatus.textContent=String(error);}};
+routeRun.disabled=true;routeReport.disabled=true;
+benchmarkPanel.append(routeFile,routeMode,routeProfileLabel,routeRun,routeStop,routeLoopLabel,routeReport,routeSeekLabel,routeSeek,routeScreenshot,routeStatus,routeLiveMetrics);el('viewport').after(benchmarkPanel);
+let loadedRoute:RouteBenchmark|undefined,lastRouteReport:string|undefined;
+routeFile.onchange=async()=>{
+  try{const file=routeFile.files?.[0];if(!file)return;if(file.size>100*1024*1024)throw Error('Route exceeds 100 MiB');
+    loadedRoute=parseRouteBenchmark(await file.text());routeRun.disabled=false;mapDebugPanel.hidden=false;routeStatus.textContent=`${loadedRoute.metadata.map_pack} · ${loadedRoute.poses.at(-1)!.t.toFixed(1)} s · ready`;
+  }catch(error){loadedRoute=undefined;routeRun.disabled=true;routeStatus.textContent=String(error);}
+};
+routeStop.onclick=()=>{++sequence;stopDrive();routeStatus.textContent='Stopped';};
+routeReport.onclick=()=>{if(lastRouteReport)downloadText(lastRouteReport,`slrr-route-result-${Date.now()}.json`);};
+routeRun.onclick=async()=>{
+  if(!loadedRoute||!viewer||!assets)return;
+  const route=loadedRoute,request=++sequence;routeRun.disabled=true;routeReport.disabled=true;
+  stopDrive();disposeJavaInput?.();disposeJavaInput=undefined;disposeGameBoot?.();disposeGameBoot=undefined;
+  viewer.setMapRenderProfile(routeProfile.value==='optimized',tightFrustumCheck.checked);
+  disposeGameOsd?.();disposeGameOsd=undefined;viewer.setJavaSceneCamera(undefined);
+  disposeMemoryLab?.();disposeMemoryLab=undefined;viewer.clear();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;
+  try{
+    const built=restoreRouteVehicle(route.vehicle);engineWorld=built.world;engineRoot=built.root;
+    await softBodyReady;
+    await viewer.showWorld(built.world,assets);
+    if(request!==sequence)return;
+    const map=await viewer.showMap(String(route.metadata.map_pack),assets,(done,total)=>{routeStatus.textContent=`Loading map ${done}/${total}`;},true);
+    if(request!==sequence)return;
+    await viewer.restoreRouteEnvironment(route.metadata,assets);
+    if(request!==sequence)return;
+    showMapDebugControls(map);el('viewport').hidden=false;el('inspector').hidden=true;
+    setViewportExpanded(route.metadata.viewport_expanded===undefined||!!Number(route.metadata.viewport_expanded));
+    el('filename').textContent=`Route benchmark · ${route.metadata.map_pack}`;
+    el('java-run-state').textContent='Java stopped for standalone route benchmark';
+    benchmarkRunning=true;
+    el('viewport').parentElement?.classList.add('route-benchmark-active');
+    routePreviewSession=viewer.playRouteBenchmark(built.root,route,map,routeMode.value as RouteMode,message=>{routeStatus.textContent=message;},(report,looping)=>{
+      benchmarkRunning=!!looping;lastRouteReport=report;routeReport.disabled=false;routeSeekInput.value=String(route.poses.at(-1)!.t);routeScreenshot.disabled=false;
+    },()=>routeLoop.checked);
+    disposeDriving=routePreviewSession;routeSeek.disabled=false;routeSeekInput.max=String(route.poses.at(-1)!.t);
+    el('details').textContent='Benchmark runs directly in the host engine. Java game loops, input polling and OSD are stopped. Use Restart Java to return to the game.';
+  }catch(error){benchmarkRunning=false;routeStatus.textContent=String(error);viewer.clear();}
+  finally{routeRun.disabled=!loadedRoute;}
+};
 trackDriveButton.onclick = async () => {
   if (trackDriving) { setViewportExpanded(true); return; }
   if (!assets || !viewer) return;
@@ -804,6 +965,9 @@ mapButton.onclick = async () => {
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
 };
 function stopDrive() {
+  benchmarkRunning=false;
+  routePreviewSession=undefined;routeSeek.disabled=true;routeScreenshot.disabled=true;
+  el('viewport').parentElement?.classList.remove('route-benchmark-active');
   disposeJavaScene?.(); disposeJavaScene = undefined;
   const wasTrackDriving = trackDriving;
   disposeOsdMenu?.(); disposeOsdMenu = undefined;
@@ -912,7 +1076,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); }
+try { viewer = new Viewer(el('viewport')); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }
