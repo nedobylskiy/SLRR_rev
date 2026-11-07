@@ -60,3 +60,10 @@ test('session maximum survives the short peak window and invalid samples are ign
   assert.ok(p.lines().some(l=>l.startsWith('Probe:')&&l.includes('peak 1.0')&&l.includes('max session 50.0')&&l.includes('samples 2')));
   p.dispose();
 });
+
+test('route summary averages the whole measurement period and reset removes the warmup',()=>{
+  const {profiler:p}=fixture();p.record('Probe',101);for(let i=0;i<200;i++)p.record('Probe',1);
+  const row=p.summary().Probe;assert.equal(row.samples,201);assert.ok(Math.abs(row.mean_ms-301/201)<1e-12);
+  assert.equal(row.max_ms,101);assert.equal(row.recent_p95_ms,1);
+  p.resetMeasurements();assert.deepEqual(p.summary(),{});p.dispose();
+});

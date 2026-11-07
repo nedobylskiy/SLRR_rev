@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mapObjectPlacements, mapObjectSeed, mapRenderResource, parseIcfg } from '../src/engine/map-objects';
+import { mapObjectPlacements, mapObjectSeed, mapRenderResource, isNightMapRenderResource, parseIcfg } from '../src/engine/map-objects';
 import { parsePartConfig } from '../src/formats/cfg';
 import type { RpkPack } from '../src/formats/rpk';
 
@@ -49,4 +49,12 @@ test('compiled ICFG exposes the original box body and render reference', () => {
   const parsed = parseIcfg(bytes);
   assert.deepEqual(parsed.bodies[0].shape, ['box', '2', '1', '1']);
   assert.equal(parsed.renders[0].resource, 0x522);
+});
+
+test('daytime map filtering removes explicit night variants while retaining daytime buildings and ordinary components',()=>{
+  for(const alias of ['krthaz02_night','night_vreklam3aa','night_reklam1nad','NIGHT_reklam1faa'])assert.equal(isNightMapRenderResource(alias),true,alias);
+  for(const alias of ['krthaz02','vreklam3aa','reklam1nad','lamp_base','trafficlamp','06x5_shop_uveg','nightclub'])assert.equal(isNightMapRenderResource(alias),false,alias);
+  const cfg=parsePartConfig('render 0x1ad 1 2 3 0 0 0\nflags 68\nrender 0x4ba 1 2 3 0 0 0\nflags 4\nrender 0x118\nflags 4');
+  const aliases=new Map([[0x1ad,'krthaz02'],[0x4ba,'krthaz02_night'],[0x118,'lamp_base']]);
+  assert.deepEqual(cfg.renders.filter(r=>!isNightMapRenderResource(aliases.get(r.resource)!)).map(r=>r.resource),[0x1ad,0x118]);
 });

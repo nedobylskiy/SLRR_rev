@@ -10,6 +10,8 @@ export class SceneLighting {
   configureMaterial(material: MeshStandardMaterial, hasVertexColors = false, paintMask = false, paintColor = new Color(1, 1, 1)) {
     // Paint is custom shader state, not fully represented by standard material fields.
     material.userData.slrrPaintMask=paintMask;
+    // The shader captures this fallback tint; include it in immutable map-material identity.
+    material.userData.slrrPaintColor=paintColor.toArray();
     const previous = material.onBeforeCompile;
     const previousKey = material.customProgramCacheKey.bind(material);
     const key = previousKey();
