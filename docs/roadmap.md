@@ -51,6 +51,10 @@ Authoritative server, content handshake, inputs, dynamics, late join/reconnect, 
 
 Readiness: two independent client sessions and a server, identical machine assembly with different load order, movement with correction, damage and replacement of parts, stable reconnect. The serializer in the unit test is not considered multiplayer.
 
+## Rendering performance — pending Hi-Z CPU optimization
+
+Cache static per-placement world-space bounding boxes across streamer slot changes, keep them resident on the GPU, and submit active placement indices instead of rebuilding and uploading every box on each Hi-Z pass. Replace matrix-string placement identities with stable IDs. First measure the individual CPU stages; the observed 14.2 ms peak in GPU occlusion CPU has not yet been attributed to box preparation. Detailed tasks and acceptance criteria: [map render cost](map-render-performance.md#planned-hi-z-caching-and-profiling).
+
 ## Research blockers
 
 The exact leak point in the old EXE has not been determined. Examined EXE without PDB. The intended complete original source has not been received from the community. The embedded map geometry/physics and animation formats are not supported. The full semantics of TREE and native API have not been restored. These are ongoing unfinished works, and not grounds to present the project as a finished game.

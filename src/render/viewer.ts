@@ -401,6 +401,7 @@ export class Viewer {
     this.gpuOcclusion=new MapGpuOcclusion(this.renderer);
     this.mapBackfaces.setEnabled(true);
     this.setBakedLightmapsEnabled(true);
+    this.setShadowMapsEnabled(true);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x11171c);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -426,6 +427,7 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      this.profiler.captureCpuFrame=!!this.renderRecorder?.status.recording;
       this.profiler.beginFrame(now);
       try {
       if (document.hidden) this.previousFrame = undefined;
@@ -485,7 +487,8 @@ export class Viewer {
       }finally{
         this.profiler.endGpu();this.profiler.endFrame();
         if(this.renderRecorder?.status.recording){const size=this.renderer.getDrawingBufferSize(new THREE.Vector2());
-          this.renderRecorder.recordRenderFrame(now,{...this.renderer.info.render,width:size.x,height:size.y},document.hidden);}
+          this.renderRecorder.recordRenderFrame(now,{...this.renderer.info.render,width:size.x,height:size.y},document.hidden);
+          this.renderRecorder.recordPerformanceFrame(now,this.profiler.frameTimings(),document.hidden);}
         this.afterFrame?.();
         const capture=this.frameCapture;if(capture){this.frameCapture=undefined;
           this.renderer.domElement.toBlob(blob=>blob?capture.resolve(blob):capture.reject(Error('Frame capture failed')),'image/png');}
@@ -1332,19 +1335,20 @@ export class Viewer {
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
       const input = java ? java.sample() : { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
-      if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
         for (const [key, title] of [['panelSolve', 'Panel solve + contacts'], ['panelSurface', 'Body collision mesh'], ['panelSleep', 'Panel sleep checks']] as const)
           this.profiler.record(title, crash.timings[key]);
+        if(crash.telemetry.status.recording)for(const [key,title] of [['panelConstraints','XPBD constraints CPU'],['panelContacts','Panel contacts CPU'],['panelUpload','WASM input upload CPU'],['panelIntegration','Panel integration + finalize CPU'],['looseContacts','Loose body contacts CPU']] as const)this.profiler.record(title,crash.timings[key]);
         const backends = new Set([...crash.soft.values()].map(part => part.panel.backend === 'wasm' ? 'C++/WASM' : 'TypeScript'));
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
         this.physicsWork = `Physics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
       root.world.lightMask = (root.world.lightMask & ~3) | (input.brake ? 1 : 0)
         | (crash instanceof Vehicle3D && crash.suspension.mechanics?.gear === -1 ? 2 : 0);
-      this.syncWorld(softParts);
+      this.profiler.measure('Vehicle world sync CPU',()=>this.syncWorld(softParts));
       for (const [part, helper] of vehicleBounds) {
         if (!helper.visible) continue;
         const proxy = this.proxies.get(part);

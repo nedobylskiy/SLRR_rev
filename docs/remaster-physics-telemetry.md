@@ -63,3 +63,34 @@ For useful comparison, use the same car configuration, track/start point,
 transmission mode and launch procedure. Original captures omit wheel speeds,
 so they still cannot uniquely separate clutch slip from tyre slip; the added
 host channels explain which mechanism is active in the remaster.
+
+
+## Per-frame CPU trace for collisions
+
+Start physics recording also enables detailed CPU stage timings for every render callback, independently of Detailed GPU diagnostics. Stop & download telemetry writes the physics samples and CPU frames to the same `.txt`. The ordinary physics samples remain at 100 ms simulation intervals. Additional lines have the prefix `SLRR_FRAME|v=1|` followed by a flat JSON object. The archived SLRR_PHYSICS v2 exporter ignores this separate prefix and remains compatible.
+
+A CPU frame records simulation-relative time, wall time since recording started, RAF timestamp/delta, physics tick count and pending debt, active panel/node steps, beam constraint iterations, collision-surface updates (with separate `collision_bvh_builds` and `collision_bvh_refits` counts), loose/sleeping panel counts and actual TS/WASM panel counts. Millisecond stages include:
+
+- `constraints_ms`: XPBD beam and anchor constraints. During recording WASM calls separate constraints and contact exports in the same numerical order; normal unprofiled simulation retains the combined call.
+- `panel_contacts_ms`: terrain sampling, ground/AABB constraints, JS triangle/guard queries and contact response of active panels. Native contact callbacks are included here rather than in constraints.
+- `wasm_upload_ms`: input collider/beam/mount packing; this is not all JS/WASM synchronization.
+- `integration_finalize_ms`: prediction, release, plasticity and velocity finalization, including mount/beam state reads in the wrapper.
+- `loose_contacts_ms` and `chassis_contacts_ms`: loose rigid-panel contact probes and chassis contact handling respectively. Loose rigid hardware also appears in the broader Physics other total.
+- `body_collision_geometry_ms`: collision skin/refit work. `cpu_vehicle_render_geometry_cpu_ms` covers visual panel skinning/normals, and `cpu_vehicle_world_sync_cpu_ms` covers the surrounding scene synchronization.
+- CPU profiler sections, including simulation+visuals, renderer, GPU-occlusion submission and the complete render callback. These are nested totals and must not be added to their inner stages.
+
+Detailed timers run only while recording; recording and timing have their own overhead. TS/WASM regression tests check that profiled and unprofiled state follows the same trajectory. Frequency remains 240 Hz, with 12 XPBD iterations. GPU query results resolve asynchronously and are intentionally excluded from the CPU frame snapshot.
+
+The RAF interval precedes the work in its row. A long interval can reflect work in the **previous** callback, browser scheduling, or both: inspect the previous row as well as the current row. The converter retains that pairing. Paused frames do not repeat old physics timings, and tab hiding breaks the interval sequence so a background pause is not labelled a collision stall.
+
+Capture is bounded to 36,000 CPU frames as well as the existing physics sample limit; reaching either stops recording. A short collision recording should include several seconds before impact and 5–10 seconds afterward. No extra download button is required.
+
+Convert CPU frames to CSV and a summary with the worst intervals and their preceding callbacks:
+
+```powershell
+npx tsx tools/report-physics-frames.ts "C:/path/slrr-remaster-physics-capture.txt"
+```
+
+This writes `.frames.csv` and `.frames-summary.json` beside the input file. An optional second argument supplies the output prefix. Files recorded before frame_cpu_v1 have no per-frame CPU data.
+
+Incremental geometry counters: `collision_triangles_updated` counts regenerated/refitted faces, `collision_parts_updated` counts changed part ranges (including removals), and `collision_vertices_skinned` counts collision skinning calls. They exclude unchanged cached geometry and are separate from rendered triangle counts.

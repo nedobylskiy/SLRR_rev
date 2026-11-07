@@ -6,7 +6,7 @@ const output = 'src/engine/wasm/soft-body.wasm';
 mkdirSync(new URL('../src/engine/wasm/', import.meta.url), { recursive: true });
 const zig = process.env.ZIG;
 const compiler = zig || process.env.WASM_CXX || 'clang++';
-const exports = ['abi_version', 'configure', 'buffer', 'predict', 'solve', 'release_mounts', 'finish', 'set_colliders'];
+const exports = ['abi_version', 'configure', 'buffer', 'predict', 'solve', 'solve_constraints', 'solve_contacts', 'release_mounts', 'finish', 'set_colliders'];
 const args = [...(zig ? ['c++', '-target', 'wasm32-freestanding'] : ['--target=wasm32']),
   '-std=c++17', '-O3', '-nostdlib', '-fno-exceptions', '-fno-rtti', '-ffp-contract=off',
   '-Wl,--no-entry', '-Wl,--export-memory',

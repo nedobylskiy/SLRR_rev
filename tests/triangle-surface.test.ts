@@ -53,3 +53,34 @@ test('a free panel bounces, transfers opposite impulse and remains supported abo
   assert.ok(peakUpward > 0.1); assert.ok(reactionY < -10); assert.ok(s.hits > 0);
   for (let i = 1; i < p.positions.length; i += 3) assert.ok(p.positions[i] >= 0.5 + s.radius - 1e-6);
 });
+
+
+test('inactive detached triangle slots leave BVH bounds and cached contacts without rebuilding, and can be restored',()=>{
+  const other=plane.map((v,i)=>v+(i%3===0?30:i%3===1?2:0));
+  const s=new TriangleSurface([...plane,...other],()=>true,()=>new Vector3(),()=>{}),tree=(s as any).tree;
+  const old=new Float64Array([30,4,0]),p=new Float64Array([30,0,0]);assert.ok(s.project(p,old,0));
+  s.refit([...plane,...other.map(()=>0)]);assert.equal((s as any).tree,tree);
+  p.set([30,0,0]);assert.equal(s.project(p,old,0),undefined,'removed triangles cannot collide through cached candidates');
+  assert.ok((s as any).tree.bounds.max.x<=10,'inactive faces do not expand the root bounds');
+  assert.ok(Math.abs(s.roofPoint().y-.5)<1e-10);
+  const live=new Float64Array([0,0,0]);assert.ok(s.project(live,new Float64Array([0,2,0]),0));
+  s.refit([...plane,...other]);p.set([30,0,0]);assert.ok(s.project(p,old,0));assert.equal((s as any).tree,tree);
+});
+
+
+test('partial refit updates sparse triangle ranges and ancestor bounds with the same contacts as a full refit',()=>{
+  const coords:number[]=[];for(let i=0;i<32;i++)coords.push(i*3,0,0,i*3+1,0,0,i*3,0,1);
+  const sparse=new TriangleSurface(coords,()=>true,()=>new Vector3(),()=>{}),full=new TriangleSurface(coords,()=>true,()=>new Vector3(),()=>{});
+  const moved=coords.slice();moved.fill(0,3*9,4*9);
+  for(let k=17*9;k<18*9;k++)moved[k]+=k%3===0?100:k%3===1?2:0;
+  sparse.refit(moved,[{start:3*9,count:9},{start:17*9,count:9}]);full.refit(moved);
+  assert.equal(sparse.lastRefitTriangles,2);assert.ok(sparse.lastRefitBranches<full.lastRefitBranches);
+  assert.deepEqual((sparse as any).tree.bounds,(full as any).tree.bounds);
+  for(const x of [.2,9.2,51.2,151.2,93.2]){
+    const a=new Float64Array([x,-1,.2]),b=a.slice(),previous=new Float64Array([x,4,.2]);
+    assert.equal(!!sparse.project(a,previous,0),!!full.project(b,previous,0));assert.deepEqual(a,b);
+  }
+  const bounds=(sparse as any).tree.bounds.clone();
+  assert.throws(()=>sparse.refit(coords,[{start:0,count:9},{start:1,count:9}]),/range/);assert.deepEqual((sparse as any).tree.bounds,bounds);
+  sparse.refit(moved,[]);assert.equal(sparse.lastRefitTriangles,0);assert.equal(sparse.lastRefitBranches,0);
+});

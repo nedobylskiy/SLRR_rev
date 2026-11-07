@@ -82,3 +82,24 @@ The terrain cell BVH now retains conservative height bounds. A swept cage first 
 A local controlled bridge run loaded City and City2 (313,893 support triangles and 19,723 CFG boxes), placed a stock Baiern at `(745.5, 6.9, -269.2)`, and held 19 km/h for three 160-frame windows of eight ticks each. Waking was disabled only in this diagnostic fixture to isolate rigid-carry overhead. Panel averages changed from **5.43 / 3.94 / 2.05 ms** to **3.83 / 0.92 / 0.73 ms**. These are headless diagnostic timings, not production FPS or an impact benchmark.
 
 The viewer also skips hidden vehicle-bounds helpers. Streaming load completion no longer invalidates the entire city's proximity query, and type priority sorting runs when the focus cell/range/index changes. A `Sun flare CPU` measurement isolates the lens-flare framebuffer copies within `Render CPU`; these times overlap and must not be added together.
+
+
+While physics recording is active, separate `solve_constraints` and `solve_contacts` exports allow CPU timings without mixing XPBD and native contacts. The existing combined `solve` export remains the unprofiled path. Both execute constraints followed by contacts in the same order; profiled/unprofiled TS and WASM parity is covered by regression tests. The bundled binary and build exports are updated together; persistent buffers and the memory layout are unchanged.
+
+
+## Quiet ground contacts and incremental collision geometry
+
+The exact ground solver keeps a 15 mm contact clearance. Its former 25 mm wake shell classified an already-settled quiet cage as threatened, so a Kurumma chassis repeatedly woke immediately after sleeping. The wake test now shares the solver clearance and allows 1 mm of resting jitter; new penetration, higher terrain, obstacle overlap and impulse/shock wake paths remain active. Fixed step and active iteration count are unchanged. Reproduce quiet-car behavior with:
+
+```powershell
+npm run benchmark:vehicle-physics -- --car=kurumma --mechanical --idle
+```
+
+Collision coordinates are cached per registered part in chassis-local space. The cache uses shape version, connectivity and exact local transform chains, excluding the moving chassis transform. Whole-car translation/rotation therefore does not invalidate it. Part movement/deformation, detachment, restoration and explicit reset do. Only changed triangle ranges are skinned/transformed; TriangleSurface updates those faces and their ancestor bounds. Inactive slots remain excluded from contacts and bounds. Full refit is retained for initial/all-range updates, and count changes can still rebuild a tree. Unchanged geometry causes no refit.
+
+The frame trace adds `collision_triangles_updated`, `collision_parts_updated` and `collision_vertices_skinned` to make the saved work observable. The sparse/full refit comparison is available in `npx tsx tools/benchmark-collision-surface.ts`.
+
+
+Validation of these changes: build and 490 standard tests pass, as do 54 explicit WASM tests; the two PanelActivity wake tests also pass with WASM preloaded. Tests cover settled contact jitter, real penetration, higher terrain, obstacles, sparse-vs-full contact parity, detach/restore, reset, and cached geometry under whole-car translation/rotation.
+
+Local warmed quiet-Kurumma experiment: before the wake correction the chassis remained active and eight physics ticks cost about 2.1–2.2 ms in settled phases; afterward all panels were inactive and eight ticks cost about 0.7–0.9 ms. A separate 60-update stock Kurumma probe (1010 collision triangles, only the front bumper deforming) measured 28.99 ms for full skin/refit versus 5.38 ms for the incremental path; maximum coordinate difference was 3.1e-14 m. These CPU experiments are not measured whole-game FPS improvements. The standalone 12,800-triangle benchmark measured 24.06 ms for 15 full refits versus 6.91 ms for partial refits. Re-record a live collision to assess remaining spikes and cache effectiveness using the new per-frame geometry counters.

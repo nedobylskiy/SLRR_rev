@@ -7,6 +7,9 @@ export class FrameProfiler {
   private samples = new Map<string, { average: number; peak: number; since: number; last:number;maximum:number;count:number;total:number;recent:number[];slot:number }>();
   private browser=new BrowserPerformance();
   private glActivity:GlActivity;
+  captureCpuFrame=false;
+  private frameCpu=new Map<string,number>();
+  frameTimings(){return Object.fromEntries(this.frameCpu);}
   private frameStart?:number;
   private frameRaf=0;
   private measured=0;
@@ -51,6 +54,9 @@ export class FrameProfiler {
   }
   record(name: string, ms: number) {
     if(!Number.isFinite(ms)||ms<0)return;
+    // GPU timer results resolve later and must never be assigned to this CPU frame.
+    if(this.captureCpuFrame&&this.frameStart!==undefined&&!(name.startsWith('GPU ')&&!name.endsWith('CPU')))
+      this.frameCpu.set(name,(this.frameCpu.get(name)??0)+ms);
     const now = performance.now(), previous = this.samples.get(name);
     const recent=previous?.recent??[],slot=previous?.slot??0;recent[slot]=ms;
     this.samples.set(name, { average: previous ? previous.average + (ms - previous.average) * 0.08 : ms,
@@ -70,7 +76,7 @@ export class FrameProfiler {
       }
     }
     this.record('RAF scheduling delay (wall)',Math.max(0,now-raf));
-    this.outside.clear();this.frameStart=now;this.frameRaf=raf;this.measured=0;this.sections=new Map();
+    this.outside.clear();this.frameCpu.clear();if(this.captureCpuFrame)this.frameCpu.set('RAF scheduling delay (wall)',Math.max(0,now-raf));this.frameStart=now;this.frameRaf=raf;this.measured=0;this.sections=new Map();
   }
   endFrame(){
     if(this.frameStart===undefined)return;

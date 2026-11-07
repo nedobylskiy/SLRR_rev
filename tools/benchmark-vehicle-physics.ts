@@ -10,8 +10,11 @@ import { softBodyRuntime } from '../src/engine/soft-body-wasm';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './game-files';
 
 if (!await softBodyRuntime.load(() => readFile(new URL('../src/engine/wasm/soft-body.wasm', import.meta.url)))) throw new Error(softBodyRuntime.error);
+const car=process.argv.find(a=>a.startsWith('--car='))?.slice(6)??'Baiern';
+if(!/^[a-z0-9_-]+$/i.test(car))throw Error('Invalid car name');
+const idle=process.argv.includes('--idle');
 const assets = new Assets((await walk(gameRoot)).map(f => ({ path: relativeGamePath(f), size: 0 })), async p => new Uint8Array(await readFile(await safeGamePath(p))));
-const { world, root } = await new PartFactory(assets).stock({ pack: 'cars/racers/Baiern.rpk', id: 6 });
+const { world, root } = await new PartFactory(assets).stock({ pack: `cars/racers/${car}.rpk`, id: 6 },{mechanical:process.argv.includes('--mechanical')});
 const hood = [...world.parts.values()].find(p => /\/hood.cfg$/i.test(p.definition.cfgPath))!;
 const data = new Map<typeof root, { samples: number[]; triangles: number[] }>();
 for (const part of world.parts.values()) {
@@ -34,10 +37,10 @@ const demo = new Vehicle3D(root, hood, data.get(hood)!.samples, bounds), triangl
 for (const [part, geometry] of data) if (part !== hood) {
   demo.register(part, geometry.samples, geometry.triangles);
   const frame = root.matrix().invert().multiply(part.matrix());
-  for (let i = 0; i < geometry.triangles.length; i += 3) { point.fromArray(geometry.triangles, i).applyMatrix4(frame); triangles.push(point.x, point.y, point.z); }
+  if(!part.definition.mechanics)for (let i = 0; i < geometry.triangles.length; i += 3) { point.fromArray(geometry.triangles, i).applyMatrix4(frame); triangles.push(point.x, point.y, point.z); }
 }
-demo.setBodyTriangles(triangles); demo.reset(50 / 3.6);
-console.log(`Baiern: ${triangles.length / 9} body triangles, ${demo.soft.size} panels, C++/WASM`);
+demo.setBodyTriangles(triangles);if(idle)demo.disableObstacle();demo.reset(idle?0:50/3.6);
+console.log(`${car}: ${triangles.length / 9} body triangles, ${demo.soft.size} panels, C++/WASM`);
 for (let phase = 0; phase < 4; phase++) {
   const totals = { wall: 0, solve: 0, surface: 0, sleep: 0, active: 0, refits: 0 };
   for (let tick = 0; tick < 720; tick++) {

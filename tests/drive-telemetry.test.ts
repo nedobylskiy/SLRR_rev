@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Quaternion, Vector3 } from 'three';
+import {parsePhysicsFrames,summarizePhysicsFrames} from '../tools/report-physics-frames';
 import { DriveTelemetry } from '../src/engine/drive-telemetry';
 import type { Vehicle3D } from '../src/engine/vehicle-3d';
 // @ts-expect-error Archived original-game exporter is intentionally plain JavaScript.
@@ -68,4 +69,32 @@ test('stop retains a completed recording; restart clears samples and the safety 
   for (let i=0;i<recorder.maxSamples+10;i++) recorder.tick(0.1,input);
   assert.equal(recorder.status.samples,recorder.maxSamples);
   assert.equal(recorder.status.recording,false); assert.equal(recorder.status.reason,'sample_limit');
+});
+
+
+test('per-frame CPU trace shares the download, preserves stalls, resets on restart and keeps the v2 exporter compatible',()=>{
+  const {recorder,vehicle}=fixture();
+  const timed=vehicle as typeof vehicle & {advanceVersion:number;timings:Record<string,number>;simulationPendingSeconds:number;soft:Map<unknown,unknown>};
+  Object.assign(timed,{advanceVersion:0,timings:{ticks:0,activePanels:0,nodeSteps:0,beamIterations:0,surfaceUpdates:0,surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,contacts:0,panelSurface:0,panels:0,other:0,suspension:0},simulationPendingSeconds:.02,soft:new Map()});
+  recorder.recordPerformanceFrame(0,{});assert.equal(recorder.text(),'');
+  recorder.start();recorder.tick(.1,input);timed.advanceVersion++;
+  Object.assign(timed.timings,{ticks:4,panelConstraints:2,panelContacts:3,panelSurface:4});
+  recorder.recordPerformanceFrame(100,{ 'Vehicle render geometry CPU':5,'Render callback CPU':20 });
+  timed.advanceVersion++;Object.assign(timed.timings,{ticks:64,panelConstraints:100});
+  recorder.recordPerformanceFrame(600,{'Render callback CPU':450});
+  // No advance since the last render: paused frames must not repeat old physics work.
+  recorder.recordPerformanceFrame(616,{});
+  recorder.recordPerformanceFrame(10000,{},true);recorder.recordPerformanceFrame(10020,{});
+  recorder.stop();const text=recorder.text();
+  const frames=text.split('\n').filter(l=>l.startsWith('SLRR_FRAME|v=1|')).map(l=>JSON.parse(l.slice('SLRR_FRAME|v=1|'.length)));
+  assert.equal(frames.length,4);assert.equal(recorder.status.frames,4);
+  assert.equal(frames[0].constraints_ms,2);assert.equal(frames[0].panel_contacts_ms,3);assert.equal(frames[0].body_collision_geometry_ms,4);
+  assert.equal(frames[0].cpu_vehicle_render_geometry_cpu_ms,5);assert.equal(frames[1].frame_interval_ms,500);assert.equal(frames[1].physics_ticks,64);
+  assert.equal(frames[1].constraints_ms,100);assert.equal(frames[2].physics_ticks,0);assert.equal(frames[2].constraints_ms,0);assert.equal(frames[3].frame_interval_ms,0);
+  const parsed=parsePhysicsFrames(text);assert.equal(parsed.rejected,0);assert.equal(parsed.frames.length,4);assert.equal(summarizePhysicsFrames(parsed.frames).worst_frames[0].previous?.constraints_ms,2);
+  assert.equal(parsePhysicsFrames('SLRR_FRAME|v=1|bad').rejected,1);
+  const original=parse(text);assert.equal(original.rejected,0);assert.equal(original.sessions[0].samples.length,1);
+  recorder.recordPerformanceFrame(11000,{});assert.equal(recorder.text(),text);
+  recorder.start();assert.equal(recorder.status.frames,0);Object.defineProperty(recorder,'maxFrames',{value:2});
+  recorder.recordPerformanceFrame(0,{});recorder.recordPerformanceFrame(16,{});assert.equal(recorder.status.reason,'frame_limit');assert.equal(recorder.status.recording,false);
 });

@@ -53,3 +53,16 @@ render counted `uniform3f` calls decreasing from 178 to 16 and `uniformMatrix3fv
 from 96 to 65. These are individual API counters, not total render-time savings.
 Viewport comparison differed at 73 of 370540 pixels in one small ground patch;
 material sorting changes the order of coplanar surfaces. No geometry was removed.
+
+
+## Planned Hi-Z caching and profiling
+
+Status: planned, not implemented. A real-driving screenshot showed GPU occlusion CPU at 2.5 ms with a 14.2 ms peak. This timing includes several stages and does not establish that bounding boxes caused the peak.
+
+- [ ] Split CPU measurements into source collection/cache validation, box preparation/upload, depth/Hi-Z/test submission, fence/readback processing and visible-instance compaction. Capture the stages in individual long frames, rather than combining unrelated peak values.
+- [ ] Cache the local box per geometry and the expanded world-space box per static placement. Preserve those boxes through streamer slot reordering and temporary removal/re-entry; invalidate only when the relevant geometry or placement changes.
+- [ ] Keep a persistent typed-array/GPU texture of placement boxes. Upload new or changed ranges where supported, and send an active-index list when the candidate set changes. Camera motion should update the view-projection matrix, without re-uploading unchanged boxes.
+- [ ] Replace placement identities built by serializing matrix values into strings with stable placement IDs supplied by the map/streamer. Preserve identity across compaction and asynchronous GPU tickets.
+- [ ] Avoid rebuilding unchanged candidate lists and recreating unchanged depth proxies; reuse buffers and allocations where the stage measurements justify it.
+
+Acceptance: completed shader verdicts remain authoritative until replaced, including interval 12, camera motion, frozen captures, slot reorder and removal/re-entry. Preserve visible geometry, shadows and material behavior. Verify that unchanged candidate sets do not cause box uploads and that camera-only changes do not recalculate world boxes. Compare before/after CPU stage timings and long-frame frequency on the same laptop, route and settings, using equally warmed runs; report streamed/cold runs separately. Do not promise an FPS improvement before measurement.

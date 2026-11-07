@@ -548,3 +548,74 @@ test('alignment failure starts below 10 percent support health and zero-health p
 
 
 
+
+
+test('sleeping detached panels do not request collision-surface refits while attached panels deform',()=>{
+  const {world,root,demo,hood,door}=setup();demo.disableObstacle();
+  const triangles=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2];
+  const samples:number[]=[];for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangles);demo.setBodyTriangles(triangles);demo.reset();
+  world.detach(hood);demo.panel.mounts.forEach(m=>m.broken=true);
+  for(let i=0;i<demo.panel.positions.length;i+=3){demo.panel.positions[i]+=5;demo.panel.positions[i+1]+=2;}
+  const state=demo.soft.get(hood)!;
+  for(let tick=0;tick<6*240&&!state.activity.resting;tick++)demo.advance(1/240,neutral);
+  assert.ok(state.activity.resting);
+  const geometry=demo as unknown as {updateSurface():void},update=geometry.updateSurface.bind(demo);let refits=0;
+  geometry.updateSurface=()=>{refits++;update();};
+  const positions=demo.panel.positions.slice();
+  for(let tick=0;tick<120;tick++){demo.soft.get(door)!.activity.wake();demo.advance(1/240,neutral);}
+  assert.equal(refits,0,'no awake loose consumer needs the current body triangle mesh');
+  assert.deepEqual(demo.panel.positions,positions);
+  state.activity.freeBody!.impulse(new Vector3(20,100,0));demo.advance(1/240,neutral);
+  assert.ok(refits>0,'waking debris receives fresh body geometry before its contact queries');
+  world.dispose();
+});
+
+
+test('recording aggregates profiled panel phases across every fixed substep and exports actual vehicle CPU frames',()=>{
+  const {demo,world,hood}=setup(true);demo.disableObstacle();demo.panel.hit(20);
+  demo.telemetry.start();demo.advance(4/240,neutral);
+  assert.equal(demo.timings.ticks,4);assert.ok(demo.timings.activePanels>=4);
+  assert.ok(demo.timings.panelConstraints>0);assert.ok(demo.timings.panelContacts>0);assert.ok(demo.timings.nodeSteps>=4*demo.panel.positions.length/3);
+  demo.telemetry.recordPerformanceFrame(100,{'Render callback CPU':25});demo.telemetry.stop();
+  const line=demo.telemetry.text().split('\n').find(l=>l.startsWith('SLRR_FRAME|v=1|'))!;
+  const row=JSON.parse(line.slice('SLRR_FRAME|v=1|'.length));assert.equal(row.physics_ticks,4);assert.equal(row.constraints_ms,demo.timings.panelConstraints);assert.equal(row.active_panel_steps,demo.timings.activePanels);
+  assert.equal(row.wasm_panels+row.ts_panels,demo.soft.size);assert.equal(row.cpu_render_callback_cpu_ms,25);
+  demo.advance(1/240,neutral);assert.equal(demo.timings.panelConstraints,0,'no detailed timers when recording is off');
+  world.dispose();
+});
+
+
+test('detaching body geometry keeps the existing collision BVH and disables its triangle slots',()=>{
+  const {demo,world,root,door}=setup();const triangle=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2];
+  const samples:number[]=[];for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangle);demo.register(door,samples,triangle);demo.setBodyTriangles([...triangle,...triangle]);
+  const original=demo.bodySurface!,update=()=>{(demo as unknown as {updateSurface():void}).updateSurface();};
+  update();assert.equal(demo.bodySurface,original);const tree=(original as any).tree;
+  world.detach(door);update();assert.equal(demo.bodySurface,original);assert.equal((original as any).tree,tree);
+  assert.equal(original.coordinateLength,18);assert.equal(demo.timings.surfaceBuilds,0);assert.equal(demo.timings.surfaceRefits,2);
+  assert.equal((original as any).faces.filter((f:any)=>f.active).length,1,'only the connected chassis triangle remains active');
+  world.dispose();
+});
+
+
+test('collision skin cache survives rigid motion and updates only changed part ranges, including removal and restoration',()=>{
+  const {demo,world,root,door}=setup();const triangle=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2];
+  const samples:number[]=[];for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangle);demo.register(door,samples,triangle);demo.setBodyTriangles([...triangle,...triangle]);
+  const chassis=demo.soft.get(root)!.panel,side=demo.soft.get(door)!.panel,skinRoot=chassis.skin.bind(chassis),skinDoor=side.skin.bind(side);
+  let rootCalls=0,doorCalls=0;chassis.skin=(...args)=>{rootCalls++;skinRoot(...args);};side.skin=(...args)=>{doorCalls++;skinDoor(...args);};
+  const update=()=>{(demo as unknown as {updateSurface():void}).updateSurface();};
+  update();assert.equal(rootCalls,3);assert.equal(doorCalls,3);update();assert.equal(rootCalls,3);assert.equal(doorCalls,3);
+  root.local.makeRotationY(.7).setPosition(20,2,-30);demo.body.setFrame(root.matrix());demo.syncRecordedPose();update();
+  assert.equal(rootCalls,3,'whole-car translation/rotation must not skin cached local geometry');assert.equal(doorCalls,3);
+  const geometry=(demo as unknown as {geometry:{part:typeof root;bindings:any[]}[];surfaceCoordinates:number[]});
+  const expected=[0,0,0];skinRoot(geometry.geometry.find(g=>g.part===root)!.bindings[0],expected);
+  const localPoint=new Vector3().fromArray(expected).applyMatrix4(root.matrix().invert());
+  assert.ok(localPoint.distanceTo(new Vector3().fromArray(geometry.surfaceCoordinates))<1e-10,'cached coordinates match an explicit rotated world-space skin');
+  door.local.elements[12]+=.1;demo.syncRecordedPose();update();assert.equal(rootCalls,3);assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
+  chassis.positions[0]-=.2;chassis.shapeVersion++;update();assert.equal(rootCalls,6);assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
+  world.detach(door);update();assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
+  world.install(root,602,door,1);demo.syncRecordedPose();update();assert.equal(doorCalls,9,'restored geometry must be regenerated');
+  demo.reset();update();assert.ok(rootCalls>6,'reset invalidates the cache');world.dispose();
+});

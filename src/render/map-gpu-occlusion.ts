@@ -41,8 +41,8 @@ export function gpuDepthOccluder(mesh:InstancedMesh){
  * Depth uses real opaque geometry, never the bounding boxes themselves as occluders.
  * Results are read through PBO/fence without waiting; shadows/reflections keep full sources. */
 export class MapGpuOcclusion {
-  enabled=false;
-  intervalFrames=4;
+  enabled=true;
+  intervalFrames=12;
   applyResults=true;
   freeze=false;
   debugMode='off';

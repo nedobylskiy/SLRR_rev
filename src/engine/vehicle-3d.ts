@@ -3,7 +3,7 @@ import { CarCrashDemo } from './car-crash-demo';
 import { RigidBody3D, boxContact, orientedBoxContact } from './rigid-body-3d';
 import { Suspension3D, TestTerrain, type Terrain } from './suspension-3d';
 import { DeformablePanel, type PanelBinding, type Triple } from './deformable-panel';
-import { TriangleSurface } from './triangle-surface';
+import { TriangleSurface, type SurfaceRange } from './triangle-surface';
 import type { EnginePart } from './world';
 import type { DrivingInput } from './driving-demo';
 import { PanelActivity } from './panel-activity';
@@ -16,7 +16,7 @@ import type { MapCollision } from './map-collision';
 interface ReleaseGuard { axis: 0 | 1 | 2; sign: number; minimum: Float64Array; frame: Matrix4; inverse: Matrix4; normal: Vector3 }
 export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean; guard?: ReleaseGuard; mountVersion?: number }
 export interface RigidPart { part: EnginePart; body: RigidBody3D; previous: Matrix4; peakForce: number }
-interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[] }
+interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[]; cache?:{start:number;count:number;connected:boolean;shape:number;local?:Matrix4} }
 export const vehiclePartMass = (p: EnginePart) => {
   const type = p.parent?.definition.config.slots.find(s => s.id === p.parentSlot)?.type;
   const minimum = type !== undefined && type >= 101 && type <= 104 ? 14 : p.definition.mechanics ? ({ suspension: 12, spring: 3, shock: 3, brake: 8, sway: 4, engine: 4 }[p.definition.mechanics.kind]) : 0.1;
@@ -78,7 +78,9 @@ export class Vehicle3D extends CarCrashDemo {
     const frame=this.root.matrix();this.bodySurface?.setFrames(frame,frame);
     this.lastVelocity.copy(this.body.velocity);this.lastOmega.copy(this.body.omega);
   }
-  readonly timings = { suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceUpdates: 0 };
+  advanceVersion=0;
+  private profileFrame=false;
+  readonly timings = { nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 };
   readonly body: RigidBody3D;
   collisionCue?: { speed: number; impulse: number; position: Vector3 };
   private spawn?: { position: Vector3; yaw: number };
@@ -90,7 +92,6 @@ export class Vehicle3D extends CarCrashDemo {
   private originalObstacle: { min: Triple; max: Triple };
   private rigidSurface?: TriangleSurface;
   private triangleSource?: number[];
-  private surfaceTopology = '';
   private surfaceCoordinates: number[] = [];
   private lastVelocity = new Vector3();
   private lastOmega = new Vector3();
@@ -225,28 +226,43 @@ export class Vehicle3D extends CarCrashDemo {
     const soft = this.soft.get(part);
     if (!part.definition.mechanics && !isWheel) this.geometry.push({ part, triangles, bindings: soft && Array.from({ length: triangles.length / 3 }, (_, i) => soft.panel.bind(triangles.slice(i * 3, i * 3 + 3))) });
   }
-  override setBodyTriangles(triangles: ArrayLike<number>) { super.setBodyTriangles(triangles, true); this.triangleSource = Array.from(triangles); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; this.configureStructure(); }
+  override setBodyTriangles(triangles: ArrayLike<number>) { super.setBodyTriangles(triangles, true); this.triangleSource = Array.from(triangles); this.rigidSurface = this.bodySurface;this.invalidateSurfaceCache(); this.configureStructure(); }
+  private invalidateSurfaceCache(){for(const g of this.geometry)g.cache=undefined;}
+  private relativeFrame(part:EnginePart,frame:Matrix4){
+    frame.identity();if(part===this.root)return frame;
+    frame.copy(part.local);for(let parent=part.parent;parent&&parent!==this.root;parent=parent.parent)frame.premultiply(parent.local);
+    return frame;
+  }
   private updateSurface() {
     if (!this.geometry.length) return;
-    const started = performance.now();
-    const inverse = this.root.matrix().invert(), triangles = this.surfaceCoordinates, out = [0, 0, 0], point = new Vector3();
-    triangles.length = 0;
-    let topology = '';
-    for (const g of this.geometry) {
-      if (g.part === this.hood || g.part.definition.mechanics || !this.connected(g.part)) continue;
-      topology += `${g.part.id},`;
-      const matrix = inverse.clone().multiply(g.part.matrix());
-      for (let i = 0; i < g.triangles.length; i += 3) {
-        if (g.bindings) { this.soft.get(g.part)!.panel.skin(g.bindings[i / 3], out); point.fromArray(out).applyMatrix4(inverse); }
-        else point.fromArray(g.triangles, i).applyMatrix4(matrix);
-        triangles.push(point.x, point.y, point.z);
+    const started=performance.now(),triangles=this.surfaceCoordinates,out=[0,0,0],point=new Vector3(),relative=new Matrix4(),ranges:SurfaceRange[]=[];
+    let count=0;for(const g of this.geometry)if(g.part!==this.hood&&!g.part.definition.mechanics)count+=g.triangles.length;
+    if(!count)return;
+    triangles.length=count;let start=0,inverse:Matrix4|undefined;
+    for(const g of this.geometry){
+      if(g.part===this.hood||g.part.definition.mechanics)continue;
+      const length=g.triangles.length,connected=this.connected(g.part),shape=g.bindings?this.soft.get(g.part)!.panel.shapeVersion:-1;
+      const local=connected?this.relativeFrame(g.part,relative):undefined,cached=g.cache;
+      const changed=!cached||cached.start!==start||cached.count!==length||cached.connected!==connected
+        ||connected&&(cached.shape!==shape||!cached.local?.equals(local!));
+      if(changed&&length){
+        if(!connected)triangles.fill(0,start,start+length);
+        else for(let i=0;i<length;i+=3){
+          if(g.bindings){inverse??=this.root.matrix().invert();this.soft.get(g.part)!.panel.skin(g.bindings[i/3],out);point.fromArray(out).applyMatrix4(inverse);this.timings.surfaceVertices++;}
+          else point.fromArray(g.triangles,i).applyMatrix4(local!);
+          triangles[start+i]=point.x;triangles[start+i+1]=point.y;triangles[start+i+2]=point.z;
+        }
+        ranges.push({start,count:length});this.timings.surfaceParts++;
       }
+      if(changed)g.cache={start,count:length,connected,shape,local:local?.clone()};start+=length;
     }
-    if (!triangles.length) return;
-    if (topology === this.surfaceTopology && this.bodySurface) this.bodySurface.refit(triangles);
-    else { super.setBodyTriangles(triangles, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = topology; }
-    this.surfaceTick = this.clock.tick + 1;
-    this.timings.panelSurface += performance.now() - started; this.timings.surfaceUpdates++;
+    if(this.bodySurface?.coordinateLength===count){
+      if(ranges.length){
+        const all=ranges.reduce((n,r)=>n+r.count,0)===count;
+        this.bodySurface.refit(triangles,all?undefined:ranges);this.timings.surfaceRefits++;this.timings.surfaceTriangles+=this.bodySurface.lastRefitTriangles;this.timings.surfaceUpdates++;
+      }
+    }else{super.setBodyTriangles(triangles,true);this.rigidSurface=this.bodySurface;this.timings.surfaceBuilds++;this.timings.surfaceTriangles+=count/9;this.timings.surfaceUpdates++;}
+    this.surfaceTick=this.clock.tick+1;this.timings.panelSurface+=performance.now()-started;
   }
   private connected(part: EnginePart) { for (let p: EnginePart | undefined = part; p; p = p.parent) if (p === this.root) return true; return false; }
   private subtreeMass(part: EnginePart): number { let total = mass(part); for (const child of part.children.values()) total += this.subtreeMass(child); return total; }
@@ -278,7 +294,7 @@ export class Vehicle3D extends CarCrashDemo {
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
     for (const s of this.soft.values()) { s.guard = undefined; s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
     for (const r of this.rigid.values()) { r.body.setMass(mass(r.part)); r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
-    if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface; this.surfaceTopology = ''; }
+    if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface;this.invalidateSurfaceCache(); }
     this.configureStructure();
   }
   placeAt(position: Vector3, yaw: number) { this.spawn = { position: position.clone(), yaw }; this.reset(); }
@@ -316,6 +332,10 @@ export class Vehicle3D extends CarCrashDemo {
   }
   /** Probe first so a hard impact can wake XPBD before any rigid proxy impulse is applied. */
   private freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape?: Float64Array, guard?: ReleaseGuard) {
+    if(!this.profileFrame)return this.freeContactsCore(body,previous,obstacle,apply,shape,guard);
+    const start=performance.now();try{return this.freeContactsCore(body,previous,obstacle,apply,shape,guard);}finally{this.timings.looseContacts+=performance.now()-start;}
+  }
+  private freeContactsCore(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape?: Float64Array, guard?: ReleaseGuard) {
     let speed = 0;
     const solve = (point: Vector3, normal: Vector3, depth: number, carrier = false, correctPosition = true) => {
       const relative = body.pointVelocity(point); if (carrier) relative.sub(this.body.pointVelocity(point));
@@ -430,7 +450,9 @@ export class Vehicle3D extends CarCrashDemo {
     if (this.root.world.disposed) throw new Error('3D world disposed');
     if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
     this.collisionCue = undefined;
-    Object.assign(this.timings, { suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceUpdates: 0 });
+    this.advanceVersion++;
+    this.profileFrame=this.telemetry.status.recording;
+    Object.assign(this.timings, { nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 });
     return this.clock.advance(seconds, tick => {
       // Restore a reference checkpoint before sampling previous frames or detecting shocks.
       this.beforeReplayTick?.((tick-1)*this.clock.dt);
@@ -491,9 +513,6 @@ export class Vehicle3D extends CarCrashDemo {
       for (const s of ordered) {
         const attached = !!s.part.parent || s.root, frame = s.part.matrix();
         if (!attached) this.updateGuard(s);
-        // Attached panels never collide with this triangle surface. Re-skin/refit the
-        // assembly only when a loose part actually needs it, not for suspension jolts.
-        if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         if (!s.root && s.part.condition === 0) s.panel.mounts.forEach(m => { m.broken = true; });
         if (attached) s.panel.setAnchorFrame(frame.elements);
         if (!s.activity.deforming && (s.activity.forced || !s.root && s.part.condition === 0 && attached || attached && (shock || s.activity.threatened(frame, obstacle, this.groundMayReach)))) s.activity.wake();
@@ -501,6 +520,9 @@ export class Vehicle3D extends CarCrashDemo {
         if (!attached && !s.activity.deforming) {
           const free = s.activity.freeBody!, old = free.matrix();
           if (s.activity.resting && free.velocity.lengthSq() === 0 && free.momentum.lengthSq() === 0 && (!sweptCarrier || !free.bounds.clone().applyMatrix4(old).intersectsBox(sweptCarrier))) continue;
+          // Sleeping debris above does not consume the body collision mesh.
+          // Refresh only for an awake loose part, before its first contact query.
+          if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
           free.integrate(dt);
           // If even the conservative maximum is below the wake threshold, the
           // extra full geometry probe cannot wake XPBD. Resolve contacts once.
@@ -511,9 +533,14 @@ export class Vehicle3D extends CarCrashDemo {
           }
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }
+        // Active loose XPBD cages also query the body surface during advance().
+        if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         this.timings.activePanels++;
         const solveStart = performance.now();
-        s.panel.advance(dt); if (attached) this.surfaceDirty = true;
+        s.panel.profiling=this.profileFrame;
+        s.panel.advance(dt);
+        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*12*p.steps;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;}
+        if (attached) this.surfaceDirty = true;
         this.timings.panelSolve += performance.now() - solveStart;
         if (attached && s.panel.collisionImpact) {
           const hit = s.panel.collisionImpact;

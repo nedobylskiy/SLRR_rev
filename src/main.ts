@@ -421,11 +421,11 @@ rayOcclusionCheck.type='checkbox';rayOcclusionLabel.prepend(rayOcclusionCheck);m
 rayOcclusionLabel.title='Experimental CPU rays against opaque visual triangles. Only proven convex coverage hides a box. Shadows and reflections retain full geometry.';
 rayOcclusionCheck.onchange=()=>viewer?.setRaycastOcclusionEnabled(rayOcclusionCheck.checked);
 const gpuOcclusionLabel=textElement('label','GPU Hi-Z occlusion'),gpuOcclusionCheck=document.createElement('input');
-gpuOcclusionCheck.type='checkbox';gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
+gpuOcclusionCheck.type='checkbox';gpuOcclusionCheck.checked=true;gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
 gpuOcclusionLabel.title='Experimental GPU bounding-box visibility flags with asynchronous readback. Preserves shadows. Always tests primary-camera visibility, including in the observer view. Bypassed with Inspect all resident instances, distance cutoff or CPU rays. Last completed GPU verdicts remain applied through camera movement and streaming until the next GPU result.';
 gpuOcclusionCheck.onchange=()=>{viewer?.setGpuOcclusionEnabled(gpuOcclusionCheck.checked);if(gpuOcclusionCheck.checked)rayOcclusionCheck.checked=false;};
 const gpuIntervalLabel=textElement('label','GPU occlusion interval (frames)'),gpuInterval=document.createElement('select');
-for(const frames of [1,2,3,4,6,8,12]){const option=document.createElement('option');option.value=String(frames);option.textContent=String(frames);gpuInterval.append(option);}gpuInterval.value='4';
+for(const frames of [1,2,3,4,6,8,12]){const option=document.createElement('option');option.value=String(frames);option.textContent=String(frames);gpuInterval.append(option);}gpuInterval.value='12';
 gpuIntervalLabel.append(gpuInterval);mapDebugOptions.append(gpuIntervalLabel);gpuInterval.onchange=()=>viewer?.setGpuOcclusionInterval(Number(gpuInterval.value));
 const gpuApplyLabel=textElement('label','Apply GPU occlusion results'),gpuApply=document.createElement('input');gpuApply.type='checkbox';gpuApply.checked=true;
 gpuApplyLabel.prepend(gpuApply);mapDebugOptions.append(gpuApplyLabel);gpuApply.onchange=()=>viewer?.setGpuOcclusionApply(gpuApply.checked);
@@ -500,7 +500,7 @@ inertialCameraCheck.onchange = () => viewer?.setInertialCameraEnabled(inertialCa
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
 const shadowsLabel = textElement('label', 'Dynamic shadows'), shadowsCheck = document.createElement('input');
-shadowsCheck.type = 'checkbox'; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
+shadowsCheck.type = 'checkbox'; shadowsCheck.checked = true; shadowsLabel.prepend(shadowsCheck); mapDebugOptions.append(shadowsLabel);
 shadowsLabel.title = 'Dynamic sun shadows from vehicle parts only. Static map shadows use Baked lightmaps.';
 shadowsCheck.onchange = () => viewer?.setShadowMapsEnabled(shadowsCheck.checked);
 const bakedLightmapsLabel = textElement('label', 'Baked lightmaps'), bakedLightmapsCheck = document.createElement('input');
@@ -679,7 +679,7 @@ telemetryStart.onclick = () => {
   recorder.start({...mapDebugSession!.telemetryContext(),viewport_expanded:Number(document.body.classList.contains('viewport-expanded'))}); recordingRequested = true;
   mapDebugSession!.focusControls();
   telemetryStart.disabled = true; telemetryStop.disabled = false;
-  telemetryStatus.textContent = 'Recording physics · 100 ms interval';
+  telemetryStatus.textContent = 'Recording physics · 100 ms samples + CPU timing every frame';
 };
 telemetryStop.onclick = () => finishDriveRecording('button');
 telemetryDownload.onclick = downloadDriveRecording;
@@ -699,7 +699,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     if (recordingRequested && !recording?.recording) finishDriveRecording(recording?.reason || 'session_ended');
     telemetryStart.disabled = !recording?.available || !!recording?.recording;
     telemetryStop.disabled = !recording?.recording; telemetryDownload.disabled = !lastDriveRecording;
-    if (recording?.recording) telemetryStatus.textContent = `Recording physics · ${recording.samples} samples · ${recording.seconds.toFixed(1)} s`;
+    if (recording?.recording) telemetryStatus.textContent = `Recording physics · ${recording.samples} samples · ${recording.frames} CPU frames · ${recording.seconds.toFixed(1)} s`;
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
