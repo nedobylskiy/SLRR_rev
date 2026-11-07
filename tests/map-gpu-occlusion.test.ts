@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {BoxGeometry,Color,Group,InstancedMesh,Matrix4,Mesh,MeshStandardMaterial,PlaneGeometry,PerspectiveCamera,Vector3,type WebGLRenderer} from 'three';
+import {BoxGeometry,Color,DoubleSide,FrontSide,BackSide,Group,InstancedMesh,Matrix4,Mesh,MeshStandardMaterial,PlaneGeometry,PerspectiveCamera,Vector3,type WebGLRenderer} from 'three';
 import {MapGpuOcclusion,gpuDepthOccluder,gpuResultUsable,gpuSourceKey} from '../src/render/map-gpu-occlusion';
 
 test('GPU verdict survives long static intervals but rejects camera translation and turn',()=>{
@@ -118,4 +118,19 @@ test('streamer slot reorder keeps known hidden placements and shows only new pla
   cull.renderMain(()=>{assert.equal(mesh.visible,false);const proxy=root.children.find(m=>m.userData.gpuOcclusionProxy) as InstancedMesh;
     assert.equal(proxy.count,2);const m=new Matrix4();proxy.getMatrixAt(0,m);assert.equal(m.elements[12],4);proxy.getMatrixAt(1,m);assert.equal(m.elements[12],8);});
   cull.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
+});
+
+
+test('transparent two-pass shader recompilation preserves visibility keys, while real depth changes invalidate them',()=>{
+  const material=new MeshStandardMaterial({transparent:true,opacity:.6,side:DoubleSide});
+  const mesh=new InstancedMesh(new BoxGeometry(),material,1);const key=gpuSourceKey(mesh);
+  for(let frame=0;frame<36;frame++){
+    material.side=BackSide;material.needsUpdate=true;material.side=FrontSide;material.needsUpdate=true;material.side=DoubleSide;
+    assert.equal(gpuSourceKey(mesh),key);
+  }
+  material.opacity=.4;assert.notEqual(gpuSourceKey(mesh),key);material.opacity=.6;
+  material.depthTest=false;assert.notEqual(gpuSourceKey(mesh),key);material.depthTest=true;
+  material.side=FrontSide;assert.notEqual(gpuSourceKey(mesh),key);material.side=DoubleSide;
+  mesh.instanceMatrix.needsUpdate=true;assert.notEqual(gpuSourceKey(mesh),key);
+  mesh.geometry.dispose();material.dispose();mesh.dispose();
 });

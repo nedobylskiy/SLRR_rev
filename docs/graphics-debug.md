@@ -545,7 +545,7 @@ are outside this prototype's scope.
 
 ## Experimental GPU Hi-Z visibility
 
-`GPU Hi-Z occlusion` renders eligible opaque static map instances into a 512 × 256 depth target, reduces depth conservatively with max operations, and tests the full projected bounds of each instance in one fragment pass. RGBA8 Hi-Z levels use Three.js depth packing. Only a small per-ID visibility bitmap returns through a WebGL2 pixel-pack buffer and a fence polled without waiting. Bounding boxes never act as occluders. Cutout/blended surfaces are candidates but cannot occlude other geometry.
+`GPU Hi-Z occlusion` renders eligible opaque static map instances into a 512 × 256 depth target, reduces depth conservatively with max operations, and tests the full projected bounds of each instance in one fragment pass. RGBA8 Hi-Z levels preserve the exact IEEE-754 float32 bits, with explicit high-precision samplers. Only a small per-ID visibility bitmap returns through a WebGL2 pixel-pack buffer and a fence polled without waiting. Bounding boxes never act as occluders. Cutout/blended surfaces are candidates but cannot occlude other geometry.
 
 The update interval is selectable (1, 2, 3, **4 by default**, 6, 8 or 12 rendered frames). Polling a pending fence each frame does not rebuild the depth pyramid. Matrices/colors are compacted only when a result changes. Full sources remain available for shadows and reflections. The experiment bypasses geometry distance cutoff, Inspect all resident instances and simultaneous CPU ray culling. The independent inspection camera displays primary-camera GPU visibility, while depth tests continue using the primary camera. It currently evaluates InstancedMesh map sources; it does not yet reuse the main pass depth target.
 
@@ -604,3 +604,25 @@ Streamer compaction previously also discarded every verdict when buffer slots ch
 
 
 Browser continuity check: fixed route preview at 60.3 s, interval 12, Apply results on. Two successive observations reported 600–600 actually hidden instances over the latest 120 main frames, with 54 whole draws culled and no WebGL errors. Capture: `Downloads/slrr-route-frame-60.3-1794057307563.png`. This checks absence of periodic mask resets, not correctness of every individual hidden verdict. Build and 478 tests pass, including pending-fence retention and streamer slot-reorder regressions.
+
+
+### GPU depth precision regression
+
+Visible foreground objects were incorrectly culled on the real GPU. A synthetic scene reproduced this without game assets: a wall 100 m from the camera hid objects at 30 m with camera near planes 0.01 and 0.1 m. Numeric GPU probes measured the wall Hi-Z value as 0.996093750 instead of 0.999902010 (`near=0.01`), which placed the wall in front of those objects for the visibility comparison. The failure was in the fractional-depth RGBA8 storage path; declaring high-precision samplers alone did not fix it.
+
+The pyramid now stores float32 bit patterns as four RGBA8 bytes via `floatBitsToUint`, and restores them with `uintBitsToFloat`. Sampling uses explicit high precision. This preserves depth through every max-reduction level instead of losing the fractional channels on the tested GPU path.
+
+Open `/tools/gpu-occlusion-check.html` with the Vite server running for a real WebGL regression test. It tests front objects, near-ground objects, objects behind a wall, objects outside the wall silhouette, center/partial visibility through a wall opening, and near-plane crossings, at near planes 0.01, 0.1 and 1 m and large world coordinates. The original solid-wall test failed 4/15 checks; the corrected extended test passes 42/42. It displays numerical GPU box/Hi-Z depth probes. These probes use synchronous readback only in this standalone diagnostic page; the game's visibility path remains asynchronous.
+
+
+Post-fix city check at route time 60.3 s, interval 12: Apply off capture `Downloads/slrr-route-frame-60.3-1794058812920.png`, Apply on `Downloads/slrr-route-frame-60.3-1794058860066.png`. RGB comparison differs at only two pixels out of 1,814,400; visible foreground street furniture is retained. Diagnostic count is 494–494 actually hidden instances over the last 120 frames, 35 completely hidden draws, with no WebGL errors. The same old pipeline had incorrectly removed foreground street furniture. Build and 478 Node tests pass in addition to the 42-case real-GPU fixture.
+
+
+### Transparent double-sided material continuity
+
+A second intermittent-mask cause was `Material.version` in the source compatibility key. Three.js increments that version during its normal back/front render passes for transparent DoubleSide materials, even though the restored material state and geometry are unchanged. This incorrectly rejected masks and pending results between Hi-Z updates. Visibility keys now compare material identity and actual depth/geometry-related state (side, alpha/depth/clipping/displacement settings), not shader compilation versions.
+
+The real-GPU fixture now samples every frame from 24 through 60 with interval 12, uses shared opaque and shared transparent DoubleSide materials, and fails if expected visibility changes during that window. Before this correction it passed 72/84 checks, with all 12 failures involving hidden transparent objects incorrectly remaining visible. Afterward it passes 84/84. A Node regression also simulates repeated back/front shader recompilation while verifying that actual depth/opacity/matrix changes still invalidate the key.
+
+
+Live city verification for the material-version correction: primary route pose 60.3 s, independent observer on, hidden-box overlay on, Apply on, interval 12, dynamic shadows on. Two observations reported 499–499 actually hidden instances across the latest 120 main frames, with no WebGL errors. Capture: `Downloads/slrr-route-frame-60.3-1794060315324.png`. Build and 479 Node tests pass; the real-GPU per-frame fixture passes 84/84.

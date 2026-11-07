@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GPU occlusion correctness check</title>
+<style>body{font:16px system-ui;background:#18232c;color:#eef4f7;margin:24px}table{border-collapse:collapse}td,th{padding:8px 18px;border:1px solid #668}canvas{display:block;margin-top:20px}.fail{color:#ff8d83}.pass{color:#84edb0}</style>
+<h1>GPU occlusion correctness check</h1>
+<p>Real WebGL depth and visibility shaders. Front objects must remain visible; only objects behind the wall may be hidden.</p>
+<p id="status">Running…</p>
+<table><thead><tr><th>Camera</th><th>Object</th><th>Expected</th><th>GPU</th><th>Result</th><th>GPU near</th><th>GPU Hi-Z far</th></tr></thead><tbody id="results"></tbody></table>
+<script type="module" src="/tools/gpu-occlusion-check.ts"></script>

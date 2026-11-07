@@ -3,14 +3,32 @@ import {Box3,BufferGeometry,Color,DataTexture,DepthTexture,Float32BufferAttribut
 interface Source {mesh:InstancedMesh;key:string;world:Matrix4;bounds:Box3[];depth?:InstancedMesh;proxy?:InstancedMesh;kept:string;hidden:number;visibleSlots?:Set<number>;identities?:string[];compatibility?:string}
 interface Ticket {sync:WebGLSync;buffer:WebGLBuffer;bytes:Uint8Array;items:{state:Source;slot:number}[];frame:number;time:number;position:Vector3;rotation:Quaternion;projection:Matrix4}
 const vertex=`precision highp float; in vec3 position; void main(){gl_Position=vec4(position.xy,0.,1.);}`;
+// Preserve the exact float32 depth through RGBA8, without fractional-depth packing.
 const packing=`
-#include <packing>
-vec4 packDepth(float v){return packDepthToRGBA(v);}
-float unpackDepth(vec4 v){return unpackRGBAToDepth(v);}`;
+vec4 packDepth(float v){
+  uint bits=floatBitsToUint(v);
+  return vec4(uvec4(bits,bits>>8u,bits>>16u,bits>>24u)&uvec4(255u)) / 255.;
+}
+float unpackDepth(vec4 v){
+  uvec4 b=uvec4(round(clamp(v,0.,1.)*255.));
+  return uintBitsToFloat(b.x|(b.y<<8u)|(b.z<<16u)|(b.w<<24u));
+}`;
 
 /** A static scene has no wall-clock expiry. Moving-camera reuse remains heuristic. */
 export function gpuResultUsable(ageMs:number,distance:number,angle:number){return Number.isFinite(ageMs)&&ageMs>=0&&distance<=2&&angle<=Math.PI/120;}
-export function gpuSourceKey(mesh:InstancedMesh){return `${mesh.geometry.id}:${mesh.count}:${mesh.instanceMatrix.version}:${mesh.instanceColor?.version??0}:${mesh.userData.mapOcclusionRole}:${(Array.isArray(mesh.material)?mesh.material:[mesh.material]).map(m=>m.uuid+":"+m.version).join(",")}`;}
+/** Three increments Material.version for its ordinary double-sided transparent
+ * back/front passes. Only semantic depth/geometry state may invalidate visibility. */
+function gpuSurfaceKey(mesh:InstancedMesh){
+  const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+  return `${mesh.geometry.id}:${mesh.userData.mapOcclusionRole}:${materials.map(material=>{
+    const m=material as MeshStandardMaterial;
+    return [m.uuid,m.side,m.visible,m.depthTest,m.depthFunc,m.depthWrite,m.colorWrite,m.transparent,m.opacity,
+      m.alphaTest,m.alphaHash,m.alphaToCoverage,m.alphaMap?.uuid,m.displacementMap?.uuid,
+      m.clippingPlanes?.map(p=>p.normal.toArray().join(',')+','+p.constant).join(';')].join(':');
+  }).join('|')}`;
+}
+export function gpuSourceKey(mesh:InstancedMesh){return `${gpuSurfaceKey(mesh)}:${mesh.count}:${mesh.instanceMatrix.version}:${mesh.instanceColor?.version??0}`;}
+
 
 /** Surface role comes from map loading, not dimensions: flat roads and small wall
  * sections are useful occluders, tall trees are not. Preserve real material holes. */
@@ -56,7 +74,7 @@ export class MapGpuOcclusion {
     this.depthTarget.texture.name='GPU occlusion depth color (unused)';
     for(let w=256,h=128;w>=1;w=Math.floor(w/2),h=Math.max(1,Math.floor(h/2)))this.levels.push(new WebGLRenderTarget(w,h,{depthBuffer:false,minFilter:NearestFilter,magFilter:NearestFilter}));
     this.reduce=new RawShaderMaterial({glslVersion:GLSL3,depthTest:false,depthWrite:false,blending:NoBlending,vertexShader:vertex,
-      uniforms:{source:{value:null},first:{value:0}},fragmentShader:`precision highp float; precision highp int; uniform sampler2D source; uniform int first; out vec4 result; ${packing}
+      uniforms:{source:{value:null},first:{value:0}},fragmentShader:`precision highp float; precision highp int; precision highp sampler2D; uniform sampler2D source; uniform int first; out vec4 result; ${packing}
       void main(){ivec2 p=ivec2(gl_FragCoord.xy)*2; ivec2 hi=textureSize(source,0)-1; float d=0.;
       for(int y=0;y<2;y++)for(int x=0;x<2;x++){vec4 v=texelFetch(source,min(p+ivec2(x,y),hi),0);d=max(d,first==1?v.r:unpackDepth(v));} result=packDepth(d);}`});
     const samplers=this.levels.map((_,i)=>`uniform sampler2D level${i};`).join('\n');
@@ -64,7 +82,7 @@ export class MapGpuOcclusion {
     const uniforms:Record<string,{value:any}>={boxes:{value:null},viewProjection:{value:new Matrix4()},count:{value:0},outputWidth:{value:256}};
     this.levels.forEach((t,i)=>uniforms[`level${i}`]={value:t.texture});
     this.test=new RawShaderMaterial({glslVersion:GLSL3,depthTest:false,depthWrite:false,blending:NoBlending,vertexShader:vertex,uniforms,
-      fragmentShader:`precision highp float; precision highp int; uniform sampler2D boxes; uniform mat4 viewProjection; uniform int count; uniform int outputWidth; ${samplers} out vec4 result; ${packing}
+      fragmentShader:`precision highp float; precision highp int; precision highp sampler2D; uniform sampler2D boxes; uniform mat4 viewProjection; uniform int count; uniform int outputWidth; ${samplers} out vec4 result; ${packing}
       float depthAt(int level,ivec2 p){${select}return 1.;}
       void main(){int id=int(gl_FragCoord.x)+int(gl_FragCoord.y)*outputWidth; result=vec4(1.);if(id>=count)return;
       vec3 lo=texelFetch(boxes,ivec2((id*2)%1024,(id*2)/1024),0).xyz;
@@ -83,7 +101,7 @@ export class MapGpuOcclusion {
     this.debugMaterial=new RawShaderMaterial({glslVersion:GLSL3,depthTest:false,depthWrite:false,blending:NoBlending,
       uniforms:{source:{value:null},mode:{value:0},nearFar:{value:new Vector2(.1,5000)}},
       vertexShader:`precision highp float; in vec3 position; out vec2 uv; void main(){uv=position.xy*.5+.5;gl_Position=vec4(position.xy,0.,1.);}`,
-      fragmentShader:`precision highp float; precision highp int; uniform sampler2D source; uniform int mode; uniform vec2 nearFar; in vec2 uv; out vec4 result; ${packing}
+      fragmentShader:`precision highp float; precision highp int; precision highp sampler2D; uniform sampler2D source; uniform int mode; uniform vec2 nearFar; in vec2 uv; out vec4 result; ${packing}
       void main(){vec4 s=texture(source,uv);if(mode==2){result=vec4(s.r>.5?vec3(.1,1.,.2):vec3(1.,.08,.04),1.);return;}
       float d=mode==0?s.r:unpackDepth(s);if(d>=.9999999){result=vec4(.05,.1,.25,1.);return;}
       float z=nearFar.x*nearFar.y/(nearFar.y-d*(nearFar.y-nearFar.x));
@@ -121,7 +139,7 @@ export class MapGpuOcclusion {
       if(Object.keys(o.geometry.morphAttributes).length||!materials.every(m=>m instanceof MeshStandardMaterial&&m.depthTest&&(m.depthFunc===LessDepth||m.depthFunc===LessEqualDepth)&&!m.displacementMap&&!m.clippingPlanes?.length))return;
       seen.add(o);const key=gpuSourceKey(o),old=this.states.get(o);
       if(old?.key===key&&old.world.equals(o.matrixWorld))return;
-      const compatibility=`${o.geometry.id}:${o.userData.mapOcclusionRole}:${materials.map(m=>m.uuid+':'+m.version).join(',')}`;
+      const compatibility=gpuSurfaceKey(o);
       const identities=Array.from({length:o.count},(_,slot)=>Array.from(o.instanceMatrix.array.subarray(slot*16,slot*16+16)).join(','));
       // Buffer slots are transient: retain verdicts by exact placement matrix, not slot number.
       const retained=old?.hidden&&old.compatibility===compatibility&&old.world.equals(o.matrixWorld)&&old.visibleSlots&&old.identities
