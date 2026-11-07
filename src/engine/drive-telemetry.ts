@@ -1,3 +1,4 @@
+import {XPBD_ITERATIONS,COLLISION_GEOMETRY_HZ,MOUNT_RELEASE_DELAY_S,REFERENCE_PHYSICS_HZ} from './physics-timing';
 import type { DrivingInput } from './driving-demo';
 import type { Vehicle3D } from './vehicle-3d';
 import { ackermannSteerAngle } from './suspension-3d';
@@ -73,7 +74,7 @@ export class DriveTelemetry {
       ...Object.fromEntries(Array.from({length:name.length},(_,i) => [`${prefix}_code_${i}`,name.charCodeAt(i)])) });
     const values = m.transmission?.definition.mechanics?.values ?? {};
     this.session = { ended: false, metadata: { source: 'redline-rebuilt', recorder_features: 'host_physics_v1 frame_cpu_v1',
-      started_utc: new Date().toISOString(), frame_cpu_version:1,frame_limit:this.maxFrames,interval_s: 0.1, physics_dt_s: v.physicsDt,
+      started_utc: new Date().toISOString(), frame_cpu_version:1,frame_limit:this.maxFrames,interval_s: 0.1, physics_dt_s: v.physicsDt,physics_hz:1/v.physicsDt,xpbd_iterations:XPBD_ITERATIONS,collision_geometry_hz:COLLISION_GEOMETRY_HZ,mount_release_delay_s:MOUNT_RELEASE_DELAY_S,reference_physics_hz:REFERENCE_PHYSICS_HZ,
       ...names('model',v.root.definition.alias), ...names('vehicle',v.root.definition.alias),
       chassis_pack: v.root.definition.key.pack, chassis_type: v.root.definition.key.id,
       mass_kg: v.body.mass, mass_source: 'host_rigid_body_kg', idle_rpm: m.idleRpm, redline_rpm: m.redlineRpm,

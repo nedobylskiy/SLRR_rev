@@ -94,3 +94,5 @@ npx tsx tools/report-physics-frames.ts "C:/path/slrr-remaster-physics-capture.tx
 This writes `.frames.csv` and `.frames-summary.json` beside the input file. An optional second argument supplies the output prefix. Files recorded before frame_cpu_v1 have no per-frame CPU data.
 
 Incremental geometry counters: `collision_triangles_updated` counts regenerated/refitted faces, `collision_parts_updated` counts changed part ranges (including removals), and `collision_vertices_skinned` counts collision skinning calls. They exclude unchanged cached geometry and are separate from rendered triangle counts.
+
+On the physics-frequency experiment branch, verify `physics_hz=120` / `physics_dt_s=0.008333333333333333` in new captures. The experiment keeps 12 XPBD iterations and 60 Hz collision geometry updates; metadata records these explicitly.

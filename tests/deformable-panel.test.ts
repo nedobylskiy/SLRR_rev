@@ -80,3 +80,17 @@ test('swept node contacts stop tunnelling through an obstacle, including entry f
   p.advance(1 / 240);
   for (let i = 2; i < p.positions.length; i += 3) assert.ok(p.positions[i] >= 0.2 - 1e-10);
 });
+
+
+test('ground damping preserves its per-second rate at 120 and 240 Hz',()=>{
+  const speeds:number[]=[];
+  for(const frequency of [120,240]){
+    const panel=new DeformablePanel([-1,.055,-1,1,.055,-1,-1,.055,1,1,.055,1],{frequency,mass:10,mount:[0,.055,0],gravity:0,backend:'ts'});
+    panel.beams.length=0;panel.mounts.forEach(m=>m.broken=true);
+    for(let i=0;i<panel.positions.length;i+=3){panel.positions[i+1]=.015;panel.velocities[i]=10;}
+    for(let i=0;i<frequency;i++)panel.advance(1/frequency);
+    speeds.push(panel.velocities[0]);assert.equal(panel.clock.frequency,frequency);
+  }
+  assert.ok(Math.abs(speeds[0]-speeds[1])<1e-8);
+  assert.ok(Math.abs(speeds[0]-10*Math.exp(-.25)*Math.pow(.96,240))<1e-8);
+});

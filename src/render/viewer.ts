@@ -1,3 +1,4 @@
+import {DRIVING_PHYSICS_HZ,XPBD_ITERATIONS} from '../engine/physics-timing';
 import {planBuildingBatches,isBuildingAlias,configureBuildingArrayMaterial} from './building-material-batch';
 import {BuildingTextureArrays} from './building-texture-array';
 import * as THREE from 'three';
@@ -1224,7 +1225,7 @@ export class Viewer {
       if (!hood) throw new Error('Installed hood required for crash demo');
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
-      crash = new Vehicle3D(root, hood, samples.flat(), bounds, track?.terrain, track?.collision);
+      crash = new Vehicle3D(root, hood, samples.flat(), bounds, track?.terrain, track?.collision,DRIVING_PHYSICS_HZ);
       const triangles: number[] = [], inverseRoot = root.matrix().invert();
       for (const part of root.world.parts.values()) {
         if (part === hood || !part.definition.model) continue;
@@ -1275,7 +1276,7 @@ export class Viewer {
     })().catch(() => { /* Procedural fallback remains available when particle assets are absent. */ });
     let frameMs = 1000 / 60, backlogTicks = 0;
     const reportTelemetry = telemetry;
-    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nChassis ${Math.round(root.condition * 100)}% · supports ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash.suspension.mechanics?.support(i) ?? 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nEngine ${crash.suspension.mechanics.running ? `${Math.round(crash.suspension.mechanics.power * 100)}%` : crash.suspension.mechanics.starting ? 'STARTER' : 'STALLED · throttle / I to start'} · ${Math.round(crash.suspension.mechanics.rpm)} rpm · gear ${crash.suspension.mechanics.gear < 0 ? 'R' : crash.suspension.mechanics.gear || 'N'} (${crash.suspension.mechanics.manual ? 'manual' : 'automatic'}) · boost ${crash.suspension.mechanics.boost.toFixed(2)} bar · slip ${Math.round(Math.max(...crash.suspension.wheels.map(w => Math.abs(w.slip))) * 100)}%` : ''}\n${Math.round(1000 / frameMs)} fps · active deformation: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${track && this.mapStream ? ` · nearby objects: ${this.mapStream.active}/${this.mapStream.total}` : ''}${backlogTicks ? ` · lag ${Math.round(backlogTicks / 240 * 1000)} ms` : ''}` : ''));
+    telemetry = text => reportTelemetry(text + (crash instanceof Vehicle3D ? `\nChassis ${Math.round(root.condition * 100)}% · supports ${crash.suspension.wheels.map((w, i) => Math.round(Math.min(w.mountCondition, crash.suspension.mechanics?.support(i) ?? 1) * 100)).join('/')}%${crash.suspension.mechanics ? `\nEngine ${crash.suspension.mechanics.running ? `${Math.round(crash.suspension.mechanics.power * 100)}%` : crash.suspension.mechanics.starting ? 'STARTER' : 'STALLED · throttle / I to start'} · ${Math.round(crash.suspension.mechanics.rpm)} rpm · gear ${crash.suspension.mechanics.gear < 0 ? 'R' : crash.suspension.mechanics.gear || 'N'} (${crash.suspension.mechanics.manual ? 'manual' : 'automatic'}) · boost ${crash.suspension.mechanics.boost.toFixed(2)} bar · slip ${Math.round(Math.max(...crash.suspension.wheels.map(w => Math.abs(w.slip))) * 100)}%` : ''}\n${Math.round(1000 / frameMs)} fps · active deformation: ${[...crash.soft.values()].filter(s => s.activity.deforming).length}/${crash.soft.size}${track && this.mapStream ? ` · nearby objects: ${this.mapStream.active}/${this.mapStream.total}` : ''}${backlogTicks ? ` · lag ${Math.round(backlogTicks * crash.clock.dt * 1000)} ms` : ''}` : ''));
     const relevant = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyN', 'KeyI', 'ShiftLeft', 'ShiftRight', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyR']);
     const down = (event: KeyboardEvent) => {
       if (java) return;
@@ -1344,7 +1345,7 @@ export class Viewer {
         if(crash.telemetry.status.recording)for(const [key,title] of [['panelConstraints','XPBD constraints CPU'],['panelContacts','Panel contacts CPU'],['panelUpload','WASM input upload CPU'],['panelIntegration','Panel integration + finalize CPU'],['looseContacts','Loose body contacts CPU']] as const)this.profiler.record(title,crash.timings[key]);
         const backends = new Set([...crash.soft.values()].map(part => part.panel.backend === 'wasm' ? 'C++/WASM' : 'TypeScript'));
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
-        this.physicsWork = `Physics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
+        this.physicsWork = `Physics rate: ${crash.physicsFrequency} Hz · step ${(crash.physicsDt*1000).toFixed(3)} ms · XPBD iterations ${XPBD_ITERATIONS}\nPhysics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
       root.world.lightMask = (root.world.lightMask & ~3) | (input.brake ? 1 : 0)
         | (crash instanceof Vehicle3D && crash.suspension.mechanics?.gear === -1 ? 2 : 0);
@@ -1452,7 +1453,7 @@ export class Viewer {
       else this.fit();
     };
     this.stopDriving = stop; focus();
-    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(1 / 240, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
+    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(crash.physicsDt, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
     // In body-shell mode retain only mechanical parts and assemblies mounted in wheel slots.
     const bodyPartVisibility = new Map([...this.proxies].map(([part, proxy]) => [part, proxy.visible] as const));
     const skeletonParts = new Set<EnginePart>();

@@ -1,3 +1,4 @@
+import {REFERENCE_PHYSICS_HZ,XPBD_ITERATIONS,COLLISION_GEOMETRY_HZ,DAMAGE_SAMPLE_HZ,physicsTickBudget} from './physics-timing';
 import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 import { CarCrashDemo } from './car-crash-demo';
 import { RigidBody3D, boxContact, orientedBoxContact } from './rigid-body-3d';
@@ -41,7 +42,7 @@ export const vehicleAssemblyCenter = (root: EnginePart) => {
   return center.multiplyScalar(1 / total);
 };
 const FREE_PANEL_WAKE_SPEED = 2.5;
-export const DEFAULT_CHASSIS_CRUMPLE = 1.25;
+export const DEFAULT_CHASSIS_CRUMPLE = 0.5;
 const boundsOf = (samples: ArrayLike<number>) => { const box = new Box3(); for (let i = 0; i < samples.length; i += 3) box.expandByPoint(new Vector3().fromArray(samples, i)); return box; };
 const centerOf = (p: ArrayLike<number>) => { const out = new Vector3(); for (let i = 0; i < p.length; i += 3) out.add(new Vector3().fromArray(p, i)); return out.multiplyScalar(3 / p.length); };
 function basis(panel: DeformablePanel) {
@@ -103,7 +104,7 @@ export class Vehicle3D extends CarCrashDemo {
   private structuralMounts = new Map<EnginePart, { parent: EnginePart; field: DeformedFrame; ownInverse: Matrix4 }>();
   private wheelMounts: DeformedFrame[] = [];
   private engineHull = new Box3();
-  private surfaceTick = -4;
+  private surfaceTick = -Infinity;
   private readonly groundMayReach = (bounds: Box3) => this.terrain.mayReach?.(bounds) ?? true;
   private chassisCrumple = DEFAULT_CHASSIS_CRUMPLE;
   setChassisCrumple(value: number) {
@@ -183,9 +184,9 @@ export class Vehicle3D extends CarCrashDemo {
       part.condition = Math.max(0, part.condition - energy * weight / threshold);
     }
   }
-  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision) {
-    super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 60000 });
-    this.clock = new FixedClock(240, 64);
+  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision,readonly physicsFrequency=REFERENCE_PHYSICS_HZ) {
+    super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 60000,frequency:physicsFrequency });
+    this.clock = new FixedClock(this.physicsFrequency,physicsTickBudget(this.physicsFrequency));
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);
     this.body = new RigidBody3D(total, chassisBounds, center); this.body.setFrame(root.matrix()); this.suspension = new Suspension3D(root, this.body, this.terrain);
@@ -218,7 +219,7 @@ export class Vehicle3D extends CarCrashDemo {
     const rigid = isWheel || isEngine && part === engineBlock || !!part.definition.mechanics && !isEngine || /headlight|taillight|window|windshield/i.test(file);
     if (metal && part !== this.hood) {
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot);
-      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5], stiffness: isRoot ? 900000 : 750000, yieldStrain: isRoot ? 0.003 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000), gravity: isRoot ? 0 : 9.81, anchorLayout: isRoot ? 'central-four' : 'panel' });
+      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5],frequency:this.physicsFrequency, stiffness: isRoot ? 900000 : 750000, yieldStrain: isRoot ? 0.003 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000), gravity: isRoot ? 0 : 9.81, anchorLayout: isRoot ? 'central-four' : 'panel' });
       this.addSoft(part, panel, isRoot); panel.setAnchorFrame(part.matrix().elements); panel.reset();
     } else if (rigid && samples.length && !this.rigid.has(part)) {
       const body = new RigidBody3D(mass(part), isEngine && !this.engineHull.isEmpty() ? this.engineHull.clone() : boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });
@@ -284,13 +285,13 @@ export class Vehicle3D extends CarCrashDemo {
       this.driving.yaw = this.spawn.yaw;
       this.driving.sync();
     }
-    this.clock = new FixedClock(240, 64);
+    this.clock = new FixedClock(this.physicsFrequency,physicsTickBudget(this.physicsFrequency));
     for (const s of this.originalTree) if (s.parent && s.part.parent !== s.parent) { if (s.part.parent) this.root.world.detach(s.part); this.root.world.install(s.parent, s.parentSlot!, s.part, s.ownSlot!); }
     for (const s of this.originalTree) if (s.part !== this.root) s.part.local.copy(s.local);
     for (const s of this.originalTree) s.part.condition = 1;
     this.body.setMass(vehicleAssemblyMass(this.root.world.parts.values())); this.body.setFrame(this.root.matrix()); this.body.velocity.z = -speed; this.suspension.reset(); this.terrain.ramp = false;
     this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false; this.pendingReleaseVelocity.clear();
-    this.surfaceTick = -4;
+    this.surfaceTick = -Infinity;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
     for (const s of this.soft.values()) { s.guard = undefined; s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
     for (const r of this.rigid.values()) { r.body.setMass(mass(r.part)); r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
@@ -522,7 +523,7 @@ export class Vehicle3D extends CarCrashDemo {
           if (s.activity.resting && free.velocity.lengthSq() === 0 && free.momentum.lengthSq() === 0 && (!sweptCarrier || !free.bounds.clone().applyMatrix4(old).intersectsBox(sweptCarrier))) continue;
           // Sleeping debris above does not consume the body collision mesh.
           // Refresh only for an awake loose part, before its first contact query.
-          if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
+          if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= this.physicsFrequency/COLLISION_GEOMETRY_HZ) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
           free.integrate(dt);
           // If even the conservative maximum is below the wake threshold, the
           // extra full geometry probe cannot wake XPBD. Resolve contacts once.
@@ -534,19 +535,19 @@ export class Vehicle3D extends CarCrashDemo {
         } else if (!s.activity.deforming) s.activity.carry(dt, frame, this.body);
         if (!s.activity.deforming) { if (attached) this.moveMounts(s.part); continue; }
         // Active loose XPBD cages also query the body surface during advance().
-        if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
+        if (!attached && !freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= this.physicsFrequency/COLLISION_GEOMETRY_HZ) { this.updateSurface(); this.surfaceDirty = false; freeSurfaceUpdated = true; }
         this.timings.activePanels++;
         const solveStart = performance.now();
         s.panel.profiling=this.profileFrame;
         s.panel.advance(dt);
-        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*12*p.steps;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;}
+        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*XPBD_ITERATIONS*p.steps;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;}
         if (attached) this.surfaceDirty = true;
         this.timings.panelSolve += performance.now() - solveStart;
         if (attached && s.panel.collisionImpact) {
           const hit = s.panel.collisionImpact;
           this.recordCollision(Math.max(hit.impulse, this.body.mass * hit.speed * 0.25), new Vector3(...hit.point), hit.speed);
         }
-        if (tick % 24 === 0) {
+        if (tick % (this.physicsFrequency/DAMAGE_SAMPLE_HZ) === 0) {
           const strain = s.panel.beams.reduce((sum, b) => sum + Math.abs(b.rest - b.initial) / b.initial, 0) / s.panel.beams.length;
           s.part.condition = Math.min(s.part.condition, Math.max(0, 1 - strain / (s.root ? 0.3 : 0.4)));
         }
@@ -561,7 +562,7 @@ export class Vehicle3D extends CarCrashDemo {
         this.timings.panelSleep += performance.now() - sleepStart;
       }
       this.timings.panels += performance.now() - sectionStart; sectionStart = performance.now();
-      if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= 4 && [...this.rigid.values()].some(r => !r.part.parent)) {
+      if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= this.physicsFrequency/COLLISION_GEOMETRY_HZ && [...this.rigid.values()].some(r => !r.part.parent)) {
         this.updateSurface(); this.surfaceDirty = false;
       }
       for (const r of this.rigid.values()) {

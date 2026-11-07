@@ -128,7 +128,7 @@ int release_mounts(double dt, double strength) {
       force += norm(anchor_lambda[i], anchor_lambda[i+1], anchor_lambda[i+2]) / (dt*dt);
     }
     m[1] = force; m[2] = force > strength ? m[2] + dt : 0;
-    if (m[2] >= 2 * dt) release = true;
+    if (m[2] >= 2.0 / 240.0) release = true;
   }
   if (release) for (int index = 0; index < mount_count; ++index) mounts[index * mount_stride] = 1;
   return release;

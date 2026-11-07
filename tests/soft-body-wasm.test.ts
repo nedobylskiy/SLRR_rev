@@ -117,3 +117,20 @@ test('profiled split constraints/contacts preserve TS and WASM trajectories and 
     assert.equal(baseline.profile.steps,0,'profiling is opt-in');
   }
 });
+
+
+test('120 Hz TS/WASM parity and mount overload duration stay measured in seconds',async()=>{
+  assert.equal(await softBodyRuntime.load(bytes),true);
+  for(const frequency of [120,240]){
+    const options:PanelOptions={frequency,mass:38.5,mount:[0,1.3,.7],mountStrength:.000001};
+    const ts=new DeformablePanel(samples,{...options,backend:'ts'}),wasm=new DeformablePanel(samples,{...options,backend:'wasm'});
+    for(const p of [ts,wasm])p.hit(65);
+    let releasedAt=0;
+    for(let tick=1;tick<=20;tick++){
+      ts.advance(1/frequency);wasm.advance(1/frequency);assert.equal(wasm.attached,ts.attached);
+      for(let i=0;i<ts.positions.length;i++)close(wasm.positions[i],ts.positions[i],'frequency positions');
+      if(!releasedAt&&!ts.attached)releasedAt=tick/frequency;
+    }
+    assert.ok(Math.abs(releasedAt-2/240)<1e-12,`release delay at ${frequency} Hz was ${releasedAt}`);
+  }
+});

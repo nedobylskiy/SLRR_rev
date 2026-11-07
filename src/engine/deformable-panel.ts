@@ -1,3 +1,4 @@
+import {REFERENCE_PHYSICS_HZ,XPBD_ITERATIONS,MOUNT_RELEASE_DELAY_S} from './physics-timing';
 import { FixedClock } from '../runtime/fixed-clock';
 import { softBodyRuntime, type SoftBodyBackend, type SoftBodyKernel } from './soft-body-wasm';
 
@@ -6,7 +7,7 @@ export const PANEL_GROUND_CLEARANCE=.015;
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
-export interface PanelOptions { mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
+export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
 export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; collider?: boolean; impulse?: (impulse: Triple, point: Triple) => void }
@@ -22,7 +23,7 @@ export class DeformablePanel {
   readonly nx: number; readonly nz: number; readonly thickness: number;
   readonly positions: Float64Array; readonly rest: Float64Array; readonly velocities: Float64Array;
   readonly beams: Beam[] = []; readonly mounts: PanelMount[] = [];
-  clock = new FixedClock(240, 32);
+  clock:FixedClock;
   private previous: Float64Array; private anchorLambda: Float64Array;
   private incoming: Float64Array;
   private ground: Float64Array;
@@ -42,6 +43,7 @@ export class DeformablePanel {
   shapeVersion = 0;
   readonly yieldStrain: number; readonly mountStrength: number;
   constructor(samples: ArrayLike<number>, readonly options: PanelOptions) {
+    this.clock=new FixedClock(options.frequency??REFERENCE_PHYSICS_HZ,32);
     [this.nx, this.nz] = options.resolution ?? [7, 9];
     if (![this.nx, this.nz].every(v => Number.isInteger(v) && v >= 3 && v <= 16)) throw new Error('Invalid cage resolution');
     if (options.gravity !== undefined && (!Number.isFinite(options.gravity) || options.gravity < 0)) throw new Error('Invalid panel gravity');
@@ -137,7 +139,7 @@ export class DeformablePanel {
   reset() {
     this.resetVersion++;
     this.shapeVersion++;
-    this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(240, 32);
+    this.positions.set(this.rest); this.previous.set(this.rest); this.velocities.fill(0); this.anchorVelocities.fill(0); this.clock = new FixedClock(this.clock.frequency,32);
     for (const b of this.beams) { b.rest = b.initial; b.lambda = 0; }
     for (const m of this.mounts) { m.broken = false; m.force = m.overload = 0; }
     this.contacts = 0;
@@ -234,7 +236,7 @@ export class DeformablePanel {
     const surfaces = () => { for (const surface of this.surfaces) for (let i = 0; i < p.length; i += 3) { const contact = surface.project(p, this.previous, i); if (contact) contacts.set(i, contact); } };
     if (!kernel) for (const b of this.beams) b.lambda = 0;
     if(profile)profile.contacts+=performance.now()-stamp;
-    for (let iteration = 0; iteration < 12; iteration++) {
+    for (let iteration = 0; iteration < XPBD_ITERATIONS; iteration++) {
       if(profile)stamp=performance.now();
       if (kernel) {if(profile)kernel.solveConstraints(dt);else kernel.solve(dt);}
       else {
@@ -263,7 +265,7 @@ export class DeformablePanel {
       for (const m of this.mounts) if (!m.broken) {
         m.force = m.nodes.reduce((sum, n) => sum + Math.hypot(this.anchorLambda[n * 3], this.anchorLambda[n * 3 + 1], this.anchorLambda[n * 3 + 2]) / dt2, 0);
         m.overload = m.force > this.mountStrength ? m.overload + dt : 0;
-        if (m.overload >= 2 * dt) release = true;
+        if (m.overload >= MOUNT_RELEASE_DELAY_S) release = true;
       }
       // The clamps represent one part attachment: a failed clamp releases the whole panel.
       if (release) for (const m of this.mounts) m.broken = true;
@@ -295,7 +297,8 @@ export class DeformablePanel {
         this.collisionImpact = { speed: -before, impulse: Math.hypot(...impulse), point: [...contact.point] };
       contact.impulse?.(impulse, contact.point);
     }
-    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= this.ground[i / 3] + 0.000001) { this.velocities[i] *= 0.96; this.velocities[i + 2] *= 0.96; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
+    const groundDecay=Math.pow(.96,dt*REFERENCE_PHYSICS_HZ);
+    for (let i = 0; i < p.length; i += 3) if (p[i + 1] <= this.ground[i / 3] + 0.000001) { this.velocities[i] *= groundDecay; this.velocities[i + 2] *= groundDecay; if (this.velocities[i + 1] < 0) this.velocities[i + 1] = 0; }
     if(profile)profile.contacts+=performance.now()-stamp;
     this.shapeVersion++;
   }

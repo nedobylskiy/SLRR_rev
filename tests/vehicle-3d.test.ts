@@ -9,7 +9,7 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
-function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4]) {
+function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4],frequency=240) {
   const world = new EngineWorld(), slots = [101, 102, 103, 104].map((type, i) => `slot 0 0 0 0 0 0 ${20 + i}\nslottype ${type}`).join('\n');
   const wheels = [[-0.7, -1.3], [0.7, -1.3], [-0.7, 1.3], [0.7, 1.3]].map(([x, z], i) => `type 10 sphere 0.3\nspring 0.29 0.1 0.05\nwheel ${x} -0.6 ${z} 0 0 0 ${i < 2 ? 1 : 0} 0 1 0`).join('\n');
   const create = (id: number, file: string, cfg: string) => world.create({ key: { pack: 'test.rpk', id }, alias: file, cfgPath: file, config: parsePartConfig(cfg) });
@@ -40,7 +40,7 @@ function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicl
     crank.definition.mechanics = { kind: 'engine', source: 'crank.java', values: { stroke: 90 } }; world.install(block, 33, crank, 1);
   }
   const samples = [-0.7, 0.04, -0.7, 0.7, 0.04, -0.7, -0.7, 0.04, 0.7, 0.7, 0.04, 0.7];
-  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain);
+  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain,undefined,frequency);
   const box = (x: number, y: number, z: number) => { const a: number[] = []; for (const px of [-x, x]) for (const py of [-y, y]) for (const pz of [-z, z]) a.push(px, py, pz); return a; };
   demo.register(door, box(0.04, 0.4, 0.6), []); demo.register(lamp, box(0.15, 0.15, 0.15), []); demo.reset();
   if (mechanical) {
@@ -618,4 +618,40 @@ test('collision skin cache survives rigid motion and updates only changed part r
   world.detach(door);update();assert.equal(doorCalls,6);assert.equal(demo.bodySurface!.lastRefitTriangles,1);
   world.install(root,602,door,1);demo.syncRecordedPose();update();assert.equal(doorCalls,9,'restored geometry must be regenerated');
   demo.reset();update();assert.ok(rootCalls>6,'reset invalidates the cache');world.dispose();
+});
+
+
+test('120 Hz vehicle keeps all soft panels in step, preserves its rate on reset and retains bounded time debt',()=>{
+  const {demo,world}=setup(false,undefined,120);demo.disableObstacle();
+  assert.equal(demo.physicsDt,1/120);assert.equal(demo.maxPhysicsSteps,32);
+  for(const s of demo.soft.values())assert.equal(s.panel.clock.frequency,120);
+  demo.advance(1/60,neutral);assert.equal(demo.timings.ticks,2);
+  for(const s of demo.soft.values())assert.equal(s.panel.clock.tick,2);
+  demo.reset();assert.equal(demo.clock.frequency,120);for(const s of demo.soft.values())assert.equal(s.panel.clock.frequency,120);
+  const result=demo.advance(.6,neutral);assert.equal(result.steps,32);assert.equal(result.backlogTicks,40);
+  assert.equal(demo.advance(0,neutral).backlogTicks,8);assert.equal(demo.advance(0,neutral).backlogTicks,0);
+  assert.ok(Math.abs(demo.simulationTime-.6)<1e-12);world.dispose();
+});
+
+test('120 Hz collision simulation has the same fixed-step trajectory at different render cadences',()=>{
+  const a=setup(false,undefined,120),b=setup(false,undefined,120);
+  a.demo.reset(15);b.demo.reset(15);
+  for(let i=0;i<180;i++)a.demo.advance(2/120,neutral);
+  for(let i=0;i<90;i++)b.demo.advance(4/120,neutral);
+  assert.ok(a.demo.body.position.distanceTo(b.demo.body.position)<1e-10);
+  assert.ok(a.demo.body.velocity.distanceTo(b.demo.body.velocity)<1e-10);
+  for(const [part,state] of a.demo.soft){const other=[...b.demo.soft.values()].find(s=>s.part.definition.alias===part.definition.alias)!;assert.deepEqual(state.panel.positions,other.panel.positions);}
+  a.world.dispose();b.world.dispose();
+});
+
+test('120 Hz keeps collision-geometry refresh cadence at 60 Hz',()=>{
+  const {demo,root,world,hood,door}=setup(false,undefined,120);demo.disableObstacle();
+  const triangles=[-.8,-.5,-2,.8,-.5,-2,.8,.6,2],samples:number[]=[];
+  for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])samples.push(x,y,z);
+  demo.register(root,samples,triangles);demo.setBodyTriangles(triangles);world.detach(hood);demo.panel.mounts.forEach(m=>m.broken=true);
+  for(let i=0;i<demo.panel.positions.length;i+=3){demo.panel.positions[i]+=5;demo.panel.positions[i+1]+=10;}
+  const internals=demo as unknown as {updateSurface():void},update=internals.updateSurface.bind(demo),ticks:number[]=[];
+  internals.updateSurface=()=>{ticks.push(demo.clock.tick+1);update();};
+  for(let i=0;i<12;i++){demo.soft.get(door)!.activity.wake();demo.soft.get(hood)!.activity.wake();demo.advance(1/120,neutral);}
+  assert.deepEqual(ticks,[1,3,5,7,9,11]);world.dispose();
 });
