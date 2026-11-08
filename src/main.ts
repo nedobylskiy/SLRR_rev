@@ -809,13 +809,15 @@ for (const [label, speed] of [['Impact at 10 km/h', 10 / 3.6], ['Impact at 50 km
 const drivingHelping:DrivingHelping={...DEFAULT_DRIVING_HELPING};
 try{
   const saved=JSON.parse(localStorage.getItem('slrr-driving-helping')??'{}');
-  for(const key of ['brake','steer','clutch','acceleration'] as const)
+  for(const key of ['brake','steer','clutch','acceleration','abs'] as const)
     if((key!=='steer'||saved.version>=2)&&(key!=='clutch'||saved.version>=3)&&Number.isFinite(saved[key])&&saved[key]>=0&&saved[key]<=1)drivingHelping[key]=saved[key];
 }catch{}
 for(const [key,title,description] of [
   ['brake','Break helping','Opens the clutch during heavy braking near stall RPM above 20 km/h; full assistance from 30 km/h.'],
   ['steer','Steer helping','Slows button steering as vehicle speed increases. Analogue steering is unchanged.'],
   ['clutch','Clutch helping','Opens the clutch near idle at low speed and progressively reconnects during acceleration.'],
+  ['acceleration','Acceleration helping','Simulates launch control: reduces accelerator demand when driven wheels spin during a fast start.'],
+  ['abs','ABS','Reduces service braking on a wheel approaching lock-up. Does not control the handbrake.'],
 ] as const){
   const label=textElement('label',title),input=document.createElement('input'),output=document.createElement('output');
   label.className='crumple-control';input.type='range';input.min='0';input.max='1';input.step='0.01';input.value=String(drivingHelping[key]);

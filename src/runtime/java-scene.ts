@@ -131,7 +131,7 @@ export function javaDrivingControls(result: BootResult): { sample(): DrivingInpu
       const analogSteering=current?.value!=null&&controllers.bindings(current).some(binding=>
         binding.virtualAxis===1&&binding.device!==0&&Math.abs(controllers.read(current,1,binding.device))>1e-4);
       return { throttle: Math.max(0, axis(28)), throttleMode: 'pedal', steerDigital: !analogSteering, steer: Math.max(-1, Math.min(1, axis(1))),
-        brake: axis(29) > 0.2 || axis(48) > 0.2, brakeAxis: Math.max(0,Math.min(1,Math.max(axis(29),axis(48)))), clutch: axis(49) > 0.2,
+        brake: axis(29) > 0.2 || axis(48) > 0.2, brakeAxis: Math.max(0,Math.min(1,Math.max(axis(29),axis(48)))), serviceBrakeAxis: Math.max(0,Math.min(1,axis(29))), handbrakeAxis: Math.max(0,Math.min(1,axis(48))), clutch: axis(49) > 0.2,
         gearUp: gear > 0.2, gearDown: gear < -0.2 };
     },
     timeOfDay() { return Number(jvm.get(jv('class', 'java.game.GameLogic'), 'time').value); },

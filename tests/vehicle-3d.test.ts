@@ -731,3 +731,24 @@ test('suspension applies speed-dependent steering help only to button input',()=
   assert.equal(analog.demo.suspension.steer,raw.demo.suspension.steer);
   for(const {world} of [helped,raw,analog])world.dispose();
 });
+
+
+test('ABS reduces service-brake locking without stopping handbrake operation',()=>{
+  const raw=setup(true),helped=setup(true);
+  for(const item of [raw,helped]){
+    item.demo.settleSpawn();item.demo.suspension.mechanics!.manual=true;
+    for(let i=0;i<4;i++)item.demo.suspension.mechanics!.corners[i].brake=item.struts[i];
+    item.demo.body.velocity.set(0,0,-20);
+    item.demo.suspension.wheels.forEach(w=>{w.omega=20/w.radius;});
+  }
+  helped.demo.suspension.helping.abs=1;
+  const braking={...neutral,brake:true,serviceBrakeAxis:1};
+  for(let step=0;step<120;step++)for(const {demo} of [raw,helped])demo.suspension.step(1/120,braking);
+  const roadOmega=20/helped.demo.suspension.wheels[0].radius;
+  const slowest=(demo:typeof raw.demo)=>Math.min(...demo.suspension.wheels.map(w=>w.omega));
+  assert.ok(slowest(helped.demo)>slowest(raw.demo),`ABS wheel speed ${slowest(helped.demo)}, raw ${slowest(raw.demo)}`);
+  assert.ok(slowest(helped.demo)>roadOmega*.8);
+  for(let step=0;step<120;step++)helped.demo.suspension.step(1/120,{...neutral,brake:true,serviceBrakeAxis:0,handbrakeAxis:1});
+  assert.ok(helped.demo.suspension.wheels.slice(2).some(w=>w.omega<roadOmega*.5),'handbrake can lock the rear wheels despite ABS');
+  raw.world.dispose();helped.world.dispose();
+});

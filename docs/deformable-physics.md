@@ -81,9 +81,9 @@ same two stop projections after each constraint iteration, without a binary ABI 
 
 ### Driving helping
 
-DrivingHelping stores brake, steer, clutch and acceleration strengths in [0,1].
-Brake, steer and clutch helping are implemented. The Graphics/map debug slider is
-labelled `Break helping`, defaults to 1.00 and persists in localStorage. Acceleration helping is reserved and has no effect. Each driving mechanics instance
+DrivingHelping stores brake, steer, clutch, acceleration and ABS strengths in [0,1].
+All five controls are implemented. The Graphics/map debug slider is
+labelled `Break helping`, defaults to 1.00 and persists in localStorage. Acceleration helping currently emulates launch control without requiring an installed controller. Each driving mechanics instance
 shares its viewer's settings, so slider changes take effect immediately.
 
 Brake helping is disabled at or below 20km/h and fades in from 20 to 30km/h,
@@ -117,4 +117,22 @@ Brake/clutch opening contributions combine across their complementary speed band
 An explicit clutch pedal always opens the clutch. At 0 the original behavior is
 unchanged; no helper starts a stalled engine. The persisted settings migrate the
 previously reserved clutch value to the new default once (version 3), preserving
-existing brake and steer settings. All three controls update a live session.
+existing brake and steer settings. All controls update a live session.
+
+
+Acceleration helping defaults to 0. It temporarily emulates launch control because
+stock vehicles do not yet expose an installed launch controller. A fast accelerator
+command (>=0.6) in first gear below 2km/h arms it. Driven-wheel slip above 0.15
+reduces actual combustion demand, with fast cut and slower recovery. Wheel radius,
+drive shares and grounded wheels determine slip. It disarms above 30km/h, outside
+first gear, on braking/clutch input or accelerator release. It does not act as
+continuous traction control while cruising. No repeated material/GPU work is involved.
+
+ABS defaults to 1, with 0 retaining unassisted braking. It limits only service-brake
+angular deceleration above 3m/s, per wheel, targeting a wheel speed of at least 85%
+of rolling speed when braking would otherwise cross that point. A wheel already
+below that speed gets pressure relief, not artificial angular momentum. Fractional
+settings interpolate the intervention. Native and fallback tire paths both apply it;
+airborne wheels and the final low-speed stop bypass it. Handbrake demand is separate
+from the service brake and is never limited by ABS. Java controls export both axes;
+older input recordings retain their boolean/combined-brake fallback.

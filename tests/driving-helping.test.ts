@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {brakingClutchHelp,steeringHelpStep,lowSpeedClutchHelp} from '../src/engine/driving-helping';
+import {brakingClutchHelp,steeringHelpStep,lowSpeedClutchHelp,LaunchHelping,absBrakeStep} from '../src/engine/driving-helping';
 import {MechanicalSystem} from '../src/engine/mechanical-system';
 import {EngineWorld} from '../src/engine/world';
 import {parsePartConfig} from '../src/formats/cfg';
@@ -122,3 +122,44 @@ for(const native of [false,true]){
     world.dispose();
   });
 }
+
+
+test('launch helping cuts slip only for a fast first-gear start and releases afterwards',()=>{
+  const control=new LaunchHelping();
+  assert.equal(control.step(.01,1,0,0,0,1),1);assert.equal(control.active,false);
+  assert.equal(control.step(.01,1,15,2,1,1),1);assert.equal(control.active,false,'rolling acceleration is not a launch');
+  for(let i=0;i<60;i++)control.step(1/120,1,0,1,1,1);
+  assert.equal(control.active,true);assert.ok(control.factor<.1);
+  const cut=control.factor;
+  for(let i=0;i<120;i++)control.step(1/120,1,3,.05,1,1);
+  assert.ok(control.factor>cut&&control.factor>.99,'traction recovery restores driver demand');
+  assert.equal(control.step(.01,1,3,1,1,2),1);assert.equal(control.active,false,'a gear change ends launch control');
+  control.step(.1,1,0,1,1,1);assert.equal(control.step(.01,1,10,1,1,1),1);
+  assert.equal(control.active,false,'above 30km/h launch control disengages');
+});
+
+test('ABS reduces only requested wheel deceleration and bypasses low speed and airborne wheels',()=>{
+  const full=absBrakeStep(100,0,20,.3,1);
+  assert.ok(Math.abs(full-20/.3*.85)<1e-9);
+  assert.equal(absBrakeStep(100,0,20,.3,0),0);
+  assert.ok(Math.abs(absBrakeStep(100,0,20,.3,.5)-full*.5)<1e-9);
+  assert.equal(absBrakeStep(100,0,2,.3,1),0);
+  assert.equal(absBrakeStep(100,0,20,.3,1,false),0);
+  assert.equal(absBrakeStep(5,0,20,.3,1),5,'releasing pressure does not artificially spin up an already locked wheel');
+  assert.equal(absBrakeStep(20,30,20,.3,1),30,'ABS never cuts acceleration');
+  assert.ok(Math.abs(absBrakeStep(-100,0,-20,.3,1)+full)<1e-9);
+});
+
+for(const native of [false,true])test(`launch control reduces combustion demand under wheelspin (${native?'native':'fallback'})`,()=>{
+  const raw=drivetrain(native),helped=drivetrain(native);helped.system.helping.acceleration=1;
+  for(let tick=0;tick<120;tick++){
+    for(const {system} of [raw,helped]){
+      system.rpm=4000;system.running=true;
+      system.advance(1/120,{throttle:1},[0,0,40,40],[0,0,0,0],0);
+    }
+  }
+  assert.ok(helped.system.launchThrottleFactor<.1);
+  assert.equal(raw.system.launchThrottleFactor,1);
+  assert.ok(helped.system.rpm<raw.system.rpm,'torque reduction is applied to combustion, not just the displayed pedal');
+  raw.world.dispose();helped.world.dispose();
+});

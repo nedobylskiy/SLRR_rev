@@ -1,4 +1,4 @@
-import {brakingClutchHelp,lowSpeedClutchHelp,type DrivingHelping} from './driving-helping';
+import {brakingClutchHelp,lowSpeedClutchHelp,LaunchHelping,type DrivingHelping} from './driving-helping';
 import { clutchExchange, engineLimiter, engineTemperatureStep } from './native-vehicle-physics';
 import type { EnginePart } from './world';
 import { HOST_WHEEL_INERTIA } from './wheel-inertia';
@@ -35,9 +35,11 @@ export class MechanicalSystem {
   temperature = 20;
   idleRpm: number;
   redlineRpm: number;
-  helping:DrivingHelping={brake:0,steer:0,clutch:0,acceleration:0};
+  helping:DrivingHelping={brake:0,steer:0,clutch:0,acceleration:0,abs:0};
   brakeHelpClutch=0;
   clutchHelpClutch=0;
+  readonly launchHelping=new LaunchHelping();
+  launchThrottleFactor=1;
   running = true;
   starting = false;
   gear = 0;
@@ -99,7 +101,7 @@ export class MechanicalSystem {
     const health = this.health(part);
     return { force: (values?.force ?? 0) * health, damping: (values?.damping ?? 0) * health };
   }
-  reset() { this.brakeHelpClutch=this.clutchHelpClutch=0; this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
+  reset() { this.launchHelping.reset();this.launchThrottleFactor=1; this.brakeHelpClutch=this.clutchHelpClutch=0; this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
   private updateIgnition(gas: number) {
     if (this.running && this.rpm < Math.max(250,this.idleRpm*0.35)) this.running = false;
     else if (!this.running && this.power>0 && this.rpm >= Math.max(500,this.idleRpm*0.65)
@@ -144,7 +146,7 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
+  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0, wheelContacts?:readonly boolean[]) {
     if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = this.idleRpm, limit = this.redlineRpm;
@@ -179,6 +181,15 @@ export class MechanicalSystem {
     }
     const ratio = this.gear < 0 ? values['ratio[7]'] ?? -3.5 : this.gear > 0 ? ratios[this.gear - 1] ?? 0 : 0;
     const totalRatio = ratio * final, shaftOmega = mean * totalRatio;
+    let launchSlip=0;
+    for(let wheel=0;this.helping.acceleration>0&&wheel<4;wheel++)if(shares[wheel]>0&&(!wheelContacts||wheelContacts[wheel])){
+      const radius=this.root.world.wheelRefs[wheel]?.radius??this.root.definition.config.wheels[wheel]?.radius??.3;
+      const wheelSpeed=Math.abs(wheelOmega[wheel])*radius,groundSpeed=Math.abs(roadOmega[wheel])*radius;
+      launchSlip=Math.max(launchSlip,(wheelSpeed-groundSpeed)/Math.max(2.5,groundSpeed));
+    }
+    this.launchThrottleFactor=this.launchHelping.step(dt,gas,roadSpeedMps,launchSlip,this.helping.acceleration,this.gear,
+      this.running&&this.power>0&&!input.clutch&&!input.brake);
+    const deliveredGas=gas*this.launchThrottleFactor;
     const targetBoost = this.engine.reduce((sum, part) => {
       const script = part.definition.script ?? '', profile = part.definition.mechanics?.values ?? {};
       if (!/turbocharger|supercharger/i.test(script) || !this.health(part)) return sum;
@@ -199,9 +210,9 @@ export class MechanicalSystem {
     // The starter is a separate motor: it can transmit torque through a closed
     // clutch before combustion catches. Native starter units remain host-adapted.
     const starterTorque = this.starting ? Math.max(0,nativeParameters?.starter_torque ?? values.starter_torque ?? 40)*this.power : 0;
-    const engineTorque = (firing ? (this.estimateFlywheelTorqueAt(this.rpm) * gas * (this.root.world.javaPowertrain?.curve ? 2 : 1) + idleControl) * lowRpmCombustion * this.power * limiter : 0) + starterTorque;
+    const engineTorque = (firing ? (this.estimateFlywheelTorqueAt(this.rpm) * deliveredGas * (this.root.world.javaPowertrain?.curve ? 2 : 1) + idleControl) * lowRpmCombustion * this.power * limiter : 0) + starterTorque;
     if (this.root.world.javaPowertrain && this.running) this.temperature = engineTemperatureStep(this.temperature,20,
-      Math.max(0.01,nativeParameters?.engine_mass ?? 100)*8000,this.estimateFlywheelTorqueAt(this.rpm)*gas,
+      Math.max(0.01,nativeParameters?.engine_mass ?? 100)*8000,this.estimateFlywheelTorqueAt(this.rpm)*deliveredGas,
       roadSpeedMps,this.root.world.javaPowertrain.cooling ?? [10,50,0.01],dt);
     const drag = 14 + Math.max(0, this.rpm - idle) * 0.012;
     // Java supplies an accelerator pedal, independent of the selected gear.

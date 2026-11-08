@@ -1,4 +1,4 @@
-import {steeringHelpStep,type DrivingHelping} from './driving-helping';
+import {steeringHelpStep,absBrakeStep,type DrivingHelping} from './driving-helping';
 import {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import { nativeSuspensionForce, nativeTireForces, updateSlip, wheelBrake } from './native-vehicle-physics';
 import { Box3, Euler, Matrix4, Quaternion, Vector3 } from 'three';
@@ -44,7 +44,7 @@ export class Suspension3D {
   readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
   readonly wheels: (TireContactState & { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; originalTyre?: WheelRefState; rest: number; bump: number; droop: number; length: number; supportHeight?: number; supportX: number; supportZ: number; frame: Matrix4; inverseOwn: Matrix4; nativeSlip: { longitudinal: number; angle: number }; steering: number; spin: number; omega: number })[];
-  helping:DrivingHelping={brake:0,steer:0,clutch:0,acceleration:0};
+  helping:DrivingHelping={brake:0,steer:0,clutch:0,acceleration:0,abs:0};
   steer = 0;
   tireModel: TireModelSettings = structuredClone(DEFAULT_TIRE_MODEL);
   constructor(readonly root: EnginePart, readonly body: RigidBody3D, readonly terrain: Terrain) {
@@ -96,7 +96,10 @@ export class Suspension3D {
     const frame = this.body.matrix(), count = this.wheels.length;
     const chassisForward = new Vector3(0, 0, -1).applyQuaternion(this.body.orientation);
     const roadSpeed = this.body.velocity.dot(chassisForward);
-    const drivetrain = this.mechanics?.advance(dt, input, this.wheels.map(w => w.omega), this.wheels.map(w => roadSpeed / w.radius), roadSpeed);
+    const drivetrain = this.mechanics?.advance(dt, input, this.wheels.map(w => w.omega), this.wheels.map(w => roadSpeed / w.radius), roadSpeed,this.helping.acceleration>0?this.wheels.map(w=>w.contact):undefined);
+    const serviceBrake=Math.max(0,Math.min(1,input.serviceBrakeAxis??input.brakeAxis??(input.brake?1:0)));
+    const handbrake=Math.max(0,Math.min(1,input.handbrakeAxis??0));
+    const serviceDemand=drivetrain?.directionBrake?1:serviceBrake;
     for (const [index, w] of this.wheels.entries()) {
       const support = this.mechanics?.support(index) ?? 1;
       const failure = Math.max(0, 1 - Math.min(w.mountCondition, support) / 0.1);
@@ -138,7 +141,7 @@ export class Suspension3D {
         w.contactNormal.copy(normal); w.forward.copy(forward); w.surface = terrainHit?.surface ?? 'road';
         w.lateralSpeed = velocity.dot(side);
         const drive = this.mechanics ? drivetrain!.torque[index] : Math.max(-1, Math.min(1, input.throttle)) * this.body.mass * 5 / count;
-        const braking = input.brake || drivetrain?.directionBrake;
+        const braking = serviceDemand>0||handbrake>0;
         const limit = w.force * 1.05 * Math.max(0.25, Math.pow(Math.abs(down.dot(normal)), 2));
         if (this.mechanics) {
           const slipSpeed = w.omega * w.radius - longitudinal;
@@ -156,13 +159,22 @@ export class Suspension3D {
           }
           const force = forward.clone().multiplyScalar(tyre.longitudinal).addScaledVector(side, tyre.lateral);
           this.body.addForce(force, patch);
-          const brakeTorque = braking && !native ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
+          const brakeTorque = serviceDemand>0 && !native ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * serviceDemand * Math.sign(w.omega) : 0;
           const rollingTorque = w.originalTyre ? Math.sign(w.omega) * w.force * w.radius * (this.tireModel.model === 'sl2' ? w.originalTyre.rollResistance*0.01 : w.originalTyre.rollResistance - 0.003625) : 0;
-          w.omega += (drive - force.dot(forward) * w.radius - brakeTorque - rollingTorque - w.omega * 0.15) / HOST_WHEEL_INERTIA * dt;
+          const beforeBrake=w.omega+(drive-force.dot(forward)*w.radius-rollingTorque-w.omega*.15)/HOST_WHEEL_INERTIA*dt;
+          w.omega=absBrakeStep(beforeBrake,beforeBrake-brakeTorque/HOST_WHEEL_INERTIA*dt,longitudinal,w.radius,this.helping.abs);
+          if(!native&&handbrake>0&&index>=2){
+            const amount=950*this.mechanics.brake(index)*handbrake/HOST_WHEEL_INERTIA*dt;
+            w.omega=Math.sign(w.omega)*Math.max(0,Math.abs(w.omega)-amount);
+          }
           if (native) {
             const config=this.root.definition.config, inertia=config.enginePower?.[5] ?? 50;
             const [brakeStrength,handbrakeStrength]=config.brakePower ?? [1000,2000];
-            w.omega = wheelBrake(w.omega,dt,0.1/Math.max(0.01,inertia),braking?1:0,0,Math.max(0,native.brake)*support,Math.max(0,native.handBrake),native.bearing,brakeStrength,handbrakeStrength);
+            const inverseInertia=0.1/Math.max(0.01,inertia);
+            const free=wheelBrake(w.omega,dt,inverseInertia,0,0,Math.max(0,native.brake)*support,Math.max(0,native.handBrake),native.bearing,brakeStrength,handbrakeStrength);
+            const braked=wheelBrake(w.omega,dt,inverseInertia,serviceDemand,0,Math.max(0,native.brake)*support,Math.max(0,native.handBrake),native.bearing,brakeStrength,handbrakeStrength);
+            w.omega=absBrakeStep(free,braked,longitudinal,w.radius,this.helping.abs);
+            if(handbrake>0)w.omega=wheelBrake(w.omega,dt,inverseInertia,0,handbrake,Math.max(0,native.brake)*support,Math.max(0,native.handBrake),0,brakeStrength,handbrakeStrength);
           }
           w.spin += w.omega * dt;
         } else {
@@ -173,7 +185,8 @@ export class Suspension3D {
       }
       else if (this.mechanics) {
         w.nativeSlip = {longitudinal:0,angle:0};
-        const brakeTorque = input.brake || drivetrain!.directionBrake ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index)) * Math.sign(w.omega) : 0;
+        const brakeDemand=Math.max(serviceDemand,index>=2?handbrake:0);
+        const brakeTorque = brakeDemand>0 ? Math.min(Math.abs(w.omega) * 80, 950 * this.mechanics.brake(index))*brakeDemand * Math.sign(w.omega) : 0;
         w.omega += (drivetrain!.torque[index] - brakeTorque - w.omega * 0.25) / HOST_WHEEL_INERTIA * dt; w.spin += w.omega * dt; w.slip = 0;
       }
     }
