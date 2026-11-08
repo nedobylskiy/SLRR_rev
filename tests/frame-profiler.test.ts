@@ -20,6 +20,16 @@ test('GPU queries are asynchronous and control-plane reads are sampled, not issu
   f.sample();f.profiler.endGpu();assert.equal(f.checks,2);
   assert.ok(f.profiler.lines().some(line=>line.startsWith('GPU: 2.0 ms')));f.profiler.dispose();
 });
+test('live GPU summary does not build the full report or query graphics/browser state',()=>{
+  const f=fixture();f.profiler.detailedGpu=true;
+  f.profiler.record('GPU main color',6.5);f.profiler.record('Render CPU',10);
+  f.profiler.lines=()=>{throw new Error('Full report must remain on demand');};
+  const before=f.checks;
+  assert.deepEqual(f.profiler.gpuSummaryLines(),['GPU main color: 6.5 ms (peak 6.5)']);
+  assert.equal(f.checks,before);
+  f.profiler.dispose();
+});
+
 test('detailed passes never nest timer queries and disjoint invalidates pending results',()=>{
   const f=fixture();f.profiler.detailedGpu=true;f.sample();assert.equal(f.active,false);
   f.profiler.gpuSection('GPU reflections',()=>f.profiler.gpuSection('nested',()=>assert.ok(f.active)));

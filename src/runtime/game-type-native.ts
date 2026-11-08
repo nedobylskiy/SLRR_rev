@@ -620,8 +620,24 @@ export class GameTypeNative {
     return this.liveByResourceId.get(id) ?? this.objects.get(id);
   }
   getByResourceId(id: number): ResourceObject | undefined {
+    // Camera/owner/cursor targets use live instance IDs. City career setup can
+    // allocate thousands of part/resource nodes; do not scan them for each hit.
+    const live = this.liveByResourceId.get(id);
+    if (live?.resourceId === id && this.objects.get(live.id) === live) return live;
     for (const node of this.objects.values()) if (node.resourceId === id) return node;
     return undefined;
+  }
+  runtimeStats() {
+    return {
+      nativeNodes: this.objects.size,
+      liveInstances: this.liveByResourceId.size,
+      callbackOwners: this.callbacks.size,
+      animateCallbacks: [...this.callbacks.values()].filter(callbacks => callbacks.has(28)).length,
+      timers: [...this.timers.values()].reduce((count,timers) => count+timers.size,0),
+      notificationOwners: this.notifications.size,
+      subscriptions: [...this.notifications.values()].reduce((count,subscriptions) => count+subscriptions.length,0),
+      pendingEvents: this.pendingEvents.length,
+    };
   }
   reference(node: ResourceObject | null): JavaValue { return this.handle(node); }
   setCommandHandler(handler: (receiver: JavaValue, command: string) => void | Promise<void>): void {

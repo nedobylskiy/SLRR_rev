@@ -104,7 +104,10 @@ async function runGameBoot() {
   const javaMouse = new JavaMouse(el('viewport'), result, source,
     message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));
   const poll = window.setInterval(() => {
-    try { result.input.pollCooperative(); }
+    try {
+      if(viewer)viewer.profiler.measure('Java input poll CPU',()=>result.input.pollCooperative());
+      else result.input.pollCooperative();
+    }
     catch (reason) {
       window.clearInterval(poll);
       appendJavaEvent({ level: 'error', message: `Java input: ${reason instanceof Error ? reason.message : String(reason)}` });
@@ -127,6 +130,7 @@ async function runGameBoot() {
     const sceneVehicles = new JavaSceneVehicles(result, source, viewer, message => appendJavaEvent({ level: 'error', message }));
     viewer.setPerformanceContext(()=>[
       `Java scheduler: ${animating?`animating for ${(performance.now()-animateStartTime).toFixed(1)} ms`:'idle'} · skipped animation ticks ${animationSkipped} · animate period 50 ms · scene poll period 150 ms · map loading ${loadingTrack?'yes':'no'}`,
+      `Java native registry: ${JSON.stringify(result.gameTypes.runtimeStats())} (allocated instances are not automatically animated)`,
       'Java call profiles (wall time, includes async waits; nested calls overlap):',
       ...[...result.javaProfile].sort((a,b)=>b[1].peakMs-a[1].peakMs).map(([name,t])=>
         `JVM ${name}: avg ${t.averageMs.toFixed(1)} ms · peak ${t.peakMs.toFixed(1)} · calls ${t.calls} · age ${((performance.now()-t.lastAt)/1000).toFixed(1)}s`),
@@ -506,8 +510,8 @@ window.setInterval(()=>{
   if(mapDebugPanel.hidden||!mapDebugPanel.open)return;
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
   graphicsReport.textContent=[
-    ...(graphicsDetailsCheck.checked?viewer?.profiler.lines().filter(line=>line.startsWith('GPU'))??[]:[]),
-    ...viewer?.graphicsDebugLines()??[],
+    ...(graphicsDetailsCheck.checked?viewer?.profiler.gpuSummaryLines()??[]:[]),
+    ...viewer?.graphicsDebugLines(false)??[],
   ].join('\n');
   });
 },500);

@@ -120,6 +120,28 @@ test('GameRef(int) resolves a live owner even when its ID overlaps a packed reso
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', owner,
     [jv('int', host.getResource(parent)!.resourceId)]);
   assert.equal(host.getResource(owner), host.getResource(parent));
+  assert.equal(host.getByResourceId(host.getResource(parent)!.resourceId),host.getResource(parent),'unqualified owner IDs prefer the live instance');
+});
+
+test('live ID lookup stays indexed after city resource allocation and releases destroyed targets', () => {
+  const jvm = new SlrrJvm({resolveImport:()=>null}), host = new GameTypeNative(jvm,()=>{});
+  for(let i=0;i<2000;i++)jvm.natives.invoke('java.util.resource.ResourceRef','newNative',ref('ResourceRef'),[]);
+  const car=ref('Vehicle');jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[]);
+  const node=host.get(car)!;
+  const objects=(host as unknown as {objects:Map<number,unknown>}).objects;
+  const values=objects.values;
+  objects.values=()=>{throw new Error('A live ID hit must not traverse unrelated native objects');};
+  try { for(let i=0;i<100;i++)assert.equal(host.getByResourceId(node.resourceId),node); }
+  finally { objects.values=values; }
+  jvm.natives.invoke('java.lang.GameType','registerCallback',car,[jv('int',28)]);
+  const stats=host.runtimeStats();
+  assert.equal(stats.nativeNodes,2001);assert.equal(stats.liveInstances,1);assert.equal(stats.animateCallbacks,1);
+  jvm.natives.invoke('java.util.resource.ResourceRef','destroy',car,[]);
+  assert.equal(host.getByResourceId(node.resourceId),undefined);assert.equal(host.runtimeStats().animateCallbacks,0);
+  const resource=ref('ResourceRef');jvm.natives.invoke('java.util.resource.ResourceRef','newNative',resource,[]);
+  jvm.natives.invoke('java.util.resource.ResourceRef','set',resource,[jv('int',1234)]);
+  assert.equal(host.getByResourceId(1234),host.getResource(resource),'non-instance resource lookup remains available');
+  host.dispose();
 });
 
 test('destroy tolerates an uninitialized render reference after a partial Track.enter', () => {

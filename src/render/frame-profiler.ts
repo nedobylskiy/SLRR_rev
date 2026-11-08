@@ -139,6 +139,13 @@ export class FrameProfiler {
     this.gl.endQuery(this.timer.TIME_ELAPSED_EXT);
     this.queries.push(this.current); this.current = undefined;
   }
+  /** Live panel summary: no browser/DOM census, resource reads or percentile sorting. */
+  gpuSummaryLines() {
+    const now=performance.now();
+    return [...this.samples].filter(([name])=>name.startsWith('GPU')).map(([name,s])=>
+      `${name}: ${s.average.toFixed(1)} ms (peak ${s.peak.toFixed(1)})`
+      +(now-s.last>1000?` · last sample ${((now-s.last)/1000).toFixed(1)}s ago`:''));
+  }
   lines() {
     const rows = [...this.samples].map(([name, s]) => `${name}: ${s.average.toFixed(1)} ms (peak ${s.peak.toFixed(1)})`
       +(this.detailedGpu?` · p95 ${[...s.recent].sort((a,b)=>a-b)[Math.ceil(s.recent.length*.95)-1].toFixed(1)} · max session ${s.maximum.toFixed(1)} · samples ${s.count}`:'')

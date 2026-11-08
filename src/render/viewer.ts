@@ -268,7 +268,7 @@ export class Viewer {
   setInspectionCameraEnabled(enabled:boolean){this.inspectionManualOverride=true;this.inspection.replay=false;this.inspection.setEnabled(enabled,this.controls.target);if(enabled){this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}this.mapStream?.setInspectResident(enabled&&this.inspectResident);this.updateCutoff();}
   setInspectResidentEnabled(enabled:boolean){this.inspectResident=enabled;this.mapStream?.setInspectResident(this.inspection.enabled&&enabled);this.updateCutoff();}
   resetInspectionCamera(){this.inspection.reset(this.controls.target);this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}
-  graphicsDebugLines(){return [
+  graphicsDebugLines(fullReport=true){return [
     `FPS ${this.fps}`,
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
@@ -288,8 +288,8 @@ export class Viewer {
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
       `Observer position: ${this.inspection.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · far ${this.inspection.camera.far.toFixed(1)} m`,
       `Primary submissions: ${this.mapStream?.primaryVisible??0} · observer batch: ${this.mapStream?.visible??0} · resident: ${this.mapStream?.active??0}`]:[]),
-    ...this.graphicsDiagnostics.lines(this.scene),
-    ...(this.physicsWork?[this.physicsWork]:[]),...this.performanceContext?.()??[]];}
+    ...(fullReport?this.graphicsDiagnostics.lines(this.scene):[]),
+    ...(this.physicsWork?[this.physicsWork]:[]),...(fullReport?this.performanceContext?.()??[]:[])];}
   physicsWork = '';
   private frameDuration = 1000 / 60;
   private previousFrame?: number;
