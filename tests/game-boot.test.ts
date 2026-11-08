@@ -80,15 +80,21 @@ test('GroundRef.setFog forwards the original color and distances to the map rend
 
 test('unbounded city crossing fallback returns an independent vector usable by Java mul', async () => {
   const sources = new Map([
+    ['system/scripts/util/resource/src/GameRef.java', 'package java.util.resource; class GameRef {}'],
     ['sl/scripts/game/src/Init.java', `package java.game; import java.util.resource.*;
       class Init extends GameType {
         Init(int id) { missingNext(); }
         Vector3 trafficSpawn(GroundRef map, Vector3 start) { return map.getNearestCross(start).mul(2.0); }
+        int registerTraffic(GroundRef map, GameRef car, Vector3 pos) {
+          int id=map.addTrafficCar(car,pos); return map.notifyTrafficCar(id,1);
+        }
       }`],
     ['system/scripts/util/resource/src/GroundRef.java', `package java.util.resource;
       class GroundRef extends GameRef {
         Vector3 getNearestCross(Vector3 start) { return getNearestCross(start,0.0); }
         native Vector3 getNearestCross(Vector3 start, float distance);
+        native int addTrafficCar(GameRef car, Vector3 pos);
+        native int notifyTrafficCar(int id, int enabled);
       }`],
     ['system/scripts/lang/src/Vector3.java', `package java.lang; class Vector3 {
       float x; float y; float z;
@@ -110,6 +116,8 @@ test('unbounded city crossing fallback returns an independent vector usable by J
     const position=await jvm.invokeAsync(receiver,'trafficSpawn',[ground,start]);
     assert.deepEqual(['x','y','z'].map(axis=>jvm.get(position,axis).value),[20,-34,40]);
     assert.deepEqual(['x','y','z'].map(axis=>jvm.get(start,axis).value),[10,-17,20],'traffic placement must not mutate the saved race start');
+    assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,ground,position])).value,0,'city traffic mock accepts placement followed by notification without allocating a traffic ID');
+    assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,ground,jv('Vector3',null)])).value,0,'the original optional null traffic position is accepted');
     for (const type of ['int','float']) {
       assert.equal(jvm.natives.invoke('java.util.resource.GroundRef','getNearestCross',ground,[start,jv(type,100)])?.value,null,'bounded camera searches retain their no-crossing fallback');
       assert.equal(jvm.natives.invoke('java.util.resource.GroundRef','getNearestCross',ground,[jv('Vector3',null),jv(type,0)])?.value,null);

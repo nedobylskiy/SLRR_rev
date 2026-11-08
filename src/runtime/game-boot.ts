@@ -447,6 +447,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       report({ level: 'native', message: `Host mock: GroundRef.addTrafficN(${countType}) skipped ${Number(args[1].value)} traffic cars` });
       return jv('int', 0);
     });
+  // MOCK: Individual traffic placement and its immediately following notification
+  // are accepted without creating a traffic entity. Zero is the absent traffic ID.
+  for (const [method, parameters] of [
+    ['addTrafficCar', ['GameRef', 'Vector3']],
+    ['notifyTrafficCar', ['int', 'int']],
+  ] as const) jvm.natives.register('java.util.resource.GroundRef', method, parameters, () => {
+    report({ level: 'native', message: `Host mock: GroundRef.${method} skipped (traffic simulation unavailable)` });
+    return jv('int', 0);
+  });
   // MOCK: Pedestrian simulation is not hosted yet; accept registrations so city setup can continue.
   native('java.util.resource.GroundRef', 'addPedestrianType', ['GameRef']);
   // MOCK: Water-plane rendering is pending; Track.animate still needs its water bounds calls.
