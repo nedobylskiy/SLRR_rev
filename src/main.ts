@@ -974,7 +974,7 @@ trackDriveButton.onclick = async () => {
     trackDriving = true; setViewportExpanded(true);
     el('viewport').parentElement?.classList.add('physics-scene');
     el('filename').textContent = 'Test Track · driving'; el('format').textContent = 'MAP / PHYSICS';
-    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · I restart engine · R reset to start';
+    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · B brake · Space handbrake · Shift clutch · I restart engine · R reset to start';
     el('details').textContent = `${map.loaded} map models · ${map.objects} RDB/CFG objects · ${map.collision.boxes} collision boxes · ${map.terrain.faces} support triangles. The start position comes from the quarter-mile straight in TestTrack.java. Placed objects use original RDB positions and CFG box shapes; the remaining map collision currently comes from SCX.`;
     status('Driving on Test Track');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Drive unavailable', true); el('details').textContent = String(error); } }
@@ -1053,7 +1053,7 @@ crashButton.onclick = async () => {
     el('viewport').parentElement?.classList.add('physics-scene');
     slow.checked = false; pause.checked = false; crashSession.slowMotion(false);
     crashControls.hidden = false; crashCage.checked = false; internals.checked = false; driveHud.hidden = false; driveHud.classList.add('crash-hud'); driveButton.textContent = 'End drive';
-    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · Space brake · Shift clutch · I restart engine · R restore car';
+    el('scene-help').textContent = 'Start in neutral: E first gear, Q reverse, N neutral · W/S throttle/reverse · A/D steer · B brake · Space handbrake · Shift clutch · I restart engine · R restore car';
     el('details').textContent = 'Original struts, springs, dampers, brakes, and engine are installed using Java addStockParts and CFG mounts. Their condition affects wheel support, damping, braking, and power; wheel misalignment starts below 10% strut condition. At zero condition, the strut remains on the chassis while the wheel detaches. The engine falls as one body with its nested parts. Detachment buttons set condition to 0% for diagnostics. Internal parts hides the body shell for inspection. R restores the assembly.';
     el('filename').textContent = 'Baiern · suspension and damage'; el('format').textContent = 'PHYSICS / 3D VEHICLE'; status('3D impact test');
   } catch (error) { stopDrive(); viewer.clear(); status('Test error', true); el('details').textContent = String(error); }
@@ -1083,7 +1083,7 @@ driveButton.onclick = async () => {
     const session = viewer.drive(engineRoot, text => { driveHud.textContent = text; });
     showVehicleDebug(engineRoot, session); disposeDriving = () => { clearVehicleDebug(); session(); };
     driveHud.hidden = false; driveButton.textContent = 'End drive';
-    el('scene-help').textContent = 'W/S or ↑/↓ throttle/reverse · A/D or ←/→ steer · Space brake · R reset car';
+    el('scene-help').textContent = 'W/S or ↑/↓ throttle/reverse · A/D or ←/→ steer · B brake · Space handbrake · R reset car';
     el('details').textContent = 'Empty test area. Mounts, wheel sizes, wheelbase, and steering limit come from CFG. Driving is simplified, without collisions, suspension, or original engine logic. Click the scene to control the car; drag to rotate the camera.';
     status('Test area');
   } catch (error) { stopDrive(); status('Drive unavailable', true); el('details').textContent = String(error); }

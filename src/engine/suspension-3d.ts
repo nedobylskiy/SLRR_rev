@@ -5,7 +5,7 @@ import { Box3, Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import type { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 import { RigidBody3D } from './rigid-body-3d';
-import type { DrivingInput } from './driving-demo';
+import { handbrakeEffort, type DrivingInput } from './driving-demo';
 import { MechanicalSystem } from './mechanical-system';
 import type { TireSurface } from './map-terrain';
 import { DEFAULT_TIRE_MODEL, tireForces, type TireModelSettings } from './tire-model';
@@ -98,7 +98,7 @@ export class Suspension3D {
     const roadSpeed = this.body.velocity.dot(chassisForward);
     const drivetrain = this.mechanics?.advance(dt, input, this.wheels.map(w => w.omega), this.wheels.map(w => roadSpeed / w.radius), roadSpeed,this.helping.acceleration>0?this.wheels.map(w=>w.contact):undefined);
     const serviceBrake=Math.max(0,Math.min(1,input.serviceBrakeAxis??input.brakeAxis??(input.brake?1:0)));
-    const handbrake=Math.max(0,Math.min(1,input.handbrakeAxis??0));
+    const handbrake=handbrakeEffort(input.handbrakeAxis??0);
     const serviceDemand=drivetrain?.directionBrake?1:serviceBrake;
     for (const [index, w] of this.wheels.entries()) {
       const support = this.mechanics?.support(index) ?? 1;
@@ -178,7 +178,8 @@ export class Suspension3D {
           }
           w.spin += w.omega * dt;
         } else {
-          const brakeForce = braking ? -longitudinal * this.body.mass / count / dt : -longitudinal * this.body.mass * 0.08 / count;
+          const wheelBraking=Math.max(serviceDemand,index>=2?handbrake:0);
+          const brakeForce = wheelBraking>0 ? -longitudinal * this.body.mass / count / dt * wheelBraking : -longitudinal * this.body.mass * 0.08 / count;
           const force = forward.multiplyScalar(drive + brakeForce).addScaledVector(side, -velocity.dot(side) * this.body.mass / count / (dt * 6));
           if (force.length() > limit) force.setLength(limit); this.body.addForce(force, patch); w.spin += longitudinal * dt / w.radius;
         }

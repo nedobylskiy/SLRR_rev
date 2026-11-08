@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EngineWorld } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
-import { DrivingDemo, NEUTRAL_INPUT } from '../src/engine/driving-demo';
+import { DrivingDemo, NEUTRAL_INPUT, drivingBrakeAxes, keyboardDrivingInput, handbrakeEffort } from '../src/engine/driving-demo';
 
 function setup() {
   const world = new EngineWorld(), cfg = parsePartConfig(`steering -0.4 0.2 -0.4 0 -0.4 0\nmaxsteer 0.6 2.6\ntype 10 sphere 0.3\nwheel -0.7 -0.6 -1.3 0 0 0 1 0 1 0\nwheel 0.7 -0.6 -1.3 0 0 0 1 0 1 0\nwheel -0.7 -0.6 1.3 0 0 0 0 1 1 1\nwheel 0.7 -0.6 1.3 0 0 0 0 1 1 1\nslot 0 0 0 0 0 0 20\nslottype 101\nslot 0 0 0 3.142 0 0 21\nslottype 102\nslot 0 0 0 0 0 0 22\nslottype 103\nslot 0 0 0 3.142 0 0 23\nslottype 104\nslot 0 0 0 0 0 0 24\nslottype 11`);
@@ -37,4 +37,20 @@ test('the same inputs produce the same movement across rendering cadences, inclu
   for (let i = 0; i < 60; i++) b.demo.advance(1 / 120, input);
   assert.ok(a.demo.position.distanceTo(b.demo.position) < 1e-10);
   a.world.dispose(); b.world.dispose();
+});
+
+
+test('Space supplies only handbrake demand and service-brake input stays independent',()=>{
+  const hand=keyboardDrivingInput(new Set(['Space']));
+  assert.equal(hand.handbrakeAxis,1);assert.equal(hand.brake,false);assert.equal(hand.brakeAxis,0);assert.equal(hand.serviceBrakeAxis,0);
+  const service=keyboardDrivingInput(new Set(['KeyB']));
+  assert.equal(service.brake,true);assert.equal(service.serviceBrakeAxis,1);assert.equal(service.handbrakeAxis,0);
+  assert.deepEqual(drivingBrakeAxes(0,1),{brake:false,brakeAxis:0,serviceBrakeAxis:0,handbrakeAxis:1});
+  const both=keyboardDrivingInput(new Set(['Space','KeyB']));assert.equal(both.serviceBrakeAxis,1);assert.equal(both.handbrakeAxis,1);
+});
+
+
+test('handbrake axis remains proportional with a 30 percent maximum effort',()=>{
+  assert.equal(handbrakeEffort(0),0);assert.equal(handbrakeEffort(.5),.15);assert.equal(handbrakeEffort(1),.3);
+  assert.equal(handbrakeEffort(5),.3);assert.equal(handbrakeEffort(-1),0);
 });

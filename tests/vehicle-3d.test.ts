@@ -1,3 +1,4 @@
+import {keyboardDrivingInput} from '../src/engine/driving-demo';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, BufferGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
@@ -748,7 +749,24 @@ test('ABS reduces service-brake locking without stopping handbrake operation',()
   const slowest=(demo:typeof raw.demo)=>Math.min(...demo.suspension.wheels.map(w=>w.omega));
   assert.ok(slowest(helped.demo)>slowest(raw.demo),`ABS wheel speed ${slowest(helped.demo)}, raw ${slowest(raw.demo)}`);
   assert.ok(slowest(helped.demo)>roadOmega*.8);
-  for(let step=0;step<120;step++)helped.demo.suspension.step(1/120,{...neutral,brake:true,serviceBrakeAxis:0,handbrakeAxis:1});
-  assert.ok(helped.demo.suspension.wheels.slice(2).some(w=>w.omega<roadOmega*.5),'handbrake can lock the rear wheels despite ABS');
+  for(let step=0;step<120;step++)helped.demo.suspension.step(1/120,keyboardDrivingInput(new Set(['Space'])));
+  assert.ok(helped.demo.suspension.wheels.slice(0,2).every(w=>w.omega>roadOmega*.8),'Space leaves front wheels rolling');
+  assert.ok(helped.demo.suspension.wheels.slice(2).some(w=>w.omega<roadOmega*.99),'handbrake still applies rear braking despite ABS');
   raw.world.dispose();helped.world.dispose();
+});
+
+
+test('handbrake applies at most 30 percent torque and preserves the analogue axis',()=>{
+  const free=setup(true),half=setup(true),full=setup(true);
+  for(const {demo,struts} of [free,half,full]){
+    for(let i=0;i<4;i++)demo.suspension.mechanics!.corners[i].brake=struts[i];
+    demo.body.position.y=10;demo.suspension.wheels.forEach(w=>w.omega=60);
+  }
+  for(const [item,axis] of [[free,0],[half,.5],[full,1]] as const)item.demo.suspension.step(1/120,{...neutral,serviceBrakeAxis:0,handbrakeAxis:axis});
+  const loss=free.demo.suspension.wheels[2].omega-full.demo.suspension.wheels[2].omega;
+  assert.ok(Math.abs(loss-950*.3/1.6/120)<1e-9,`full handbrake torque loss ${loss}`);
+  const halfLoss=free.demo.suspension.wheels[2].omega-half.demo.suspension.wheels[2].omega;
+  assert.ok(Math.abs(halfLoss-loss*.5)<1e-9);
+  assert.equal(full.demo.suspension.wheels[0].omega,free.demo.suspension.wheels[0].omega);
+  for(const {world} of [free,half,full])world.dispose();
 });

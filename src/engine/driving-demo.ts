@@ -3,6 +3,24 @@ import type { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 
 export interface DrivingInput { throttle: number; throttleMode?: 'directional' | 'pedal'; steer: number; steerDigital?: boolean; brake: boolean; brakeAxis?: number; serviceBrakeAxis?: number; handbrakeAxis?: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }
+export const MAX_HANDBRAKE_EFFORT=0.3;
+export function handbrakeEffort(axis:number):number{return Math.max(0,Math.min(1,axis))*MAX_HANDBRAKE_EFFORT;}
+
+/** Keep the service brake and handbrake independent for all control sources. */
+export function drivingBrakeAxes(service:number,hand:number):Pick<DrivingInput,'brake'|'brakeAxis'|'serviceBrakeAxis'|'handbrakeAxis'>{
+  const brake=Math.max(0,Math.min(1,service)),handbrake=Math.max(0,Math.min(1,hand));
+  return {brake:brake>.2,brakeAxis:brake,serviceBrakeAxis:brake,handbrakeAxis:handbrake};
+}
+
+export function keyboardDrivingInput(keys:ReadonlySet<string>):DrivingInput{
+  const pressed=(...codes:string[])=>codes.some(code=>keys.has(code))?1:0;
+  return {throttle:pressed('KeyW','ArrowUp')-pressed('KeyS','ArrowDown'),steerDigital:true,
+    steer:pressed('KeyA','ArrowLeft')-pressed('KeyD','ArrowRight'),
+    ...drivingBrakeAxes(pressed('KeyB'),pressed('Space')),
+    clutch:pressed('ShiftLeft','ShiftRight')>0,gearUp:keys.has('KeyE'),gearDown:keys.has('KeyQ'),
+    neutral:keys.has('KeyN'),start:keys.has('KeyI')};
+}
+
 export const NEUTRAL_INPUT: DrivingInput = { throttle: 0, steer: 0, brake: false };
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const approach = (n: number, target: number, step: number) => n + clamp(target - n, -step, step);
@@ -65,7 +83,8 @@ export class DrivingDemo {
     const throttle = clamp(input.throttle, -1, 1), oldSpeed = this.speed;
     this.steer = approach(this.steer, clamp(input.steer, -1, 1) * this.maxSteer, 1.8 * dt);
     // Demonstration handling constants are shared by every car, never a reconstructed drivetrain.
-    if (input.brake || throttle * this.speed < 0) this.speed = approach(this.speed, 0, 9 * dt);
+    const braking=Math.max(input.brake||throttle*this.speed<0?1:0,handbrakeEffort(input.handbrakeAxis??0));
+    if (braking>0) this.speed = approach(this.speed, 0, 9 * braking * dt);
     else this.speed = clamp(this.speed + throttle * 5 * dt, -8, 28);
     this.speed = approach(this.speed, 0, (0.12 + 0.006 * this.speed * this.speed) * dt);
     const travel = (oldSpeed + this.speed) * 0.5 * dt;

@@ -136,3 +136,19 @@ settings interpolate the intervention. Native and fallback tire paths both apply
 airborne wheels and the final low-speed stop bypass it. Handbrake demand is separate
 from the service brake and is never limited by ABS. Java controls export both axes;
 older input recordings retain their boolean/combined-brake fallback.
+
+
+Control sources keep the service brake and handbrake separate all the way through
+DrivingInput, including the boolean `brake` (service brake only). Original Java
+ControlSet maps Space to axis 48 and Down to axis 29. Playground keyboard controls
+map Space to handbrake and B to service brake; W/S retain directional throttle.
+Space does not request service braking, brake helping or brake lights. Rear
+handbrake torque bypasses ABS; front wheels remain free. Launch control also
+suspends intervention while the handbrake is held.
+
+
+Handbrake demand remains a 0–1 analogue axis, but actuator effort is capped at
+30 percent: effort=clamp(axis,0,1)*0.3. The same scaling applies before the native,
+fallback and airborne wheel-brake paths. The simplified driving prototype uses
+the same effort cap. Service-brake demand is unchanged. Full handbrake input no
+longer implies that a driven wheel must lock against engine/tire torque.

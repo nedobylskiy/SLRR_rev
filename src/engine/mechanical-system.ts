@@ -146,7 +146,7 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0, wheelContacts?:readonly boolean[]) {
+  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; handbrakeAxis?:number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0, wheelContacts?:readonly boolean[]) {
     if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = this.idleRpm, limit = this.redlineRpm;
@@ -188,7 +188,7 @@ export class MechanicalSystem {
       launchSlip=Math.max(launchSlip,(wheelSpeed-groundSpeed)/Math.max(2.5,groundSpeed));
     }
     this.launchThrottleFactor=this.launchHelping.step(dt,gas,roadSpeedMps,launchSlip,this.helping.acceleration,this.gear,
-      this.running&&this.power>0&&!input.clutch&&!input.brake);
+      this.running&&this.power>0&&!input.clutch&&!input.brake&&(input.handbrakeAxis??0)<=.2);
     const deliveredGas=gas*this.launchThrottleFactor;
     const targetBoost = this.engine.reduce((sum, part) => {
       const script = part.definition.script ?? '', profile = part.definition.mechanics?.values ?? {};
