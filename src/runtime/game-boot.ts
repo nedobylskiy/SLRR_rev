@@ -330,10 +330,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     setMapFog?.({ color, near, far });
     return voidValue();
   });
-  // MOCK: The road-intersection graph is not imported yet. A null result follows
-  // the original Track.changeCamTV() branch for maps without a nearby crossing.
+  // MOCK: The road-intersection graph is not imported yet. Unbounded city traffic
+  // setup immediately mutates the result, so retain its seed position in a copy.
+  // Bounded camera searches still report no crossing instead of inventing one.
   for (const distanceType of ['int', 'float'])
-    jvm.natives.register('java.util.resource.GroundRef', 'getNearestCross', ['Vector3', distanceType], () => jv('Vector3', null));
+    jvm.natives.register('java.util.resource.GroundRef', 'getNearestCross', ['Vector3', distanceType], ({ args }) => {
+      if (args[0].value == null || Number(args[1].value) !== 0) return jv('Vector3', null);
+      return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
+        ['x', 'y', 'z'].map(axis => [axis, jv('float', Number(jvm.get(args[0], axis).value))])) });
+    });
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));

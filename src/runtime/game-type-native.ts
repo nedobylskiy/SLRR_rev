@@ -299,13 +299,12 @@ export class GameTypeNative {
       this.notifications.set(key, subscriptions);
       return voidValue();
     };
-    // The interpreter currently gives a null String argument the runtime type Object.
-    for (const messageType of ['String', 'Object']) {
-      jvm.natives.register(gameType, 'addNotification', ['GameRef', 'int', 'int', messageType],
-        ({ receiver, args }) => addNotification(receiver, args));
-      jvm.natives.register(gameType, 'addNotification', ['GameRef', 'int', 'int', messageType, 'String'],
-        ({ receiver, args }) => addNotification(receiver, args));
-    }
+    // Null already matches a reference parameter in the native resolver. An Object
+    // alias ties with String when the watched map also requires a GameRef upcast.
+    jvm.natives.register(gameType, 'addNotification', ['GameRef', 'int', 'int', 'String'],
+      ({ receiver, args }) => addNotification(receiver, args));
+    jvm.natives.register(gameType, 'addNotification', ['GameRef', 'int', 'int', 'String', 'String'],
+      ({ receiver, args }) => addNotification(receiver, args));
     jvm.natives.register(gameType, 'remNotification', ['GameRef', 'int'], ({ receiver, args }) => {
       if (args[0].value == null) return voidValue();
       const watched = this.getResource(args[0]);

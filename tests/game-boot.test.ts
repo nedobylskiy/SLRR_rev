@@ -78,6 +78,45 @@ test('GroundRef.setFog forwards the original color and distances to the map rend
   result.dispose();
 });
 
+test('unbounded city crossing fallback returns an independent vector usable by Java mul', async () => {
+  const sources = new Map([
+    ['sl/scripts/game/src/Init.java', `package java.game; import java.util.resource.*;
+      class Init extends GameType {
+        Init(int id) { missingNext(); }
+        Vector3 trafficSpawn(GroundRef map, Vector3 start) { return map.getNearestCross(start).mul(2.0); }
+      }`],
+    ['system/scripts/util/resource/src/GroundRef.java', `package java.util.resource;
+      class GroundRef extends GameRef {
+        Vector3 getNearestCross(Vector3 start) { return getNearestCross(start,0.0); }
+        native Vector3 getNearestCross(Vector3 start, float distance);
+      }`],
+    ['system/scripts/lang/src/Vector3.java', `package java.lang; class Vector3 {
+      float x; float y; float z;
+      Vector3 mul(Vector3 v) { x*=v.x; y*=v.y; z*=v.z; return this; }
+      Vector3 mul(float n) { x*=n; y*=n; z*=n; return this; }
+    }`],
+  ]);
+  const assets = new Assets([...sources].map(([path,text])=>({path,size:text.length})),
+    async path=>new TextEncoder().encode(sources.get(path)!));
+  const result = await bootGame(assets,()=>{});
+  try {
+    assert.match(result.error?.message ?? '', /missingNext/);
+    const jvm=result.jvm;
+    const ground=jv('GroundRef',{className:'java.util.resource.GroundRef',fields:new Map()});
+    const start=jv('Vector3',{className:'java.lang.Vector3',fields:new Map([
+      ['x',jv('float',10)],['y',jv('float',-17)],['z',jv('float',20)],
+    ])});
+    const receiver=jv('Init',{className:'java.game.Init',fields:new Map()});
+    const position=await jvm.invokeAsync(receiver,'trafficSpawn',[ground,start]);
+    assert.deepEqual(['x','y','z'].map(axis=>jvm.get(position,axis).value),[20,-34,40]);
+    assert.deepEqual(['x','y','z'].map(axis=>jvm.get(start,axis).value),[10,-17,20],'traffic placement must not mutate the saved race start');
+    for (const type of ['int','float']) {
+      assert.equal(jvm.natives.invoke('java.util.resource.GroundRef','getNearestCross',ground,[start,jv(type,100)])?.value,null,'bounded camera searches retain their no-crossing fallback');
+      assert.equal(jvm.natives.invoke('java.util.resource.GroundRef','getNearestCross',ground,[jv('Vector3',null),jv(type,0)])?.value,null);
+    }
+  } finally { result.dispose(); }
+});
+
 test('RenderRef.setLight reaches the scene light bridge during Java boot', async () => {
   const source = 'package java.game; class Init extends GameType { Init(int id) { missingNext(); } }';
   const assets = new Assets([{ path: 'sl/scripts/game/src/Init.java', size: source.length }],

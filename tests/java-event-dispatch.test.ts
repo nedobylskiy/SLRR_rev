@@ -15,6 +15,42 @@ class Handler {
   void handleEvent(Object ref, int type, int value) { calls++; last = value; }
 }`;
 
+for (const asynchronous of [false, true]) test(`Java notification accepts a map subtype and null message (${asynchronous ? 'async' : 'sync'})`, async () => {
+  const sources = new Map([
+    ['java.util.resource.GameRef', 'package java.util.resource; class GameRef {}'],
+    ['java.lang.GameType', `package java.lang; import java.util.resource.*; class GameType extends GameRef {
+      native void addNotification(GameRef ref, int type, int alias, String text);
+      native void addNotification(GameRef ref, int type, int alias, String text, String method);
+    }`],
+    ['demo.Listener', `package demo; import java.util.resource.*;
+      class GroundRef extends GameRef {}
+      class Listener extends GameType {
+        int calls;
+        void watch(GroundRef map) { addNotification(map,32,0,null); }
+        void watchNamed(GroundRef map) { addNotification(map,32,0,null,"onTrigger"); }
+        void handleEvent(Object ref, int type, String text) { calls++; }
+        void onTrigger(Object ref, int type, String text) { calls++; }
+      }`],
+  ]);
+  const jvm = new SlrrJvm({ resolveImport: ({className}) => {
+    const text = sources.get(className);
+    return text ? {path:className+'.java',source:text} : null;
+  }});
+  const events = new GameTypeNative(jvm,()=>{});
+  await jvm.loadClass('demo.Listener');
+  const listener = jvm.construct('demo.Listener',[]), map = jvm.construct('demo.GroundRef',[]);
+  for (const object of [listener,map]) jvm.natives.invoke('java.lang.GameType','createNativeInstance',object,[]);
+  jvm.natives.invoke('java.lang.GameType','setEventMask',listener,[jv('int',32)]);
+  for (const method of ['watch','watchNamed']) {
+    if (asynchronous) await jvm.invokeAsync(listener,method,[map]);
+    else jvm.invoke(listener,method,[map]);
+    events.queueStringEvent(map,map,32,jv('String','entered'));
+    assert.equal(events.dispatchQueuedEvents(),1);
+  }
+  assert.equal(jvm.get(listener,'calls').value,2);
+  events.dispose();
+});
+
 test('cursor subscriptions receive the picked Java part as source, not the cursor object', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'Listener.java', source: `package demo;
     class Listener { Object picked; String payload; void handleEvent(Object ref, int event, String text) { picked=ref; payload=text; } }` }) });
