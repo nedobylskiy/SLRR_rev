@@ -45,7 +45,7 @@ export async function javaPartPreviewSelection(result: BootResult, assets: Asset
   const render = result.parts.renderTypeFor(ref);
   const texture = result.parts.textureFor(ref);
   const selection: JavaStockSelection = {
-    nativeId: native.resourceId, rootRender: render ? await resolve(render, native.resourcePack) : undefined,
+    rootWear: result.parts.wearFor?.(ref), damage: result.parts.damageFor?.(ref), nativeId: native.resourceId, rootRender: render ? await resolve(render, native.resourcePack) : undefined,
     rootTexture: texture?.value ? texture.resource ?? await resolve(Number(texture.value), native.resourcePack) : undefined,
     body: [], mechanical: [], tyres: [], wheelRefs: [], rootPositions: result.parts.slotOverrides(ref),
     installed: await Promise.all(result.parts.installedTree(ref).map(project)),

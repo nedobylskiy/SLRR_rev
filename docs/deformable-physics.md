@@ -152,3 +152,24 @@ Handbrake demand remains a 0–1 analogue axis, but actuator effort is capped at
 fallback and airborne wheel-brake paths. The simplified driving prototype uses
 the same effort cap. Service-brake demand is unchanged. Full handbrake input no
 longer implies that a driven wheel must lock against engine/tire torque.
+
+
+### Persistent vehicle damage
+
+Driving sessions now publish damage to the owning Java chassis before teardown and before `File.open(WRITE)`. This happens at persistence boundaries, not on every display poll or render frame. The snapshot uses attachment-slot paths and resource keys rather than runtime native IDs. It includes part health, attachment transforms and connectivity, local cage node positions/reference targets and relative velocities, plastic beam rest lengths, broken/overloaded mounts, and wheel hardpoint/alignment damage. Lost attachments are removed from the native installed table and Java chassis inventory before its original serializer walks the tree.
+
+The versioned `SLRR_DAMAGE_1:` envelope is carried in an existing non-parent chassis slot's opaque native damage string. The original `Part.save/load` writes and restores it through SDAT; any pre-existing opaque string is preserved inside the envelope. Legacy saves without the envelope continue to load. This is an engine extension, not a promise that the original native game can interpret the new cage payload. SRVS snapshots also accept and validate the same optional `damage` state.
+
+Garage display skins the saved local cage without starting XPBD. Reference SCX positions are retained separately; entering physics restores reference meshes, generates the usual bindings, then restores node/plastic/mount state at the new vehicle pose. Repeated scene changes therefore do not apply dents twice. Replacing a part's mesh through Java repair clears that part's stored deformation. Snapshot arrays are copied, and malformed/version-incompatible cage data is rejected before restoration.
+
+A returning car may have no installed hood or wheels. The full vehicle solver now accepts those assemblies: an absent hood is not a bootstrap requirement, and configured wheel query slots without an installed wheel never generate tire contact or render a replacement. Missing wheel records are not added to the assembly/world or its mass.
+
+Inventory removal transfers the damaged subtree from chassis-relative slot paths to the actual loose part instance. Installing that instance rebases its damage onto the new parent slot; a fresh replacement in the old slot does not inherit dents. Inventory preview selection carries this state through the same assembly projection, and preview geometry applies the saved cage before switching to unlit materials. A loose installed part's own slot is no longer the excluded parent slot, so its existing native damage string can serialize the cage with ordinary inventory `Part.save/load` as well.
+
+Java `Part.repair()` ultimately sends the native `repair` command (the mesh-replacement patch in the installed Java source is commented out). This command now clears saved cage/attachment state and opaque slot/wheel damage for the repaired installed subtree. Reconciliation explicitly clears old `EnginePart.savedDamage` when no damage payload remains, refreshes CFG attachment frames, and restores reference geometry in existing views. Full-car repair excludes detached parts in the inventory; health/tear limits and repair costs remain controlled by the original Java methods.
+
+Permanent deformation now limits part condition using RMS plastic beam strain instead of the old mean-strain/40% linear threshold. The response is calibrated to 50% condition at 2% RMS permanent strain and 20% at 4%; a local crushed region therefore contributes substantially even when the rest of the part is intact. Elastic node motion does not count. This mapping remains above zero by itself, leaving mount failure/detachment to the existing physical criteria. Restored panels reconcile condition immediately even if XPBD remains asleep; normal active solves retain the existing 10 Hz damage sampling cadence.
+
+Vehicle body-panel mount failure loads use a 1.10 multiplier: the hood threshold is 66 kN and other panels retain their mass-dependent thresholds scaled by 10%. This changes attachment strength only; panel stiffness, plasticity, release delay, chassis anchors, and wheel mounts retain their existing values.
+
+Rigid detached panels also resist twisting on the ground. The support patch is approximated from cage points within the existing ground-clearance shell; its RMS radius bounds a torsional friction impulse by the accumulated ground normal impulse and friction coefficient. The impulse cannot reverse the normal component of spin. This prevents a dented hood spinning indefinitely about one support point without adding angular drag in flight. Patch spread is measured relative to a local point to retain accuracy far from the world origin.

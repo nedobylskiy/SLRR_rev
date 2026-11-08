@@ -5,7 +5,7 @@ import { PartFactory } from '../engine/world';
 import { poseMatrix } from '../engine/transforms';
 import { applyDisplaySteering } from '../engine/display-steering';
 import { resetParkedRunningGear, settleParkedSuspension } from '../engine/parked-suspension';
-import { Euler, Quaternion, Vector3 } from 'three';
+import { Euler, Quaternion, Vector3, Matrix4 } from 'three';
 import type { MapTerrain } from '../engine/map-terrain';
 import type { BootResult } from '../runtime/game-boot';
 import { GameObject } from '../runtime/game-object';
@@ -25,7 +25,7 @@ export class JavaSceneVehicles {
   private terrain?: Pick<MapTerrain, 'height'>;
   private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number; contacts:string }>();
   private readonly synced = new WeakMap<BuiltVehicle, {
-    geometry: string; steering: number | undefined; pose: GameObject; revision: number; filters: string; terrain: boolean;
+    inputs: string; geometry: string; steering: number | undefined; pose: GameObject; revision: number; filters: string; terrain: boolean;
   }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
     private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'>>,
@@ -124,12 +124,19 @@ export class JavaSceneVehicles {
     // Chassis.setState is used for the dealer's rotating display stand.
     const pose = chassis && chassis.poseRevision > node.poseRevision ? chassis : node;
     const steering = this.viewer.calibrationSteering ?? node.steeringInput ?? chassis?.steeringInput;
-    const geometry = this.geometrySignature(built);
-    const filters = JSON.stringify([[...node.renderFilters], [...chassis?.renderFilters ?? []]]);
     const previous = this.synced.get(built);
+    // Only four wheel records and the chassis revision are read on an idle poll.
+    // A rigid stand rotation must not rebuild the installed-part geometry signature.
+    const inputs = JSON.stringify([this.result.parts.visualRevision?.(chassisRef),
+      this.result.chassis.updateState(chassisRef)?.revision, built.world.experimentalHubGeometry,
+      built.root.definition.config.wheels, built.world.wheelRefs.map(wheel => wheel && [
+        wheel.force, wheel.restLength, wheel.minLength, wheel.maxLength, wheel.radius,
+        wheel.arm, wheel.hub, wheel.orientation, wheel.position, wheel.oppositeWheel])]);
+    const geometry = previous?.inputs === inputs ? previous.geometry : this.geometrySignature(built);
+    const filters = JSON.stringify([[...node.renderFilters], [...chassis?.renderFilters ?? []]]);
     const runningGearChanged = !previous || previous.geometry !== geometry || previous.steering !== steering;
     if (!runningGearChanged && previous.pose === pose && previous.revision === pose.poseRevision
-      && previous.filters === filters && previous.terrain === !!this.terrain) return;
+      && previous.filters === filters && previous.terrain === !!this.terrain) { previous.inputs = inputs; return; }
     built.root.local.copy(poseMatrix({ position: [pose.position.x, pose.position.y, pose.position.z],
       rotation: [pose.orientation.y, pose.orientation.p, pose.orientation.r] }));
     // Moving the chassis does not change the loaded spring pose or assembly mass.
@@ -137,6 +144,11 @@ export class JavaSceneVehicles {
       resetParkedRunningGear(built.root);
       if (steering !== undefined) applyDisplaySteering(built.root, steering);
       settleParkedSuspension(built.root, steering);
+      built.root.savedVehicleDamage?.wheels.forEach((state,index)=>{
+        const slot=built.root.definition.config.slots.find(slot=>slot.type===101+index);
+        const wheel=slot&&built.root.children.get(slot.id);
+        if(wheel)wheel.local.premultiply(new Matrix4().fromArray(state.damage));
+      });
     }
     const suspended = built.root.definition.config.wheels.length === 4
       && built.world.wheelRefs.some(wheel => wheel && wheel.force > 0 && wheel.restLength > 0);
@@ -186,7 +198,7 @@ export class JavaSceneVehicles {
       part.renderVisible = (node.renderFilters.get(category) ?? chassis?.renderFilters.get(category) ?? 0) !== 2;
     }
     this.viewer.syncWorldVisuals(built.world);
-    this.synced.set(built, { geometry: runningGearChanged ? this.geometrySignature(built) : geometry,
+    this.synced.set(built, { inputs, geometry: runningGearChanged ? this.geometrySignature(built) : geometry,
       steering, pose, revision: pose.poseRevision, filters, terrain: !!this.terrain });
   }
 
@@ -237,9 +249,11 @@ export class JavaSceneVehicles {
   }
 
   private signature(ref: JavaValue): string {
+    const chassis = this.result.jvm.get(ref, 'chassis');
+    const revision = this.result.parts.visualRevision?.(chassis);
+    if (revision !== undefined) return `${this.result.gameTypes.getResource(chassis)?.id}:${revision}`;
     const visit = (nodes: ReturnType<BootResult['parts']['installedTree']>): string => nodes.map(part =>
       `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}:${part.texture?.value}[${visit(part.children)}]`).join(',');
-    const chassis = this.result.jvm.get(ref, 'chassis');
     return `${this.result.parts.textureFor?.(chassis)?.value}|${visit(this.result.parts.installedTree(chassis))}`;
   }
 

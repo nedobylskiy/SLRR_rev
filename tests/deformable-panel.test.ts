@@ -114,3 +114,19 @@ test('hood has two hinges, a central latch and two compression-only front stops'
   panel.positions[i]=panel.rest[i]+.04;panel.mounts.forEach(m=>m.broken=true);
   assert.equal((panel as any).supportContact(node),undefined,'a detached hood is no longer supported');
 });
+
+
+test('condition reflects severe localized permanent crumpling while elastic flex stays healthy',()=>{
+  const samples=[-1,0,-1,1,0,-1,-1,0,1,1,0,1];
+  const panel=new DeformablePanel(samples,{mass:20,mount:[0,0,0],backend:'ts'});
+  panel.positions[10]-=.25;
+  assert.equal(panel.deformationCondition,1,'a temporary elastic displacement is not wear');
+  const count=Math.ceil(panel.beams.length*.1);
+  for(let i=0;i<count;i++)panel.beams[i].rest=panel.beams[i].initial*.8;
+  assert.ok(panel.deformationCondition<=.25,'a deeply crumpled tenth of the panel must not average out to a nearly healthy part');
+  assert.ok(panel.deformationCondition>0,'condition mapping alone must not tear attached mounts off');
+  assert.ok(panel.attached);
+  panel.reset();assert.equal(panel.deformationCondition,1);
+  for(let i=0;i<Math.ceil(panel.beams.length*.02);i++)panel.beams[i].rest=panel.beams[i].initial*.99;
+  assert.ok(panel.deformationCondition>.98,'minor isolated plastic strain should preserve high condition');
+});

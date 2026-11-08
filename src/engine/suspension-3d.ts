@@ -2,7 +2,7 @@ import {steeringHelpStep,absBrakeStep,type DrivingHelping} from './driving-helpi
 import {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import { nativeSuspensionForce, nativeTireForces, updateSlip, wheelBrake } from './native-vehicle-physics';
 import { Box3, Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import type { EnginePart } from './world';
+import { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 import { RigidBody3D } from './rigid-body-3d';
 import { handbrakeEffort, type DrivingInput } from './driving-demo';
@@ -52,8 +52,12 @@ export class Suspension3D {
     if (root.world.mechanical) this.mechanics = new MechanicalSystem(root);
     const cfg = root.definition.config;
     this.wheels = cfg.slots.filter(s => s.type !== undefined && s.type >= 101 && s.type < 200).map(slot => {
-      const wheel = cfg.wheels[slot.type! - 101], part = root.children.get(slot.id);
-      if (!wheel?.radius || !part) throw new Error('3D suspension needs installed wheels and CFG radii');
+      const wheel = cfg.wheels[slot.type! - 101], installed = root.children.get(slot.id);
+      if (!wheel?.radius) throw new Error('3D suspension needs CFG wheel radii');
+      // Keep four query slots, but an absent wheel has no world membership, mass,
+      // renderer or parent and therefore cannot generate contact/drive forces.
+      const part=installed ?? new EnginePart(root.world,-slot.id,root.definition);
+      if(!installed)part.condition=0;
       const originalTyre = root.world.wheelRefs[slot.type! - 101];
       const fallback = wheel.spring ?? [0.29,0.1,0.05];
       const rest = originalTyre && originalTyre.restLength>0 ? originalTyre.restLength : fallback[0];
@@ -61,7 +65,7 @@ export class Suspension3D {
       const droop = originalTyre && originalTyre.maxLength>0 ? Math.max(0,originalTyre.maxLength-rest) : fallback[2];
       const frame = root.slotFrame(slot), center = new Vector3().setFromMatrixPosition(frame);
       const hardpoint = center.clone().add(new Vector3(0, rest, 0));
-      return { nativeSlip: {longitudinal:0,angle:0}, part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: originalTyre?.radius ?? wheel.radius, originalTyre, rest, bump, droop, length: rest, supportX: 0, supportZ: 0, contact: false, force: 0, contactPoint: new Vector3(), contactNormal: new Vector3(0, 1, 0), forward: new Vector3(0, 0, -1), slipSpeed: 0, lateralSpeed: 0, surface: 'road' as const, frame, inverseOwn: slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert(), steering: wheel.parameters[0] ?? 0, spin: 0, omega: 0, slip: 0 };
+      return { nativeSlip: {longitudinal:0,angle:0}, part, center, hardpoint, originalHardpoint: hardpoint.clone(), damage: new Matrix4(), mountCondition: 1, radius: originalTyre?.radius ?? wheel.radius, originalTyre, rest, bump, droop, length: rest, supportX: 0, supportZ: 0, contact: false, force: 0, contactPoint: new Vector3(), contactNormal: new Vector3(0, 1, 0), forward: new Vector3(0, 0, -1), slipSpeed: 0, lateralSpeed: 0, surface: 'road' as const, frame, inverseOwn: installed ? slotMatrix(part.definition.config, part.definition.config.slots.find(s => s.id === part.ownSlot)!).invert() : new Matrix4(), steering: wheel.parameters[0] ?? 0, spin: 0, omega: 0, slip: 0 };
     });
     if (root.world.javaPowertrain) this.tireModel.model = 'sl2';
     if (this.wheels.length !== 4) throw new Error('3D prototype requires four configured wheels');

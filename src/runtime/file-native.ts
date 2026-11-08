@@ -13,13 +13,14 @@ const voidValue = () => jv('void', undefined);
 export class FileNative {
   private readonly opened = new WeakMap<JavaObject, OpenFile>();
 
-  constructor(jvm: SlrrJvm, private readonly fs: VirtualFileSystem, private readonly resources: GameTypeNative) {
+  constructor(jvm: SlrrJvm, private readonly fs: VirtualFileSystem, private readonly resources: GameTypeNative, private readonly beforeWrite?: () => void) {
     jvm.natives.register(owner, 'open', ['int'], ({ receiver, args }) => {
       this.close(receiver);
       const path = this.path(receiver);
       const mode = Number(args[0].value);
       if (!path || (mode !== 0 && mode !== 1)) return jv('int', 0);
       if (mode === 1) {
+        this.beforeWrite?.();
         const stream = new MemoryFile();
         const sdat: Sdat = { type: 2, flags: 0, payload: new Uint8Array(), packs: new Map(), unsaved: [] };
         this.opened.set(this.object(receiver), { path, mode, stream, sdat });

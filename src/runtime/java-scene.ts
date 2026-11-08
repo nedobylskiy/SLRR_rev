@@ -6,6 +6,7 @@ import type { BootResult } from './game-boot';
 import { drivingBrakeAxes, type DrivingInput } from '../engine/driving-demo';
 
 export interface JavaTrackScene {
+  state: JavaValue;
   mapPack: string;
   map: JavaValue;
   mapResourceId: number;
@@ -50,9 +51,14 @@ export function activeJavaTrack(result: BootResult): JavaTrackScene | null {
   const mapResourceId = (result.resolveResourceIdentity(mapNode.typeId)?.id ?? mapNode.typeId) & 0xffff;
   const driving = !!state && jvm.isInstance(state, 'java.game.Track');
   const attached = carNode?.parent === mapNode;
-  return { mapPack, map: map!, mapResourceId, chassis: driving || attached ? chassisKey : undefined, start,
+  return { state: state!, mapPack, map: map!, mapResourceId, chassis: driving || attached ? chassisKey : undefined, start,
     carPose: driving || attached ? carPose : undefined, driving,
     ready: !driving || car?.value == null || attached };
+}
+
+/** A drive session belongs to one Java state, even when a later state uses the same map. */
+export function javaTrackIsCurrent(result: BootResult, scene: JavaTrackScene): boolean {
+  return result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState').value === scene.state.value;
 }
 
 /** Project the installed Java assembly; stock lists only describe the factory recipe. */
@@ -111,14 +117,17 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   };
   const texture = result.parts.textureFor?.(chassis);
   const rootTexture = texture?.value ? texture.resource ?? await resolve(Number(texture.value)) : undefined;
-  return { nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
+  return { rootWear: result.parts.wearFor?.(chassis), damage: result.parts.damageFor?.(chassis), nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */
 export function javaDrivingControls(result: BootResult): { sample(): DrivingInput; timeOfDay(): number; cameraMode(): number; cameraIndex(): number; cameraDistance(): number;
   mouseButton(pressed: boolean): void; mouseMotion(dx: number, dy: number): void; cameraLook(): { x: number; y: number } } {
   const { jvm, controllers, gameTypes, input } = result;
-  const activeState = () => jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+  const activeState = () => {
+    const state = jvm.get(jv('class', 'java.game.GameLogic'), 'actualState');
+    return state.value != null && jvm.isInstance(state, 'java.game.Track') ? state : jv('Object', null);
+  };
   const controller = () => {
     const player = jvm.get(jv('class', 'java.game.GameLogic'), 'player');
     return player.value == null ? null : jvm.get(player, 'controller');

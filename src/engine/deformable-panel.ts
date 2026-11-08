@@ -1,3 +1,4 @@
+import { Matrix4, Vector3 } from 'three';
 import {REFERENCE_PHYSICS_HZ,XPBD_ITERATIONS,MOUNT_RELEASE_DELAY_S} from './physics-timing';
 import { FixedClock } from '../runtime/fixed-clock';
 import { softBodyRuntime, type SoftBodyBackend, type SoftBodyKernel } from './soft-body-wasm';
@@ -5,6 +6,11 @@ import { softBodyRuntime, type SoftBodyBackend, type SoftBodyKernel } from './so
 export const PANEL_GROUND_CLEARANCE=.015;
 
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
+export interface PanelDamageState {
+  nx: number; nz: number; thickness: number; bounds: number[];
+  template: number[]; positions: number[]; rest: number[]; velocities: number[];
+  beams: number[]; mounts: { broken: boolean; force: number; overload: number }[];
+}
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
 export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; thickness?: number; plasticRate?: number; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four' | 'hood-five'; backend?: SoftBodyBackend }
@@ -165,6 +171,45 @@ export class DeformablePanel {
   get permanentDamage() {
     if (!this.beams.length) return 0;
     return this.beams.reduce((sum, beam) => sum + Math.min(1, Math.abs(beam.rest - beam.initial) / (beam.initial * 0.5)), 0) / this.beams.length;
+  }
+  /** Persistent plastic strain only: springs flexing elastically do not consume condition.
+   * RMS keeps a badly crumpled local region from disappearing in a large undamaged panel.
+   * 2% RMS plastic strain -> 50% condition; 4% -> 20%. Never releases a mount by itself.
+   */
+  get deformationCondition(): number {
+    if(!this.beams.length)return 1;
+    let squared=0;
+    for(const beam of this.beams){const strain=(beam.rest-beam.initial)/beam.initial;squared+=strain*strain;}
+    return 1/(1+squared/this.beams.length/(0.02*0.02));
+  }
+  captureDamage(frame: Matrix4): PanelDamageState {
+    const inverse=frame.clone().invert(), point=new Vector3();
+    const local=(values:Float64Array, vector=false) => {
+      const out:number[]=[];
+      const transform=vector?inverse.clone().setPosition(0,0,0):inverse;
+      for(let i=0;i<values.length;i+=3) out.push(...point.fromArray(values,i).applyMatrix4(transform).toArray());
+      return out;
+    };
+    return { nx:this.nx,nz:this.nz,thickness:this.thickness,bounds:[this.minX,this.maxX,this.minZ,this.maxZ],
+      template:Array.from(this.template),positions:local(this.positions),rest:local(this.rest),velocities:local(this.velocities,true),
+      beams:this.beams.map(b=>b.rest),mounts:this.mounts.map(m=>({broken:m.broken,force:m.force,overload:m.overload})) };
+  }
+  restoreDamage(state: PanelDamageState, frame: Matrix4) {
+    if(state.nx!==this.nx||state.nz!==this.nz||state.positions.length!==this.positions.length
+      ||state.beams.length!==this.beams.length||state.mounts.length!==this.mounts.length)
+      throw new Error('Saved panel topology does not match the installed part');
+    const point=new Vector3(), rotation=frame.clone().setPosition(0,0,0);
+    this.template.set(state.template);
+    this.setAnchorFrame(frame.elements);
+    for(let i=0;i<this.positions.length;i+=3) {
+      point.fromArray(state.positions,i).applyMatrix4(frame).toArray(this.positions,i);
+      point.fromArray(state.rest,i).applyMatrix4(frame).toArray(this.rest,i);
+      point.fromArray(state.velocities,i).applyMatrix4(rotation).toArray(this.velocities,i);
+    }
+    this.previous.set(this.positions);this.anchorLambda.fill(0);this.anchorVelocities.fill(0);
+    this.beams.forEach((b,i)=>{b.rest=state.beams[i];b.lambda=0;});
+    this.mounts.forEach((m,i)=>{const saved=state.mounts[i];m.broken=saved.broken;m.force=saved.force;m.overload=saved.overload;});
+    this.resetVersion++;this.shapeVersion++;
   }
   reset() {
     this.resetVersion++;

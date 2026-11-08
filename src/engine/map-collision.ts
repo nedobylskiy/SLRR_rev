@@ -3,7 +3,7 @@ import { Box3, Matrix4, Triangle, Vector3 } from 'three';
 import type { ScxModel } from '../formats/scx';
 import { orientedBoxContact, type RigidBody3D } from './rigid-body-3d';
 
-interface Wall { triangle: Triangle; normal: Vector3; minY: number; maxY: number }
+interface Wall { triangle: Triangle; normal: Vector3; minY: number; maxY: number; bounds: Box3 }
 interface StaticBox { matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: Box3 }
 
 /** Static, two-sided side contacts from original map meshes. Road support is handled by MapTerrain. */
@@ -61,7 +61,7 @@ export class MapCollision {
         const z0 = Math.floor((Math.min(...vertices.map(v => v.z)) - 0.3) / this.size);
         const z1 = Math.floor((Math.max(...vertices.map(v => v.z)) + 0.3) / this.size);
         if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) continue;
-        const wall = { triangle, normal, minY, maxY };
+        const wall = { triangle, normal, minY, maxY, bounds: new Box3().setFromPoints(vertices) };
         for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
           const key = `${x},${z}`, list = this.cells.get(key) ?? [];
           if (!list.length) this.cells.set(key, list);
@@ -131,11 +131,11 @@ export class MapCollision {
     }
     return nearest;
   }
-  contact(point: Vector3, radius = 0.2, includeBoxes = true): { point: Vector3; normal: Vector3; depth: number } | undefined {
+  contact(point: Vector3, radius = 0.2, includeBoxes = true): { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined {
     const list = this.cells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`);
     const boxes = includeBoxes ? this.boxCells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`) : undefined;
     if (!list && !boxes) return;
-    let nearest: { point: Vector3; normal: Vector3; depth: number } | undefined;
+    let nearest: { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined;
     const closest = new Vector3();
     for (const wall of list ?? []) {
       if (point.y < wall.minY - radius || point.y > wall.maxY + radius) continue;
@@ -146,7 +146,7 @@ export class MapCollision {
         ? point.clone().sub(closest).divideScalar(distance)
         : wall.normal.clone().multiplyScalar(Math.sign(point.clone().sub(wall.triangle.a).dot(wall.normal)) || 1);
       const depth = radius - distance;
-      if (!nearest || depth > nearest.depth) nearest = { point: closest.clone(), normal, depth };
+      if (!nearest || depth > nearest.depth) nearest = { point: closest.clone(), normal, depth, bounds: wall.bounds };
     }
     for (const box of boxes ?? []) {
       if (point.y < box.bounds.min.y - radius || point.y > box.bounds.max.y + radius) continue;
@@ -162,7 +162,7 @@ export class MapCollision {
         closest.setComponent(axis, normal.getComponent(axis) * box.half.getComponent(axis)); depth = radius + margins[axis];
       }
       normal.transformDirection(box.matrix);
-      const hit = { point: closest.applyMatrix4(box.matrix), normal, depth };
+      const hit = { point: closest.applyMatrix4(box.matrix), normal, depth, bounds: box.bounds };
       if (!nearest || hit.depth > nearest.depth) nearest = hit;
     }
     return nearest;

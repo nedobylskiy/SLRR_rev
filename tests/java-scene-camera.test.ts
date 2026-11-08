@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { ResourceCatalog } from '../src/runtime/resource-catalog';
+import { javaDrivingControls, javaTrackIsCurrent, type JavaTrackScene } from '../src/runtime/java-scene';
 import { javaSceneCamera } from '../src/runtime/java-scene-camera';
 import type { BootResult } from '../src/runtime/game-boot';
 import { ControllerNative } from '../src/runtime/controller-native';
@@ -110,4 +111,34 @@ test('destroyed RenderRefs notify the visual backend as removed before releasing
   jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy', render, []);
   jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy', render, []);
   assert.deepEqual(removed, [node.id]); assert.equal(node.parent, null);
+});
+
+
+test('leaving a track invalidates its drive session before the scene poll and camera reads tolerate menus', async () => {
+  const source = `package java.game;
+    class GameLogic { static Object actualState; }
+    class Track { int cameraMode = 2; int cameraNum = 3; Object cam; }
+    class MainMenu {}`;
+  const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'GameLogic.java', source }) });
+  await jvm.loadClass('java.game.GameLogic'); await jvm.globalAsync('java.game.GameLogic');
+  await jvm.loadClass('java.game.Track'); await jvm.loadClass('java.game.MainMenu');
+  const track = jvm.construct('java.game.Track', []);
+  const result = { jvm } as unknown as BootResult;
+  const scene = { state: track } as JavaTrackScene;
+  const controls = javaDrivingControls(result);
+  const setState = (state: ReturnType<typeof jv>) => jvm.set(jv('class', 'java.game.GameLogic'), 'actualState', state);
+  setState(track);
+  assert.equal(javaTrackIsCurrent(result, scene), true);
+  assert.equal(controls.cameraMode(), 2);
+  assert.equal(controls.cameraIndex(), 3);
+  setState(jvm.construct('java.game.MainMenu', []));
+  assert.equal(javaTrackIsCurrent(result, scene), false, 'no timer or render frame needed to invalidate the old session');
+  assert.equal(controls.cameraMode(), 1, 'menu has no Track.cameraMode field');
+  assert.equal(controls.cameraIndex(), 0);
+  assert.equal(controls.cameraDistance(), 7);
+  setState(jv('Object', null));
+  assert.equal(javaTrackIsCurrent(result, scene), false);
+  assert.equal(controls.cameraMode(), 1);
+  setState(jvm.construct('java.game.Track', []));
+  assert.equal(javaTrackIsCurrent(result, scene), false, 'a new Track instance cannot revive the old session');
 });

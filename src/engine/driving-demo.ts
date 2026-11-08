@@ -1,5 +1,5 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import type { EnginePart } from './world';
+import { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 
 export interface DrivingInput { throttle: number; throttleMode?: 'directional' | 'pedal'; steer: number; steerDigital?: boolean; brake: boolean; brakeAxis?: number; serviceBrakeAxis?: number; handbrakeAxis?: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }
@@ -38,14 +38,15 @@ export class DrivingDemo {
   private pitch: number;
   private mounts: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4; radius: number; steering: number; axleSign: number }[];
   private steeringMount?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
-  constructor(readonly root: EnginePart) {
+  constructor(readonly root: EnginePart, allowMissingWheels = false) {
     const cfg = root.definition.config;
     this.mounts = cfg.slots.filter(s => s.type !== undefined && s.type >= 101 && s.type <= 199).map(slot => {
-      const part = root.children.get(slot.id), wheel = cfg.wheels[slot.type! - 101];
+      const installed = root.children.get(slot.id), wheel = cfg.wheels[slot.type! - 101];
+      const part = installed ?? (allowMissingWheels ? new EnginePart(root.world, -slot.id, root.definition) : undefined);
       if (!part || !wheel || !wheel.radius) throw new Error(`Driving requires a mounted wheel and radius at slot ${slot.id}`);
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot)!;
       const frame = slotMatrix(cfg, slot);
-      return { part, frame, inverseOwn: slotMatrix(part.definition.config, own).invert(), radius: wheel.radius, steering: wheel.parameters[0] ?? 0, axleSign: new Vector3(1, 0, 0).transformDirection(frame).x < 0 ? -1 : 1 };
+      return { part, frame, inverseOwn: installed ? slotMatrix(part.definition.config, own).invert() : new Matrix4(), radius: wheel.radius, steering: wheel.parameters[0] ?? 0, axleSign: new Vector3(1, 0, 0).transformDirection(frame).x < 0 ? -1 : 1 };
     });
     if (this.mounts.length < 2 || root.parent) throw new Error('Driving requires an independent chassis with mounted wheels');
     const centers = this.mounts.map(m => new Vector3().setFromMatrixPosition(m.frame));

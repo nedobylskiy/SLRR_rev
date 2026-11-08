@@ -1,3 +1,5 @@
+import { Matrix4 } from 'three';
+import { DeformablePanel } from '../src/engine/deformable-panel';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { serializeVehicle, deserializeVehicle, type VehicleState } from '../src/runtime/vehicle-state';
@@ -50,4 +52,15 @@ test('SDAT trailer remaps resource IDs by pack path, independent of engine load 
   const parsed = parseSdat(bytes); assert.equal(parsed.packs.get(7), 'cars/test.rpk'); assert.deepEqual(parsed.payload, new Uint8Array(payload));
   assert.throws(() => inspectSavedVehicle(bytes));
   assert.throws(() => parseSdat(bytes.subarray(0, bytes.length - 1)));
+});
+
+
+test('SRVS vehicle encoding retains full cage damage and rejects malformed cage payloads',()=>{
+  const state=vehicle(),panel=new DeformablePanel([-1,0,-1,1,0,-1,-1,0,1,1,0,1],{mass:10,mount:[0,0,0],backend:'ts'});
+  panel.positions[10]-=.23;panel.beams[0].rest*=.8;panel.mounts[0].broken=true;
+  state.damage={version:1,parts:[{path:[],resource:{pack:'cars/test.rpk',id:6},condition:.7,connected:true,
+    local:new Matrix4().toArray(),panel:panel.captureDamage(new Matrix4())}],wheels:[]};
+  const decoded=deserializeVehicle(serializeVehicle(state));assert.deepEqual(decoded.damage,state.damage);
+  state.damage.parts[0].panel!.positions[0]=NaN;
+  assert.throws(()=>serializeVehicle(state),/cage state/);
 });

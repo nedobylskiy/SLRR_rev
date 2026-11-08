@@ -1,3 +1,4 @@
+import { validateVehicleDamage, type VehicleDamageState } from '../engine/vehicle-damage';
 import { normalizePath } from '../assets';
 
 export type Vec3 = [number, number, number];
@@ -12,6 +13,7 @@ export interface PartState {
   scriptVersion: number; script: { [key: string]: JsonValue };
 }
 export interface VehicleState {
+  damage?: VehicleDamageState;
   vehicleId: string; tick: number; contentHash: string; rootPartId: string;
   position: Vec3; rotation: Quat; linearVelocity: Vec3; angularVelocity: Vec3;
   rpm: number; gear: number; parts: PartState[];
@@ -49,6 +51,7 @@ export function validateVehicleState(value: unknown): asserts value is VehicleSt
     || !vector(value.position, 3) || !quaternion(value.rotation) || !vector(value.linearVelocity, 3) || !vector(value.angularVelocity, 3)
     || !finite(value.rpm) || !Number.isInteger(value.gear) || !Array.isArray(value.parts) || value.parts.length < 1 || value.parts.length > 10_000)
     throw new Error('Invalid vehicle state header');
+  if (value.damage !== undefined) validateVehicleDamage(value.damage);
   const ids = new Map<string, PartState>();
   for (const p of value.parts) {
     if (!record(p) || !identifier(p.id) || ids.has(p.id) || !(p.parentId === null || identifier(p.parentId)) || !uint(p.parentSlot) || !uint(p.ownSlot)

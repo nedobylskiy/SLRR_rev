@@ -1,3 +1,5 @@
+import { validateVehicleDamage, type VehicleDamageState } from '../engine/vehicle-damage';
+import type { Vehicle3D } from '../engine/vehicle-3d';
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
 import type { GameTypeNative } from './game-type-native';
 import type { ResourceObject } from './resource-object';
@@ -28,6 +30,8 @@ export interface NativeInstalledPart {
 
 /** Native condition values owned by each interpreted SLRR part. */
 export class PartNative {
+  private readonly damage = new WeakMap<JavaObject, VehicleDamageState>();
+  private readonly physics = new Map<JavaObject, { receiver: JavaValue; vehicle: Vehicle3D }>();
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
   private readonly tear = new WeakMap<JavaObject, number>();
@@ -154,6 +158,7 @@ export class PartNative {
       const adjustedRotation = slot && rotation ? new Euler().setFromQuaternion(
         new Quaternion().setFromEuler(new Euler(slot.rotation[1], slot.rotation[0], slot.rotation[2], 'YXZ'))
           .multiply(new Quaternion().setFromEuler(new Euler(rotation[1], rotation[0], rotation[2], 'YXZ'))), 'YXZ') : undefined;
+      if (slot) this.changed(receiver);
       if (slot) state.positions.set(id, {
         position: position ? slot.position.map((base, axis) => base + position[axis]) as [number, number, number] : undefined,
         rotation: adjustedRotation ? [adjustedRotation.y, adjustedRotation.x, adjustedRotation.z] : undefined,
@@ -168,6 +173,7 @@ export class PartNative {
       jvm.natives.register(conditionOwner, 'setWear', ['float'], ({ receiver, args }) => {
         const value = Math.fround(Number(args[0].value));
         if (!Number.isFinite(value)) throw new Error('Invalid part wear');
+        if (this.wear.get(receiver.value as JavaObject) !== value) this.changed(receiver);
         this.wear.set(receiver.value as JavaObject, value);
         return jv('float', value);
       });
@@ -176,6 +182,7 @@ export class PartNative {
       jvm.natives.register(conditionOwner, 'setTear', ['float'], ({receiver,args}) => {
         const value=Math.fround(Number(args[0].value));
         if (!Number.isFinite(value)) throw new Error('Invalid part tear');
+        if (this.tear.get(receiver.value as JavaObject) !== value) this.changed(receiver);
         this.tear.set(receiver.value as JavaObject,value);
         return jv('float',value);
       });
@@ -195,27 +202,46 @@ export class PartNative {
     jvm.natives.register(owner, 'setMesh', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part mesh resource ID');
+      this.clearMeshDamage(receiver);
       this.mesh.set(receiver.value as JavaObject, { ...args[0], type: 'int', value: id | 0 });
+      this.changed(receiver);
       return jv('int', 1);
     });
-    jvm.natives.register(owner, 'getSlotDamage', ['int'], ({ receiver, args }) =>
-      jv('String', this.slotDamage.get(receiver.value as JavaObject)?.get(Number(args[0].value)) ?? null));
+    jvm.natives.register(owner, 'getSlotDamage', ['int'], ({ receiver, args }) => {
+      const object=receiver.value as JavaObject,index=Number(args[0].value);
+      const original=this.slotDamage.get(object)?.get(index) ?? null;
+      const damage=this.damageFor(receiver);
+      if(!damage)return jv('String',original);
+      const slots=this.partSlots(receiver);
+      // The original serializer already stores opaque native damage strings.
+      // Use an existing non-parent slot so even a leaf part's parent-slot skip is respected.
+      const carrier=slots.slots.findIndex(slot=>slot.id!==slots.ownSlot);
+      return jv('String',damage&&index===carrier?'SLRR_DAMAGE_1:'+JSON.stringify({damage,original}):original);
+    });
     jvm.natives.register(owner, 'setSlotDamage', ['int', 'String'], ({ receiver, args }) => {
       const object = receiver.value as JavaObject;
       const damage = this.slotDamage.get(object) ?? new Map<number, string>();
       const index = Number(args[0].value);
       if (!Number.isInteger(index) || index < 0) throw new Error('Invalid part slot damage index');
-      if (args[1].value == null) damage.delete(index);
-      else damage.set(index, String(args[1].value));
+      let text=args[1].value == null?null:String(args[1].value);
+      if(text?.startsWith('SLRR_DAMAGE_1:')){
+        if(text.length>16*1024*1024)throw new Error('Saved vehicle damage is too large');
+        const saved=JSON.parse(text.slice('SLRR_DAMAGE_1:'.length));
+        validateVehicleDamage(saved.damage);
+        if(saved.original!==null&&typeof saved.original!=='string')throw new Error('Invalid original slot damage');
+        this.damage.set(object,saved.damage);this.changed(receiver);text=saved.original;
+      }
+      if (text == null) damage.delete(index);
+      else damage.set(index,text);
       this.slotDamage.set(object, damage);
-      // Stored opaque data for original Part.save/load; applying slot damage
-      // to live physical attachment strength is not implemented yet.
+      // Unknown legacy payloads remain opaque; our versioned cage payload is restored above.
       return jv('void', undefined);
     });
     jvm.natives.register(owner, 'setTexture', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part texture resource ID');
       this.texture.set(receiver.value as JavaObject, { ...args[0], type: 'int', value: id | 0 });
+      this.changed(receiver);
       // The original native reports success even when no render object is bound yet.
       return jv('int', 1);
     });
@@ -223,6 +249,7 @@ export class PartNative {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part render type');
       this.renderType.set(receiver.value as JavaObject, id);
+      this.changed(receiver);
       return jv('int', 1);
     });
     jvm.natives.register(owner, 'getCar', [], ({ receiver }) => {
@@ -232,6 +259,7 @@ export class PartNative {
 
   configure(receiver: JavaValue, cfg: PartConfig | null): void {
     this.configs.set(receiver.value as JavaObject, cfg);
+    this.changed(receiver);
     const node = this.gameTypes.getResource(receiver);
     const state = node && this.slots.get(node);
     if (state) state.slots = cfg?.slots ?? [];
@@ -265,6 +293,116 @@ export class PartNative {
   }
   renderTypeFor(receiver: JavaValue): number | undefined { return this.renderType.get(receiver.value as JavaObject); }
   textureFor(receiver: JavaValue): JavaValue | undefined { return this.texture.get(receiver.value as JavaObject); }
+  wearFor(receiver:JavaValue):number { return this.wear.get(receiver.value as JavaObject)??1; }
+
+  /** Original repair replaces the part's mesh; discard only that part's saved cage. */
+  private clearMeshDamage(receiver:JavaValue):void {
+    let node=this.gameTypes.getResource(receiver);const path:number[]=[];
+    while(node){
+      const handle=path.length?this.gameTypes.reference(node):receiver;
+      const damage=this.damage.get(handle.value as JavaObject);
+      if(damage)damage.parts=damage.parts.filter(part=>part.path.join('/')!==path.join('/'));
+      const slots=this.slots.get(node);if(!slots?.parentSlot)break;
+      path.unshift(slots.parentSlot);node=node.parent??undefined;
+    }
+  }
+
+  private damageSource(receiver:JavaValue):{object:JavaObject;state:VehicleDamageState;path:number[]}|undefined {
+    let node=this.gameTypes.getResource(receiver);const path:number[]=[];
+    while(node){
+      const handle=path.length?this.gameTypes.reference(node):receiver,object=handle.value as JavaObject;
+      const state=this.damage.get(object);if(state)return {object,state,path};
+      const slots=this.slots.get(node);if(!slots?.parentSlot)break;
+      path.unshift(slots.parentSlot);node=node.parent??undefined;
+    }
+  }
+  private hasPrefix(path:number[],prefix:number[]):boolean { return prefix.every((slot,i)=>path[i]===slot); }
+  damageFor(receiver:JavaValue):VehicleDamageState|undefined {
+    const source=this.damageSource(receiver);if(!source)return;
+    if(!source.path.length)return source.state;
+    const parts=source.state.parts.filter(part=>this.hasPrefix(part.path,source.path))
+      .map(part=>({...part,path:part.path.slice(source.path.length)}));
+    return parts.length?{version:1,parts,wheels:[]}:undefined;
+  }
+  private takePartDamage(receiver:JavaValue):void {
+    const source=this.damageSource(receiver);if(!source?.path.length)return;
+    const state=this.damageFor(receiver);if(!state)return;
+    source.state.parts=source.state.parts.filter(part=>!this.hasPrefix(part.path,source.path));
+    this.damage.set(receiver.value as JavaObject,state);
+    this.changed(receiver);
+  }
+  private installPartDamage(receiver:JavaValue,parent:ResourceObject,slot:CfgSlot,own:CfgSlot):void {
+    const state=this.damage.get(receiver.value as JavaObject);
+    const parentRef=this.gameTypes.reference(parent),source=this.damageSource(parentRef);
+    let owner=parent,path:number[]=[];
+    if(source){path=source.path;}
+    else while(this.slots.get(owner)?.parentSlot&&owner.parent){path.unshift(this.slots.get(owner)!.parentSlot);owner=owner.parent;}
+    const object=source?.object??this.gameTypes.reference(owner).value as JavaObject;
+    const target=source?.state??{version:1 as const,parts:[],wheels:[]};
+    const prefix=[...path,slot.id];
+    const previous=target.parts.find(part=>part.path.length===prefix.length&&this.hasPrefix(part.path,prefix));
+    if(!state){
+      // A new replacement must not inherit a snapshot of the part physically lost from this slot.
+      if(previous&&!previous.connected){target.parts=target.parts.filter(part=>!this.hasPrefix(part.path,prefix));parent.markVisualChanged();}
+      return;
+    }
+    const parentConfig=this.configs.get(parentRef.value as JavaObject),ownConfig=this.configs.get(receiver.value as JavaObject);
+    const frame=(config:PartConfig,slots:PartSlots,base:CfgSlot)=>{
+      const pose=slots.positions.get(base.id);
+      return slotMatrix(config,{...base,position:pose?.position??base.position,rotation:pose?.rotation??base.rotation});
+    };
+    const ownDamage=state.parts.find(part=>!part.path.length);
+    const local=previous?.connected&&previous.resource.pack===ownDamage?.resource.pack&&previous.resource.id===ownDamage?.resource.id
+      ?previous.local:parentConfig&&ownConfig?frame(parentConfig,this.partSlots(parentRef),slot)
+        .multiply(frame(ownConfig,this.partSlots(receiver),own).invert()).toArray():undefined;
+    target.parts=target.parts.filter(part=>!this.hasPrefix(part.path,prefix));
+    target.parts.push(...state.parts.map(part=>({...part,path:[...prefix,...part.path],
+      local:part.path.length?part.local:local??part.local,connected:part.path.length?part.connected:true})));
+    this.damage.set(object,target);this.damage.delete(receiver.value as JavaObject);parent.markVisualChanged();
+  }
+
+  /** Capture only at scene exit or file writes, never from the ordinary display poll. */
+  bindPhysics(receiver:JavaValue,vehicle:Vehicle3D):()=>void {
+    const object=receiver.value as JavaObject;
+    this.physics.set(object,{receiver,vehicle});
+    let bound=true;
+    return ()=>{if(!bound)return;this.flushPhysics();this.physics.delete(object);bound=false;};
+  }
+  flushPhysics():void {
+    for(const [object,{receiver,vehicle}] of this.physics){
+      this.damage.set(object,vehicle.captureDamage());
+      for(const part of vehicle.root.world.parts.values()){
+        if(part.nativeId===undefined)continue;
+        const node=this.gameTypes.getByResourceId(part.nativeId);
+        if(!node)continue;
+        const ref=part===vehicle.root?receiver:this.gameTypes.reference(node),native=ref.value as JavaObject;
+        const condition=Math.fround(part.condition);
+        if(this.wear.get(native)!==condition){this.wear.set(native,condition);node.markVisualChanged();}
+        if(part!==vehicle.root&&!part.parent){
+          const slots=this.partSlots(ref),parent=node.parent;
+          if(parent&&slots.parentSlot){
+            // Keep Java's aggregate inventory/prestige in step with native collision detachment.
+            if(object.fields.has('attachedParts')){
+              const notify=(part:ResourceObject)=>{
+                this.jvm.invoke(receiver,'rempart',[this.gameTypes.reference(part)]);
+                for(const child of part.children)notify(child);
+              };
+              notify(node);
+            }
+            this.partSlots(this.gameTypes.reference(parent)).installed.delete(slots.parentSlot);
+            slots.parentSlot=slots.ownSlot=0;node.setParent(null);
+          }
+        }
+      }
+      this.changed(receiver);
+    }
+  }
+
+  visualRevision(receiver: JavaValue): number {
+    return this.gameTypes.getResource(receiver)?.visualRevision ?? 0;
+  }
+
+  private changed(receiver: JavaValue): void { this.gameTypes.getResource(receiver)?.markVisualChanged(); }
 
   installedTree(receiver: JavaValue): NativeInstalledPart[] {
     const root = this.gameTypes.getResource(receiver);
@@ -370,17 +508,38 @@ export class PartNative {
     return null;
   }
 
+  private repairDamage(receiver:JavaValue):void {
+    const source=this.damageSource(receiver);
+    if(source){
+      if(!source.path.length)this.damage.delete(source.object);
+      else source.state.parts=source.state.parts.filter(part=>!this.hasPrefix(part.path,source.path));
+    }
+    const clear=(node:ResourceObject)=>{
+      const ref=this.gameTypes.reference(node),object=ref.value as JavaObject;
+      this.damage.delete(object);this.slotDamage.delete(object);node.markVisualChanged();
+      for(let index=0;index<4;index++)this.jvm.natives.invoke('java.game.parts.bodypart.Chassis','setWheelDamage',ref,[jv('int',index),jv('String',null)]);
+      for(const {child} of this.slots.get(node)?.installed.values()??[])clear(child);
+    };
+    const node=this.gameTypes.getResource(receiver);if(node)clear(node);
+    this.changed(receiver);
+  }
+
   private async command(receiver: JavaValue, command: string): Promise<void> {
     const words = command.trim().split(/\s+/);
+    if(words[0]==='repair'){this.repairDamage(receiver);return;}
     // Vehicle.wakeUp and the garage lift's reset follow inventory edits. Run
     // Java's recalculation here so disableSlot reflects the current assembly,
     // rather than the assembly it had when the vehicle was first created.
     if (words[0] === 'wakeup' || words[0] === 'reset') {
+      this.changed(receiver);
       const root = this.gameTypes.getResource(receiver);
       const car = this.carNode(receiver) ?? [...root?.children ?? []].find(node =>
         this.carNode(this.gameTypes.reference(node)) === node);
-      if (car) await this.jvm.natives.invokeAsync('java.game.parts.bodypart.Chassis', 'forceUpdate',
-        this.gameTypes.reference(car), []);
+      if (car) {
+        car.markVisualChanged();
+        await this.jvm.natives.invokeAsync('java.game.parts.bodypart.Chassis', 'forceUpdate',
+          this.gameTypes.reference(car), []);
+      }
       return;
     }
     if (words[0] === 'remove') {
@@ -400,6 +559,7 @@ export class PartNative {
         };
         await notify(child);
       }
+      this.takePartDamage(receiver);
       this.partSlots(this.gameTypes.reference(parent)).installed.delete(state.parentSlot);
       state.parentSlot = state.ownSlot = 0;
       const destination = this.gameTypes.getByResourceId(Number(words[2])) ?? this.gameTypes.getById(Number(words[2]));
@@ -451,8 +611,10 @@ export class PartNative {
           if (!compatible) continue;
           child.setParent(candidate);
           parentState.installed.set(slot.id, { child, mate: own.id });
+          candidate.markVisualChanged();
           childState.parentSlot = slot.id;
           childState.ownSlot = own.id;
+          this.installPartDamage(this.gameTypes.reference(child),candidate,slot,own);
           // The native car installer notifies its chassis through the original
           // Java callbacks. attachedParts is the car-wide script inventory,
           // including nested engine/running-gear parts, not just direct slots.

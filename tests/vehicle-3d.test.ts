@@ -1,3 +1,6 @@
+import { MapCollision } from '../src/engine/map-collision';
+import type { ScxModel } from '../src/formats/scx';
+import { validateVehicleDamage } from '../src/engine/vehicle-damage';
 import {keyboardDrivingInput} from '../src/engine/driving-demo';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +13,7 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
-function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4],frequency=240) {
+function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4],frequency=240,mapCollision?:MapCollision,withBumper=false) {
   const world = new EngineWorld(), slots = [101, 102, 103, 104].map((type, i) => `slot 0 0 0 0 0 0 ${20 + i}\nslottype ${type}`).join('\n');
   const wheels = [[-0.7, -1.3], [0.7, -1.3], [-0.7, 1.3], [0.7, 1.3]].map(([x, z], i) => `type 10 sphere 0.3\nspring 0.29 0.1 0.05\nwheel ${x} -0.6 ${z} 0 0 0 ${i < 2 ? 1 : 0} 0 1 0`).join('\n');
   const create = (id: number, file: string, cfg: string) => world.create({ key: { pack: 'test.rpk', id }, alias: file, cfgPath: file, config: parsePartConfig(cfg) });
@@ -19,6 +22,11 @@ function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicl
   const hood = create(6, 'hood.cfg', 'slot 0 0.191 0.696 0 0 0 601\nbody 0 0 0 0 0 0 38.5 sphere 1'); world.install(root, 601, hood, 601);
   const door = create(7, 'door.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 15 sphere 1'); world.install(root, 602, door, 1);
   const lamp = create(8, 'headlights.cfg', 'slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 1 sphere 0.2'); world.install(root, 603, lamp, 1);
+  let bumper:ReturnType<typeof create>|undefined;
+  if(withBumper){
+    root.definition.config.slots.push({id:604,position:[0,0,-2.25],rotation:[0,0,0],attach:[],compatible:[]});
+    bumper=create(9,'front_bumper.cfg','slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 18 sphere 1');world.install(root,604,bumper,1);
+  }
   let struts: ReturnType<typeof create>[] = [], sway: ReturnType<typeof create> | undefined, block: ReturnType<typeof create> | undefined, crank: ReturnType<typeof create> | undefined;
   if (mechanical) {
     world.mechanical = true;
@@ -41,16 +49,16 @@ function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicl
     crank.definition.mechanics = { kind: 'engine', source: 'crank.java', values: { stroke: 90 } }; world.install(block, 33, crank, 1);
   }
   const samples = [-0.7, 0.04, -0.7, 0.7, 0.04, -0.7, -0.7, 0.04, 0.7, 0.7, 0.04, 0.7];
-  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain,undefined,frequency);
+  const demo = new Vehicle3D(root, hood, samples, new Box3(new Vector3(-0.85, -0.55, -2.1), new Vector3(0.85, 0.6, 2.1)), terrain,mapCollision,frequency);
   const box = (x: number, y: number, z: number) => { const a: number[] = []; for (const px of [-x, x]) for (const py of [-y, y]) for (const pz of [-z, z]) a.push(px, py, pz); return a; };
-  demo.register(door, box(0.04, 0.4, 0.6), []); demo.register(lamp, box(0.15, 0.15, 0.15), []); demo.reset();
+  demo.register(door, box(0.04, 0.4, 0.6), []); demo.register(lamp, box(0.15, 0.15, 0.15), []); if(bumper)demo.register(bumper,box(.7,.14,.1),[]); demo.reset();
   if (mechanical) {
     for (const wheel of demo.suspension.wheels) demo.register(wheel.part, box(0.3, 0.3, 0.1), []);
     demo.register(block!, box(0.3, 0.3, 0.3), []);
     demo.register(crank!, box(0.2, 0.2, 0.2), []);
     demo.reset();
   }
-  return { world, root, hood, door, lamp, demo, struts, sway, block, crank };
+  return { world, root, hood, door, lamp, demo, struts, sway, block, crank,bumper };
 }
 
 test('route inputs run once per fixed tick and assembly export excludes animated local travel',()=>{
@@ -386,6 +394,24 @@ test('many contact points cannot launch one rigid detached panel upward', () => 
   const before = body.position.y;
   (demo as unknown as { freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape: Float64Array): number }).freeContacts(body, body.matrix(), new Box3(new Vector3(100, 100, 100), new Vector3(101, 101, 101)), true, points);
   assert.ok(body.position.y - before < 0.05, `one shallow contact displaced the whole part by ${body.position.y - before} m`);
+  world.dispose();
+});
+
+test('ground support resists detached-panel twisting without damping airborne rotation', () => {
+  const { world, demo } = setup(); demo.disableObstacle();
+  const obstacle = new Box3(new Vector3(100,100,100), new Vector3(101,101,101));
+  const solve = (x: number, y: number) => {
+    const body = new RigidBody3D(20, new Box3(new Vector3(-.5,-.01,-.5), new Vector3(.5,.01,.5)));
+    body.setFrame(new Matrix4().makeTranslation(x,y,0));
+    body.velocity.set(0,-.1,0); body.setAngularVelocity(new Vector3(0,3,0));
+    const points = new Float64Array(body.corners().flatMap(p=>p.toArray()));
+    (demo as unknown as { freeContacts(body: RigidBody3D, previous: Matrix4, obstacle: Box3, apply: boolean, shape: Float64Array): unknown }).freeContacts(body,body.matrix(),obstacle,true,points);
+    return body.omega.y;
+  };
+  const grounded = solve(10,.009);
+  assert.ok(grounded>=0 && grounded<3,'a supported patch dissipates spin without reversing it');
+  assert.ok(Math.abs(solve(100000,.009)-grounded)<1e-8,'friction is independent of world-coordinate magnitude');
+  assert.equal(solve(10,2),3,'there is no artificial spin damping in flight');
   world.dispose();
 });
 
@@ -769,4 +795,92 @@ test('handbrake applies at most 30 percent torque and preserves the analogue axi
   assert.ok(Math.abs(halfLoss-loss*.5)<1e-9);
   assert.equal(full.demo.suspension.wheels[0].omega,free.demo.suspension.wheels[0].omega);
   for(const {world} of [free,half,full])world.dispose();
+});
+
+
+test('damage survives JSON encoding, a different garage pose and a new physics session', () => {
+  const restoredCar=()=>{
+    const car=setup(true),samples:number[]=[];
+    for(const x of [-.8,.8])for(const y of [-.5,.5])for(const z of [-2,2])samples.push(x,y,z);
+    car.demo.register(car.root,samples,[-.8,-.5,-2,.8,-.5,-2,-.8,-.5,2]);car.demo.setBodyTriangles([-.8,-.5,-2,.8,-.5,-2,-.8,-.5,2]);return car;
+  };
+  const first=restoredCar(),panel=first.demo.soft.get(first.hood)!.panel;
+  first.demo.placeAt(new Vector3(40,2,-30),0.6);
+  panel.positions[7]-=0.18;panel.beams[0].rest*=0.83;
+  panel.mounts[0].broken=true;panel.mounts[1].overload=0.012;
+  first.hood.condition=0.65;first.root.condition=0.8;
+  first.world.detach(first.door);first.door.condition=0;
+  first.demo.suspension.deform(0,new Matrix4().makeTranslation(0.05,0.02,0),0.08);
+  first.demo.body.velocity.set(12,0,0);
+  for(const state of first.demo.soft.values())for(let i=0;i<state.panel.velocities.length;i+=3)
+    first.demo.body.pointVelocity(new Vector3().fromArray(state.panel.positions,i)).toArray(state.panel.velocities,i);
+  const saved=JSON.parse(JSON.stringify(first.demo.captureDamage()));validateVehicleDamage(saved);
+  const second=restoredCar();second.demo.placeAt(new Vector3(-80,3,20),-1.2);
+  second.demo.restoreDamage(saved);
+  assert.equal(second.door.parent,undefined,'a detached part must not become installed again');
+  assert.equal(second.hood.condition,0.65);assert.equal(second.root.condition,0.8);
+  const restored=second.demo.soft.get(second.hood)!.panel;
+  assert.equal(restored.beams[0].rest,panel.beams[0].rest);
+  assert.equal(restored.mounts[0].broken,true);assert.equal(restored.mounts[1].overload,0.012);
+  assert.ok(second.demo.suspension.wheels[0].hardpoint.distanceTo(first.demo.suspension.wheels[0].hardpoint)<1e-10);
+  assert.equal(second.demo.suspension.wheels[0].mountCondition,0.08);
+  const shape=restored.captureDamage(second.hood.matrix()),original=saved.parts.find(p=>p.path.join('/')==='601')!.panel!;
+  shape.positions.forEach((value,i)=>assert.ok(Math.abs(value-original.positions[i])<1e-9));
+  assert.ok(restored.velocities.every(v=>Math.abs(v)<1e-9),'the old driving velocity must not kick panels on a stationary garage spawn');
+  second.demo.advance(second.demo.physicsDt,neutral);
+  assert.ok(second.demo.suspension.wheels[0].hardpoint.distanceTo(first.demo.suspension.wheels[0].hardpoint)<1e-8,'the first physics tick must not heal the restored wheel mount');
+  const again=JSON.parse(JSON.stringify(second.demo.captureDamage()));validateVehicleDamage(again);
+  const third=restoredCar();third.demo.placeAt(new Vector3(4,3,5),0.2);third.demo.restoreDamage(again);
+  assert.equal(third.demo.soft.get(third.hood)!.panel.beams[0].rest,panel.beams[0].rest);
+  assert.equal(third.demo.suspension.wheels[0].mountCondition,0.08);
+});
+
+
+test('a new trip starts with a missing hood and wheel without recreating lost parts',()=>{
+  const car=setup(),wheel=car.demo.suspension.wheels[0].part;
+  car.world.detach(car.hood);car.world.parts.delete(car.hood.id);
+  car.world.detach(wheel);car.world.parts.delete(wheel.id);
+  const count=car.world.parts.size,samples:number[]=[];
+  for(const x of [-.8,.8])for(const y of [-.5,.5])for(const z of [-2,2])samples.push(x,y,z);
+  const demo=new Vehicle3D(car.root,car.root,samples,new Box3(new Vector3(-.8,-.5,-2),new Vector3(.8,.5,2)));
+  demo.register(car.root,samples,[]);demo.placeAt(new Vector3(0,3,0),0);
+  demo.advance(demo.physicsDt,neutral);
+  assert.equal(car.world.parts.size,count);
+  assert.equal(car.root.children.has(601),false);assert.equal(car.root.children.has(20),false);
+  assert.equal(demo.suspension.wheels[0].contact,false);
+  assert.equal(demo.suspension.wheels[0].part.parent,undefined);
+  assert.ok(demo.soft.get(car.root),'the chassis remains deformable when the hood is absent');
+  assert.ok(Number.isFinite(demo.body.position.y));
+});
+
+
+test('60 km/h frontal impact against an SCX map wall permanently crumples hood and bumper',()=>{
+  const map=new MapCollision();
+  const model:ScxModel={version:3,warnings:[],meshes:[{name:'map wall',
+    positions:new Float32Array([-2000,-2000,-800,2000,-2000,-800,2000,2000,-800,-2000,2000,-800]),
+    normals:new Float32Array(12),uv:new Float32Array(8),indices:new Uint32Array([0,1,2,0,2,3]),diffuse:[1,1,1,1],textureIndex:0}]};
+  map.add(model);
+  const {demo,root,bumper}=setup(false,undefined,120,map,true),shell:number[]=[];
+  for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])shell.push(x,y,z);
+  demo.register(root,shell,[]);demo.disableObstacle();demo.reset(60/3.6);
+  let hit=false;for(let i=0;i<120;i++){demo.advance(1/120,neutral);hit ||= (demo.collisionCue?.speed??0)>10;}
+  const hood=demo.panel,front=demo.soft.get(bumper!)!.panel;
+  assert.ok(hit,'the real map wall was reached at speed');
+  assert.ok(hood.permanentDamage>.005,`hood must retain a dent after release: ${hood.permanentDamage}`);
+  assert.ok(front.permanentDamage>.005,`bumper must retain a dent: ${front.permanentDamage}`);
+  const shape=hood.captureDamage(demo.hood.matrix());
+  let bend=0;for(let i=0;i<shape.positions.length;i+=3)
+    bend=Math.max(bend,Math.hypot(...[0,1,2].map(axis=>shape.positions[i+axis]-shape.template[i+axis])));
+  assert.ok(bend>.03,`hood must visibly bend, not only lose condition: ${bend}m`);
+});
+
+
+test('a strongly dented saved panel cannot restore with high condition while its solver sleeps',()=>{
+  const car=setup(),panel=car.demo.soft.get(car.door)!.panel;
+  for(let i=0;i<Math.ceil(panel.beams.length*.1);i++)panel.beams[i].rest=panel.beams[i].initial*.8;
+  const saved=JSON.parse(JSON.stringify(car.demo.captureDamage()));
+  assert.equal(saved.parts.find((p:{path:number[]})=>p.path[0]===602).condition,1,'old saves may carry an overly generous condition');
+  const restored=setup();restored.demo.restoreDamage(saved);
+  assert.ok(restored.door.condition<=.25,'restoration immediately reconciles permanent shape and part condition');
+  assert.equal(restored.door.parent,restored.root,'low condition does not automatically tear off an attached panel');
 });

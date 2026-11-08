@@ -1,6 +1,11 @@
 /** Native ResourceRef handle and its place in the resource tree. */
 export class ResourceObject {
   readonly children = new Set<ResourceObject>();
+  /** Visual assembly changes propagate upward once, instead of polling every descendant. */
+  visualRevision = 0;
+  markVisualChanged(): void {
+    for (let node: ResourceObject | null = this; node; node = node.parent) node.visualRevision++;
+  }
   parent: ResourceObject | null = null;
   /** The ID exposed by ResourceRef.id(); zero means an unbound handle. */
   resourceId = 0;
@@ -27,8 +32,10 @@ export class ResourceObject {
     for (let current = next; current; current = current.parent)
       if (current === this) throw new Error('Resource object parent cycle');
     if (this.parent === next) return;
+    this.parent?.markVisualChanged();
     this.parent?.children.delete(this);
     this.parent = next;
     next?.children.add(this);
+    this.markVisualChanged();
   }
 }

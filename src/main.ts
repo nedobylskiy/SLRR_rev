@@ -2,7 +2,7 @@ import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from './engine/driving-help
 import {parseScxAsync} from './formats/scx-worker-client';
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
-import { activeJavaTrack, javaDrivingControls, javaStockSelection } from './runtime/java-scene';
+import { activeJavaTrack, javaDrivingControls, javaStockSelection, javaTrackIsCurrent } from './runtime/java-scene';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaPartPreviews } from './render/java-part-previews';
@@ -98,7 +98,8 @@ async function runGameBoot() {
     flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   disposeGameBoot = () => result.dispose();
-  viewer?.setJavaSceneCamera(() => javaSceneCamera(result));
+  viewer?.setJavaSceneCamera(() => javaSceneCamera(result),
+    () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value));
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const javaMouse = new JavaMouse(el('viewport'), result, source,
     message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));
@@ -147,7 +148,7 @@ async function runGameBoot() {
       finally { replacingGarageCar = false; garageCarButton.disabled = false; }
     };
     let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
-    let loadedTrackKey = '', activeTrackCleanup: (() => void) | undefined;
+    let loadedTrackKey = '', loadedTrackState: unknown, activeTrackCleanup: (() => void) | undefined;
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
       if (animating || replacingGarageCar){animationSkipped++;return;}
@@ -172,13 +173,14 @@ async function runGameBoot() {
       let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
       let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
       let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
+      let persistPhysics: (() => void) | undefined;
       try {
         status('Loading Java track…');
         if (selected.driving && selected.chassis && source.byPath.has(selected.chassis.pack)) {
           try {
             const selection = await javaStockSelection(result, source, selected.chassis.pack);
             built = await new PartFactory(source).stock(selected.chassis, { mechanical: true, javaSelection: selection });
-            if (source !== assets || run !== sequence) { built.world.dispose(); return; }
+            if (source !== assets || run !== sequence || !javaTrackIsCurrent(result, selected)) { built.world.dispose(); return; }
             await viewer!.showWorld(built.world, source, true);
           } catch (reason) {
             if (built) viewer?.removeWorld(built.world);
@@ -186,10 +188,17 @@ async function runGameBoot() {
             appendJavaEvent({ level: 'error', message: `Java car rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
           }
         }
+        if (!javaTrackIsCurrent(result, selected)) {
+          if (built) viewer?.removeWorld(built.world);
+          built?.world.dispose(); return;
+        }
         const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
         }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving });
-        if (source !== assets || run !== sequence) { built?.world.dispose(); return; }
+        if (source !== assets || run !== sequence || !javaTrackIsCurrent(result, selected)) {
+          if (built) viewer?.removeWorld(built.world);
+          built?.world.dispose(); return;
+        }
         if (map.loaded === 0) throw new Error(`No map geometry loaded from ${selected.mapPack}: ${map.warnings.slice(0, 3).join('; ')}`);
         sceneTerrain = map.terrain;
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
@@ -218,7 +227,7 @@ async function runGameBoot() {
             const javaVehicle = result.gameTypes.get(car);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, sample: () => { physicsBinding?.sync(); return javaControls.sample(); },
+              { ...javaControls, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { physicsBinding?.sync(); return javaControls.sample(); },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
@@ -226,6 +235,7 @@ async function runGameBoot() {
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
                   result.gameTypes.updateTriggerContacts(car);
                 } });
+            if (session.vehicle) persistPhysics = result.parts.bindPhysics(result.jvm.get(car, 'chassis'), session.vehicle);
             showVehicleDebug(built.root, session, () => [...result.javaProfile].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 3)
               .map(([name, t]) => `JVM ${name}: ${t.averageMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / calls ${t.calls} / ${((performance.now() - t.lastAt) / 1000).toFixed(1)}s ago (wall)`).join('\n'));
             driveHud.hidden = true;
@@ -258,9 +268,23 @@ async function runGameBoot() {
       garageCarButton.hidden = actual.value == null || !result.jvm.isInstance(actual,'java.game.Garage');
       if (replacingGarageCar) return;
       const selected = activeJavaTrack(result);
+      if (loadedTrackKey && actual.value !== loadedTrackState) {
+        const cleanup = activeTrackCleanup;
+        activeTrackCleanup = undefined;
+        cleanup?.();
+        sceneVehicles.update(null);
+        if (!selected) viewer?.clear();
+        sceneTerrain = undefined;
+        loadedTrackKey = ''; pendingTrackKey = '';
+      }
       if (!selected || !source.byPath.has(selected.mapPack)) {
         sceneVehicles.update(null);
         mapDebugPanel.hidden = true;
+        const cleanup = activeTrackCleanup;
+        activeTrackCleanup = undefined;
+        cleanup?.();
+        if (loadedTrackKey) viewer?.clear();
+        sceneTerrain = undefined;
         loadedTrackKey = '';
         pendingTrackKey = '';
         return;
@@ -282,7 +306,7 @@ async function runGameBoot() {
       }
       if (performance.now() - pendingTrackSince < 450) return;
       loadingTrack = true;
-      loadedTrackKey = key;
+      loadedTrackKey = key; loadedTrackState = selected.state.value;
       void loadSelectedTrack(selected).finally(() => { loadingTrack = false; });
     };
     const trackPoll = window.setInterval(()=>viewer?.profiler.measure('Java scene poll CPU',checkActiveTrack), 150);

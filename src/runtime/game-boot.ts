@@ -420,7 +420,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const velocity = gameTypes.get(receiver)?.velocity;
     return jv('float', velocity ? velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2 : 0);
   });
-  new FileNative(jvm, files, gameTypes);
+  new FileNative(jvm, files, gameTypes, () => partNative.flushPhysics());
   new FindFileNative(jvm, files, new AssetCatalogAdapter(assets));
   new MathNative(jvm);
   new VectorNative(jvm);

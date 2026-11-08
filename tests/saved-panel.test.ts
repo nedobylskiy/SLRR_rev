@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Matrix4, Group, Mesh, BufferGeometry, Float32BufferAttribute, Vector3 } from 'three';
+import { DeformablePanel } from '../src/engine/deformable-panel';
+import { skinSavedPanel, validateVehicleDamage } from '../src/engine/vehicle-damage';
+import { applySavedPanel, restoreReferenceGeometry } from '../src/render/saved-panel';
+import { EngineWorld } from '../src/engine/world';
+import { parsePartConfig } from '../src/formats/cfg';
+
+test('parked saved skin matches the solver and repeated garage projection never compounds dents',()=>{
+  const samples=[-1,0,-1,1,0,-1,-1,0,1,1,0,1];
+  const panel=new DeformablePanel(samples,{mass:20,mount:[0,0,0],backend:'ts'});
+  panel.positions[7]-=.3;panel.beams[0].rest*=.9;panel.mounts[0].broken=true;
+  const state=panel.captureDamage(new Matrix4()),p=new Vector3(.2,.01,.1),expected:number[]=[];
+  panel.skin(panel.bind(p.toArray()),expected);
+  assert.ok(skinSavedPanel(state,p).distanceTo(new Vector3(...expected))<1e-10);
+  const world=new EngineWorld(),part=world.create({key:{pack:'test.rpk',id:1},alias:'hood',cfgPath:'hood.cfg',config:parsePartConfig('')});
+  part.savedDamage={path:[],resource:part.definition.key,condition:.5,connected:true,local:new Matrix4().toArray(),panel:state};
+  const geometry=new BufferGeometry();geometry.setAttribute('position',new Float32BufferAttribute([-90,0,-90,0,0,0,90,0,90],3));
+  const original=Array.from(geometry.getAttribute('position').array),group=new Group();group.add(new Mesh(geometry));
+  applySavedPanel(group,part);const dented=Array.from(geometry.getAttribute('position').array);
+  assert.notDeepEqual(dented,original);applySavedPanel(group,part);
+  assert.deepEqual(Array.from(geometry.getAttribute('position').array),dented);
+  restoreReferenceGeometry(group);assert.deepEqual(Array.from(geometry.getAttribute('position').array),original);
+  const damage={version:1,parts:[part.savedDamage],wheels:[]};validateVehicleDamage(damage);
+  applySavedPanel(group,part);part.savedDamage=undefined;applySavedPanel(group,part);
+  assert.deepEqual(Array.from(geometry.getAttribute('position').array),original,'repair restores the existing preview mesh immediately');
+  const corrupt=JSON.parse(JSON.stringify(damage));corrupt.parts[0].panel.positions.pop();
+  assert.throws(()=>validateVehicleDamage(corrupt),/cage state/);
+});

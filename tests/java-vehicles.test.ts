@@ -33,8 +33,9 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
     node.setMatrix({ x: id * 10, y: 1, z: 0 }, { y: 0, p: 0, r: 0 });
     return { car, chassis, node };
   });
+  let treeReads = 0;
   const result = { jvm, gameTypes, resolveResourceIdentity: () => undefined,
-    parts: { installedTree: () => [], slotOverrides: () => new Map(), engineDyno: () => undefined },
+    parts: { visualRevision: (receiver: JavaValue) => gameTypes.getResource(receiver)?.visualRevision ?? 0, installedTree: () => { treeReads++; return []; }, slotOverrides: () => new Map(), engineDyno: () => undefined },
     chassis: { wheelState: () => undefined, updateState: () => undefined, coolingSettings: () => [10,50,0.01] } } as unknown as BootResult;
   // Driving and display projections must both accept loaded cars with empty stock
   // recipes, without inventing replacements for missing installed components.
@@ -109,7 +110,15 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.ok(Math.abs(wheel.local.elements[8]) > 0.1, 'Java command turns the displayed wheel');
   const turned = wheel.local.clone();
   const beforeIdle = visualSyncs;
-  renderer.update(map);
+  const readsBeforeIdle = treeReads;
+  const parts = built[0].world.parts;
+  const values = parts.values;
+  let partWalks = 0;
+  parts.values = function () { partWalks++; return values.call(this); };
+  for (let i = 0; i < 100; i++) renderer.update(map);
+  assert.equal(treeReads, readsBeforeIdle, 'idle display polls must not rebuild native installed trees');
+  assert.equal(partWalks, 0, 'idle display polls must not traverse the host parts to build geometry signatures');
+  parts.values = values;
   assert.equal(visualSyncs, beforeIdle, 'unchanged cars skip visual and native transform publication');
   assert.deepEqual(wheel.local, turned, 'display updates must not accumulate steering');
   await steer('0');

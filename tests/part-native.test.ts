@@ -212,3 +212,31 @@ test('CFG slots connect parts through Java install commands and expose both side
     [jv('ResourceRef', null), jv('int', 16), jv('String', `install 0 ${id(car)} 0 0 0 -1.25 0.5 2`)]);
   assert.equal(call(crank, 'partOnSlot', 6), flywheel.value, 'inventory drop command accepts signed fractional coordinates');
 });
+
+
+test('visual revisions invalidate only the owning assembly on edits, detach, and Java wakeup', async () => {
+  const jvm = new SlrrJvm({ resolveImport: () => null });
+  const resources = new GameTypeNative(jvm, () => {}), parts = new PartNative(jvm, resources);
+  const create = () => {
+    const ref = jv('GameRef', { className: 'java.util.resource.GameRef', fields: new Map() });
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', ref, []);
+    return ref;
+  };
+  const car = create(), child = create(), other = create();
+  resources.getResource(child)!.setParent(resources.getResource(car)!);
+  let revision = parts.visualRevision(car);
+  const untouched = parts.visualRevision(other);
+  jvm.natives.invoke('java.game.parts.Part', 'setTexture', child, [jv('int', 5)]);
+  assert.ok(parts.visualRevision(car) > revision, 'nested paint propagates to its owning chassis');
+  revision = parts.visualRevision(car);
+  jvm.natives.invoke('java.game.parts.Part', 'setWear', child, [jv('float', 0.5)]);
+  assert.ok(parts.visualRevision(car) > revision);
+  revision = parts.visualRevision(car);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', car,
+    [jv('ResourceRef', null), jv('int', 16), jv('String', 'wakeup')]);
+  assert.ok(parts.visualRevision(car) > revision, 'wakeup invalidates even without a changed pose');
+  revision = parts.visualRevision(car);
+  resources.getResource(child)!.setParent(null);
+  assert.ok(parts.visualRevision(car) > revision, 'removal invalidates the former parent');
+  assert.equal(parts.visualRevision(other), untouched, 'unrelated parked cars stay clean');
+});

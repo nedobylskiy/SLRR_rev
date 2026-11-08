@@ -1,3 +1,4 @@
+import { applyAssemblyDamage, type VehicleDamageState, type PartDamageState } from './vehicle-damage';
 import {parseScxAsync} from '../formats/scx-worker-client';
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { Assets, normalizePath } from '../assets';
@@ -20,6 +21,8 @@ export { poseMatrix } from './transforms';
 export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
+  damage?: VehicleDamageState;
+  rootWear?: number;
   nativeId?: number;
   rootRender?: ResourceKey;
   rootTexture?: ResourceKey;
@@ -58,6 +61,8 @@ export class EnginePart {
   wheelFrameOffsets: WheelFrameOffsets = [];
   wheelFrame(index: number) { return wheelFrameMatrix(this.definition.config, index, this.wheelFrameOffsetY, this.wheelFrameOffsets); }
   nativeId?: number;
+  savedDamage?: PartDamageState;
+  savedVehicleDamage?: VehicleDamageState;
   renderVisible = true;
   paintTexture?: ResourceKey;
   readonly children = new Map<number, EnginePart>();
@@ -189,6 +194,10 @@ export class PartFactory {
     }
     world.wheelRefs = [...selection.wheelRefs]; world.javaPowertrain = selection.powertrain;
     if (world.mechanical) await this.alignRunningGear(root, world.parts.values());
+    root.savedVehicleDamage = selection.damage;
+    root.condition=Math.max(0,Math.min(1,selection.rootWear??1));
+    if (selection.damage) applyAssemblyDamage(root, selection.damage);
+    else for(const part of world.parts.values())part.savedDamage=undefined;
   }
   async definition(key: ResourceKey): Promise<PartDefinition> {
     const resolved = await this.assets.resource(key.pack, key.id);
@@ -295,6 +304,7 @@ export class PartFactory {
       world.mechanical = !!options.mechanical;
       if (options.javaSelection) {
         root.nativeId = options.javaSelection.nativeId;
+        root.condition=Math.max(0,Math.min(1,options.javaSelection.rootWear??1));
         root.paintTexture = options.javaSelection.rootTexture;
         world.wheelRefs = [...options.javaSelection.wheelRefs];
         world.javaPowertrain = options.javaSelection.powertrain;
@@ -387,6 +397,8 @@ export class PartFactory {
         }
       }
       if (options.mechanical) await this.alignRunningGear(root, world.parts.values());
+      root.savedVehicleDamage = options.javaSelection?.damage;
+      if (root.savedVehicleDamage) applyAssemblyDamage(root, root.savedVehicleDamage);
       return { world, root, warnings };
     } catch (error) { world.dispose(); throw error; }
   }

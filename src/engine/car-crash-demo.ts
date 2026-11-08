@@ -25,11 +25,11 @@ export class CarCrashDemo {
   private hoodSurface = { project: (p: Float64Array, previous: Float64Array, offset: number) => !this.panel.attached ? this.bodySurface?.project(p, previous, offset) : undefined };
   constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength' | 'frequency' | 'thickness' | 'plasticRate'> = {}) {
     this.clock=new FixedClock(material.frequency??240,32);
-    if (!hood.parent || hood.world !== root.world) throw new Error('Crash demo needs an installed hood');
-    this.parent = hood.parent; this.parentSlot = hood.parentSlot!; this.ownSlot = hood.ownSlot!; this.originalLocal = hood.local.clone();
-    this.driving = new DrivingDemo(root);
+    if (hood !== root && (!hood.parent || hood.world !== root.world)) throw new Error('Crash demo needs an installed hood');
+    this.parent = hood.parent ?? root; this.parentSlot = hood.parentSlot ?? 0; this.ownSlot = hood.ownSlot ?? 0; this.originalLocal = hood.local.clone();
+    this.driving = new DrivingDemo(root, true);
     const cfg = hood.definition.config, slot = cfg.slots.find(s => s.id === this.ownSlot)!;
-    this.panel = new DeformablePanel(samples, { ...material, anchorLayout: 'hood-five', mass: cfg.bodies.reduce((s, b) => s + b.mass, 0), mount: [...slot.position] });
+    this.panel = new DeformablePanel(samples, { ...material, anchorLayout: 'hood-five', mass: cfg.bodies.reduce((s, b) => s + b.mass, 0), mount: slot ? [...slot.position] : [0,0,0] });
     this.localCenter = this.center(this.panel.positions);
     this.referenceInverse = this.cageBasis(this.panel.positions)!.invert();
     this.panel.setAnchorFrame(hood.matrix().elements); this.panel.reset();
@@ -50,6 +50,7 @@ export class CarCrashDemo {
   pointVelocity(point: Vector3) { return this.velocity().add(new Vector3().crossVectors(new Vector3(0, this.yawVelocity, 0), point.clone().sub(this.driving.position))); }
   dropOnRoof() {
     if (!this.bodySurface) throw new Error('Body collision surface not loaded');
+    if(this.hood===this.root)return;
     this.reset(); this.hood.world.detach(this.hood); this.panel.mounts.forEach(m => { m.broken = true; });
     const roof = this.bodySurface.roofPoint().applyMatrix4(this.root.matrix()), center = this.center(this.panel.positions);
     const bottom = Math.min(...this.panel.positions.filter((_, i) => i % 3 === 1));
@@ -67,8 +68,8 @@ export class CarCrashDemo {
   }
   reset(speed = 0) {
     if (!Number.isFinite(speed) || speed < 0 || speed > 20) throw new Error('Invalid launch speed');
-    if (!this.hood.parent) this.hood.world.install(this.parent, this.parentSlot, this.hood, this.ownSlot);
-    this.hood.local.copy(this.originalLocal); this.driving.reset(); this.driving.speed = speed; this.impactSpeed = 0;
+    if (this.hood !== this.root && !this.hood.parent) this.hood.world.install(this.parent, this.parentSlot, this.hood, this.ownSlot);
+    if (this.hood !== this.root) this.hood.local.copy(this.originalLocal); this.driving.reset(); this.driving.speed = speed; this.impactSpeed = 0;
     this.clock = new FixedClock(this.clock.frequency,32);
     this.lateralVelocity.set(0, 0, 0); this.yawVelocity = this.reboundSpeed = 0; this.bodySurface?.reset();
     this.panel.setAnchorFrame(this.hood.matrix().elements); this.panel.reset();
