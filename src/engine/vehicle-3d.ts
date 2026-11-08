@@ -186,9 +186,9 @@ export class Vehicle3D extends CarCrashDemo {
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision,readonly physicsFrequency=REFERENCE_PHYSICS_HZ) {
-    // The legacy hood cage was softer and shallower than other metal panels.
-    // Reinforcement depth resists bending without increasing mass or solver iterations.
-    super(root, hood, samples, chassisBounds, { stiffness: 750000, thickness: 0.12, yieldStrain: 0.018, mountStrength: 60000,frequency:physicsFrequency });
+    // A short suspension shock should remain mostly elastic: retain the original
+    // stiffness/yield and slow permanent rest-length creep instead of hardening metal.
+    super(root, hood, samples, chassisBounds, { stiffness: 500000, thickness: 0.12, plasticRate: 1, yieldStrain: 0.012, mountStrength: 60000,frequency:physicsFrequency });
     this.clock = new FixedClock(this.physicsFrequency,physicsTickBudget(this.physicsFrequency));
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);

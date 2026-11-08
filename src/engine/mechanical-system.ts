@@ -1,3 +1,4 @@
+import {brakingClutchHelp,lowSpeedClutchHelp,type DrivingHelping} from './driving-helping';
 import { clutchExchange, engineLimiter, engineTemperatureStep } from './native-vehicle-physics';
 import type { EnginePart } from './world';
 import { HOST_WHEEL_INERTIA } from './wheel-inertia';
@@ -34,6 +35,9 @@ export class MechanicalSystem {
   temperature = 20;
   idleRpm: number;
   redlineRpm: number;
+  helping:DrivingHelping={brake:0,steer:0,clutch:0,acceleration:0};
+  brakeHelpClutch=0;
+  clutchHelpClutch=0;
   running = true;
   starting = false;
   gear = 0;
@@ -95,7 +99,7 @@ export class MechanicalSystem {
     const health = this.health(part);
     return { force: (values?.force ?? 0) * health, damping: (values?.damping ?? 0) * health };
   }
-  reset() { this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
+  reset() { this.brakeHelpClutch=this.clutchHelpClutch=0; this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
   private updateIgnition(gas: number) {
     if (this.running && this.rpm < Math.max(250,this.idleRpm*0.35)) this.running = false;
     else if (!this.running && this.power>0 && this.rpm >= Math.max(500,this.idleRpm*0.65)
@@ -140,7 +144,7 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
+  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0) {
     if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = this.idleRpm, limit = this.redlineRpm;
@@ -203,7 +207,14 @@ export class MechanicalSystem {
     // Java supplies an accelerator pedal, independent of the selected gear.
     // Only the playground's signed forward/reverse input requests direction braking.
     const directionBrake = input.throttleMode !== 'pedal' && (this.gear > 0 && throttle < 0 || this.gear < 0 && throttle > 0);
-    const clutchOpen = !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power || !this.running && !this.manual;
+    const brakeAxis = input.brakeAxis ?? (input.brake ? 1 : 0);
+    this.brakeHelpClutch = this.running && totalRatio && this.power>0
+      ? brakingClutchHelp(this.helping.brake,brakeAxis,this.rpm,shaftOmega*30/Math.PI,idle,roadSpeedMps) : 0;
+    const clutchProtection=this.running&&totalRatio&&this.power>0?lowSpeedClutchHelp(this.helping.clutch,roadSpeedMps):0;
+    const idleRisk=Math.max(0,Math.min(1,(idle*1.25-Math.min(this.rpm,Math.abs(shaftOmega)*30/Math.PI))/(idle*.5)));
+    this.clutchHelpClutch=(gas<=.05||brakeAxis>.2)?clutchProtection*idleRisk:0;
+    const assistedOpening=Math.min(1,this.brakeHelpClutch+this.clutchHelpClutch);
+    const clutchOpen = assistedOpening>=1-1e-9 || !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power || !this.running && !this.manual;
     const launch = Math.max(0.65, Math.min(1, (this.rpm - idle) / (idle * 0.55) + gas * 0.28));
     // Dyno torque may be negative outside the combustion band. That is engine
     // braking, not a negative friction capacity for the clutch.
@@ -211,10 +222,15 @@ export class MechanicalSystem {
     const manualCapacity = gas > 0 ? Math.min(stallCapacity * launch, Math.max(0, this.estimateFlywheelTorqueAt(this.rpm)) * (0.95 + gas * 0.2)) : 120;
     const automaticCapacity = gas > 0 ? stallCapacity * launch : 90 * Math.min(1, Math.abs(shaftOmega) / Math.max(1, omega));
     // Torque-derived friction remains only in the non-native fallback below.
-    const capacity = clutchOpen ? 0 : (this.manual ? manualCapacity : automaticCapacity) * (this.clutch ? this.health(this.clutch) : 1);
-    const clutchTorque = Math.max(-capacity, Math.min(capacity, (omega - shaftOmega) * 9));
+    const capacity = clutchOpen ? 0 : (this.manual ? manualCapacity : automaticCapacity) * (this.clutch ? this.health(this.clutch) : 1) * (1-assistedOpening);
+    let clutchTorque = Math.max(-capacity, Math.min(capacity, (omega - shaftOmega) * 9));
     // Use the same flywheel inertia with the clutch open and closed.
     const inertia = 0.28 + Math.max(0, nativeParameters?.engine_inertia ?? this.crank?.definition.mechanics?.values.inertia ?? 0) * 0.01;
+    if(clutchProtection>0&&clutchTorque>0){
+      const idleFloor=idle*.85*Math.PI/30;
+      const safeTorque=Math.max(0,engineTorque-drag+(omega-idleFloor)*inertia/dt);
+      clutchTorque+=(Math.min(clutchTorque,safeTorque)-clutchTorque)*clutchProtection;
+    }
     if (this.root.world.javaPowertrain?.curve && totalRatio && !clutchOpen) {
       // The host integrates SI torques; native CFG inertia values use its own
       // scale. Keep that conversion here rather than changing recovered math.
@@ -239,6 +255,11 @@ export class MechanicalSystem {
         const idleFloor = idle * 0.85 * Math.PI / 30;
         grip = Math.min(grip, Math.max(0, uncoupled-idleFloor)/(uncoupled-closed.engineSpeed));
       }
+      if(clutchProtection>0&&closed.engineSpeed<uncoupled){
+        const safeGrip=Math.max(0,Math.min(1,(uncoupled-idle*.85*Math.PI/30)/(uncoupled-closed.engineSpeed)));
+        grip+=(Math.min(grip,safeGrip)-grip)*clutchProtection;
+      }
+      grip *= 1-assistedOpening;
       const exchange = clutchExchange({...exchangeInput,clutch:1-grip});
       this.rpm = Math.max(0,exchange.engineSpeed*30/Math.PI);
       this.updateIgnition(gas);

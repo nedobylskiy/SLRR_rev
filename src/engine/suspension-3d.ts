@@ -1,3 +1,4 @@
+import {steeringHelpStep,type DrivingHelping} from './driving-helping';
 import {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import { nativeSuspensionForce, nativeTireForces, updateSlip, wheelBrake } from './native-vehicle-physics';
 import { Box3, Euler, Matrix4, Quaternion, Vector3 } from 'three';
@@ -43,6 +44,7 @@ export class Suspension3D {
   readonly mechanics?: MechanicalSystem;
   private steering?: { part: EnginePart; frame: Matrix4; inverseOwn: Matrix4 };
   readonly wheels: (TireContactState & { part: EnginePart; center: Vector3; hardpoint: Vector3; originalHardpoint: Vector3; damage: Matrix4; mountCondition: number; radius: number; originalTyre?: WheelRefState; rest: number; bump: number; droop: number; length: number; supportHeight?: number; supportX: number; supportZ: number; frame: Matrix4; inverseOwn: Matrix4; nativeSlip: { longitudinal: number; angle: number }; steering: number; spin: number; omega: number })[];
+  helping:DrivingHelping={brake:0,steer:0,clutch:0,acceleration:0};
   steer = 0;
   tireModel: TireModelSettings = structuredClone(DEFAULT_TIRE_MODEL);
   constructor(readonly root: EnginePart, readonly body: RigidBody3D, readonly terrain: Terrain) {
@@ -90,7 +92,7 @@ export class Suspension3D {
     w.hardpoint.copy(w.originalHardpoint).applyMatrix4(delta);
   }
   step(dt: number, input: DrivingInput) {
-    const target = Math.max(-1, Math.min(1, input.steer)) * (this.root.definition.config.maxSteer ?? 0.6); this.steer += Math.max(-2 * dt, Math.min(2 * dt, target - this.steer));
+    const target = Math.max(-1, Math.min(1, input.steer)) * (this.root.definition.config.maxSteer ?? 0.6); this.steer = steeringHelpStep(this.steer,target,Math.hypot(this.body.velocity.x,this.body.velocity.z),dt,this.helping.steer,input.steerDigital===true);
     const frame = this.body.matrix(), count = this.wheels.length;
     const chassisForward = new Vector3(0, 0, -1).applyQuaternion(this.body.orientation);
     const roadSpeed = this.body.velocity.dot(chassisForward);

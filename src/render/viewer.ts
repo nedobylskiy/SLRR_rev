@@ -1,3 +1,4 @@
+import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from '../engine/driving-helping';
 import {parseScxAsync} from '../formats/scx-worker-client';
 import {DRIVING_PHYSICS_HZ,XPBD_ITERATIONS} from '../engine/physics-timing';
 import {planBuildingBatches,isBuildingAlias,configureBuildingArrayMaterial} from './building-material-batch';
@@ -270,7 +271,7 @@ export class Viewer {
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Static environment: ${this.environmentPath??'none'}`,
-    `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
+    `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · brake helping ${this.drivingHelping.brake.toFixed(2)} · steer helping ${this.drivingHelping.steer.toFixed(2)} · clutch helping ${this.drivingHelping.clutch.toFixed(2)} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
     `Map variants: daytime only · excluded night batches ${this.excludedNightMapVariants} · component instances ${this.excludedNightMapInstances}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
@@ -369,6 +370,13 @@ export class Viewer {
   private ambientLight = new THREE.HemisphereLight(0xe5efff, 0x47524b, 2.5);
   private sunLight = new THREE.DirectionalLight(0xffddb8, 3);
   private lighting = new SceneLighting();
+  private drivingHelping:DrivingHelping={...DEFAULT_DRIVING_HELPING};
+  setDrivingHelping(settings:DrivingHelping){
+    for(const key of ['brake','steer','clutch','acceleration'] as const){
+      if(!Number.isFinite(settings[key])||settings[key]<0||settings[key]>1)throw Error('Driving helping must be between 0 and 1');
+      this.drivingHelping[key]=settings[key];
+    }
+  }
   private bakedLightmaps = { value: 0 };
   private staticMapShadows = new StaticMapShadows();
   private staticMapRoot?: THREE.Group;
@@ -1251,6 +1259,8 @@ export class Viewer {
       const samples = localPositions(hood), bounds = new THREE.Box3();
       for (const positions of localPositions(root)) for (let i = 0; i < positions.length; i += 3) bounds.expandByPoint(new THREE.Vector3().fromArray(positions, i));
       crash = new Vehicle3D(root, hood, samples.flat(), bounds, track?.terrain, track?.collision,DRIVING_PHYSICS_HZ);
+      if(crash instanceof Vehicle3D)crash.suspension.helping=this.drivingHelping;
+      if(crash instanceof Vehicle3D&&crash.suspension.mechanics)crash.suspension.mechanics.helping=this.drivingHelping;
       const triangles: number[] = [], inverseRoot = root.matrix().invert();
       for (const part of root.world.parts.values()) {
         if (part === hood || !part.definition.model) continue;
@@ -1360,7 +1370,7 @@ export class Viewer {
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
-      const input = java ? java.sample() : { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
+      const input = java ? java.sample() : { throttle: pressed('KeyW', 'ArrowUp') - pressed('KeyS', 'ArrowDown'), steerDigital: true, steer: pressed('KeyA', 'ArrowLeft') - pressed('KeyD', 'ArrowRight'), brake: keys.has('Space'), clutch: pressed('ShiftLeft', 'ShiftRight') > 0, gearUp: keys.has('KeyE'), gearDown: keys.has('KeyQ'), neutral: keys.has('KeyN'), start: keys.has('KeyI') };
       if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
@@ -1460,7 +1470,7 @@ export class Viewer {
       if (now - lastHud > 100) {
         const intact = crash?.panel.mounts.filter(m => !m.broken).length;
         const up = crash instanceof Vehicle3D ? new THREE.Vector3(0, 1, 0).applyQuaternion(crash.body.orientation).y : 1;
-        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} km/h${crash instanceof Vehicle3D ? ` · supported wheels ${crash.suspension.wheels.filter(w => w.contact).length}/4\nHood: ${crash.hood.parent ? 'attached' : 'detached'} · mounts ${intact}/3\nDented panels: ${[...crash.soft.values()].filter(s => s.panel.plasticBeams > 0).length} · detached parts: ${[...crash.soft.keys(), ...crash.rigid.keys()].filter(p => p !== root && !p.parent).length}\nChassis: ${up < -0.5 ? 'upside down' : up < 0.5 ? 'on its side' : crash.suspension.wheels.every(w => !w.contact) ? 'airborne' : 'on wheels'}` : crash ? ` · impact ${Math.round(crash.impactSpeed * 3.6)} km/h\nHood: ${crash.hood.parent ? 'attached' : 'separate part'}` : ` · ${demo.speed < -0.1 ? 'reverse' : 'forward'}`}`); lastHud = now;
+        telemetry(`${Math.round(crash ? crash.velocity().length() * 3.6 : Math.abs(demo.speed) * 3.6)} km/h${crash instanceof Vehicle3D ? ` · supported wheels ${crash.suspension.wheels.filter(w => w.contact).length}/4\nHood: ${crash.hood.parent ? 'attached' : 'detached'} · mounts ${intact}/${crash.panel.mounts.length} · stops ${crash.panel.supports.length}\nDented panels: ${[...crash.soft.values()].filter(s => s.panel.plasticBeams > 0).length} · detached parts: ${[...crash.soft.keys(), ...crash.rigid.keys()].filter(p => p !== root && !p.parent).length}\nChassis: ${up < -0.5 ? 'upside down' : up < 0.5 ? 'on its side' : crash.suspension.wheels.every(w => !w.contact) ? 'airborne' : 'on wheels'}` : crash ? ` · impact ${Math.round(crash.impactSpeed * 3.6)} km/h\nHood: ${crash.hood.parent ? 'attached' : 'separate part'}` : ` · ${demo.speed < -0.1 ? 'reverse' : 'forward'}`}`); lastHud = now;
       }
     };
     const stop = () => {

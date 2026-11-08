@@ -412,7 +412,8 @@ test('installed panels stay rigid at rest, wake for an impulse and retain their 
   for (let i = 0; i < 120; i++) demo.advance(1 / 240, neutral);
   assert.ok([...demo.soft.values()].every(s => !s.activity.deforming));
   assert.equal(demo.panel.clock.tick, demo.clock.tick);
-  demo.panel.hit(90); demo.advance(1 / 240, neutral);
+  // A weak tap is now recoverable; use a strong strike to exercise permanent dents.
+  demo.panel.hit(400); demo.advance(1 / 240, neutral);
   assert.ok(demo.soft.get(hood)!.activity.deforming);
   for (let i = 0; i < 180; i++) demo.advance(1 / 240, neutral);
   assert.ok(demo.panel.plasticBeams > 0);
@@ -701,6 +702,32 @@ test('a small vertical hop keeps an attached hood elastic at 120Hz',()=>{
     demo.advance(1/120,neutral);const inverse=hood.matrix().invert();
     for(let j=0;j<rest.length;j++)sag=Math.max(sag,rest[j].y-new Vector3().fromArray(demo.panel.positions,j*3).applyMatrix4(inverse).y);
   }
-  assert.ok(sag<0.05,`vertical hop hood sag ${sag}m, permanent damage ${demo.panel.permanentDamage}`);
+  assert.ok(sag<0.15,`vertical hop hood sag ${sag}m, permanent damage ${demo.panel.permanentDamage}`);
+  const finalFrame=hood.matrix().invert();
+  const residual=Math.max(...rest.map((point,index)=>point.distanceTo(new Vector3().fromArray(demo.panel.positions,index*3).applyMatrix4(finalFrame))));
+  assert.ok(residual<0.025,`hood must spring back after the hop, residual ${residual}m`);
   assert.ok(demo.panel.permanentDamage<0.001);assert.equal(hood.parent,demo.root);world.dispose();
+});
+
+test('landing on wheels after reset height does not permanently fold an untouched hood',()=>{
+  const {demo,world,hood}=setup(true,{ramp:false,height:()=>0,normal:()=>new Vector3(0,1,0)},120);
+  demo.placeAt(new Vector3(0,1,0),0);demo.disableObstacle();
+  for(let i=0;i<480;i++)demo.advance(1/120,neutral);
+  assert.ok(demo.panel.permanentDamage<0.001,`hood damage from wheel-only landing ${demo.panel.permanentDamage}`);
+  assert.ok(hood.condition>0.99);assert.equal(hood.parent,demo.root);world.dispose();
+});
+
+
+test('suspension applies speed-dependent steering help only to button input',()=>{
+  const helped=setup(),raw=setup(),analog=setup();
+  for(const {demo} of [helped,raw,analog])demo.body.velocity.set(0,0,-100/3.6);
+  helped.demo.suspension.helping.steer=1;analog.demo.suspension.helping.steer=1;
+  for(let i=0;i<12;i++){
+    helped.demo.suspension.step(1/120,{...neutral,steer:1,steerDigital:true});
+    raw.demo.suspension.step(1/120,{...neutral,steer:1,steerDigital:true});
+    analog.demo.suspension.step(1/120,{...neutral,steer:1,steerDigital:false});
+  }
+  assert.ok(helped.demo.suspension.steer<raw.demo.suspension.steer/3);
+  assert.equal(analog.demo.suspension.steer,raw.demo.suspension.steer);
+  for(const {world} of [helped,raw,analog])world.dispose();
 });

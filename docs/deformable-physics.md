@@ -48,15 +48,73 @@ The points of the initial collision geometry can be the input for constructing t
 
 ### Mounted hood under vertical suspension loads
 
-The driving hood now uses a 0.12m effective cage reinforcement depth, beam stiffness
-750000 and yield strain 0.018 (previously 0.08m, 500000 and 0.012). This is the
-spacing of the structural cage layers, not sheet-metal thickness or a change to
-the visible mesh. Mass, mount strength and XPBD iteration count are unchanged.
-The 120Hz small-hop regression (initial vertical velocity 1.5m/s) reduces peak
-local sag from about 8.1cm to 4.7cm. Severe-impact release and detached settling
-remain covered by the existing tests; the hop/release tests also pass on WASM.
+The driving hood retains the 0.12m effective cage depth, while stiffness and yield
+strain return to 500000 and 0.012. The recovery change is temporal plasticity,
+not an increased yield threshold: permanent beam rest-length creep uses 1/s rather
+than the reference 120/s. At 120Hz the old model permanently absorbed all excess
+strain in one tick; brief suspension shocks now remain mostly recoverable.
+Mass, mount strength and XPBD iteration count are unchanged.
+
+Attached panels wait at least 0.5s and require internal speed below 0.03m/s before
+sleeping (loose debris retains its old thresholds). This prevents freezing a still
+recovering elastic shape at the first low-velocity point.
+
+Regression cases cover a 1.5m/s vertical hop, settling after the debug reset height,
+and severe-impact release/landing. The WASM wrapper blends the binary's plastic
+rest-length delta to the configured creep rate before its next upload; its ABI and
+velocity reconstruction are unchanged. Other panels default to the original 120/s.
 Visual evaluation on different stock cars is still required.
 
 For a new map driving session, settleSpawn initializes rigid-body suspension support
 before the first displayed frame. It does not run damage/XPBD ticks or advance the
 vehicle recorder clock. This initialization is separate from the hood reinforcement.
+
+
+The hood uses five support locations: two hinge clamps near its CFG mount, a
+central latch at the opposite edge, and two compression-only stops at that edge's
+corners. The stops project downward penetration along the current chassis up axis;
+they permit upward separation and do not increase attachment break strength.
+They have an 8cm lateral footprint and disengage when the hood is released.
+This applies only to hood cages, not other body panels. TS and WASM share the
+same two stop projections after each constraint iteration, without a binary ABI change.
+
+
+### Driving helping
+
+DrivingHelping stores brake, steer, clutch and acceleration strengths in [0,1].
+Brake, steer and clutch helping are implemented. The Graphics/map debug slider is
+labelled `Break helping`, defaults to 1.00 and persists in localStorage. Acceleration helping is reserved and has no effect. Each driving mechanics instance
+shares its viewer's settings, so slider changes take effect immediately.
+
+Brake helping is disabled at or below 20km/h and fades in from 20 to 30km/h,
+using chassis speed rather than potentially locked wheel speed. Low-speed control
+is handled independently by clutch helping. During heavy braking (axis 0.8–1.0), if the engine or driven shaft approaches idle,
+brake helping opens the clutch proportionally to the setting. It affects both
+native recovered exchange grip and fallback clutch torque. It does not clamp RPM,
+restart a stalled engine or change wheel brake force. At 0 the original manual
+stall behavior remains. Java controls retain the brake axis in DrivingInput;
+older recordings and keyboard input fall back to their boolean brake value.
+
+
+Steer helping (default 1.00) changes button steering slew rate from the original
+2rad/s towards max(0.2, 2/(1+(speedMps/15)^2))rad/s. Strength interpolates the rates.
+It does not cap steering angle. Centering/unwinding retains the original rate.
+The limit runs at each suspension physics tick, independently of render FPS.
+Java Controller bindings distinguish active keyboard steering from mouse/wheel
+axes; only button input is tagged steerDigital. The setting is persisted alongside
+brake helping. Settings predating the steer control migrate its previously unused
+reserved value to the new default once.
+
+
+Clutch helping defaults to 0.00, with full low-speed weight up to 20km/h and a
+fade to zero by 30km/h (absolute chassis speed, including reverse). With little
+throttle or braking, it opens the clutch near idle. While accelerating, the clutch
+load is limited to available combustion torque and rotational energy above 85%
+of idle, allowing a progressive launch without directly overwriting engine RPM.
+Native exchange limits grip using its predicted coupled/uncoupled engine speeds;
+the fallback limits transmitted torque and applies the same torque to the wheels.
+Brake/clutch opening contributions combine across their complementary speed bands.
+An explicit clutch pedal always opens the clutch. At 0 the original behavior is
+unchanged; no helper starts a stalled engine. The persisted settings migrate the
+previously reserved clutch value to the new default once (version 3), preserving
+existing brake and steer settings. All three controls update a live session.

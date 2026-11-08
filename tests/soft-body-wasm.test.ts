@@ -134,3 +134,20 @@ test('120 Hz TS/WASM parity and mount overload duration stay measured in seconds
     assert.ok(Math.abs(releasedAt-2/240)<1e-12,`release delay at ${frequency} Hz was ${releasedAt}`);
   }
 });
+
+test('slow permanent creep retains TS/WASM parity without changing the yield threshold',async()=>{
+  assert.equal(await softBodyRuntime.load(bytes),true,softBodyRuntime.error);
+  for(const plasticRate of [0,1,8]){
+    const options:PanelOptions={mass:38.5,mount:[0,1.3,0.7],frequency:120,plasticRate,anchorLayout:'hood-five'};
+    const ts=new DeformablePanel(samples,{...options,backend:'ts'}),wasm=new DeformablePanel(samples,{...options,backend:'wasm'});
+    for(const panel of [ts,wasm])panel.hit(400);
+    for(let tick=0;tick<120;tick++){
+      ts.advance(1/120);wasm.advance(1/120);
+      for(let i=0;i<ts.positions.length;i++)close(wasm.positions[i],ts.positions[i],`rate ${plasticRate}, tick ${tick}, node ${i}`);
+      for(let i=0;i<ts.beams.length;i++)close(wasm.beams[i].rest,ts.beams[i].rest,`rate ${plasticRate}, beam ${i}`);
+    }
+    assert.equal(ts.yieldStrain,wasm.yieldStrain);
+    if(plasticRate===0)assert.equal(ts.permanentDamage,0);
+    else assert.ok(ts.permanentDamage>0,'strong impacts can still leave permanent dents');
+  }
+});

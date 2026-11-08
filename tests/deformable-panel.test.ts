@@ -94,3 +94,23 @@ test('ground damping preserves its per-second rate at 120 and 240 Hz',()=>{
   assert.ok(Math.abs(speeds[0]-speeds[1])<1e-8);
   assert.ok(Math.abs(speeds[0]-10*Math.exp(-.25)*Math.pow(.96,240))<1e-8);
 });
+
+test('hood has two hinges, a central latch and two compression-only front stops',()=>{
+  const panel=new DeformablePanel([-.7,.4,-.7,.7,.4,-.7,-.7,.4,.7,.7,.4,.7],
+    {mass:20,mount:[0,.4,.7],anchorLayout:'hood-five',gravity:0});
+  assert.equal(panel.mounts.length,3);assert.equal(panel.supports.length,2);
+  const nodes=panel.supports.map(s=>s.node),points=nodes.map(node=>[...panel.rest.slice(node*3,node*3+3)]);
+  assert.deepEqual(points.map(p=>p[0]),[-.7,.7]);assert.ok(points.every(p=>p[2]===-.7));
+  assert.ok(nodes.every(node=>panel.mounts.every(m=>!m.nodes.includes(node))));
+  const frame=new Matrix4().makeRotationZ(Math.PI/2);panel.setAnchorFrame(frame.elements);panel.reset();
+  const normal=[-1,0,0],node=nodes[0],i=node*3;
+  for(let axis=0;axis<3;axis++)panel.positions[i+axis]=panel.rest[i+axis]-normal[axis]*.04;
+  const contact=(panel as any).supportContact(node);
+  assert.ok(contact);assert.ok(Math.abs(panel.positions[i]-panel.rest[i])<1e-10,'stop normal follows the rotated chassis');
+  for(let axis=0;axis<3;axis++)panel.positions[i+axis]=panel.rest[i+axis]+normal[axis]*.04;
+  const lifted=panel.positions.slice(i,i+3);
+  assert.equal((panel as any).supportContact(node),undefined);
+  assert.deepEqual(panel.positions.slice(i,i+3),lifted,'a stop must not pull a lifted hood down');
+  panel.positions[i]=panel.rest[i]+.04;panel.mounts.forEach(m=>m.broken=true);
+  assert.equal((panel as any).supportContact(node),undefined,'a detached hood is no longer supported');
+});

@@ -1,3 +1,4 @@
+import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from './engine/driving-helping';
 import {parseScxAsync} from './formats/scx-worker-client';
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
@@ -805,6 +806,26 @@ const showEngineControls = (root: EnginePart) => {
 for (const [label, speed] of [['Impact at 10 km/h', 10 / 3.6], ['Impact at 50 km/h', 50 / 3.6], ['Reset', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
 }
+const drivingHelping:DrivingHelping={...DEFAULT_DRIVING_HELPING};
+try{
+  const saved=JSON.parse(localStorage.getItem('slrr-driving-helping')??'{}');
+  for(const key of ['brake','steer','clutch','acceleration'] as const)
+    if((key!=='steer'||saved.version>=2)&&(key!=='clutch'||saved.version>=3)&&Number.isFinite(saved[key])&&saved[key]>=0&&saved[key]<=1)drivingHelping[key]=saved[key];
+}catch{}
+for(const [key,title,description] of [
+  ['brake','Break helping','Opens the clutch during heavy braking near stall RPM above 20 km/h; full assistance from 30 km/h.'],
+  ['steer','Steer helping','Slows button steering as vehicle speed increases. Analogue steering is unchanged.'],
+  ['clutch','Clutch helping','Opens the clutch near idle at low speed and progressively reconnects during acceleration.'],
+] as const){
+  const label=textElement('label',title),input=document.createElement('input'),output=document.createElement('output');
+  label.className='crumple-control';input.type='range';input.min='0';input.max='1';input.step='0.01';input.value=String(drivingHelping[key]);
+  input.setAttribute('aria-label',title);output.value=drivingHelping[key].toFixed(2);label.title=description+' Set 0 to disable.';
+  label.append(input,output);mapDebugOptions.append(label);
+  input.oninput=()=>{
+    drivingHelping[key]=Number(input.value);output.value=drivingHelping[key].toFixed(2);viewer?.setDrivingHelping(drivingHelping);
+    try{localStorage.setItem('slrr-driving-helping',JSON.stringify({...drivingHelping,version:3}));}catch{}
+  };
+}
 const crumpleLabel = textElement('label', 'Chassis deformation'), crumpleSlider = document.createElement('input'), crumpleValue = textElement('output', `×${DEFAULT_CHASSIS_CRUMPLE.toFixed(2)}`);
 crumpleLabel.className = 'crumple-control'; crumpleSlider.type = 'range'; crumpleSlider.min = '0.5'; crumpleSlider.max = '1.5'; crumpleSlider.step = '0.05'; crumpleSlider.value = String(DEFAULT_CHASSIS_CRUMPLE);
 crumpleSlider.setAttribute('aria-label', 'Chassis deformation'); crumpleSlider.title = 'Adjusts chassis deformation on the next impact';
@@ -1086,7 +1107,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

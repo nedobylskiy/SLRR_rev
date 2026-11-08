@@ -7,7 +7,7 @@ export const PANEL_GROUND_CLEARANCE=.015;
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
-export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; thickness?: number; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
+export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; thickness?: number; plasticRate?: number; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four' | 'hood-five'; backend?: SoftBodyBackend }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
 export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; collider?: boolean; impulse?: (impulse: Triple, point: Triple) => void }
@@ -23,6 +23,8 @@ export class DeformablePanel {
   readonly nx: number; readonly nz: number; readonly thickness: number;
   readonly positions: Float64Array; readonly rest: Float64Array; readonly velocities: Float64Array;
   readonly beams: Beam[] = []; readonly mounts: PanelMount[] = [];
+  readonly supports: {node:number}[] = [];
+  private supportNormal:Triple=[0,1,0];
   clock:FixedClock;
   private previous: Float64Array; private anchorLambda: Float64Array;
   private incoming: Float64Array;
@@ -54,6 +56,7 @@ export class DeformablePanel {
     }
     if (this.maxX - this.minX < 0.01 || this.maxZ - this.minZ < 0.01) throw new Error('Panel requires an XZ surface');
     const ys = Array.from(samples).filter((_, i) => i % 3 === 1), minY = Math.min(...ys), maxY = Math.max(...ys);
+    if(options.plasticRate!==undefined&&(!Number.isFinite(options.plasticRate)||options.plasticRate<0||options.plasticRate>120))throw new Error('Invalid plastic rate');
     if(options.thickness!==undefined&&(!Number.isFinite(options.thickness)||options.thickness<=0))throw new Error('Invalid panel thickness');
     this.thickness = options.thickness ?? (options.volume ? Math.max(0.02, maxY - minY) : 0.08);
     this.yieldStrain = options.yieldStrain ?? 0.008; this.mountStrength = options.mountStrength ?? 5000;
@@ -103,6 +106,18 @@ export class DeformablePanel {
       }
       this.mounts.push({ nodes, broken: false, force: 0, overload: 0 });
     }
+    if(options.anchorLayout==='hood-five'){
+      const frontZ=Math.abs(options.mount[2]-this.minZ)>Math.abs(options.mount[2]-this.maxZ)?this.minZ:this.maxZ;
+      for(const x of [this.minX,this.maxX]){
+        let best=-1,distance=Infinity;
+        for(let z=0;z<this.nz;z++)for(let xx=0;xx<this.nx;xx++){
+          const node=this.index(xx,z,0),i=node*3;
+          const d=(this.rest[i]-x)**2+(this.rest[i+2]-frontZ)**2;
+          if(!used.has(node)&&d<distance){distance=d;best=node;}
+        }
+        if(best>=0){this.supports.push({node:best});used.add(best);}
+      }
+    }
     this.template = this.rest.slice();
     this.kernel = softBodyRuntime.create(count, this.beams.length, this.mounts.length, options.mass, options.backend ?? 'auto');
     if (this.kernel) {
@@ -123,6 +138,8 @@ export class DeformablePanel {
   /** Move anchor targets, not simulated nodes. Existing node velocity supplies inertia on release. */
   setAnchorFrame(e: ArrayLike<number>) {
     if (e.length !== 16 || !Array.from(e).every(Number.isFinite)) throw new Error('Invalid anchor frame');
+    const length=Math.hypot(e[4],e[5],e[6]);
+    if(length>1e-12)this.supportNormal=[e[4]/length,e[5]/length,e[6]/length];
     for (let i = 0; i < this.rest.length; i += 3) {
       const x = this.template[i], y = this.template[i + 1], z = this.template[i + 2];
       for (let axis = 0; axis < 3; axis++) {
@@ -130,6 +147,18 @@ export class DeformablePanel {
         this.anchorVelocities[i + axis] = (next - this.rest[i + axis]) / this.clock.dt; this.rest[i + axis] = next;
       }
     }
+  }
+  /** Rubber stops resist compression only and cease supporting a released hood. */
+  private supportContact(node:number):PanelContact|undefined{
+    if(!this.attached)return;
+    const i=node*3,p=this.positions,n=this.supportNormal;
+    const delta:Triple=[p[i]-this.rest[i],p[i+1]-this.rest[i+1],p[i+2]-this.rest[i+2]];
+    const depth=delta[0]*n[0]+delta[1]*n[1]+delta[2]*n[2];
+    if(depth>=0)return;
+    const lateral=delta.reduce((sum,value,axis)=>sum+(value-depth*n[axis])**2,0);
+    if(lateral>0.08**2)return;
+    for(let axis=0;axis<3;axis++)p[i+axis]-=depth*n[axis];
+    return {normal:[...n],point:[p[i],p[i+1],p[i+2]],velocity:[this.anchorVelocities[i],this.anchorVelocities[i+1],this.anchorVelocities[i+2]],restitution:0,friction:0.4};
   }
   get plasticBeams() { return this.beams.filter(b => Math.abs(b.rest - b.initial) > b.initial * 0.001).length; }
   /** Permanent beam-length change, normalized to the solver's maximum plastic range. */
@@ -259,6 +288,7 @@ export class DeformablePanel {
       else for(let i=1;i<p.length;i+=3)p[i]=Math.max(this.ground[(i-1)/3],p[i]);
       if (!nativeBoxes) for (const box of this.colliders) for (let i = 0; i < p.length; i += 3) { const contact = this.contactBox(i, box); if (contact) contacts.set(i, contact); }
       if (iteration === 0 || iteration === 4 || iteration === 8 || iteration === 11) surfaces();
+      for(const support of this.supports){const contact=this.supportContact(support.node);if(contact)contacts.set(support.node*3,contact);}
       if(profile)profile.contacts+=performance.now()-stamp;
     }
     if(profile)stamp=performance.now();
@@ -276,11 +306,11 @@ export class DeformablePanel {
     if(profile){profile.integration+=performance.now()-stamp;stamp=performance.now();}
     if (attached && !this.attached) surfaces();
     if(profile){profile.contacts+=performance.now()-stamp;stamp=performance.now();} // Sweep the release step too, before its history is discarded.
-    if (kernel) kernel.finish(dt, this.yieldStrain, this.beams);
+    if (kernel) kernel.finish(dt, this.yieldStrain, this.beams, this.options.plasticRate ?? 120);
     else {
       for (const b of this.beams) {
         const a = b.a * 3, c = b.b * 3, dx = p[a] - p[c], dy = p[a + 1] - p[c + 1], dz = p[a + 2] - p[c + 2], length = Math.sqrt(dx * dx + dy * dy + dz * dz), strain = (length - b.rest) / b.initial;
-        if (Math.abs(strain) > this.yieldStrain) b.rest = clamp(b.rest + Math.sign(strain) * (Math.abs(strain) - this.yieldStrain) * b.initial * Math.min(1, 120 * dt), b.initial * 0.5, b.initial * 1.5);
+        if (Math.abs(strain) > this.yieldStrain) b.rest = clamp(b.rest + Math.sign(strain) * (Math.abs(strain) - this.yieldStrain) * b.initial * Math.min(1, (this.options.plasticRate ?? 120) * dt), b.initial * 0.5, b.initial * 1.5);
       }
       for (let i = 0; i < p.length; i++) { this.velocities[i] = (p[i] - this.previous[i]) / dt; if (!Number.isFinite(p[i])) throw new Error('Non-finite panel state'); }
     }

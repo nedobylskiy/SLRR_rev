@@ -23,13 +23,13 @@ export class CarCrashDemo {
   private localCenter: Vector3;
   private referenceInverse: Matrix4;
   private hoodSurface = { project: (p: Float64Array, previous: Float64Array, offset: number) => !this.panel.attached ? this.bodySurface?.project(p, previous, offset) : undefined };
-  constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength' | 'frequency' | 'thickness'> = {}) {
+  constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength' | 'frequency' | 'thickness' | 'plasticRate'> = {}) {
     this.clock=new FixedClock(material.frequency??240,32);
     if (!hood.parent || hood.world !== root.world) throw new Error('Crash demo needs an installed hood');
     this.parent = hood.parent; this.parentSlot = hood.parentSlot!; this.ownSlot = hood.ownSlot!; this.originalLocal = hood.local.clone();
     this.driving = new DrivingDemo(root);
     const cfg = hood.definition.config, slot = cfg.slots.find(s => s.id === this.ownSlot)!;
-    this.panel = new DeformablePanel(samples, { ...material, mass: cfg.bodies.reduce((s, b) => s + b.mass, 0), mount: [...slot.position] });
+    this.panel = new DeformablePanel(samples, { ...material, anchorLayout: 'hood-five', mass: cfg.bodies.reduce((s, b) => s + b.mass, 0), mount: [...slot.position] });
     this.localCenter = this.center(this.panel.positions);
     this.referenceInverse = this.cageBasis(this.panel.positions)!.invert();
     this.panel.setAnchorFrame(hood.matrix().elements); this.panel.reset();

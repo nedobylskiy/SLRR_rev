@@ -74,10 +74,13 @@ export class SoftBodyKernel {
       m.broken = Boolean(this.mounts[i]); m.force = this.mounts[i + 1]; m.overload = this.mounts[i + 2];
     }
   }
-  finish(dt: number, yieldStrain: number, beams: Beam[]) {
+  finish(dt: number, yieldStrain: number, beams: Beam[], plasticRate = 120) {
     if (!this.api.finish(dt, yieldStrain)) throw new Error('Non-finite panel state');
+    // The binary's reference creep rate is 120/s. Blend its rest-length delta
+    // before the next upload, leaving velocity reconstruction and ABI unchanged.
+    const creep = Math.min(1, plasticRate * dt) / Math.min(1, 120 * dt);
     for (let index = 0; index < beams.length; index++) {
-      beams[index].rest = this.beams[index * 6 + 3]; beams[index].lambda = this.beams[index * 6 + 4];
+      beams[index].rest = creep === 1 ? this.beams[index * 6 + 3] : beams[index].rest + (this.beams[index * 6 + 3] - beams[index].rest) * creep; beams[index].lambda = this.beams[index * 6 + 4];
     }
   }
 }

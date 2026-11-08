@@ -68,10 +68,10 @@ export class PanelActivity {
   settle(dt: number, frame: Matrix4, attached: boolean) {
     this.impulseVersion = this.panel.impulseVersion;
     this.frame.copy(frame); this.activeTicks++;
-    if (this.activeTicks * dt < 0.25) return;
+    if (this.activeTicks * dt < (attached ? 0.5 : 0.25)) return;
     const motion = this.motion();
     const overloaded = this.panel.mounts.some(m => !m.broken && m.force > this.panel.mountStrength * 0.5);
-    this.quietTicks = motion.internalSpeed < 0.12 && !overloaded ? this.quietTicks + 1 : 0;
+    this.quietTicks = motion.internalSpeed < (attached ? 0.03 : 0.12) && !overloaded ? this.quietTicks + 1 : 0;
     if (this.quietTicks * dt < 0.2) return;
     this.deforming = false;
     if (!attached) {
