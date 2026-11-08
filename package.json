@@ -38,6 +38,7 @@
     "verify:3d": "tsx tools/verify-3d.ts",
     "verify:components": "tsx tools/verify-components.ts",
     "report:stock-benchmark": "tsx tools/report-stock-benchmark.ts",
+    "report:natives": "tsx tools/report-native-status.ts",
     "measure:stock-drive": "tsx tools/measure-stock-drive.ts",
     "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify"
   },

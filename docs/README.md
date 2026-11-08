@@ -33,6 +33,10 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 |[Sources](sources.md)|Direct links, versions, reliability|
 |[Working archive Elias](elias-workspace-archive.md)|IDA, native ABI, wheel physics, third-party host boundaries|
 
+## Native implementation inventory
+
+[Реестр Java native-методов](native-status.md) — implemented handlers, temporary mocks, missing methods, per-overload signatures and current limitations. Regenerate with `npm run report:natives`; machine-readable output: [native-status.json](reports/native-status.json).
+
 ## Confidence levels
 
 **Confirmed by the corpus** - the parser checked the structure on local files with full consumption of the corresponding sections. This is not a proof of the semantics of each field.
