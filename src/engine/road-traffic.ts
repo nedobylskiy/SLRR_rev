@@ -53,18 +53,21 @@ class TrafficCurve {
     position.copy(a).lerp(b, (at - this.distances[low - 1]) / (this.distances[low] - this.distances[low - 1]));
     direction.copy(b).sub(a).normalize();
   }
-  nearest(point: Vector3) {
+  nearest(point: Vector3, planar=false) {
     let best = Infinity, at = 0;
     const delta = new Vector3(), projected = new Vector3();
     for (let i = 1; i < this.points.length; i++) {
-      const a = this.points[i - 1], b = this.points[i]; delta.copy(b).sub(a);
+      const a = this.points[i - 1], b = this.points[i]; delta.copy(b).sub(a);if(planar)delta.y=0;
       const t = Math.max(0, Math.min(1, projected.copy(point).sub(a).dot(delta) / delta.lengthSq()));
-      projected.copy(a).addScaledVector(delta, t); const d = projected.distanceToSquared(point);
+      projected.copy(a).addScaledVector(delta, t);if(planar)projected.y=point.y;const d = projected.distanceToSquared(point);
       if (d < best) { best = d; at = this.distances[i - 1] + t * (this.distances[i] - this.distances[i - 1]); }
     }
     return { distance: best, at };
   }
 }
+const graphs = new WeakMap<RoadNetwork, { connections: Map<number, TrafficTurn[]>; curves: Map<number, TrafficCurve> }>();
+const turns=new WeakMap<RoadSegment,TrafficCurve>();
+function crossingCurve(segment:RoadSegment){let curve=turns.get(segment);if(!curve){curve=new TrafficCurve([segment]);turns.set(segment,curve);}return curve;}
 
 /** One kinematic traffic experiment. No new physics bodies, collision or signal policy. */
 export class RoadTrafficCar {
@@ -82,8 +85,14 @@ export class RoadTrafficCar {
   travelled = 0;
   stopped = false;
   constructor(network: RoadNetwork, spawn = new Vector3(), private random = Math.random) {
-    this.connections = trafficConnections(network);
-    for (const road of network.others) this.curves.set(road.id, new TrafficCurve(road.segments));
+    let graph=graphs.get(network);
+    if(!graph){graph={connections:trafficConnections(network),curves:new Map(network.others.map(road=>[road.id,new TrafficCurve(road.segments)]))};graphs.set(network,graph);}
+    this.connections = graph.connections;this.curves=graph.curves;
+    this.curve = this.curves.values().next().value!;
+    this.rejoin(spawn);
+  }
+  /** Rebind navigation only; never moves a physical vehicle. Graph buffers are shared. */
+  rejoin(spawn:Vector3) {
     let nearest = Infinity;
     for (const [id, curve] of this.curves) {
       if (!this.connections.get(id)?.length) continue;
@@ -91,7 +100,21 @@ export class RoadTrafficCar {
       if (candidate.distance < nearest) { nearest = candidate.distance; this.roadId = id; this.at = candidate.at; }
     }
     const curve = this.curves.get(this.roadId); if (!curve) throw Error('No connected traffic road near spawn');
-    this.curve = curve; this.curve.sample(this.at, this.position, this.direction);
+    this.curve = curve;this.pending=this.crossingTurn=undefined;this.stopped=false;
+    this.curve.sample(this.at, this.position, this.direction);
+  }
+  targetAhead(distance:number,position:Vector3,direction:Vector3){
+    if(!this.crossingTurn&&!this.pending&&this.curve.length-this.at<=Math.max(15,distance))this.pending=this.chooseTurn();
+    const sample=this.at+distance;
+    if(sample>this.curve.length&&this.pending){crossingCurve(this.pending.segment).sample(sample-this.curve.length,position,direction);return;}
+    this.curve.sample(sample,position,direction);
+  }
+  /** Project progress onto the current spline; crossing transitions remain topology constrained. */
+  follow(position:Vector3){
+    const nearest=this.curve.nearest(position,true);this.at=Math.max(this.at,nearest.at);
+    const end=this.curve.points.at(-1)!;
+    if(this.curve.length-this.at<1&&Math.hypot(position.x-end.x,position.z-end.z)<1.5)this.moveDistance(this.curve.length-this.at+.01);
+    this.curve.sample(this.at,this.position,this.direction);
   }
   get phase() { return this.crossingTurn ? `crossing #${this.crossingTurn.crossing}` : `road #${this.roadId}`; }
   get nextRoad() { return this.pending?.outgoing; }
@@ -103,7 +126,10 @@ export class RoadTrafficCar {
   }
   advance(seconds: number) {
     if (!Number.isFinite(seconds) || seconds <= 0 || this.stopped) return;
-    let remaining = Math.min(seconds, .25) * this.speed;
+    this.moveDistance(Math.min(seconds,.25)*this.speed);
+  }
+  private moveDistance(distance:number){
+    let remaining=distance;
     for (let transition = 0; remaining > 0 && transition < 16; transition++) {
       if (!this.crossingTurn && !this.pending && this.curve.length - this.at <= 15) this.pending = this.chooseTurn();
       const step = Math.min(remaining, this.curve.length - this.at); this.at += step; remaining -= step; this.travelled += step;
@@ -114,7 +140,7 @@ export class RoadTrafficCar {
       } else {
         const turn = this.pending ?? this.chooseTurn(); this.pending = undefined;
         if (!turn) { this.stopped = true; break; }
-        this.crossingTurn = turn; this.curve = new TrafficCurve([turn.segment]);
+        this.crossingTurn = turn; this.curve = crossingCurve(turn.segment);
       }
       this.at = 0;
     }

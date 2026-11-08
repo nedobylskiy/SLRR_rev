@@ -23,6 +23,7 @@ import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
+import { trafficLampDefinitions, createTrafficLamps, type TrafficLamp } from './traffic-lamps';
 import { createVehicleBeam, createHeadlightCameraFlare } from './vehicle-beam';
 import { linkedRenderPose } from '../engine/linked-render';
 import { selectLinkedRule } from '../engine/linked-slots';
@@ -62,6 +63,12 @@ import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { MapRoadDebug, type RoadDebugLayer } from './map-road-debug';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
+import { Bot } from '../engine/bot';
+import { TrafficVehicle } from '../engine/traffic-vehicle';
+import { TrafficDamageView } from './traffic-damage-view';
+import { TrafficAudio, type TrafficVoice } from '../audio/traffic-audio';
+import { vehiclePairContact } from '../engine/vehicle-pair-test';
+import type { CfgWheel } from '../formats/cfg';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
 import { RenderObject } from '../runtime/render-object';
@@ -373,14 +380,18 @@ export class Viewer {
   private mapStreamFocus?: THREE.Vector3;
   private mapDebug?: MapDebugView;
   private mapRoadDebug?: MapRoadDebug;
-  private mapRoadSource?: { assets: Assets; pack: string; groundId?: number; terrain?: MapTerrain };
+  private mapRoadSource?: { assets: Assets; pack: string; groundId?: number; terrain?: MapTerrain; collision?: MapCollision };
   private mapRoadRevision = 0;
   private mapRoadPending?: Promise<void>;
   private mapRoadLayers = new Set<RoadDebugLayer>();
   roadDebugStatus = 'Road graph off';
   private trafficTestEnabled = false;
   private trafficTestRevision = 0;
-  private trafficTest?: { car: RoadTrafficCar; group: THREE.Group; wheels: { group: THREE.Group; radius: number }[]; height: number; previous?: number };
+  private trafficTest?: { car: RoadTrafficCar; bot:Bot; vehicle:TrafficVehicle; damage:TrafficDamageView; lamps:Awaited<ReturnType<typeof createTrafficLamps>>; voice?:TrafficVoice; group: THREE.Group; wheels: { mount:THREE.Group; rotor:THREE.Group }[]; previous?: number };
+  private trafficTemplates=new Map<Assets,Promise<{group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]}>>();
+  private trafficAudio?:TrafficAudio;
+  private trafficAudioStart=()=>this.trafficAudio?.activate();
+  private trafficPeer?:Vehicle3D;
   trafficTestStatus = 'Traffic test off';
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
   private environmentTexture?: THREE.Texture;
@@ -442,6 +453,7 @@ export class Viewer {
     this.lighting.configureMaterial(this.ground.material);
     this.ground.receiveShadow = true;
     container.append(this.renderer.domElement);
+    container.addEventListener('pointerdown',this.trafficAudioStart,true);
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -509,6 +521,7 @@ export class Viewer {
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
+      if(this.trafficTest?.voice)this.trafficAudio?.listener(renderCamera);
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
@@ -834,8 +847,31 @@ export class Viewer {
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   private stopTrafficTest() {
     this.trafficTestRevision++;
-    if(this.trafficTest){this.trafficTest.group.removeFromParent();this.disposeGroup(this.trafficTest.group);this.trafficTest=undefined;}
+    if(this.trafficTest){this.trafficTest.voice?.dispose();this.trafficTest.lamps.dispose();this.trafficTest.damage.dispose();this.trafficTest.group.removeFromParent();this.trafficTest=undefined;}
     this.trafficTestStatus='Traffic test off';
+  }
+  private trafficTemplate(assets:Assets){
+    let pending=this.trafficTemplates.get(assets);if(pending)return pending;
+    const generation=this.generation;
+    pending=(async()=>{
+      const built=await new PartFactory(assets).stock({pack:'cars/traffic/Pickup.rpk',id:6});let group:THREE.Group|undefined;
+      try{
+        group=await this.createPreviewWorld(built.world,assets,false);
+        const bounds=new THREE.Box3().setFromObject(group),wheels=built.root.definition.config.wheels;
+        for(let i=0;i<wheels.length;i++){
+          const wheel=wheels[i];if(!wheel.render)throw Error('Traffic wheel has no inline render');
+          const resource=await assets.modelForResource(built.root.definition.key.pack,wheel.render.resource),model=await parseScxAsync(await assets.read(resource.path));
+          const mount=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.matrixAutoUpdate=false;mount.matrix.copy(poseMatrix(wheel));group.add(mount);
+          const rotor=new THREE.Group();mount.add(rotor);const mesh=new THREE.Group();mesh.matrixAutoUpdate=false;mesh.matrix.copy(modelMatrix(new THREE.Matrix4(),wheel.render.pose?poseMatrix(wheel.render.pose):undefined));rotor.add(mesh);
+          const warnings=await this.append(model,assets,resource.textures,mesh,generation,false,()=>generation===this.generation,undefined,undefined,false,THREE.FrontSide);
+          if(warnings.length)throw Error(warnings.join('\n'));
+        }
+        if(generation!==this.generation)throw Error('Traffic template load superseded');
+        const lamps=await trafficLampDefinitions(built.world,assets);
+        const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps};group=undefined;return result;
+      }finally{built.world.dispose();if(group)this.disposeGroup(group);}
+    })();
+    this.trafficTemplates.set(assets,pending);pending.catch(()=>{if(this.trafficTemplates.get(assets)===pending)this.trafficTemplates.delete(assets);});return pending;
   }
   async setTrafficTestEnabled(enabled:boolean) {
     this.trafficTestEnabled=enabled;
@@ -848,56 +884,63 @@ export class Viewer {
     const revision=this.trafficTestRevision,generation=this.generation;
     const current=()=>revision===this.trafficTestRevision&&generation===this.generation&&this.trafficTestEnabled;
     this.trafficTestStatus='Loading traffic Pickup…';
-    let group:THREE.Group|undefined,world:EngineWorld|undefined;
     try{
       const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
       if(!current())return;
       if(!roads){this.trafficTestStatus='No road graph for traffic test';return;}
       const car=new RoadTrafficCar(roads.network);
-      const built=await new PartFactory(source.assets).stock({pack:'cars/traffic/Pickup.rpk',id:6});world=built.world;
+      const template=await this.trafficTemplate(source.assets);
       if(!current())return;
-      group=await this.createPreviewWorld(world,source.assets,false);
-      const wheels:{group:THREE.Group;radius:number}[]=[];
-      for(const wheel of built.root.definition.config.wheels){
-        if(!current())return;
-        if(!wheel.render)throw Error('Traffic wheel has no inline render');
-        const resource=await source.assets.modelForResource(built.root.definition.key.pack,wheel.render.resource);
-        const model=await parseScxAsync(await source.assets.read(resource.path));
-        const mount=new THREE.Group();mount.matrixAutoUpdate=false;mount.matrix.copy(poseMatrix(wheel));group.add(mount);
-        const rotor=new THREE.Group();mount.add(rotor);
-        const mesh=new THREE.Group();mesh.matrixAutoUpdate=false;mesh.matrix.copy(modelMatrix(new THREE.Matrix4(),wheel.render.pose?poseMatrix(wheel.render.pose):undefined));rotor.add(mesh);
-        const warnings=await this.append(model,source.assets,resource.textures,mesh,generation,false,current,undefined,undefined,false,THREE.FrontSide);
-        if(warnings.length)throw Error(warnings.join('\n'));
-        wheels.push({group:rotor,radius:wheel.radius??.36});
-      }
-      if(!current())return;
-      const height=-new THREE.Box3().setFromObject(group).min.y;
+      if(!source.terrain)throw Error('Traffic test requires map terrain');
+      const lamps=await createTrafficLamps(template.lamps,source.assets);
+      if(!current()){lamps.dispose();return;}
+      const group=template.group.clone(true);group.matrixAutoUpdate=false;
+      group.add(lamps.group);
+      const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
+      vehicle.place(car.position,car.direction,template.height);
+      const bot=new Bot(car,vehicle),damage=new TrafficDamageView(group,vehicle.crush);
+      const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
       group.name='Traffic test Pickup · 15 km/h';
-      this.trafficTest={car,group,wheels,height};this.scene.add(group);group=undefined;
+      const test={car,bot,vehicle,damage,lamps,group,wheels,voice:undefined as TrafficVoice|undefined};
+      this.trafficTest=test;this.scene.add(group);
       this.trafficTestStatus='Pickup · red → green · 15 km/h';this.updateTrafficTest(performance.now());
+      try{this.trafficAudio??=new TrafficAudio();const voice=await this.trafficAudio.voice(source.assets);if(current()&&this.trafficTest===test)test.voice=voice;else voice.dispose();}catch{/* Missing audio must not stop physics. */}
     }catch(error){if(current())this.trafficTestStatus=`Traffic test: ${String(error)}`;}
-    finally{world?.dispose();if(group)this.disposeGroup(group);}
   }
   trafficTestInfo() {
     const test=this.trafficTest;if(!test)return this.trafficTestStatus;
     const car=test.car;
-    return `Pickup · ${car.stopped?'stopped: no connected exit':'15 km/h'} · ${car.phase}\n${car.crossingsPassed} crossings passed · ${car.travelled.toFixed(1)} m · XYZ ${car.position.toArray().map(n=>n.toFixed(1)).join(', ')}${car.nextRoad===undefined?'':`\nSelected exit: road #${car.nextRoad}`}\nKinematic graph test; collisions and traffic lights are not simulated.`;
+    return `Pickup · ${test.bot.mode} · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${Math.round(test.bot.rpm)} RPM\n${car.phase} · ${car.crossingsPassed} crossings · damage #${test.vehicle.crush.version}\nXYZ ${test.vehicle.body.position.toArray().map(n=>n.toFixed(1)).join(', ')}${car.nextRoad===undefined?'':` · exit #${car.nextRoad}`}\nOne body + 4 springs; traffic-light obedience not implemented.`;
   }
   focusTrafficTest() {
     if(!this.trafficTest)return;
-    this.setInspectionCameraEnabled(true);this.inspection.focus(this.trafficTest.car.position);
+    this.setInspectionCameraEnabled(true);this.inspection.focus(this.trafficTest.vehicle.body.position);
+  }
+  impactTrafficTest(){
+    const test=this.trafficTest;if(!test)return;
+    const body=test.vehicle.body,impulse=new THREE.Vector3(1,.1,0).applyQuaternion(body.orientation).multiplyScalar(body.mass*5);
+    const point=new THREE.Vector3(.7,0,body.bounds.min.z).applyMatrix4(body.matrix());test.bot.hit(impulse,point,12);
   }
   private updateTrafficTest(now:number) {
     const test=this.trafficTest;if(!test)return;
+    this.trafficAudio?.setHidden(document.hidden);
     if(document.hidden){test.previous=undefined;return;}
-    if(test.previous!==undefined)test.car.advance((now-test.previous)/1000);
+    const time=this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:12*3600);
+    test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time));
+    const peer=this.trafficPeer;
+    if(peer){
+      const hit=vehiclePairContact(peer.body,test.vehicle.body);
+      if(hit){
+        if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+        const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+        peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+      }
+    }
+    if(test.previous!==undefined)test.bot.advance((now-test.previous)/1000,peer?[peer.body]:[]);
     test.previous=now;
-    test.group.position.copy(test.car.position);
-    const support=this.mapRoadSource?.terrain?.sample(test.car.position.x,test.car.position.z,test.car.position.y+.25);
-    // TRC heights are navigation coordinates, not a promise of tyre contact height.
-    if(support&&Math.abs(support.height-test.car.position.y)<3)test.group.position.y=support.height+test.height;
-    test.group.rotation.set(Math.asin(Math.max(-1,Math.min(1,test.car.direction.y))),Math.atan2(-test.car.direction.x,-test.car.direction.z),0,'YXZ');
-    for(const wheel of test.wheels)wheel.group.rotation.x=-test.car.travelled/wheel.radius;
+    test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+    test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
+    test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
   }
   private resetRoadDebug() {
     this.stopTrafficTest();
@@ -928,6 +971,8 @@ export class Viewer {
     try{await pending;}finally{if(this.mapRoadPending===pending)this.mapRoadPending=undefined;}
   }
   dispose() {
+    this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
+    for(const pending of this.trafficTemplates.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
@@ -1313,7 +1358,7 @@ export class Viewer {
       await stream.setCachedCells(this.precachedObjectCells,this.objectCellSize);
       if(generation!==this.generation)return {loaded,total:ids.length,triangles,objects,warnings,terrain,collision};
       terrain.prepare(); this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position);
-      if(this.mapRoadSource)this.mapRoadSource.terrain=terrain;
+      if(this.mapRoadSource){this.mapRoadSource.terrain=terrain;this.mapRoadSource.collision=collision;}
       if(this.trafficTestEnabled)void this.restartTrafficTest();
     }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
@@ -1495,6 +1540,7 @@ export class Viewer {
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); if (!track) this.model.add(obstacle);
     }
+    this.trafficPeer=crash instanceof Vehicle3D?crash:undefined;
     const demo = crash?.driving ?? new DrivingDemo(root);
     this.renderRecorder=crash instanceof Vehicle3D?crash.telemetry:undefined;
     if(crash instanceof Vehicle3D)crash.telemetry.setViewSource(()=>{
@@ -1679,6 +1725,7 @@ export class Viewer {
       java?.persist?.();
       if (this.mapStreamFocus === demo.position) this.mapStreamFocus = undefined;
       this.frame = undefined; this.stopDriving = undefined; this.drivingTimeOfDay = undefined;
+      if(this.trafficPeer===crash)this.trafficPeer=undefined;
       if(crash instanceof Vehicle3D&&this.renderRecorder===crash.telemetry)this.renderRecorder=undefined;
       releaseMouse();
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);

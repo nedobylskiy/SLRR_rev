@@ -1,21 +1,35 @@
-# One-car traffic graph experiment
+# Physical traffic bot experiment
 
-On the `traffic` branch, **One traffic Pickup · 15 km/h** in **Graphics / map debug** enables one original `cars/traffic/Pickup.rpk:0x0006` model. The experiment is enabled by default in this branch when a loaded map declares a TRC graph. Maps without road data do not receive a guessed or borrowed graph.
+On the `traffic` branch, **Traffic bot · cruise 15 km/h** in **Graphics / map debug** enables one original `cars/traffic/Pickup.rpk:0x0006`. It starts near world `(0,0,0)` on the closest connected road (City road #2182). Maps without declared TRC road data receive no guessed graph.
 
-- Spawn is the closest point to world `(0,0,0)` on a connected road. In the installed City this is approximately `(-0.113, 1.004, -0.613)`, road record #2182.
-- Speed is capped at **15 km/h** (4.1667 m/s), independent of crossing A/B speed regimes. It uses an arc-length lookup rather than constant Hermite parameter speed.
-- Road records are traversed **red → green**: reverse segment order and reverse each segment's parameter.
-- On approach (15 m remaining), choose a random connected outgoing branch once. Branches are grouped by their owning path reference so a road with more lanes does not automatically gain more selection weight; then choose an available lane connection within that branch.
-- Connections are restricted to road IDs explicitly linked by the same crossing record. A grey lane must meet the incoming road's green endpoint and the outgoing road's red endpoint within 3 cm. This is geometry-assisted interpretation of explicit topology, not global nearest-road snapping or a fully decoded lane-header contract.
-- Traverse the selected grey Hermite curve in reverse, then enter the outgoing road at its red endpoint. If no connected exit exists, stop; do not teleport to another road.
-- The model uses the original body, hood, lights mesh, rollbar and four inline CFG wheel renders. Wheel spin follows travelled distance. The navigation spline controls position and orientation; a bounded nearby terrain sample places tyre bottoms on the actual road because navigation Y is not necessarily surface Y.
+## Navigation and behavior
 
-**Restart traffic near (0, 0, 0)** replaces the single test instance. **Inspect traffic Pickup** focuses the independent inspection camera on its current location without changing the primary streaming camera. This is a one-time camera focus, not continuous camera follow. The inspector displays current road/crossing, chosen exit, distance, position and crossings passed.
+- Roads run **red → green**, opposite stored segment order. At an approaching crossing, choose a random outgoing branch once, then a lane within that branch.
+- Connections require explicit road links in the same crossing record and matching grey-lane endpoints within 3 cm. Grey Hermite lanes are also followed in reverse. An unsupported exit stops the bot.
+- The spline supplies steering targets. It never assigns the physical body's position during driving or recovery. Progress uses planar projection because navigation Y is not body or road-surface Y.
+- `Bot` controls throttle, brake and steering at 60 Hz. Normal target speed is 15 km/h, reduced in turns or behind another car. This is a target, not a hard velocity clamp: slopes and impacts can exceed it.
+- An impact enters physical response mode. After remaining nearly stationary for one second, the bot accelerates toward the closest connected road at a target up to 30 km/h. Once close and aligned, it resumes cruise.
+- Attempting to drive without advancing for two seconds triggers **3.5 seconds of reverse with full left or right steering**, then another recovery attempt. Waiting behind another car does not count as being stuck.
+- The single-car experiment follows and collides with the active player's full vehicle. Multi-bot population management and mutual traffic queries are not yet wired.
 
-This is a kinematic navigation experiment: no collision response, damage, yielding, traffic-light obedience, original traffic-native registration or persistence is claimed. Disabled, hidden-tab and scene-change lifecycles stop/release the test appropriately; returning from a hidden tab does not fast-forward the car. Long frames advance at most 0.25 seconds to avoid large visible jumps.
+## Vehicle, damage and sound
 
-## Validation
+`TrafficVehicle` uses one `RigidBody3D` and four terrain ray springs from the original inline CFG wheels. Tyre forces, wheel steering/spin and suspension movement drive the model. Cruise performs reduced map contact checks; impact/recovery/reverse use all hull corners. The same body, velocity and damage survive mode changes.
 
-- Unit tests: reverse road and crossing traversal; explicit-link restriction despite overlapping unlinked roads; random selection stability during approach; distinct random branches; continuous bounded-speed transitions; stopping at an unsupported exit; bounded long-frame behavior; inline wheel resource/orientation association.
-- Local City route check: a 1,200 s simulated run (12,000 × 0.1 s) covered 5,000 m and 36 crossings with no unsupported exit. Maximum displacement per 0.1 s was 0.416667 m, consistent with 15 km/h. The random route can differ on reruns.
-- Original Pickup assembly resolved four body parts without warnings. Visual checks use the real city and the same Viewer methods as the app, including the independent inspection camera.
+Damage uses one coarse 3×3×5 displacement field across the body, updated on impacts. It does not simulate individual panels, mounts or detachment. The collision hull remains conservative and undeformed. This shares the normal rigid-body/contact core, but is not the full assembled-car soft-body solver. `FullVehicleBotAdapter` lets the controller drive an already assembled `Vehicle3D`; original Java Bot/traffic natives and racer spawning are not connected yet.
+
+A quiet positional engine loop uses simplified RPM and a low-pass filter. There are no tyre tracks, smoke or skid sounds. Playback requires a browser audio gesture.
+
+Original CFG lamp resources produce depth-tested flare sprites, including front/roof lamps and rear running/brake/reverse lamps. Running lamps follow night time, brake/reverse follow bot inputs. They create no spotlights, projected beams, gobo, or shadow maps. See [lamp and signal research](traffic-signals-research.md).
+
+Immutable model geometry/materials, decoded engine audio and road curves are cached. New instances clone the scene hierarchy; their body geometry is copied only on first damage. Each instance owns its physics and crush field. Scene changes release instances; Viewer disposal releases templates and audio. Hidden tabs pause advancement without later fast-forward; one update advances at most 0.25 seconds.
+
+## Controls and validation
+
+**Restart traffic near (0, 0, 0)** replaces the test instance using cached assets. **Inspect traffic Pickup** focuses the independent camera once without changing the streaming camera. **Test traffic impact** applies a test impulse. Status includes mode, speed, RPM, road, crossings, damage version and position.
+
+No traffic-light obedience, original native registration, traffic persistence, or full traffic streaming system is claimed.
+
+- Tests cover reverse road/crossing traversal, explicit topology, stable random branch selection, unsupported exits and bounded long frames.
+- Bot tests cover stopped-time recovery without teleportation, the 3.5-second reverse maneuver, queuing, physical spring support/driving, impact deformation and independent damage with shared graph data.
+- A physical City-graph run on flat test terrain traversed six crossings in 300 simulated seconds, with maximum planar route deviation about 1.5 m and straight-road speed near 15 km/h. This validates navigation/steering, not every real City obstacle.

@@ -525,13 +525,14 @@ for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(roadDebugStatus);
-const trafficTestLabel=textElement('label','One traffic Pickup · 15 km/h'),trafficTestCheck=document.createElement('input');
+const trafficTestLabel=textElement('label','Traffic bot · cruise 15 km/h'),trafficTestCheck=document.createElement('input');
 trafficTestCheck.type='checkbox';trafficTestCheck.checked=true;trafficTestLabel.prepend(trafficTestCheck);mapDebugOptions.append(trafficTestLabel);
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
 trafficTestCheck.onchange=()=>{void viewer?.setTrafficTestEnabled(trafficTestCheck.checked).then(()=>{trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';});};
 const trafficRestart=textElement('button','Restart traffic near (0, 0, 0)');trafficRestart.setAttribute('type','button');
 trafficRestart.onclick=()=>{if(!trafficTestCheck.checked){trafficTestCheck.checked=true;void viewer?.setTrafficTestEnabled(true);}else void viewer?.restartTrafficTest();};mapDebugOptions.append(trafficRestart);
 const trafficFind=textElement('button','Inspect traffic Pickup');trafficFind.setAttribute('type','button');trafficFind.onclick=()=>{viewer?.focusTrafficTest();observerCheck.checked=true;};mapDebugOptions.append(trafficFind);
+const trafficHit=textElement('button','Test traffic impact');trafficHit.setAttribute('type','button');trafficHit.onclick=()=>viewer?.impactTrafficTest();mapDebugOptions.append(trafficHit);
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
   const label = textElement('label', title), input = document.createElement('input'); input.type = 'checkbox';
   input.onchange = () => viewer?.showMapDebug(layer, input.checked);

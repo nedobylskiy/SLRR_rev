@@ -60,6 +60,8 @@ Subsequent broad user checks of the original game's right-hand traffic establish
 
 ## Signals: what remains unknown
 
+Later local executable work identified the `trlight` instance-to-crossing/link binding and the visual state getter. See [original traffic signal binding](traffic-signals-research.md) for the exact executable hash, addresses, evidence and remaining limits. The findings below describe the earlier upstream-only audit.
+
 `roadSecondCrossingInitialState` retains initialization time and groups flagged links by related road records. Both crossing pools have lane/group initialization. This is useful intersection state evidence, but by itself does NOT establish red/yellow/green phases, phase durations, yielding rules, stop-line locations or mapping to visible signal instances.
 
 No verified complete signal controller or visual traffic-light binding was found in the inspected default-branch implementation and road/parity files. Do not label the two pools definitively as signalized/unsignalized until verified.
