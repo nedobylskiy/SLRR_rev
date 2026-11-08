@@ -6,9 +6,12 @@ export type SignalState='red'|'yellow'|'green';
 export interface TrafficFixture { kind:'signal'|'stop'|'yield'; position:Vector3;pose?:CfgPose }
 export interface TrafficRule { kind:TrafficFixture['kind']; crossing:number; branch:number }
 interface CrossingCycle { branches:number[]; first:number }
+export const TRAFFIC_GREEN_SECONDS=10;
+export const TRAFFIC_YELLOW_SECONDS=3;
+const PHASE_SECONDS=TRAFFIC_GREEN_SECONDS+TRAFFIC_YELLOW_SECONDS;
 export interface SignalBinding { fixture:TrafficFixture; crossing:number; branch:number }
 
-/** One shared intersection state, consumed by lamps and all drivers. Timings follow gameplay observation. */
+/** One shared intersection state, consumed by lamps and all drivers. Timings are shared gameplay settings. */
 export class TrafficControl {
   time=0;
   readonly rules=new Map<number,TrafficRule>();
@@ -43,11 +46,11 @@ export class TrafficControl {
     }
   }
   advance(dt:number){if(Number.isFinite(dt)&&dt>0)this.time+=dt;}
-  get phaseRevision(){const slot=Math.floor((this.time+1e-9)/25);return slot*2+(this.time-slot*25>=20-1e-9?1:0);}
+  get phaseRevision(){const slot=Math.floor((this.time+1e-9)/PHASE_SECONDS);return slot*2+(this.time-slot*PHASE_SECONDS>=TRAFFIC_GREEN_SECONDS-1e-9?1:0);}
   state(crossing:number,branch:number):SignalState {
     const cycle=this.cycles.get(crossing);if(!cycle||!cycle.branches.length)return 'red';
-    const slot=Math.floor((this.time+1e-9)/25),active=cycle.branches[(cycle.first+slot)%cycle.branches.length];
-    return active!==branch?'red':this.time-slot*25<20-1e-9?'green':'yellow';
+    const slot=Math.floor((this.time+1e-9)/PHASE_SECONDS),active=cycle.branches[(cycle.first+slot)%cycle.branches.length];
+    return active!==branch?'red':this.time-slot*PHASE_SECONDS<TRAFFIC_GREEN_SECONDS-1e-9?'green':'yellow';
   }
   rule(road:number){return this.rules.get(road);}
 }

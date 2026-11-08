@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { Vector3 } from 'three';
+import { Box3, Vector3 } from 'three';
+import { TrafficVehicle } from '../src/engine/traffic-vehicle';
+import { Bot } from '../src/engine/bot';
 import { RoadTrafficCar, trafficConnections } from '../src/engine/road-traffic';
 import { parsePartConfig } from '../src/formats/cfg';
 import type { RoadNetwork, RoadOther, RoadPoint, RoadSegment } from '../src/formats/trc';
@@ -18,6 +20,48 @@ function junction(): RoadNetwork {
       links: [{ target: 2, flag: 1 }, { target: 3, flag: 0 }, { target: 4, flag: 0 }],
       lanes: [{ header: new Uint8Array(12), segment: segment([2, 0, 2], [0, 0, 0]) }, { header: new Uint8Array(12), segment: segment([-2, 0, 2], [0, 0, 0]) }] }] };
 }
+
+function parallelRoads():RoadNetwork {
+  const network=junction();
+  network.others=[road(2,[200,0,0],[0,0,0]),road(3,[200,0,3],[0,0,3]),road(4,[0,0,-3],[200,0,-3]),road(5,[200,0,6],[0,0,6])];
+  for(const road of network.others)road.refs[0]=100;
+  const exit=road(9,[300,0,0],[202,0,0]);network.others.push(exit);
+  network.nodes[0].links=network.others.map(r=>({target:r.id,flag:r.id===9?0:1}));
+  network.nodes[0].lanes=network.others.filter(r=>r.id!==9).map(r=>({header:new Uint8Array(12),segment:segment([202,0,0],r.segments[0].start)}));
+  return network;
+}
+
+test('lane changes use adjacent same-direction branch lanes and blend continuously',()=>{
+  const graph=parallelRoads();
+  const route=new RoadTrafficCar(graph,new Vector3(50,0,0),()=>0);
+  assert.equal(route.tryChangeLane(route.position,30),true);assert.equal(route.roadId,3);assert.equal(route.changingLane,true);
+  const point=new Vector3(),direction=new Vector3();route.targetAhead(0,point,direction);assert.ok(point.distanceTo(new Vector3(50,0,0))<1e-8,'no lateral teleport');
+  route.targetAhead(15,point,direction);assert.ok(Math.abs(point.z-1.5)<1e-8);assert.ok(direction.x>0);
+  route.follow(new Vector3(81,0,3));assert.equal(route.changingLane,false);assert.ok(Math.abs(route.position.z-3)<1e-8);
+  const near=new RoadTrafficCar(graph,new Vector3(190,0,0));assert.equal(near.tryChangeLane(near.position,30),false);
+  const blocked=new RoadTrafficCar(graph,new Vector3(50,0,0));assert.equal(blocked.tryChangeLane(blocked.position,30,()=>false),false);
+  graph.others[1].refs[0]=999;graph.others[3].refs[0]=999;
+  const opposite=new RoadTrafficCar(graph,new Vector3(50,0,0));assert.equal(opposite.tryChangeLane(opposite.position,30),false,'opposing lane is rejected');
+});
+
+test('a physical traffic car steers into the new lane without teleporting or reversing',()=>{
+  const route=new RoadTrafficCar(parallelRoads(),new Vector3(50,0,0),()=>0);
+  const wheels=[[-.86,-.747,-1.74],[.86,-.747,-1.74],[-.86,-.747,1.27],[.86,-.747,1.27]].map(position=>({position:position as RoadPoint,rotation:[0,0,0] as RoadPoint,radius:.36,parameters:[]}));
+  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1,-.8,-2.5),new Vector3(1,1.2,2.5)),1400,wheels,{height:()=>0,normal:()=>new Vector3(0,1,0)});
+  vehicle.place(route.position,route.direction,1.107);vehicle.body.velocity.copy(route.direction).multiplyScalar(15/3.6);
+  const bot=new Bot(route,vehicle,()=>.5),before=vehicle.body.position.clone();
+  assert.equal(route.tryChangeLane(route.position,30),true);assert.ok(vehicle.body.position.equals(before));
+  let previous=before.clone();
+  for(let i=0;i<720;i++){bot.advance(1/60);assert.ok(vehicle.body.position.distanceTo(previous)<.15);previous.copy(vehicle.body.position);}
+  assert.equal(route.changingLane,false);assert.equal(bot.mode,'cruise');assert.ok(Math.abs(vehicle.body.position.z-3)<.2);
+});
+
+test('speed regime changes only after leaving the crossing',()=>{
+  const graph=junction();graph.nodes[0].group=0;const car=new RoadTrafficCar(graph,new Vector3(-1,0,0),()=>0);
+  assert.equal(car.lastCrossingGroup,undefined);
+  for(let i=0;i<20;i++)car.advance(.1);
+  assert.equal(car.crossingsPassed,1);assert.equal(car.lastCrossingGroup,0);
+});
 
 test('traffic joins only explicit crossing links and follows grey curves in reverse', () => {
   const network = junction(), turns = trafficConnections(network).get(2)!;

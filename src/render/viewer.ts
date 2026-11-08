@@ -981,7 +981,8 @@ export class Viewer {
     this.trafficPrevious=now;
     this.trafficSignals?.update();
     for(const test of cars){
-      test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time));
+      const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
+      test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time),test.vehicle.wheels[0]?.steer??0,test.vehicle.body.velocity.dot(forward),now/1000);
       test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
       test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
       test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);

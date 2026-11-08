@@ -42,7 +42,7 @@ The original itself uses proximity when binding the instance, but only at initia
 The user observed **one original-game intersection** and supplied these rules on 2026-11-08. They are implementation inputs, not an executable-parity proof or a claim that every original intersection behaves identically:
 
 - There are no separate turn-arrow sections. A signal controls all incoming lanes of its approach; no right turn is allowed on red.
-- Green lasts **20 seconds**, then yellow **5 seconds**. All other approaches remain red. Yellow blocks new entry just like red.
+- Original observed green lasts **20 seconds**, then yellow **5 seconds**. Our current gameplay setting, shortened at the user’s request on 2026-11-09, is **10 seconds green / 3 seconds yellow**. All other approaches remain red. Yellow blocks new entry just like red.
 - A vehicle already past the entry line continues independently of later signal changes.
 - Initial approach order might be random or clockwise; this was not established. The test rotates through approaches in TRC link order with a random starting approach, then keeps that order fixed. It does not claim confirmed clockwise or original-random behavior.
 - An incoming approach with no bound lamp at an otherwise signalized junction uses a five-second STOP fallback, as requested. Unsignalized junctions are not globally converted to STOP.
@@ -74,3 +74,5 @@ Validation covers exclusive signal phases and boundary timing, all-lane branch c
 Pickup's original lamp resources are type 13 renders in CFG with `lod 1 2`. Ordinary inventory secondary-render selection excludes those LOD entries, which explains why the previous traffic template had no lamps. The traffic-specific loader now resolves these lamp resources explicitly without changing body LOD selection.
 
 The test Pickup resolves 12 lamp sprites: two headlights, two rear running lamps, two brake lamps, two reverse lamps, and four roof lamps. Running lamps follow night time; braking/reversing use the bot controls. No SpotLight, gobo, projector, or extra shadow pass is created. Per-instance sprite callbacks/materials are not cloned from a shared template; immutable lamp definitions and decoded source images are cached.
+
+Gameplay update (2026-11-09): yellow is now a per-driver decision: approaching moving cars sample once per phase, 50% braking / 50% modest acceleration, while queues and unentered red signals still block. Debug graph colors remain global entry permissions (yellow red), so individual yellow decisions appear in bot status instead of changing the shared graph.

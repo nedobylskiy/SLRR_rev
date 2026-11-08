@@ -7,13 +7,16 @@ const segment=(start:RoadPoint,end:RoadPoint):RoadSegment=>{const tangent=end.ma
 const road=(id:number,start:RoadPoint,end:RoadPoint,branch=id):RoadOther=>({id,refs:[branch,0],raw:new Uint32Array(12),extraRefs:[],tail:new Uint32Array(3),flag:0,segments:[segment(start,end)]});
 function network():RoadNetwork{return {version:1,bytes:0,paths:[],others:[road(2,[100,0,0],[0,0,0],10),road(3,[100,0,3],[0,0,3],10),road(4,[103,0,5],[103,0,100],20),road(5,[200,0,0],[105,0,0],30)],nodes:[{id:1,group:1,position:[100,0,0],raw:new Uint32Array(4),links:[{target:2,flag:1},{target:3,flag:1},{target:4,flag:1},{target:5,flag:0}],lanes:[{header:new Uint8Array(12),segment:segment([105,0,0],[100,0,0])},{header:new Uint8Array(12),segment:segment([105,0,0],[103,0,5])}]}]};}
 const fixtures=[{kind:'signal' as const,position:new Vector3(100,0,0)},{kind:'signal' as const,position:new Vector3(103,0,5)}];
-test('one green approach at a time; green 20s, blocking yellow 5s, other lanes red',()=>{
+test('one green approach at a time; green 10s, blocking yellow 3s, other lanes red',()=>{
  const control=new TrafficControl(network(),fixtures,()=>0);
+ assert.equal(control.phaseRevision,0);
  assert.equal(control.state(1,10),'green');assert.equal(control.state(1,20),'red');
  assert.equal(control.rule(2)?.branch,control.rule(3)?.branch,'one signal governs all incoming lanes of the same branch');
- control.advance(20);assert.equal(control.state(1,10),'yellow');assert.equal(control.state(1,20),'red');
- control.advance(5);assert.equal(control.state(1,10),'red');assert.equal(control.state(1,20),'green');
- control.advance(25);assert.equal(control.state(1,10),'green');
+ control.advance(10);assert.equal(control.state(1,10),'yellow');assert.equal(control.state(1,20),'red');
+ assert.equal(control.phaseRevision,1);
+ control.advance(3);assert.equal(control.state(1,10),'red');assert.equal(control.state(1,20),'green');
+ assert.equal(control.phaseRevision,2);
+ control.advance(13);assert.equal(control.state(1,10),'green');
 });
 test('initial direction may vary but ordering remains fixed, with stop fallback for an unsignaled approach',()=>{
  const control=new TrafficControl(network(),fixtures,()=>.999);assert.equal(control.state(1,20),'green');
@@ -34,19 +37,37 @@ test('a real signal binds to its nearest crossing in either pool; numbered decor
  assert.equal(control.rule(2)?.kind,'signal');assert.equal(control.rule(2)?.crossing,99);
  assert.equal(trafficFixtureKind('trafficlamp','trlight'),'signal');assert.equal(trafficFixtureKind('stop_sign'),'stop');assert.equal(trafficFixtureKind('yield_1'),'yield');assert.equal(trafficFixtureKind('tabla_a'),undefined);
 });
-function car(control:TrafficControl,spawn=70){
+function car(control:TrafficControl,spawn=70,random=()=>0){
  const graph=control.network,route=new RoadTrafficCar(graph,new Vector3(spawn,0,0),()=>0);
  const wheels=[[-.86,-.747,-1.74],[.86,-.747,-1.74],[-.86,-.747,1.27],[.86,-.747,1.27]].map(position=>({position:position as RoadPoint,rotation:[0,0,0] as RoadPoint,radius:.36,parameters:[]}));
  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1,-.8,-2.5),new Vector3(1,1.2,2.5)),1400,wheels,{height:()=>0,normal:()=>new Vector3(0,1,0)});vehicle.place(route.position,route.direction,1.107);
- return new Bot(route,vehicle,()=>0,15/3.6,control);
+ return new Bot(route,vehicle,random,15/3.6,control);
 }
+
+test('yellow choice is sampled once per approach/phase, either braking or accelerating; red still blocks unentered cars',()=>{
+ for(const go of [false,true]){
+  const control=new TrafficControl(network(),fixtures,()=>0);control.time=10;
+  let draws=0;const bot=car(control,95,()=>{draws++;return go?.1:.9;});bot.vehicle.body.velocity.set(4,0,0);
+  bot.advance(1/60);assert.equal(draws,1);assert.match(bot.trafficStatus,go?/accelerate/:/brake/);
+  assert.equal(bot.input.brake,!go);assert.equal(bot.input.throttle>0,go);
+  for(let i=0;i<5;i++)bot.advance(1/60);assert.equal(draws,1,'decision is not rerolled each frame');
+  control.time=13;bot.advance(2/60);assert.equal(bot.input.brake,true);assert.match(bot.trafficStatus,/red/);
+ }
+});
+
+test('a stopped car does not launch on yellow; a yellow driver still brakes for the car ahead',()=>{
+ const control=new TrafficControl(network(),fixtures,()=>0);control.time=10;
+ const stopped=car(control,96.5);stopped.advance(1/60);assert.equal(stopped.input.brake,true);assert.equal(stopped.input.throttle,0);
+ const moving=car(control,95);moving.vehicle.body.velocity.set(4,0,0);
+ const peer=car(control,101).vehicle.body;moving.advance(1/60,[peer]);assert.equal(moving.input.brake,true);assert.equal(moving.input.throttle,0);
+});
 test('physical bot brakes for red/yellow without reversing; after passing the line it ignores later changes',()=>{
  const control=new TrafficControl(network(),fixtures,()=>.999),bot=car(control);
  for(let i=0;i<1100;i++)bot.advance(1/60);
  assert.ok(bot.vehicle.body.position.x<97.5);assert.ok(bot.vehicle.body.velocity.length()<.25);assert.equal(bot.mode,'cruise');
  control.time=0; // The blocked branch stays red; test passing before a phase change separately.
  const clear=new TrafficControl(network(),fixtures,()=>0),entered=car(clear,98);
- entered.advance(1/60);clear.advance(20);entered.advance(1/60);
+ entered.advance(1/60);clear.advance(10);entered.advance(1/60);
  assert.ok(entered.desiredSpeed>0);assert.equal(entered.trafficStatus,'');
 });
 test('crossing the line on red does not grant permission or advance the navigation cursor into the junction',()=>{
@@ -56,7 +77,7 @@ test('crossing the line on red does not grant permission or advance the navigati
  assert.equal(bot.input.throttle,0);assert.equal(bot.input.brake,true);assert.match(bot.trafficStatus,/red/);
  bot.vehicle.body.position.x=100.2;bot.advance(1/60);
  assert.equal(bot.route.phase,'road #2');assert.equal(bot.input.throttle,0);assert.equal(bot.input.brake,true);
- control.time=25;for(let i=0;i<100;i++)bot.advance(1/60);
+ control.time=13;for(let i=0;i<100;i++)bot.advance(1/60);
  assert.ok(bot.input.throttle>0||bot.route.phase!=='road #2');
 });
 test('being beyond a STOP line does not bypass the five-second stationary wait',()=>{

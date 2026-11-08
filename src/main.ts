@@ -525,9 +525,9 @@ for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(roadDebugStatus);
-const trafficTestLabel=textElement('label','Traffic bot · cruise 15 km/h'),trafficTestCheck=document.createElement('input');
+const trafficTestLabel=textElement('label','Traffic bot · initial 15 km/h'),trafficTestCheck=document.createElement('input');
 trafficTestCheck.type='checkbox';trafficTestCheck.checked=true;trafficTestLabel.prepend(trafficTestCheck);mapDebugOptions.append(trafficTestLabel);
-const trafficPairLabel=textElement('label','Second Pickup · cruise 30 km/h'),trafficPairCheck=document.createElement('input');
+const trafficPairLabel=textElement('label','Second Pickup · initial 30 km/h'),trafficPairCheck=document.createElement('input');
 trafficPairCheck.type='checkbox';trafficPairCheck.checked=true;trafficPairLabel.prepend(trafficPairCheck);mapDebugOptions.append(trafficPairLabel);
 trafficPairCheck.onchange=()=>{void viewer?.setTrafficPairEnabled(trafficPairCheck.checked);};
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);

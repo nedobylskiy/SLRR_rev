@@ -80,6 +80,8 @@ export class RoadTrafficCar {
   private at = 0;
   private pending?: TrafficTurn;
   private crossingTurn?: TrafficTurn;
+  private laneChange?:{source:TrafficCurve;start:number;length:number};
+  lastCrossingGroup?:0|1;
   roadId = 0;
   crossingsPassed = 0;
   travelled = 0;
@@ -119,10 +121,11 @@ export class RoadTrafficCar {
       if (candidate.distance < nearest) { nearest = candidate.distance; this.roadId = id; this.at = candidate.at; }
     }
     const curve = this.curves.get(this.roadId); if (!curve) throw Error('No connected traffic road near spawn');
-    this.curve = curve;this.pending=this.crossingTurn=undefined;this.stopped=false;
+    this.curve = curve;this.pending=this.crossingTurn=undefined;this.laneChange=undefined;this.stopped=false;
     this.curve.sample(this.at, this.position, this.direction);
   }
   targetAhead(distance:number,position:Vector3,direction:Vector3){
+    if(this.laneChange){this.sampleLaneChange(this.at+distance,position,direction);return;}
     if(!this.crossingTurn&&!this.pending&&this.curve.length-this.at<=Math.max(15,distance))this.pending=this.chooseTurn();
     const sample=this.at+distance;
     if(sample>this.curve.length&&this.pending){crossingCurve(this.pending.segment).sample(sample-this.curve.length,position,direction);return;}
@@ -131,9 +134,44 @@ export class RoadTrafficCar {
   /** Project progress onto the current spline; crossing transitions remain topology constrained. */
   follow(position:Vector3,allowCrossing=true){
     const nearest=this.curve.nearest(position,true);this.at=Math.max(this.at,nearest.at);
+    if(this.laneChange&&this.at>=this.laneChange.start+this.laneChange.length)this.laneChange=undefined;
     const end=this.curve.points.at(-1)!;
     if(allowCrossing&&this.curve.length-this.at<1&&Math.hypot(position.x-end.x,position.z-end.z)<1.5)this.moveDistance(this.curve.length-this.at+.01);
-    this.curve.sample(this.at,this.position,this.direction);
+    if(this.laneChange)this.sampleLaneChange(this.at,this.position,this.direction);else this.curve.sample(this.at,this.position,this.direction);
+  }
+  get changingLane(){return !!this.laneChange;}
+  /** Choose only an adjacent, parallel lane belonging to the same road branch. Body motion stays physical. */
+  tryChangeLane(position:Vector3,length:number,isClear:(point:Vector3,direction:Vector3)=>boolean=()=>true){
+    if(this.crossingTurn||this.laneChange||this.stopped||this.at<15||this.curve.length-this.at<length+20)return false;
+    const road=this.network.others.find(road=>road.id===this.roadId);if(!road?.refs[0])return false;
+    const sides=new Map<number,{id:number;curve:TrafficCurve;at:number;point:Vector3;direction:Vector3;gap:number}>();
+    for(const other of this.network.others){
+      if(other.id===this.roadId||other.refs[0]!==road.refs[0]||!this.connections.get(other.id)?.length)continue;
+      const curve=this.curves.get(other.id)!,nearest=curve.nearest(position,true),point=new Vector3(),direction=new Vector3();curve.sample(nearest.at,point,direction);
+      const delta=point.clone().sub(this.position),lateral=delta.x*this.direction.z-delta.z*this.direction.x,gap=Math.abs(lateral);
+      if(gap<2||gap>5||Math.abs(delta.y)>1||Math.abs(delta.dot(this.direction))>2||direction.dot(this.direction)<.97||nearest.at<15||curve.length-nearest.at<length+20)continue;
+      // Reject merging/diverging or crossing curves, even when their local tangents match.
+      const ahead=new Vector3(),aheadDirection=new Vector3();curve.sample(nearest.at+length,ahead,aheadDirection);
+      const sourceAhead=new Vector3(),sourceDirection=new Vector3();this.curve.sample(this.at+length,sourceAhead,sourceDirection);
+      if(ahead.distanceTo(sourceAhead)>6||aheadDirection.dot(sourceDirection)<.97)continue;
+      const side=Math.sign(lateral),previous=sides.get(side);
+      if(!previous||gap<previous.gap)sides.set(side,{id:other.id,curve,at:nearest.at,point,direction,gap});
+    }
+    const choices=[...sides.values()].filter(lane=>isClear(lane.point,lane.direction));if(!choices.length)return false;
+    const selected=choices[Math.min(choices.length-1,Math.floor(this.random()*choices.length))];
+    this.laneChange={source:this.curve,start:selected.at,length};this.curve=selected.curve;this.at=selected.at;this.roadId=selected.id;this.pending=undefined;
+    return true;
+  }
+  private sampleLaneChange(at:number,position:Vector3,direction:Vector3){
+    const change=this.laneChange!;
+    this.curve.sample(at,position,direction);
+    const blend=(distance:number,out:Vector3)=>{
+      this.curve.sample(distance,out,new Vector3());
+      const source=new Vector3();change.source.sample(change.source.nearest(out,true).at,source,new Vector3());
+      const t=Math.max(0,Math.min(1,(distance-change.start)/change.length)),weight=t*t*(3-2*t);
+      out.lerp(source,1-weight);
+    };
+    blend(at,position);const ahead=new Vector3();blend(Math.min(this.curve.length,at+.1),ahead);direction.copy(ahead).sub(position).normalize();
   }
   get phase() { return this.crossingTurn ? `crossing #${this.crossingTurn.crossing}` : `road #${this.roadId}`; }
   get nextRoad() { return this.pending?.outgoing; }
@@ -159,6 +197,7 @@ export class RoadTrafficCar {
       const step = Math.min(remaining, this.curve.length - this.at); this.at += step; remaining -= step; this.travelled += step;
       if (this.at < this.curve.length - 1e-8) break;
       if (this.crossingTurn) {
+        this.lastCrossingGroup=this.network.nodes.find(node=>node.id===this.crossingTurn!.crossing)?.group;
         this.roadId = this.crossingTurn.outgoing; this.curve = this.curves.get(this.roadId)!;
         this.crossingTurn = undefined; this.crossingsPassed++;
       } else {

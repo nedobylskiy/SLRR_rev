@@ -48,8 +48,12 @@ export class Bot {
   private stopSeconds=0;
   private holdingBrake=false;
   private startDelay?:number;
+  private laneCheckSeconds=0;
+  private speedCrossings=0;
+  private yellowVisit='';
+  private yellowGo=false;
   trafficStatus='';
-  constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,readonly cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);}
+  constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,public cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);this.speedCrossings=route.crossingsPassed;}
   hit(impulse:Vector3,point:Vector3,closing:number,otherBounds?:Box3){
     this.vehicle.impact(impulse,point,closing,otherBounds);this.enterImpact();this.collisionVersion=this.vehicle.collisionVersion;
   }
@@ -87,8 +91,28 @@ export class Bot {
     if(this.mode==='recover'&&!this.recoveryBound){this.route.rejoin(body.position);this.recoveryBound=true;}
     const before=this.route.approach,beforeRule=before&&this.traffic?.rule(before.road);
     const rememberedEntry=before?.key===this.crossingKey&&(this.clearedCrossing||this.entryAllowedLastTick);
-    const mayEnter=this.mode!=='cruise'||!beforeRule||rememberedEntry||beforeRule.kind==='signal'&&this.traffic!.state(beforeRule.crossing,beforeRule.branch)==='green';
+    const beforeSignal=beforeRule?.kind==='signal'?this.traffic!.state(beforeRule.crossing,beforeRule.branch):undefined;
+    const yellowPermission=beforeSignal==='yellow'&&before?.key===this.crossingKey&&this.yellowGo&&this.yellowVisit===`${before.key}:${this.traffic!.phaseRevision}`;
+    const mayEnter=this.mode!=='cruise'||!beforeRule||rememberedEntry||beforeSignal==='green'||yellowPermission;
     this.route.follow(body.position,mayEnter);
+    if(this.route.crossingsPassed!==this.speedCrossings){
+      this.speedCrossings=this.route.crossingsPassed;
+      if(this.route.lastCrossingGroup!==undefined){const fast=this.route.lastCrossingGroup===0;this.cruiseSpeed=((fast?60:15)+this.random()*(fast?40:20))/3.6;}
+    }
+    this.laneCheckSeconds+=dt;
+    if(this.laneCheckSeconds>=20-1e-9){
+      this.laneCheckSeconds=0;
+      if(this.mode==='cruise'&&speed>.5&&this.route.approach&&this.random()<.1){
+        const length=Math.max(25,speed*3.5);
+        this.route.tryChangeLane(body.position,length,(point,direction)=>peers.every(peer=>{
+          if(peer===body)return true;
+          const delta=peer.position.clone().sub(point),along=delta.dot(direction),lateral=Math.abs(delta.x*direction.z-delta.z*direction.x);
+          const size=peer.bounds.getSize(new Vector3()),own=body.bounds.getSize(new Vector3());
+          const rearSpeed=Math.max(0,peer.velocity.dot(direction));
+          return Math.abs(delta.y)>2.5||lateral>(Math.max(size.x,size.z)+own.x)*.5+.5||along>Math.max(12,speed*2)+(size.z+own.z)*.5||along< -Math.max(12,rearSpeed*2)-(size.z+own.z)*.5;
+        }));
+      }
+    }
     const lookahead=Math.max(4,Math.min(12,Math.abs(speed)*1.3+3));
     this.route.targetAhead(lookahead,this.target,this.tangent);
     const error=this.target.clone().sub(body.position);error.y=0;
@@ -101,22 +125,28 @@ export class Bot {
     this.trafficStatus='';
     const approach=this.route.approach,rule=approach&&this.traffic?.rule(approach.road);
     if(approach&&rule&&this.mode==='cruise'){
-      if(approach.key!==this.crossingKey){this.crossingKey=approach.key;this.clearedCrossing=false;this.stopSeconds=0;this.entryAllowedLastTick=false;}
+      if(approach.key!==this.crossingKey){this.crossingKey=approach.key;this.clearedCrossing=false;this.stopSeconds=0;this.entryAllowedLastTick=false;this.yellowVisit='';this.yellowGo=false;}
       const front=body.center.z-body.bounds.min.z;
       const line=approach.remaining-front,stopDistance=line-1;
       const signal=rule.kind==='signal'?this.traffic!.state(rule.crossing,rule.branch):undefined;
+      if(signal==='yellow'&&!this.clearedCrossing&&line<=Math.max(15,Math.max(0,speed)*3)){
+        const visit=`${approach.key}:${this.traffic!.phaseRevision}`;
+        if(this.yellowVisit!==visit){this.yellowVisit=visit;this.yellowGo=speed>.5&&!this.holdingBrake&&this.random()<.5;}
+      }
+      const goOnYellow=signal==='yellow'&&this.yellowGo&&this.yellowVisit===`${approach.key}:${this.traffic!.phaseRevision}`;
       // Only a permitted entry is latched. Creeping or being pushed over a red line is not permission.
-      if(line<=0&&(signal==='green'||this.entryAllowedLastTick))this.clearedCrossing=true;
+      if(line<=0&&(signal==='green'||goOnYellow||this.entryAllowedLastTick))this.clearedCrossing=true;
       if(!this.clearedCrossing){
-        let blocked=signal!==undefined?signal!=='green':true;
+        let blocked=signal!==undefined?signal!=='green'&&!goOnYellow:true;
+        if(goOnYellow)desired=Math.min(this.cruiseSpeed+10/3.6,desired*1.2);
         if(signal===undefined){
           if(stopDistance<1.25&&Math.abs(speed)<.2)this.stopSeconds+=dt;else this.stopSeconds=0;
           if(this.stopSeconds>=5){this.clearedCrossing=true;blocked=false;}
         }
-        this.trafficStatus=`${signal??`${rule.kind} ${Math.min(5,this.stopSeconds).toFixed(1)}/5s`} · Cross #${rule.crossing} · branch #${rule.branch}`;
+        this.trafficStatus=`${signal??`${rule.kind} ${Math.min(5,this.stopSeconds).toFixed(1)}/5s`}${signal==='yellow'?goOnYellow?' · accelerate':' · brake':''} · Cross #${rule.crossing} · branch #${rule.branch}`;
         if(blocked)desired=Math.min(desired,stopDistance<.25?0:Math.sqrt(2*2.5*Math.max(0,stopDistance)));
       }
-      this.entryAllowedLastTick=this.clearedCrossing||signal==='green';
+      this.entryAllowedLastTick=this.clearedCrossing||signal==='green'||goOnYellow;
     }
     desired=this.followingSpeed(peers,desired);if(this.route.stopped)desired=0;
     // A queued car must hold its pedal instead of alternating tiny creep commands and no brake.

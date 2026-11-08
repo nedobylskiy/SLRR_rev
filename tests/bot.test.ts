@@ -20,6 +20,33 @@ class HeldVehicle implements BotVehicle {
   step(_dt:number,_input:DrivingInput){} // Controlled immobility models a blocked vehicle, not its suspension.
   impact(){this.collisionVersion++;}
 }
+
+test('traffic chooses a new cruise speed after exiting yellow or pink crossings, once per exit',()=>{
+  for(const [group,low,high] of [[0,60,100],[1,15,35]] as const)for(const sample of [0,.999]){
+    const graph=network();graph.nodes[0].group=group;
+    const route=new RoadTrafficCar(graph,new Vector3(99,0,0),()=>0),vehicle=new HeldVehicle();
+    let draws=0;const bot=new Bot(route,vehicle,()=>{draws++;return sample;});
+    assert.ok(Math.abs(bot.cruiseSpeed*3.6-15)<1e-8);
+    for(let i=0;i<20;i++)route.advance(.1);
+    vehicle.body.position.copy(route.position);bot.advance(1/60);
+    assert.ok(bot.cruiseSpeed*3.6>=low&&bot.cruiseSpeed*3.6<=high);
+    assert.ok(Math.abs(bot.cruiseSpeed*3.6-(low+sample*(high-low)))<1e-8);assert.equal(draws,1);
+    bot.advance(1/60);assert.equal(draws,1);
+  }
+});
+
+test('lane-change lottery runs once per twenty seconds with a ten percent chance, and checks the neighboring traffic gap',()=>{
+  for(const sample of [.099,.1]){
+    const route=new RoadTrafficCar(network(),new Vector3(10,0,0),()=>0),vehicle=new HeldVehicle();vehicle.body.velocity.set(1,0,0);
+    let attempts=0,draws=0,clear=true;
+    route.tryChangeLane=(_position,_length,isClear)=>{attempts++;clear=isClear!(new Vector3(10,0,3),new Vector3(1,0,0));return false;};
+    const bot=new Bot(route,vehicle,()=>{draws++;return sample;});
+    const peer=new RigidBody3D(1400,bounds.clone());peer.position.set(10,0,3);
+    advance(bot,19.9,[peer]);assert.equal(draws,0);advance(bot,.2,[peer]);assert.equal(draws,1);assert.equal(attempts,sample<.1?1:0);
+    if(sample<.1)assert.equal(clear,false,'adjacent car prevents merging');
+    advance(bot,19.9,[peer]);assert.equal(draws,2);assert.equal(attempts,sample<.1?2:0);
+  }
+});
 function advance(bot:Bot,seconds:number,peers:RigidBody3D[]=[]){for(let i=0;i<Math.round(seconds*60);i++)bot.advance(1/60,peers);}
 
 test('bot waits one stopped second after impact, recovers without teleport, then resumes cruise',()=>{

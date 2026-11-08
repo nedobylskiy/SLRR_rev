@@ -42,3 +42,5 @@ This visualization does not simulate traffic, classify priority or change the `g
 ## Validation
 
 `tests/trc.test.ts` covers nontrivial Hermite curvature, group IDs/references, unknown-field preservation, malformed/truncated data, explicit map selection, caching and read-error retry. A local original-file verification consumed all 843,301 bytes and confirmed the record counts. The graph was visually checked over the original City map, including independent layer toggles and the displayed camera.
+
+Runtime policy (2026-11-09): after exiting a gold/pool-A crossing, traffic samples a 60–100 km/h cruise target; after pink/pool B, 15–35 km/h. This is the requested gameplay implementation of the observed regime correlation, not a decoded native speed-limit field.
