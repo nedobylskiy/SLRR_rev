@@ -2,7 +2,7 @@ export type Triple = [number, number, number];
 export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
 export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
-export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple }
+export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple; render?: { resource: number; pose?: CfgPose } }
 export interface CfgCamera extends CfgPose { fov?: number }
 /** Original car config defaults; enginepower only overwrites supplied fields (00443f90). */
 export const DEFAULT_ENGINE_POWER = [200, 10, 0.0001, 0.03, 1000, 50] as const;
@@ -22,6 +22,7 @@ export function parsePartConfig(source: string): PartConfig {
   let slot: CfgSlot | undefined, deformable: number | undefined, render: number | undefined;
   let renderPose: CfgPose | undefined, deformablePose: CfgPose | undefined, radius: number | undefined;
   let spring: Triple | undefined;
+  let inlineWheel: CfgWheel | undefined;
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const text = raw.replace(/(?:#|;|\/\/).*$/, '').trim();
     if (!text) continue;
@@ -70,6 +71,7 @@ export function parsePartConfig(source: string): PartConfig {
       case 'render': {
         const resource = rid(), poseValue = args.length === 4 ? { position: [number(1), number(2), number(3)] as Triple, rotation: [0, 0, 0] as Triple } : args.length > 1 ? pose(1) : undefined;
         result.renders.push({ resource, pose: poseValue });
+        if (inlineWheel && !inlineWheel.render) inlineWheel.render = { resource, pose: poseValue };
         if (render === undefined) { render = resource; renderPose = poseValue; }
         break;
       }
@@ -115,12 +117,13 @@ export function parsePartConfig(source: string): PartConfig {
       }
       case 'nocollision': if (result.bodies.length) result.bodies.at(-1)!.collision = false; result.unknown.push({ line, command, args }); break;
       case 'type':
+        inlineWheel = undefined;
         spring = undefined;
         radius = args[1]?.toLowerCase() === 'sphere' ? number(2) : undefined;
         if (radius !== undefined && radius <= 0) throw fail();
         result.unknown.push({ line, command, args }); break;
       case 'spring': spring = [number(0), number(1), number(2)]; if (spring.some(v => v <= 0)) throw fail(); break;
-      case 'wheel': result.wheels.push({ ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }); break;
+      case 'wheel': inlineWheel = { ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }; result.wheels.push(inlineWheel); break;
       case 'camera': result.cameras.push({ ...pose(), fov: args[6] === undefined ? undefined : number(6) }); break;
       case 'steering': result.steering = pose(); break;
       case 'maxsteer':

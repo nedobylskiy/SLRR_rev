@@ -325,6 +325,14 @@ export class Vehicle3D extends CarCrashDemo {
     if (this.body) { this.body.impulse(j, point); if (j.length() / this.body.mass / this.clock.dt > 25) this.pendingShock = true; }
     else super.applyImpulse(j, point);
   }
+  /** Contact impulse from another moving vehicle, shared with the impact damage model. */
+  vehicleContact(impulse:Vector3, point:Vector3, otherBounds:Box3, closingSpeed:number) {
+    this.applyImpulse(impulse,point);
+    const frame=this.body.matrix();
+    this.damageImpact(impulse,point,otherBounds,frame,frame);
+    this.impactSpeed=Math.max(this.impactSpeed,closingSpeed);
+    this.recordCollision(impulse,point,closingSpeed);
+  }
   override reset(speed = 0) {
     this.telemetry?.stop('vehicle_reset');
     super.reset(speed);
@@ -709,5 +717,8 @@ export class Vehicle3D extends CarCrashDemo {
       this.timings.other += performance.now() - sectionStart;
     });
   }
-  override dispose() { this.reset(); }
+  override dispose() {
+    this.telemetry.stop('vehicle_dispose');
+    if(!this.root.world.disposed)this.reset();
+  }
 }

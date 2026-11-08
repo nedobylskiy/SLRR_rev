@@ -361,6 +361,7 @@ const driveButton = textElement('button', 'Test drive') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Hood impact test'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
+const pairControls = textElement('div', '', 'hood-controls'); pairControls.hidden = true; el('scene-help').before(pairControls);
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
 const garageCarButton = textElement('button','Replace car: Einvagen 110 GTK') as HTMLButtonElement;
 garageCarButton.hidden = true;
@@ -508,6 +509,7 @@ window.setInterval(()=>{
     });return;
   }
   if(mapDebugPanel.hidden||!mapDebugPanel.open)return;
+  trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
   graphicsReport.textContent=[
     ...(graphicsDetailsCheck.checked?viewer?.profiler.gpuSummaryLines()??[]:[]),
@@ -516,6 +518,20 @@ window.setInterval(()=>{
   });
 },500);
 const mapDebugChecks: HTMLInputElement[] = [];
+const roadDebugStatus=textElement('pre','','map-debug-data');
+for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'],['metadata','Road metadata labels']] as const){
+  const label=textElement('label',title),input=document.createElement('input');input.type='checkbox';
+  input.onchange=()=>{const pending=viewer?.showRoadDebug(layer,input.checked);roadDebugStatus.textContent=viewer?.roadDebugStatus??'';void pending?.then(()=>{roadDebugStatus.textContent=viewer?.roadDebugStatus??'';});};
+  label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
+}
+mapDebugOptions.append(roadDebugStatus);
+const trafficTestLabel=textElement('label','One traffic Pickup · 15 km/h'),trafficTestCheck=document.createElement('input');
+trafficTestCheck.type='checkbox';trafficTestCheck.checked=true;trafficTestLabel.prepend(trafficTestCheck);mapDebugOptions.append(trafficTestLabel);
+const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
+trafficTestCheck.onchange=()=>{void viewer?.setTrafficTestEnabled(trafficTestCheck.checked).then(()=>{trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';});};
+const trafficRestart=textElement('button','Restart traffic near (0, 0, 0)');trafficRestart.setAttribute('type','button');
+trafficRestart.onclick=()=>{if(!trafficTestCheck.checked){trafficTestCheck.checked=true;void viewer?.setTrafficTestEnabled(true);}else void viewer?.restartTrafficTest();};mapDebugOptions.append(trafficRestart);
+const trafficFind=textElement('button','Inspect traffic Pickup');trafficFind.setAttribute('type','button');trafficFind.onclick=()=>{viewer?.focusTrafficTest();observerCheck.checked=true;};mapDebugOptions.append(trafficFind);
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
   const label = textElement('label', title), input = document.createElement('input'); input.type = 'checkbox';
   input.onchange = () => viewer?.showMapDebug(layer, input.checked);
@@ -660,6 +676,7 @@ fogCheck.onchange = () => viewer?.setMapFogEnabled(fogCheck.checked);
 const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { walls: number; boxes: number } }) => {
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;
+  roadDebugStatus.textContent='';
   vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
   if (map) mapDebugData.textContent = `Support triangles: ${map.terrain.faces.toLocaleString()}\nCollision walls: ${map.collision.walls.toLocaleString()}\nCFG collision boxes: ${map.collision.boxes.toLocaleString()}`;
 };
@@ -833,6 +850,9 @@ const showEngineControls = (root: EnginePart) => {
 };
 for (const [label, speed] of [['Impact at 10 km/h', 10 / 3.6], ['Impact at 50 km/h', 50 / 3.6], ['Reset', 0]] as const) {
   const button = textElement('button', label); button.onclick = () => crashSession?.launch(speed); crashControls.append(button);
+}
+for(const [scenario,label] of [['offset','Two cars · 50% overlap · 50 km/h each'],['side','Side impact · 50 km/h'],['rear-chain','Barrier · A 50 / B 100 km/h · 1 s following gap']] as const){
+  const button=textElement('button',label);button.onclick=()=>void openVehiclePairTest(scenario);crashControls.append(button);
 }
 const drivingHelping:DrivingHelping={...DEFAULT_DRIVING_HELPING};
 try{
@@ -1026,6 +1046,7 @@ mapButton.onclick = async () => {
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
 };
 function stopDrive() {
+  pairControls.hidden=true;
   benchmarkRunning=false;
   routePreviewSession=undefined;routeSeek.disabled=true;routeScreenshot.disabled=true;
   el('viewport').parentElement?.classList.remove('route-benchmark-active');
@@ -1037,7 +1058,10 @@ function stopDrive() {
   mapDebugPanel.hidden = true;
   tirePanel.hidden = true;
   enginePanel.hidden = true;
-  crashSession = undefined; crashControls.hidden = true; driveHud.classList.remove('crash-hud');
+  // Stop physics while its EngineWorld is still alive. Several disposal callbacks
+  // refer to crashSession, so clearing it first left the old viewer session running.
+  const stopCrash=crashSession;crashSession=undefined;stopCrash?.();
+  crashControls.hidden = true; driveHud.classList.remove('crash-hud');
   clearVehicleDebug();
   hood?.dispose(); hood = undefined; hoodControls.hidden = true;
   if (disposeDriving) el('details').textContent = beforeDrivingDetails;
@@ -1066,6 +1090,41 @@ async function openMainMenu() {
     el('details').textContent = 'MainMenu.enter(), Gates.show(), Gates.buildSlidingMenu(), Gates.run(), and Gates.osdCommand() execute from the installed Java source. Calls to other game systems are currently stubbed. Freeride opens the current track; other sections await the game-logic port.';
     status('Main menu');
   } catch (error) { if (request === sequence) { status('MainMenu.java execution error', true); el('details').textContent = String(error); } }
+}
+async function openVehiclePairTest(scenario:'offset'|'side'|'rear-chain') {
+  if(!assets||!viewer)return;
+  const source=assets;let request=sequence;
+  let other:Awaited<ReturnType<PartFactory['stock']>>|undefined;
+  try{
+    const opening=openWorld('cars/racers/Baiern.rpk',6);request=sequence;
+    await opening;if(request!==sequence||!engineRoot||!viewer)return;
+    status('Assembling second car…');
+    other=await new PartFactory(source).stock({pack:'cars/racers/Baiern.rpk',id:6},{mechanical:true});
+    if(request!==sequence){other.world.dispose();return;}
+    await viewer.showWorld(other.world,source,true);
+    if(request!==sequence){viewer.removeWorld(other.world);other.world.dispose();return;}
+    beforeDrivingDetails=el('details').textContent??'';
+    const second=other,session=viewer.vehiclePair([engineRoot,second.root],scenario,text=>{driveHud.textContent=text;});
+    session.chassisCrumple(Number(crumpleSlider.value));
+    disposeDriving=()=>{session();viewer?.removeWorld(second.world);second.world.dispose();};
+    pairControls.replaceChildren();
+    for(const [label,action] of [
+      ['Restart same collision',()=>session.reset()],
+      ['50% overlap',()=>void openVehiclePairTest('offset')],
+      ['Side impact',()=>void openVehiclePairTest('side')],
+      ['Barrier + rear hit',()=>void openVehiclePairTest('rear-chain')],
+      ['Car and obstacle',()=>crashButton.click()],
+    ] as const){const button=textElement('button',label);button.onclick=action;pairControls.append(button);}
+    for(const [label,action] of [['Pause',(value:boolean)=>session.pause(value)],['Slow motion ×0.25',(value:boolean)=>session.slowMotion(value)],['Cages',(value:boolean)=>session.wireframe(value)]] as const){
+      const container=textElement('label',label),check=document.createElement('input');check.type='checkbox';check.onchange=()=>action(check.checked);container.prepend(check);pairControls.append(container);
+    }
+    pairControls.hidden=false;crashControls.hidden=true;driveHud.hidden=false;driveHud.classList.add('crash-hud');driveButton.textContent='End drive';
+    el('viewport').parentElement?.classList.add('physics-scene');
+    el('filename').textContent=scenario==='offset'?'Baiern ×2 · 50% overlap':scenario==='side'?'Baiern ×2 · side impact':'Baiern ×2 · barrier + following car';el('format').textContent='PHYSICS / TWO VEHICLES';
+    el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Restart restores both cars';
+    el('details').textContent='Both complete CFG cars use 120 Hz suspension, mass, rotation and deformable panels. Offset: each starts at 50 km/h, with 50% body-width overlap. Side: A starts at 50 km/h and hits stationary B at 90 degrees. Chain: both start together toward a barrier, A at 50 km/h and B at 100 km/h, with a 27.8 m bumper-to-bumper gap (one second at B\'s initial speed). Both remain fully dynamic throughout; impact timing follows their motion. Inter-car contact uses chassis OBB hulls; detailed mesh-to-mesh and cross-car debris contacts are not yet implemented.';
+    status('Two-car collision test');
+  }catch(error){if(other){viewer?.removeWorld(other.world);other.world.dispose();}if(request===sequence){stopDrive();status('Two-car test error',true);el('details').textContent=String(error);}}
 }
 crashButton.onclick = async () => {
   const opening = openWorld('cars/racers/Baiern.rpk', 6), request = sequence;
@@ -1137,7 +1196,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); void viewer.setTrafficTestEnabled(trafficTestCheck.checked); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

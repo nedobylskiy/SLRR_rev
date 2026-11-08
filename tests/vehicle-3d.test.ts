@@ -328,6 +328,14 @@ test('chassis crumple control changes the same 50 km/h impact without changing b
   world.dispose();
 });
 
+test('vehicle disposal restores a live assembly and does not reinstall parts into a disposed world',()=>{
+  const {world,root,hood,demo}=setup();
+  world.detach(hood);demo.panel.mounts.forEach(m=>m.broken=true);
+  demo.dispose();assert.equal(hood.parent,root,'normal stand teardown restores the live assembly');
+  world.dispose();assert.doesNotThrow(()=>demo.dispose());assert.doesNotThrow(()=>demo.dispose());
+  assert.equal(world.parts.size,0,'late teardown cannot resurrect disposed parts');
+});
+
 test('a severe impact can still release the hood as one part', () => {
   const { world, root, hood, demo } = setup();
   const shell: number[] = [];
