@@ -45,6 +45,7 @@ annotate('java.lang.GarbageCollector',['<init>','push','flush'],'mocked','No-op 
 annotate('java.util.resource.ResourceRef',['precache','cache','unload'],'mocked','Logs the call; no original resource-cache operation or explicit unloading.');
 annotate('java.util.resource.GroundRef',['getNearestCross'],'mocked','Road graph absent. Distance 0 returns a copy of the input position; bounded searches or null input return null. This is not a nearest-crossing search.');
 annotate('java.util.resource.GroundRef',['delTraffic','addTrafficN'],'mocked','Traffic simulation absent. addTrafficN returns 0 and creates no traffic; delTraffic only logs.');
+annotate('java.util.resource.GroundRef',['addTrafficCar','notifyTrafficCar'],'mocked','Traffic simulation absent. Logs and returns 0; creates no traffic entity or notification subscription.');
 annotate('java.util.resource.GroundRef',['setPedestrianDensityN','addPedestrianType'],'mocked','Accepts/logs the call; no pedestrian simulation.');
 annotate('java.util.resource.GroundRef',['setWater','addWaterLimit'],'mocked','Returns void; no water-plane rendering or water bounds.');
 annotate('java.util.resource.RenderRef',['lineCreate','lineAdd'],'mocked','lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible.');
@@ -136,27 +137,28 @@ const report={schema:1,scope:'Installed TUFA native declarations (flag 0x40) plu
 await mkdir('docs/reports',{recursive:true});
 await writeFile('docs/reports/native-status.json',JSON.stringify(report,null,2)+'\n');
 const link=(source:string) => { const [path,line]=source.split(':'); return `[${source}](../${path}${line?'#L'+line:''})`; };
-const labels:Record<Status,string>={implemented:'Реализованные',mocked:'Замоканные',missing:'Несделанные'};
-const md=[`# Реестр Java native-методов`, '', 'Срез: 2026-11-08. Генерируется из установленной игры и текущего браузерного хоста.', '',
-  `Проверено файлов TUFA: **${classFiles}**, классов: **${classes}**. Ошибок чтения: **${errors.length}**.`, '',
-  '| Категория | Всего перегрузок | Из native-деклараций игры | Дополнения хоста |','|---|---:|---:|---:|',...Object.entries(counts).map(([status,count])=>`| ${labels[status as Status]} | ${count} | ${declaredCounts[status]} | ${count-declaredCounts[status]} |`),'',
-  '## Как читать', '',
-  '- **Реализованные**: зарегистрирован обработчик с рабочим поведением. Это не утверждение о полном совпадении с оригинальным EXE. Частичные реализации и адаптации браузера описаны в примечаниях.',
-  '- **Замоканные**: вызов принимается, но основная операция отсутствует, данные отбрасываются или возвращается временный результат.',
-  '- **Несделанные**: нет подходящего обработчика в текущем браузерном Java-хосте. Отсутствие обработчика не маскируется заглушкой.',
-  '- Каждая перегрузка — отдельная строка. Сопоставление учитывает класс, имя и типы параметров, включая массивы; короткие имена типов нормализуются как в native-регистрациях. Обработчики предков учитываются.',
-  '- «Декларация» означает native-флаг `0x40` в установленном TUFA. Хостовые дополнения без такой декларации отмечены отдельно. Методы, исполняемые из Java-исходника без native-флага, не входят в этот список.',
-  '- Автоматический срез не оценивает точность каждого алгоритма и не является каталогом всего API всех версий игры. Динамически регистрируемые возможности вне стандартного boot-пути и отдельный старый PartHost не считаются возможностями браузерного хоста.',
-  '- Сбор регистраций использует синтетический Init и не запускает игровую сессию. Необязательные аудио/видео/рендер-мосты в приложении подключаются отдельно; отсутствие моста в аудите не превращает реализованный метод в заглушку.',
-  '- Оригинальные игровые файлы в репозиторий не копируются: сохраняются только имена, сигнатуры и относительные пути.', '',
-  '## Обновление', '', '```powershell','npm run report:natives','# При другой установке: задайте переменную окружения SLRR_GAME_ROOT','```','',
-  'Результат для инструментов: [native-status.json](reports/native-status.json). Разметка исключений и ограничений: [report-native-status.ts](../tools/report-native-status.ts). При реализации очередной заглушки обновите аннотации и перегенерируйте оба отчёта.',''];
-for(const status of ['implemented','mocked','missing'] as const) {
-  md.push(`## ${labels[status]}`,'','| Метод | Реализация | Примечание |','|---|---|---|');
-  for(const entry of ordered.filter(entry=>entry.status===status)) md.push(`| \`${entry.owner}.${entry.method}(${entry.parameters.map(leaf).join(', ')})${entry.result?' → '+leaf(entry.result):''}\` | ${entry.source?link(entry.source):'—'} | ${entry.note}${entry.declarations.length?'':' **Хостовое дополнение.**'} |`);
+const statuses = ['implemented','mocked','missing'] as const;
+const labels:Record<Status,string>={implemented:'Implemented',mocked:'Mocked',missing:'Not implemented'};
+const md=[`# Java native method inventory`, '', 'Snapshot: 2026-11-08. Generated from the installed game and current browser host.', '',
+  ...statuses.map((status,index)=>`${index+1}. [${labels[status]} (${counts[status]})](#${index+1}-${labels[status].toLowerCase().replaceAll(' ','-')})`), '',
+  `Scanned **${classFiles} TUFA files**, **${classes} classes**; **${errors.length} read errors**. Each overload is a separate row.`, '',
+  '| Status | Total overloads | Game native declarations | Host additions |','|---|---:|---:|---:|',...Object.entries(counts).map(([status,count])=>`| ${labels[status as Status]} | ${count} | ${declaredCounts[status]} | ${count-declaredCounts[status]} |`),'',
+  '**Status definitions**', '',
+  '- **Implemented**: a host handler provides working behavior. This does not imply full parity with the original EXE. Notes identify partial implementations and browser adaptations.',
+  '- **Mocked**: the call is accepted, but its main operation is absent, data is discarded, or a temporary result is returned.',
+  '- **Not implemented**: no matching handler exists in the current browser Java host.', '',
+  '**Scope and limitations**', '',
+  'Matching uses class, method and parameter types, including arrays. Short type names are normalized to match host registrations; ancestor handlers are considered. A game declaration is a TUFA method with native flag `0x40`. Host-only overloads are marked separately. Methods interpreted from Java source without that flag are outside this inventory.', '',
+  'This snapshot does not certify algorithm accuracy or cover every game version. Registrations outside the standard boot path and the separate legacy PartHost are excluded. Registration capture runs a synthetic Init rather than a game session. Optional audio/video/render bridges are supplied separately by the application; their absence during capture does not make an implemented handler a mock.', '',
+  'Only names, signatures and relative paths are published; original game files are not copied into the repository.', '',
+  '**Regenerate**', '', '```powershell','npm run report:natives','# Set SLRR_GAME_ROOT to use a different installation.','```','',
+  'Machine-readable output: [native-status.json](reports/native-status.json). Classification overrides and limitations: [report-native-status.ts](../tools/report-native-status.ts). Update the annotations and regenerate both reports when replacing a mock.',''];
+for(const [index,status] of statuses.entries()) {
+  md.push(`## ${index+1}. ${labels[status]}`,'',`**${counts[status]} overloads.**`,'','| Method | Implementation | Notes |','|---|---|---|');
+  for(const entry of ordered.filter(entry=>entry.status===status)) md.push(`| \`${entry.owner}.${entry.method}(${entry.parameters.map(leaf).join(', ')})${entry.result?' → '+leaf(entry.result):''}\` | ${entry.source?link(entry.source):'—'} | ${entry.note}${entry.declarations.length?'':' **Host addition.**'} |`);
   md.push('');
 }
-if(errors.length) md.push('## Ошибки чтения','',...errors.map(error=>`- \`${error.path}\`: ${error.error}`),'');
+if(errors.length) md.push('**Read errors**','',...errors.map(error=>`- \`${error.path}\`: ${error.error}`),'');
 await writeFile('docs/native-status.md',md.join('\n'));
 console.log(JSON.stringify({classFiles,classes,...counts,errors:errors.length}));
 if(errors.length) process.exitCode=1;

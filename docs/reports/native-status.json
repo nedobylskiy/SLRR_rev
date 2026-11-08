@@ -5,13 +5,13 @@
   "classes": 3118,
   "counts": {
     "implemented": 335,
-    "mocked": 30,
-    "missing": 123
+    "mocked": 32,
+    "missing": 121
   },
   "declaredCounts": {
     "implemented": 274,
-    "mocked": 21,
-    "missing": 123
+    "mocked": 23,
+    "missing": 121
   },
   "errors": [],
   "entries": [
@@ -69,7 +69,7 @@
       "status": "mocked",
       "note": "Returns void; the native navigator viewport update is deferred.",
       "handler": "java.game.Navigator#updateNavigator(GameRef,int)",
-      "source": "src/runtime/game-boot.ts:495"
+      "source": "src/runtime/game-boot.ts:504"
     },
     {
       "owner": "java.game.Painter",
@@ -2426,7 +2426,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes SysKeyboard/SysMouse; other device indices return null.",
       "handler": "java.io.Input#getDeviceName(int)",
-      "source": "src/runtime/game-boot.ts:510"
+      "source": "src/runtime/game-boot.ts:519"
     },
     {
       "owner": "java.io.Input",
@@ -4498,7 +4498,7 @@
       "status": "mocked",
       "note": "Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change.",
       "handler": "java.render.GfxEngine#changeVideoMode(int,int,int)",
-      "source": "src/runtime/game-boot.ts:473"
+      "source": "src/runtime/game-boot.ts:482"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4512,7 +4512,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#closeVideo()",
-      "source": "src/runtime/game-boot.ts:491"
+      "source": "src/runtime/game-boot.ts:500"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4526,7 +4526,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes one current viewport-sized mode, not OS display enumeration.",
       "handler": "java.render.GfxEngine#currDisplayMode()",
-      "source": "src/runtime/game-boot.ts:471"
+      "source": "src/runtime/game-boot.ts:480"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4542,7 +4542,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes one current viewport-sized mode, not OS display enumeration.",
       "handler": "java.render.GfxEngine#displayModeName(int)",
-      "source": "src/runtime/game-boot.ts:472"
+      "source": "src/runtime/game-boot.ts:481"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4570,7 +4570,7 @@
       "status": "mocked",
       "note": "Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change.",
       "handler": "java.render.GfxEngine#forceRendering()",
-      "source": "src/runtime/game-boot.ts:462"
+      "source": "src/runtime/game-boot.ts:471"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4584,7 +4584,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#isPlayingVideo()",
-      "source": "src/runtime/game-boot.ts:492"
+      "source": "src/runtime/game-boot.ts:501"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4598,7 +4598,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes one current viewport-sized mode, not OS display enumeration.",
       "handler": "java.render.GfxEngine#numDisplayModes()",
-      "source": "src/runtime/game-boot.ts:470"
+      "source": "src/runtime/game-boot.ts:479"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4617,7 +4617,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#openVideo(String,int,int,int)",
-      "source": "src/runtime/game-boot.ts:489"
+      "source": "src/runtime/game-boot.ts:498"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4635,7 +4635,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#openVideo(String,int,int)",
-      "source": "src/runtime/game-boot.ts:489"
+      "source": "src/runtime/game-boot.ts:498"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4677,7 +4677,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.render.GfxEngine#setGlobalEnvmap(ResourceRef)",
-      "source": "src/runtime/game-boot.ts:474"
+      "source": "src/runtime/game-boot.ts:483"
     },
     {
       "owner": "java.render.Text",
@@ -5030,7 +5030,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#changeMusicSet(int)",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5046,7 +5046,7 @@
       "status": "mocked",
       "note": "Returns 0; no original sound debug dump.",
       "handler": "java.sound.Sound#enableDebugDump(ResourceRef)",
-      "source": "src/runtime/game-boot.ts:506"
+      "source": "src/runtime/game-boot.ts:515"
     },
     {
       "owner": "java.sound.Sound",
@@ -5060,7 +5060,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#firstTrack()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5086,7 +5086,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#getNowPlaying()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5100,7 +5100,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#getTotalTracks()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5116,7 +5116,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#getVolume(int)",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5140,7 +5140,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#nextTrack()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5156,7 +5156,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#playTrack(int)",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5172,7 +5172,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#playTrack(String)",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5186,7 +5186,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#prevTrack()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5200,7 +5200,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#randomTrack()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5231,7 +5231,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#setVolume(int,float)",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.sound.Sound",
@@ -5245,7 +5245,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#stopMusic()",
-      "source": "src/runtime/game-boot.ts:504"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.util.Replay",
@@ -5842,8 +5842,10 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "mocked",
+      "note": "Traffic simulation absent. Logs and returns 0; creates no traffic entity or notification subscription.",
+      "handler": "java.util.resource.GroundRef#addTrafficCar(GameRef,Vector3)",
+      "source": "src/runtime/game-boot.ts:455"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -5915,7 +5917,7 @@
       "status": "mocked",
       "note": "Returns void; no water-plane rendering or water bounds.",
       "handler": "java.util.resource.GroundRef#addWaterLimit(Vector3,Vector3)",
-      "source": "src/runtime/game-boot.ts:454"
+      "source": "src/runtime/game-boot.ts:463"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6174,8 +6176,10 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "mocked",
+      "note": "Traffic simulation absent. Logs and returns 0; creates no traffic entity or notification subscription.",
+      "handler": "java.util.resource.GroundRef#notifyTrafficCar(int,int)",
+      "source": "src/runtime/game-boot.ts:455"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6316,7 +6320,7 @@
       "status": "mocked",
       "note": "Returns void; no water-plane rendering or water bounds.",
       "handler": "java.util.resource.GroundRef#setWater(Vector3,Vector3,float,float)",
-      "source": "src/runtime/game-boot.ts:453"
+      "source": "src/runtime/game-boot.ts:462"
     },
     {
       "owner": "java.util.resource.ParticleSystem",

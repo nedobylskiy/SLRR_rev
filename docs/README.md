@@ -35,7 +35,7 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 
 ## Native implementation inventory
 
-[Реестр Java native-методов](native-status.md) — implemented handlers, temporary mocks, missing methods, per-overload signatures and current limitations. Regenerate with `npm run report:natives`; machine-readable output: [native-status.json](reports/native-status.json).
+[Java native method inventory](native-status.md) — three sections: implemented handlers, temporary mocks, and methods not implemented. Includes per-overload signatures and current limitations. Regenerate with `npm run report:natives`; machine-readable output: [native-status.json](reports/native-status.json).
 
 ## Confidence levels
 
