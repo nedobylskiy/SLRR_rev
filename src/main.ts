@@ -527,6 +527,9 @@ for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'
 mapDebugOptions.append(roadDebugStatus);
 const trafficTestLabel=textElement('label','Traffic bot · cruise 15 km/h'),trafficTestCheck=document.createElement('input');
 trafficTestCheck.type='checkbox';trafficTestCheck.checked=true;trafficTestLabel.prepend(trafficTestCheck);mapDebugOptions.append(trafficTestLabel);
+const trafficPairLabel=textElement('label','Second Pickup · cruise 30 km/h'),trafficPairCheck=document.createElement('input');
+trafficPairCheck.type='checkbox';trafficPairCheck.checked=true;trafficPairLabel.prepend(trafficPairCheck);mapDebugOptions.append(trafficPairLabel);
+trafficPairCheck.onchange=()=>{void viewer?.setTrafficPairEnabled(trafficPairCheck.checked);};
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
 trafficTestCheck.onchange=()=>{void viewer?.setTrafficTestEnabled(trafficTestCheck.checked).then(()=>{trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';});};
 const trafficRestart=textElement('button','Restart traffic near (0, 0, 0)');trafficRestart.setAttribute('type','button');
@@ -1197,7 +1200,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); void viewer.setTrafficTestEnabled(trafficTestCheck.checked); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); void viewer.setTrafficPairEnabled(trafficPairCheck.checked); void viewer.setTrafficTestEnabled(trafficTestCheck.checked); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

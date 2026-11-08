@@ -42,7 +42,36 @@ test('queuing behind a car requests zero speed and does not trigger the stuck re
   const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle);
   const peer=new RigidBody3D(1400,bounds.clone());peer.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
   advance(bot,5,[peer]);assert.equal(bot.desiredSpeed,0);assert.equal(bot.input.throttle,0);assert.equal(bot.mode,'cruise');
-  peer.position.z=20;advance(bot,.1,[peer]);assert.ok(bot.input.throttle>.5);
+  peer.position.z=20;advance(bot,1.6,[peer]);assert.ok(bot.input.throttle>.5);
+});
+
+test('a nearly stopped queue holds the brake pedal and releases when the lead vehicle moves away',()=>{
+  const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle);
+  const peer=new RigidBody3D(1400,bounds.clone());peer.orientation.copy(vehicle.body.orientation);
+  peer.position.copy(vehicle.body.position).add(new Vector3(8.4,0,0));
+  advance(bot,4,[peer]);assert.equal(bot.desiredSpeed,0);assert.equal(bot.input.throttle,0);
+  assert.equal(bot.input.brake,true);assert.ok((bot.input.brakeAxis??0)>.5);assert.equal(bot.mode,'cruise');
+  peer.position.x+=.3;advance(bot,.5,[peer]);assert.equal(bot.input.brake,true,'small queue-gap changes retain the pedal');
+  peer.velocity.set(2,0,0);advance(bot,1.6,[peer]);assert.ok(bot.input.throttle>0);assert.equal(bot.input.brake,false);
+});
+
+test('each stopped bot samples one 500–1500 ms reaction delay and keeps its brake while waiting',()=>{
+  for(const [sample,delay] of [[0,.5],[1,1.5]]){
+    let samples=0;const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle,()=>{samples++;return sample;});
+    const peer=new RigidBody3D(1400,bounds.clone());peer.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
+    advance(bot,.1,[peer]);peer.position.z=20;
+    advance(bot,delay-1/60,[peer]);assert.equal(bot.input.throttle,0);assert.equal(bot.input.brake,true);assert.equal(samples,1);
+    advance(bot,2/60,[peer]);assert.ok(bot.input.throttle>0);assert.equal(bot.input.brake,false);assert.equal(samples,1);
+  }
+});
+
+test('a newly blocked queue cancels reaction time and requires a new delay after clearing again',()=>{
+  let samples=0;const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle,()=>{samples++;return .5;});
+  const peer=new RigidBody3D(1400,bounds.clone());peer.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
+  advance(bot,.1,[peer]);peer.position.z=20;advance(bot,.7,[peer]);assert.equal(bot.input.brake,true);
+  peer.position.z=0;advance(bot,.1,[peer]);peer.position.z=20;advance(bot,.7,[peer]);
+  assert.equal(bot.input.throttle,0);assert.equal(bot.input.brake,true);assert.equal(samples,2);
+  advance(bot,.4,[peer]);assert.ok(bot.input.throttle>0);assert.equal(bot.input.brake,false);
 });
 
 test('traffic body is supported on four springs, drives through physical forces, and retains dents on impact',()=>{
@@ -62,4 +91,23 @@ test('crush fields and physics belong to an instance while immutable road graph 
   const first=new TrafficCrush(bounds.clone()),second=new TrafficCrush(bounds.clone());
   first.hit(new Vector3(1,0,2),new Vector3(-7000,0,-2000),15,1400);
   assert.ok(first.offsets.some(v=>v!==0));assert.ok(second.offsets.every(v=>v===0));assert.equal(second.version,0);
+});
+
+test('a 30 km/h pickup catches a 15 km/h pickup, follows without contact, and accelerates when the lane clears',()=>{
+  const graph=network(),terrain={height:()=>0,normal:()=>new Vector3(0,1,0)};
+  const wheels=[[-.86,-.747,-1.74],[.86,-.747,-1.74],[-.86,-.747,1.27],[.86,-.747,1.27]].map(position=>({position:position as RoadPoint,rotation:[0,0,0] as RoadPoint,radius:.36,parameters:[]}));
+  const leadRoute=new RoadTrafficCar(graph,new Vector3(40,0,0)),rearRoute=leadRoute.spawnBehind(25);
+  const make=(route:RoadTrafficCar,speed:number)=>{const vehicle=new TrafficVehicle(bounds.clone(),1400,wheels,terrain);vehicle.place(route.position,route.direction,1.107);return new Bot(route,vehicle,()=>0,speed/3.6);};
+  const lead=make(leadRoute,15),rear=make(rearRoute,30),peers=[lead.vehicle.body,rear.vehicle.body];
+  let minimumGap=Infinity,maximumSpeed=0;
+  for(let i=0;i<600;i++){
+    lead.advance(1/60,peers);rear.advance(1/60,peers);
+    minimumGap=Math.min(minimumGap,lead.vehicle.body.position.x-rear.vehicle.body.position.x-5);
+    maximumSpeed=Math.max(maximumSpeed,rear.vehicle.body.velocity.length()*3.6);
+  }
+  assert.ok(minimumGap>2,`bumper gap ${minimumGap}`);assert.ok(maximumSpeed>20);
+  assert.ok(Math.abs(rear.vehicle.body.velocity.length()*3.6-15)<.7);
+  assert.equal(rear.mode,'cruise');assert.equal(rear.vehicle.collisionVersion,0);
+  assert.equal(rear.cruiseSpeed,30/3.6);
+  advance(rear,1.5);assert.ok(rear.vehicle.body.velocity.length()*3.6>25);
 });

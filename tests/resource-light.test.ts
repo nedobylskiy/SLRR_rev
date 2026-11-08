@@ -3,11 +3,26 @@ import { test } from 'node:test';
 import { AmbientLight, DirectionalLight, Group, Vector3 } from 'three';
 import { createResourceLight, parseResourceLight } from '../src/render/resource-light';
 import type { RpkEntry } from '../src/formats/rpk';
+import { Assets } from '../src/assets';
+import { trafficSignalGlowTexture } from '../src/render/traffic-signals';
 
 function entry(text: string, type = 13): RpkEntry {
   return { superId: 0x1000b, typeId: 0x1d, type, flags: 0, compatibility: 1, offset: 0, size: text.length,
     alias: 'garage', data: new TextEncoder().encode(text) };
 }
+
+test('traffic signal CFG light resolves a type-14 billboard and its texture in the dependency pack',async()=>{
+  const assets=new Assets([],async()=>new Uint8Array());
+  const requests:{pack:string;id:number}[]=[];
+  assets.resource=async(pack,id)=>{
+    requests.push({pack,id});
+    if(pack==='objects.rpk'&&id===0x30006)return {packPath:'particles.rpk',entry:entry('mesh 0x5\ntexture 0x4',14)};
+    if(pack==='particles.rpk'&&id===4)return {packPath:'particles.rpk',entry:entry('sourcefile particles/textures/Flare.ptx',7)};
+    throw Error('Unexpected glow resource lookup');
+  };
+  assert.equal(await trafficSignalGlowTexture(assets),'particles/textures/Flare.ptx');
+  assert.deepEqual(requests,[{pack:'objects.rpk',id:0x30006},{pack:'particles.rpk',id:4}]);
+});
 test('RPK garage directional lights use RGB, metre poses and the original direction instead of loading a mesh', () => {
   const definition = parseResourceLight(entry(`type directional
 diffuse 1.000 0.919 0.958 1.000

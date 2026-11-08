@@ -80,6 +80,11 @@ import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 import type { JavaSceneCamera } from '../runtime/java-scene-camera';
+import { FixedClock } from '../runtime/fixed-clock';
+import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
+import {createTrafficSignals} from './traffic-signals';
+
+type TrafficTestCar={ car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -387,7 +392,15 @@ export class Viewer {
   roadDebugStatus = 'Road graph off';
   private trafficTestEnabled = false;
   private trafficTestRevision = 0;
-  private trafficTest?: { car: RoadTrafficCar; bot:Bot; vehicle:TrafficVehicle; damage:TrafficDamageView; lamps:Awaited<ReturnType<typeof createTrafficLamps>>; voice?:TrafficVoice; group: THREE.Group; wheels: { mount:THREE.Group; rotor:THREE.Group }[]; previous?: number };
+  private trafficTest?:TrafficTestCar;
+  private trafficFollower?:TrafficTestCar;
+  private trafficPairEnabled=true;
+  private trafficPrevious?:number;
+  private trafficClock=new FixedClock(60,15);
+  private mapTrafficFixtures:TrafficFixture[]=[];
+  private trafficControl?:TrafficControl;
+  private trafficSignals?:Awaited<ReturnType<typeof createTrafficSignals>>;
+  private trafficSignalError?:string;
   private trafficTemplates=new Map<Assets,Promise<{group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]}>>();
   private trafficAudio?:TrafficAudio;
   private trafficAudioStart=()=>this.trafficAudio?.activate();
@@ -521,7 +534,8 @@ export class Viewer {
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
-      if(this.trafficTest?.voice)this.trafficAudio?.listener(renderCamera);
+      if(this.trafficTest?.voice||this.trafficFollower?.voice)this.trafficAudio?.listener(renderCamera);
+      this.mapRoadDebug?.updateTraffic(this.trafficControl);
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
@@ -847,9 +861,14 @@ export class Viewer {
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   private stopTrafficTest() {
     this.trafficTestRevision++;
-    if(this.trafficTest){this.trafficTest.voice?.dispose();this.trafficTest.lamps.dispose();this.trafficTest.damage.dispose();this.trafficTest.group.removeFromParent();this.trafficTest=undefined;}
+    for(const test of [this.trafficTest,this.trafficFollower])if(test)this.disposeTrafficCar(test);
+    this.trafficTest=this.trafficFollower=undefined;this.trafficPrevious=undefined;this.trafficClock=new FixedClock(60,15);
+    this.trafficSignals?.dispose();this.trafficSignals=undefined;this.trafficControl=undefined;
+    this.trafficSignalError=undefined;
     this.trafficTestStatus='Traffic test off';
   }
+  private disposeTrafficCar(test:TrafficTestCar){test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
+  async setTrafficPairEnabled(enabled:boolean){if(this.trafficPairEnabled===enabled)return;this.trafficPairEnabled=enabled;if(this.trafficTestEnabled&&this.mapRoadSource)await this.restartTrafficTest();}
   private trafficTemplate(assets:Assets){
     let pending=this.trafficTemplates.get(assets);if(pending)return pending;
     const generation=this.generation;
@@ -884,6 +903,7 @@ export class Viewer {
     const revision=this.trafficTestRevision,generation=this.generation;
     const current=()=>revision===this.trafficTestRevision&&generation===this.generation&&this.trafficTestEnabled;
     this.trafficTestStatus='Loading traffic Pickup…';
+    const staged:TrafficTestCar[]=[];
     try{
       const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
       if(!current())return;
@@ -892,29 +912,38 @@ export class Viewer {
       const template=await this.trafficTemplate(source.assets);
       if(!current())return;
       if(!source.terrain)throw Error('Traffic test requires map terrain');
-      const lamps=await createTrafficLamps(template.lamps,source.assets);
-      if(!current()){lamps.dispose();return;}
-      const group=template.group.clone(true);group.matrixAutoUpdate=false;
-      group.add(lamps.group);
-      const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
-      vehicle.place(car.position,car.direction,template.height);
-      const bot=new Bot(car,vehicle),damage=new TrafficDamageView(group,vehicle.crush);
-      const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
-      group.name='Traffic test Pickup · 15 km/h';
-      const test={car,bot,vehicle,damage,lamps,group,wheels,voice:undefined as TrafficVoice|undefined};
-      this.trafficTest=test;this.scene.add(group);
-      this.trafficTestStatus='Pickup · red → green · 15 km/h';this.updateTrafficTest(performance.now());
-      try{this.trafficAudio??=new TrafficAudio();const voice=await this.trafficAudio.voice(source.assets);if(current()&&this.trafficTest===test)test.voice=voice;else voice.dispose();}catch{/* Missing audio must not stop physics. */}
+      const control=new TrafficControl(roads.network,this.mapTrafficFixtures);
+      const routes=[car];if(this.trafficPairEnabled)routes.push(car.spawnBehind(25));
+      for(const [index,route] of routes.entries()){
+        const lamps=await createTrafficLamps(template.lamps,source.assets);
+        if(!current()){lamps.dispose();return;}
+        const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
+        const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
+        vehicle.place(route.position,route.direction,template.height);
+        const bot=new Bot(route,vehicle,Math.random,(index?30:15)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
+        const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
+        group.name=`Traffic Pickup ${index?'B · 30':'A · 15'} km/h`;
+        staged.push({car:route,bot,vehicle,damage,lamps,group,wheels});
+      }
+      this.trafficTest=staged[0];this.trafficFollower=staged[1];
+      this.trafficControl=control;
+      const cars=staged.splice(0);for(const test of cars)this.scene.add(test.group);
+      this.updateTrafficTest(performance.now());
+      for(const test of cars){
+        try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(current())test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
+      }
+      if(control.signals.length)void createTrafficSignals(source.assets,control).then(signals=>{if(current()){this.trafficSignals=signals;this.scene.add(signals.root);}else signals.dispose();}).catch(error=>{if(current()){this.trafficSignalError=String(error);console.warn('Traffic signal glows:',error);}});
     }catch(error){if(current())this.trafficTestStatus=`Traffic test: ${String(error)}`;}
+    finally{for(const test of staged)this.disposeTrafficCar(test);}
   }
   trafficTestInfo() {
     const test=this.trafficTest;if(!test)return this.trafficTestStatus;
-    const car=test.car;
-    return `Pickup · ${test.bot.mode} · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${Math.round(test.bot.rpm)} RPM\n${car.phase} · ${car.crossingsPassed} crossings · damage #${test.vehicle.crush.version}\nXYZ ${test.vehicle.body.position.toArray().map(n=>n.toFixed(1)).join(', ')}${car.nextRoad===undefined?'':` · exit #${car.nextRoad}`}\nOne body + 4 springs; traffic-light obedience not implemented.`;
+    return [test,this.trafficFollower].filter((car):car is TrafficTestCar=>!!car).map((test,i)=>`Pickup ${i?'B':'A'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${test.bot.mode} · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${Math.round(test.bot.rpm)} RPM\n${test.car.phase} · ${test.car.crossingsPassed} crossings · damage #${test.vehicle.crush.version} · ${test.bot.trafficStatus||'free'}\nXYZ ${test.vehicle.body.position.toArray().map(n=>n.toFixed(1)).join(', ')}${test.car.nextRoad===undefined?'':` · exit #${test.car.nextRoad}`}`).join('\n\n')+`\nIndependent routes · signals ${this.trafficControl?.signals.length??0} · glows ${this.trafficSignalError??(this.trafficSignals?'ready':'loading')} · stop/yield wait 5s`;
   }
   focusTrafficTest() {
     if(!this.trafficTest)return;
-    this.setInspectionCameraEnabled(true);this.inspection.focus(this.trafficTest.vehicle.body.position);
+    const target=this.trafficTest.vehicle.body.position.clone();if(this.trafficFollower)target.lerp(this.trafficFollower.vehicle.body.position,.5);
+    this.setInspectionCameraEnabled(true);this.inspection.focus(target);
   }
   impactTrafficTest(){
     const test=this.trafficTest;if(!test)return;
@@ -922,28 +951,45 @@ export class Viewer {
     const point=new THREE.Vector3(.7,0,body.bounds.min.z).applyMatrix4(body.matrix());test.bot.hit(impulse,point,12);
   }
   private updateTrafficTest(now:number) {
-    const test=this.trafficTest;if(!test)return;
+    if(!this.trafficTest)return;
+    const cars=[this.trafficTest,...(this.trafficFollower?[this.trafficFollower]:[])];
     this.trafficAudio?.setHidden(document.hidden);
-    if(document.hidden){test.previous=undefined;return;}
+    if(document.hidden){this.trafficPrevious=undefined;return;}
     const time=this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:12*3600);
-    test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time));
     const peer=this.trafficPeer;
-    if(peer){
-      const hit=vehiclePairContact(peer.body,test.vehicle.body);
-      if(hit){
-        if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
-        const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
-        peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+    const bodies=cars.map(car=>car.vehicle.body);if(peer)bodies.push(peer.body);
+    if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
+      this.trafficControl?.advance(this.trafficClock.dt);
+      for(const test of cars)test.bot.advance(this.trafficClock.dt,bodies);
+      for(const [i,test] of cars.entries()){
+        if(peer){
+          const hit=vehiclePairContact(peer.body,test.vehicle.body);
+          if(hit){
+            if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+            const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+            peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+          }
+        }
+        for(const other of cars.slice(i+1)){
+          const a=test.vehicle.body,b=other.vehicle.body,hit=vehiclePairContact(a,b);if(!hit)continue;
+          if(hit.impulse.lengthSq()>1){test.bot.hit(hit.impulse,hit.point,hit.closing);other.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+          const total=1/a.mass+1/b.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+          a.position.addScaledVector(hit.normal,correction/a.mass/total);b.position.addScaledVector(hit.normal,-correction/b.mass/total);
+        }
       }
+    });
+    this.trafficPrevious=now;
+    this.trafficSignals?.update();
+    for(const test of cars){
+      test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time));
+      test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+      test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
+      test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
     }
-    if(test.previous!==undefined)test.bot.advance((now-test.previous)/1000,peer?[peer.body]:[]);
-    test.previous=now;
-    test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
-    test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
-    test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
   }
   private resetRoadDebug() {
     this.stopTrafficTest();
+    this.mapTrafficFixtures=[];
     this.mapRoadRevision++; this.mapRoadDebug?.dispose(); this.mapRoadDebug=undefined;
     this.mapRoadSource=undefined;this.mapRoadPending=undefined;this.mapRoadLayers.clear();this.roadDebugStatus='Road graph off';
   }
@@ -1284,6 +1330,9 @@ export class Viewer {
           const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
+          const nativeClass=new TextDecoder().decode(resource.entry.data.subarray(8,resource.entry.data.indexOf(0,8)));
+          const fixtureKind=trafficFixtureKind(resource.entry.alias,nativeClass);
+          if(fixtureKind)for(const instance of instances)this.mapTrafficFixtures.push({kind:fixtureKind,position:new THREE.Vector3(...instance.pose.position),pose:instance.pose});
           // Keep the highest-detail LOD for the nearby-object stream. Lower LODs
           // are substitutes, not extra pieces; loading all of them hides the map
           // behind overlapping tree/building meshes, while skipping them all

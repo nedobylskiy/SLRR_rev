@@ -4,7 +4,7 @@ Enable **Road graph**, **Road crossings** and optionally **Road metadata labels*
 
 - Cyan: path-record splines.
 - Green → red: stored start → end of each fourth-group road-record spline (formerly blue). The gradient runs continuously over all segments of that record, weighted by stored segment length. Original traffic travels in the opposite direction, **red → green**, as established by the user's checks at most crossing locations (see below).
-- Grey-green: lane splines inside crossings.
+- Crossing lane splines: **green** when their incoming signal branch permits entry; **red** on red or yellow. A known unregulated incoming lane is green. Grey-green means no active controller, an ambiguous topology binding, or a per-vehicle STOP/YIELD rule rather than a shared signal phase. These colors show intersection permission, not vehicle spacing or a driver's reaction timer.
 - Gold/pink markers: the two crossing pools in the TRC file. Their colors do not assert signalized versus unsignalized intersections.
 - Labels show one-based global record IDs, stored spline lengths, segment counts, crossing link/lane counts, and unclassified raw tail values. Hover a label for reference IDs and raw words.
 

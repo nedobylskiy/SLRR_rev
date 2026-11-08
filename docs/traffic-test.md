@@ -1,16 +1,19 @@
 # Physical traffic bot experiment
 
-On the `traffic` branch, **Traffic bot · cruise 15 km/h** in **Graphics / map debug** enables one original `cars/traffic/Pickup.rpk:0x0006`. It starts near world `(0,0,0)` on the closest connected road (City road #2182). Maps without declared TRC road data receive no guessed graph.
+On the `traffic` branch, **Traffic bot · cruise 15 km/h** in **Graphics / map debug** enables the original `cars/traffic/Pickup.rpk:0x0006`. It starts near world `(0,0,0)` on the closest connected road (City road #2182). **Second Pickup · cruise 30 km/h**, enabled by default, adds a second instance 25 metres upstream along the graph. Disable it to return to the single-car experiment; changing it restarts the experiment. Maps without declared TRC road data receive no guessed graph.
 
 ## Navigation and behavior
 
 - Roads run **red → green**, opposite stored segment order. At an approaching crossing, choose a random outgoing branch once, then a lane within that branch.
 - Connections require explicit road links in the same crossing record and matching grey-lane endpoints within 3 cm. Grey Hermite lanes are also followed in reverse. An unsupported exit stops the bot.
 - The spline supplies steering targets. It never assigns the physical body's position during driving or recovery. Progress uses planar projection because navigation Y is not body or road-surface Y.
-- `Bot` controls throttle, brake and steering at 60 Hz. Normal target speed is 15 km/h, reduced in turns or behind another car. This is a target, not a hard velocity clamp: slopes and impacts can exceed it.
+- `Bot` controls throttle, brake and steering at 60 Hz. Normal target speed is 15 km/h for A and 30 km/h for B, reduced in turns or behind another car. These are targets, not hard velocity clamps: slopes and impacts can exceed them.
 - An impact enters physical response mode. After remaining nearly stationary for one second, the bot accelerates toward the closest connected road at a target up to 30 km/h. Once close and aligned, it resumes cruise.
 - Attempting to drive without advancing for two seconds triggers **3.5 seconds of reverse with full left or right steering**, then another recovery attempt. Waiting behind another car does not count as being stuck.
-- The single-car experiment follows and collides with the active player's full vehicle. Multi-bot population management and mutual traffic queries are not yet wired.
+- After a stopped queue or intersection wait clears, each bot samples a fresh **500–1500 ms reaction delay** once. It holds the brake and brake lamps throughout, cancels the countdown if blocked again, and does not delay a car already moving. The delay uses simulation ticks so hidden-tab pauses do not consume it. At STOP/YIELD this is additional to the five-second stop.
+- Both Pickups see one another and the active player's full vehicle. Following uses a 3-metre standstill gap plus 1.2 seconds of current speed, the leader's forward speed and a braking-distance constraint. Oriented hull extents define the lane corridor. The faster car slows behind the first and accelerates again when its path clears.
+- Each car owns its route cursor and independently chooses crossing exits; B does not copy A's route. Spawn placement walks upstream through explicit lane connections, including crossing curves, instead of projecting an offset onto an arbitrary nearby lane. Unsupported upstream placement reports an error rather than overlapping the cars.
+- Cars advance on one shared 60 Hz schedule, with car-to-car contact response each tick. Full population streaming/management remains future work.
 
 ## Vehicle, damage and sound
 
@@ -26,10 +29,13 @@ Immutable model geometry/materials, decoded engine audio and road curves are cac
 
 ## Controls and validation
 
-**Restart traffic near (0, 0, 0)** replaces the test instance using cached assets. **Inspect traffic Pickup** focuses the independent camera once without changing the streaming camera. **Test traffic impact** applies a test impulse. Status includes mode, speed, RPM, road, crossings, damage version and position.
+**Restart traffic near (0, 0, 0)** replaces the test instances using cached assets. **Inspect traffic Pickup** focuses the independent camera once between the cars without changing the streaming camera. **Test traffic impact** applies a test impulse to A. Each car's status includes cruise target, mode, actual speed, RPM, road, selected exit, crossings, damage version and position.
 
-No traffic-light obedience, original native registration, traffic persistence, or full traffic streaming system is claimed.
+Traffic signals use a shared 20-second green / 5-second blocking-yellow cycle, with all other approaches red. Each incoming branch governs all its lanes, and a car already past the entry line continues. Missing-lamp approaches at a regulated crossing use a five-second STOP fallback. Explicit STOP/YIELD fixtures also wait five stopped seconds, without crossing-traffic checks. Stock road-marking identification remains pending; see [signal research and policy](traffic-signals-research.md).
+
+Original native registration, traffic persistence, and a full traffic streaming system are not yet implemented.
 
 - Tests cover reverse road/crossing traversal, explicit topology, stable random branch selection, unsupported exits and bounded long frames.
 - Bot tests cover stopped-time recovery without teleportation, the 3.5-second reverse maneuver, queuing, physical spring support/driving, impact deformation and independent damage with shared graph data.
+- A physical two-car test checks that the 30 km/h car catches the 15 km/h car without contact, maintains more than 2 m bumper clearance and accelerates above 25 km/h after the lane clears. Navigation tests cover upstream placement across a crossing and independent branch selection.
 - A physical City-graph run on flat test terrain traversed six crossings in 300 simulated seconds, with maximum planar route deviation about 1.5 m and straight-road speed near 15 km/h. This validates navigation/steering, not every real City obstacle.

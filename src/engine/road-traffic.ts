@@ -69,7 +69,7 @@ const graphs = new WeakMap<RoadNetwork, { connections: Map<number, TrafficTurn[]
 const turns=new WeakMap<RoadSegment,TrafficCurve>();
 function crossingCurve(segment:RoadSegment){let curve=turns.get(segment);if(!curve){curve=new TrafficCurve([segment]);turns.set(segment,curve);}return curve;}
 
-/** One kinematic traffic experiment. No new physics bodies, collision or signal policy. */
+/** Per-car navigation cursor over a shared road graph; no physics or signal policy. */
 export class RoadTrafficCar {
   readonly speed = 15 / 3.6;
   readonly position = new Vector3();
@@ -84,12 +84,31 @@ export class RoadTrafficCar {
   crossingsPassed = 0;
   travelled = 0;
   stopped = false;
-  constructor(network: RoadNetwork, spawn = new Vector3(), private random = Math.random) {
+  constructor(private network: RoadNetwork, spawn = new Vector3(), private random = Math.random) {
     let graph=graphs.get(network);
     if(!graph){graph={connections:trafficConnections(network),curves:new Map(network.others.map(road=>[road.id,new TrafficCurve(road.segments)]))};graphs.set(network,graph);}
     this.connections = graph.connections;this.curves=graph.curves;
     this.curve = this.curves.values().next().value!;
     this.rejoin(spawn);
+  }
+  /** Place an independent cursor upstream on this lane, including explicit crossing connections. */
+  spawnBehind(metres:number,random=Math.random):RoadTrafficCar {
+    if(!Number.isFinite(metres)||metres<0)throw Error('Invalid traffic following distance');
+    const car=new RoadTrafficCar(this.network,this.position,random);
+    car.roadId=this.roadId;car.curve=this.curve;car.at=this.at;car.crossingTurn=this.crossingTurn;car.pending=undefined;
+    let remaining=metres;
+    for(let i=0;remaining>car.at&&i<32;i++){
+      remaining-=car.at;
+      if(car.crossingTurn){car.crossingTurn=undefined;car.curve=car.curves.get(car.roadId)!;}
+      else{
+        const previous=[...car.connections].flatMap(([incoming,turns])=>turns.filter(turn=>turn.outgoing===car.roadId).map(turn=>({incoming,turn})))[0];
+        if(!previous)throw Error('No connected upstream road for traffic spawn');
+        car.roadId=previous.incoming;car.crossingTurn=previous.turn;car.curve=crossingCurve(previous.turn.segment);
+      }
+      car.at=car.curve.length;
+    }
+    if(remaining>car.at)throw Error('Traffic spawn exceeds upstream traversal limit');
+    car.at-=remaining;car.curve.sample(car.at,car.position,car.direction);return car;
   }
   /** Rebind navigation only; never moves a physical vehicle. Graph buffers are shared. */
   rejoin(spawn:Vector3) {
@@ -110,14 +129,19 @@ export class RoadTrafficCar {
     this.curve.sample(sample,position,direction);
   }
   /** Project progress onto the current spline; crossing transitions remain topology constrained. */
-  follow(position:Vector3){
+  follow(position:Vector3,allowCrossing=true){
     const nearest=this.curve.nearest(position,true);this.at=Math.max(this.at,nearest.at);
     const end=this.curve.points.at(-1)!;
-    if(this.curve.length-this.at<1&&Math.hypot(position.x-end.x,position.z-end.z)<1.5)this.moveDistance(this.curve.length-this.at+.01);
+    if(allowCrossing&&this.curve.length-this.at<1&&Math.hypot(position.x-end.x,position.z-end.z)<1.5)this.moveDistance(this.curve.length-this.at+.01);
     this.curve.sample(this.at,this.position,this.direction);
   }
   get phase() { return this.crossingTurn ? `crossing #${this.crossingTurn.crossing}` : `road #${this.roadId}`; }
   get nextRoad() { return this.pending?.outgoing; }
+  get approach(){
+    if(this.crossingTurn)return;
+    const crossing=this.connections.get(this.roadId)?.[0]?.crossing;if(crossing===undefined)return;
+    return {road:this.roadId,crossing,remaining:this.curve.length-this.at,key:`${this.crossingsPassed}:${this.roadId}:${crossing}`};
+  }
   private chooseTurn() {
     const turns = this.connections.get(this.roadId) ?? [];
     const branches = [...new Set(turns.map(turn => turn.branch))]; if (!branches.length) return;

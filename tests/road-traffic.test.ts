@@ -60,3 +60,15 @@ test('inline traffic wheel render keeps its resource and local orientation', () 
   assert.equal(config.wheels[0].render?.resource, 10); assert.equal(config.wheels[0].render?.pose?.rotation[0], 3.142);
   assert.equal(config.wheels[1].render?.resource, 11); assert.equal(config.render, 1);
 });
+
+test('following spawn walks upstream through explicit crossing links and keeps independent exit choices',()=>{
+  const network=junction();network.others[0]=road(2,[0,0,0],[-100,0,0]);
+  const lead=new RoadTrafficCar(network,new Vector3(-1,0,0),()=>0);
+  for(let i=0;i<60;i++)lead.advance(.1);
+  const rear=lead.spawnBehind(25,()=>.999);
+  assert.ok(rear.position.x<lead.position.x-15);assert.equal(rear.roadId,2);
+  const independent=new RoadTrafficCar(network,new Vector3(-10,0,0),()=>0).spawnBehind(0,()=>.999);
+  const original=new RoadTrafficCar(network,new Vector3(-10,0,0),()=>0);
+  independent.advance(.1);original.advance(.1);
+  assert.equal(original.nextRoad,3);assert.equal(independent.nextRoad,4);
+});

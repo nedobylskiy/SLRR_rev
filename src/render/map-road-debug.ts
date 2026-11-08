@@ -1,5 +1,7 @@
 import { BufferGeometry, Color, Float32BufferAttribute, Group, LineBasicMaterial, LineSegments, Points, PointsMaterial, Vector3, type PerspectiveCamera, type Object3D } from 'three';
 import { roadWordFloat, sampleRoadSegment, type RoadNetwork, type RoadSegment } from '../formats/trc';
+import {trafficConnections} from '../engine/road-traffic';
+import type {TrafficControl} from '../engine/traffic-control';
 
 export type RoadDebugLayer = 'graph' | 'crossings' | 'metadata';
 interface Label { position: Vector3; text: string; detail: string; crossing: boolean }
@@ -16,6 +18,10 @@ export class MapRoadDebug {
   private metadata = false;
   private nextLabels = -Infinity;
   private projected = new Vector3();
+  private crossingLines:LineSegments;
+  private laneRanges:{road?:number;start:number;count:number}[]=[];
+  private colorControl?:TrafficControl;
+  private colorPhase=-2;
   constructor(parent: Object3D, container: HTMLElement, network: RoadNetwork) {
     this.root.name = 'Road graph debug'; this.root.add(this.graph, this.crossings); parent.add(this.root);
     this.graph.visible = this.crossings.visible = false;
@@ -44,11 +50,19 @@ export class MapRoadDebug {
       const geometry = new BufferGeometry(); geometry.setAttribute('position', new Float32BufferAttribute(positions, 3));
       if (gradient) geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
       const mesh = new LineSegments(geometry, new LineBasicMaterial({ color: gradient ? 0xffffff : color, vertexColors: gradient, depthTest: false, depthWrite: false, fog: false, toneMapped: false }));
-      mesh.renderOrder = 20; target.add(mesh);
+      mesh.renderOrder = 20; target.add(mesh);return mesh;
     };
     line(network.paths.map(record => record.segments), 0x54eaff, this.graph);
     line(network.others.map(record => record.segments), 0x67a0ff, this.graph, true);
-    line(network.nodes.flatMap(node => node.lanes.map(lane => [lane.segment])), 0x9dbeaa, this.graph);
+    const lanes=network.nodes.flatMap(node=>node.lanes),owners=new Map<RoadSegment,number|undefined>();
+    for(const [road,connections] of trafficConnections(network))for(const turn of connections){
+      if(!owners.has(turn.segment))owners.set(turn.segment,road);else if(owners.get(turn.segment)!==road)owners.set(turn.segment,undefined);
+    }
+    let vertex=0;for(const lane of lanes){const count=Math.max(2,Math.min(32,Math.ceil(lane.segment.length/8)))*2;this.laneRanges.push({road:owners.get(lane.segment),start:vertex,count});vertex+=count;}
+    this.crossingLines=line(lanes.map(lane=>[lane.segment]),0xffffff,this.graph);
+    this.crossingLines.geometry.setAttribute('color',new Float32BufferAttribute(new Float32Array(vertex*3),3));
+    (this.crossingLines.material as LineBasicMaterial).vertexColors=true;
+    this.updateTraffic();
     for (const group of [0, 1]) {
       const nodes = network.nodes.filter(node => node.group === group);
       const geometry = new BufferGeometry(); geometry.setAttribute('position', new Float32BufferAttribute(nodes.flatMap(node => [node.position[0], node.position[1] + .6, node.position[2]]), 3));
@@ -71,6 +85,19 @@ export class MapRoadDebug {
     else this[layer].visible = visible;
     this.nextLabels = -Infinity;
     if (!this.metadata) this.pool.forEach(label => label.hidden = true);
+  }
+  /** Update only vertex colors when the shared signal phase changes; keep every spline buffer. */
+  updateTraffic(control?:TrafficControl){
+    const phase=control?.phaseRevision??-1;if(control===this.colorControl&&phase===this.colorPhase)return;
+    this.colorControl=control;this.colorPhase=phase;
+    const colors=this.crossingLines.geometry.getAttribute('color'),tint=new Color();
+    for(const lane of this.laneRanges){
+      const rule=lane.road===undefined?undefined:control?.rule(lane.road);
+      const known=control&&lane.road!==undefined&&(!rule||rule.kind==='signal');
+      tint.setHex(!known?0x9dbeaa:!rule||control!.state(rule.crossing,rule.branch)==='green'?0x36ff65:0xff3838);
+      for(let i=lane.start;i<lane.start+lane.count;i++)colors.setXYZ(i,tint.r,tint.g,tint.b);
+    }
+    colors.needsUpdate=true;
   }
   update(camera: PerspectiveCamera, width: number, height: number, now: number) {
     if (!this.metadata || now < this.nextLabels) return;
