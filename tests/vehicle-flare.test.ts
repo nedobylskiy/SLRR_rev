@@ -26,8 +26,11 @@ test('PNG lamp flare preserves image dimensions and alpha without PTX atlas crop
     assert.deepEqual(draws, [[bitmap, 0, 0]], 'draw RGBA image directly without replacing alpha or selecting a PTX tile');
     assert.equal(a.material.transparent, true);
     const atlas = await createVehicleFlare({ ...source, textureMode: 2 }, assets);
-    assert.deepEqual(atlas.material.map!.repeat.toArray(), [0.5, 0.5]);
-    assert.deepEqual(atlas.material.map!.offset.toArray(), [0, 0.5]);
+    assert.equal(atlas.material.map!.image.width, 48);
+    assert.equal(atlas.material.map!.image.height, 24);
+    assert.deepEqual(draws[1].slice(1), [0, 0, 48, 24, 0, 0, 48, 24], 'bake the upper-left tile for sprite and lens shaders');
+    assert.deepEqual(atlas.material.map!.repeat.toArray(), [1, 1]);
+    assert.deepEqual(atlas.material.map!.offset.toArray(), [0, 0]);
     assert.notEqual(a.material.map, b.material.map, 'GPU texture lifetimes remain independent');
     for (const sprite of [a, b, atlas]) { sprite.material.map!.dispose(); sprite.material.dispose(); }
   } finally {

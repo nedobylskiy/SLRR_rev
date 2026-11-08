@@ -45,3 +45,18 @@ In [assembled vehicle mode](car-crash-demo.md) added stationary obstacle nodes, 
 The current scene [Vehicle3D](vehicle-3d.md) already removes the flat limitation: jumps/flips, CFG suspension supports and volumetric frames of other body panels are implemented. The headlights do not deform, but separate like a rigid body. The supporting structure of the chassis still remains a rigid body with a deformable shell; Full prop reactions, self-collisions and snapshots remain the next steps.
 
 The points of the initial collision geometry can be the input for constructing the frame. The connections, mass distribution and material parameters will either have to be reconstructed from additional data/EXE or explicitly generated and calibrated as a new model. The original geometry itself does not uniquely define them.
+
+### Mounted hood under vertical suspension loads
+
+The driving hood now uses a 0.12m effective cage reinforcement depth, beam stiffness
+750000 and yield strain 0.018 (previously 0.08m, 500000 and 0.012). This is the
+spacing of the structural cage layers, not sheet-metal thickness or a change to
+the visible mesh. Mass, mount strength and XPBD iteration count are unchanged.
+The 120Hz small-hop regression (initial vertical velocity 1.5m/s) reduces peak
+local sag from about 8.1cm to 4.7cm. Severe-impact release and detached settling
+remain covered by the existing tests; the hop/release tests also pass on WASM.
+Visual evaluation on different stock cars is still required.
+
+For a new map driving session, settleSpawn initializes rigid-body suspension support
+before the first displayed frame. It does not run damage/XPBD ticks or advance the
+vehicle recorder clock. This initialization is separate from the hood reinforcement.

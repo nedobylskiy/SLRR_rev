@@ -411,7 +411,11 @@ export class JavaSourceMachine {
     }
   }
   private binary(op: string, a: JavaValue, b: JavaValue): JavaValue {
-    if (op === '+' && (a.type === 'String' || b.type === 'String')) return jv('String', String(a.value) + String(b.value));
+    if (op === '+' && (a.type==='String'||a.type==='java.lang.String'||b.type==='String'||b.type==='java.lang.String')) {
+      // SLRR scripts accumulate strings from null (e.g. Mechanic's String flags;).
+      // This dialect treats null as empty during concatenation, unlike standard Java.
+      return jv('String', (a.value===null?'':String(a.value))+(b.value===null?'':String(b.value)));
+    }
     if (op === '==' || op === '!=') return jv('int', (a.value === b.value) === (op === '==') ? 1 : 0);
     const x = Number(a.value), y = Number(b.value), type = a.type === 'float' || b.type === 'float' ? 'float' : 'int';
     const comparisons: Record<string, boolean> = { '<': x < y, '>': x > y, '<=': x <= y, '>=': x >= y };

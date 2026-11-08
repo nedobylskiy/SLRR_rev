@@ -89,7 +89,7 @@ export class OsdLayer {
     return node;
   }
 
-  private handle(node: HTMLElement, image?: HTMLImageElement): OsdElement {
+  private handle(node: HTMLElement, image?: HTMLImageElement, intrinsicText=false): OsdElement {
     let imageRequest = 0;
     return {
       node,
@@ -103,7 +103,10 @@ export class OsdLayer {
       setBounds: (x, y, width, height, depth) => {
         const bounds = osdBounds(x, y, width, height);
         node.style.left = `${bounds.left}%`; node.style.top = `${bounds.top}%`;
-        node.style.width = `${bounds.width}%`; node.style.height = `${bounds.height}%`;
+        // Text.setPos uses zero dimensions to move an intrinsic glyph box.
+        // A literal 0% width makes translateX(-100%) right alignment a no-op.
+        node.style.width = intrinsicText&&width===0?'max-content':`${bounds.width}%`;
+        node.style.height = intrinsicText&&height===0?'auto':`${bounds.height}%`;
         node.style.zIndex = String(depth + 10);
       },
       show: () => { node.hidden = false; },
@@ -159,7 +162,7 @@ export class OsdLayer {
     const node = this.place(document.createElement('span'), x, y, 0, 0, depth);
     node.classList.add('osd-text', `osd-align-${align}`);
     node.textContent = value;
-    return this.handle(node);
+    return this.handle(node,undefined,true);
   }
 
   createHitTarget(label: string, x: number, y: number, width: number, height: number, depth: number,

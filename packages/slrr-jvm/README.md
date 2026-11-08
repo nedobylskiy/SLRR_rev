@@ -98,3 +98,8 @@ SLRR source calls can pass a floating numeric literal to an `int` parameter. The
 Async native callbacks receive an optional `continuation`. Its `ready` promise resolves when the calling Java method returns or explicitly yields. A thread host can schedule its first `run()` after this promise instead of guessing a startup delay. Ordinary asynchronous asset I/O does not release it.
 
 Blocking thread primitives such as `sleep` and `wait` should call `continuation?.yield()` before awaiting their host timer or notification. This releases deferred work in the current caller chain, allowing child threads to run while their parent sleeps. Continuations are per invocation, so unrelated suspended Java calls do not share a global startup barrier.
+
+
+### SLRR string concatenation
+
+For the SLRR script dialect, a null reference contributes an empty string to string concatenation (`+`). The original Mechanic source builds optional flags from an uninitialized `String flags;` and later appends that optional string to a part name. This differs from standard Java's literal `"null"` conversion. Null references themselves remain null, equality checks are unchanged, and an actual string containing `"null"` is preserved. Synchronous and asynchronous execution share this operator implementation.

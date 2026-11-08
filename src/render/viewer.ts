@@ -17,8 +17,9 @@ import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
-import { cfgRenderVisible, applyCfgRenderChannels } from './vehicle-lights';
+import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
+import { createVehicleBeam, createHeadlightCameraFlare } from './vehicle-beam';
 import { linkedRenderPose } from '../engine/linked-render';
 import { selectLinkedRule } from '../engine/linked-slots';
 import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugRotation, rearArmAdjustment, type SuspensionDebugSettings } from './suspension-debug';
@@ -269,7 +270,7 @@ export class Viewer {
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Static environment: ${this.environmentPath??'none'}`,
-    `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
+    `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
     `Map variants: daytime only · excluded night batches ${this.excludedNightMapVariants} · component instances ${this.excludedNightMapInstances}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
@@ -436,6 +437,7 @@ export class Viewer {
       this.gpuOcclusion.workProfile.setEnabled(this.profiler.captureCpuFrame);
       this.profiler.beginFrame(now);
       try {
+      this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.beginFrame());
       if (document.hidden) this.previousFrame = undefined;
       if (this.previousFrame !== undefined && now > this.previousFrame) {
         this.profiler.recordFrame(now - this.previousFrame);
@@ -490,6 +492,7 @@ export class Viewer {
         this.gpuOcclusion.renderMain(()=>this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera),this.earlyMapCulling?this.staticMapRoot:undefined))));
       this.profiler.measure('GPU occlusion debug CPU',()=>this.gpuOcclusion.renderDebug(renderCamera));
       this.profiler.endGpu();
+      this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.endFrame());
       }finally{
         this.profiler.endGpu();this.profiler.endFrame();
         if(this.renderRecorder?.status.recording){const size=this.renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -831,6 +834,7 @@ export class Viewer {
           const extraModel = await parseScxAsync(await assets.read(extra.model.path));
           bindLinkedRender(sub, extra.links, extraModel, extra.pose, extra.linkRules);
           await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint);
+          configureCfgLampEmission(sub, extra.flags);
         }
         syncLinkedRenders(part, group);
       }
@@ -931,6 +935,7 @@ export class Viewer {
         const extraModel = await parseScxAsync(await assets.read(extra.model.path));
         bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
         warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint, true));
+        configureCfgLampEmission(submodel, extra.flags);
         if (generation !== this.generation) return warnings;
       }
       for (const light of part.definition.lights ?? []) {
@@ -947,6 +952,16 @@ export class Viewer {
           .multiply(light.pose ? poseMatrix(light.pose) : new THREE.Matrix4());
         lamp.userData.lightFlags = light.flags ?? 0; lamp.visible = cfgRenderVisible(light.flags, world.lightMask);
         lamp.add(flare); group.add(lamp);
+        if (light.source.beam && ((light.flags ?? 0) & 4)) {
+          try {
+            const beam = createVehicleBeam(light.source);
+            if (generation !== this.generation || world.disposed) {
+              beam?.userData.disposeVehicleLight?.(); return warnings;
+            }
+            if (beam) lamp.add(beam);
+            lamp.add(createHeadlightCameraFlare(light.source, flare, Math.min(0.25, lensRadius)));
+          } catch (error) { warnings.push(`Headlight projector ${part.definition.alias}: ${String(error)}`); }
+        }
       }
     }
     if (generation === this.generation && !world.disposed) {
@@ -1206,7 +1221,7 @@ export class Viewer {
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -1256,7 +1271,7 @@ export class Viewer {
         }
       }
       crash.setBodyTriangles(triangles);
-      if (track && crash instanceof Vehicle3D) { crash.disableObstacle(); crash.placeAt(track.position, track.yaw); }
+      if (track && crash instanceof Vehicle3D) { crash.disableObstacle(); crash.placeAt(track.position, track.yaw); crash.settleSpawn(); }
       for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part)); panelViews.push(view); panelParts.set(view, s.part); }
       const rampGeometry = new THREE.BufferGeometry();
       rampGeometry.setAttribute('position', new THREE.Float32BufferAttribute([-1.8, 0, -4, 1.8, 0, -4, 1.8, 1.12, -8, -1.8, 0, -4, 1.8, 1.12, -8, -1.8, 1.12, -8], 3)); rampGeometry.computeVertexNormals();
@@ -1357,8 +1372,18 @@ export class Viewer {
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
         this.physicsWork = `Physics rate: ${crash.physicsFrequency} Hz · step ${(crash.physicsDt*1000).toFixed(3)} ms · XPBD iterations ${XPBD_ITERATIONS}\nPhysics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
-      root.world.lightMask = (root.world.lightMask & ~3) | (input.brake ? 1 : 0)
-        | (crash instanceof Vehicle3D && crash.suspension.mechanics?.gear === -1 ? 2 : 0);
+      const timeOfDay = java?.timeOfDay?.() ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
+      const night = isNightTime(timeOfDay);
+      if (this.lighting.setNightShadows(this.renderer, this.sunLight, night)) {
+        this.staticMapShadows.setNightQuality(night);
+        this.scene.traverse(object => {
+          if (object instanceof THREE.Mesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.needsUpdate = true;
+        });
+      }
+      root.world.lightMask = drivingLightMask(root.world.lightMask, input.brake,
+        crash instanceof Vehicle3D && crash.suspension.mechanics?.gear === -1,
+        crash instanceof Vehicle3D && !!crash.suspension.mechanics?.running,
+        timeOfDay);
       this.profiler.measure('Vehicle world sync CPU',()=>this.syncWorld(softParts));
       for (const [part, helper] of vehicleBounds) {
         if (!helper.visible) continue;
@@ -1452,7 +1477,7 @@ export class Viewer {
       canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
-      root.world.lightMask &= ~3;
+      root.world.lightMask &= ~7;
       panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
@@ -1604,6 +1629,8 @@ export class Viewer {
   }
   private disposeGroup(group: THREE.Group): void {
     group.traverse(object => {
+      object.userData.disposeVehicleLight?.();
+      if (object instanceof Lensflare) return;
       if (object instanceof THREE.Sprite) { object.material.map?.dispose(); object.material.dispose(); return; }
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();

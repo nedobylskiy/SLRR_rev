@@ -346,7 +346,7 @@ test('a severe impact can still release the hood as one part', () => {
   assert.ok(relative.z < -0.5 && relative.length() < 1.6, `release follows the incoming -Z motion without an excessive kick: ${relative.toArray()}`);
   for (let i = 0; i < 6 * 240; i++) demo.advance(1 / 240, neutral);
   const landed = demo.soft.get(hood)!.activity.motion();
-  assert.ok(landed.velocity.length() < 0.3 && landed.omega.length() < 0.3, 'a crashed hood eventually settles');
+  assert.ok(landed.velocity.length() < 0.3 && landed.omega.length() < 0.3, `a crashed hood eventually settles: speed ${landed.velocity.length()}, spin ${landed.omega.length()}`);
   world.dispose();
 });
 
@@ -658,4 +658,49 @@ test('120 Hz keeps collision-geometry refresh cadence at 60 Hz',()=>{
   internals.updateSurface=()=>{ticks.push(demo.clock.tick+1);update();};
   for(let i=0;i<12;i++){demo.soft.get(door)!.activity.wake();demo.soft.get(hood)!.activity.wake();demo.advance(1/120,neutral);}
   assert.deepEqual(ticks,[1,3,5,7,9,11]);world.dispose();
+});
+
+test('a 20cm spawn drop does not crumple the mounted hood at 120Hz',()=>{
+  const {demo,world,hood}=setup(true,{ramp:false,height:()=>0,normal:()=>new Vector3(0,1,0)},120);
+  demo.placeAt(new Vector3(0,0.2,0),0);
+  const initial=demo.panel.positions.slice(),inverse=hood.matrix().invert();
+  const rest=Array.from({length:initial.length/3},(_,i)=>new Vector3().fromArray(initial,i*3).applyMatrix4(inverse));
+  let sag=0;
+  for(let frame=0;frame<240;frame++){
+    demo.advance(1/120,neutral);
+    const local=hood.matrix().invert();
+    for(let i=0;i<rest.length;i++)sag=Math.max(sag,rest[i].y-new Vector3().fromArray(demo.panel.positions,i*3).applyMatrix4(local).y);
+  }
+  assert.ok(sag<0.03,`hood sag after spawn settling: ${sag}m, damage ${demo.panel.permanentDamage}, plastic beams ${demo.panel.plasticBeams}`);
+  assert.equal(hood.parent,demo.root);world.dispose();
+});
+
+
+test('spawn suspension initialization eliminates the visible drop without solving or damaging body panels',()=>{
+  const {demo,world,hood}=setup(true,{ramp:false,height:()=>0,normal:()=>new Vector3(0,1,0)},120);
+  demo.placeAt(new Vector3(0,0.2,0),0);
+  const tick=demo.clock.tick;
+  demo.settleSpawn();
+  assert.equal(demo.clock.tick,tick,'initialization must not advance the recorded physics timeline');
+  assert.equal(demo.panel.plasticBeams,0);assert.equal(hood.condition,1);
+  assert.ok([...demo.soft.values()].every(state=>!state.activity.deforming));
+  const height=demo.body.position.y;let movement=0;
+  for(let i=0;i<120;i++){demo.advance(1/120,neutral);movement=Math.max(movement,Math.abs(demo.body.position.y-height));}
+  assert.ok(movement<0.03,`remaining spawn settling ${movement}m`);
+  assert.equal(demo.panel.plasticBeams,0);assert.equal(hood.condition,1);
+  assert.ok(demo.suspension.wheels.every(w=>w.contact));world.dispose();
+});
+
+test('a small vertical hop keeps an attached hood elastic at 120Hz',()=>{
+  const {demo,world,hood}=setup(true,{ramp:false,height:()=>0,normal:()=>new Vector3(0,1,0)},120);
+  demo.settleSpawn();
+  const inverse=hood.matrix().invert(),rest=Array.from({length:demo.panel.positions.length/3},(_,i)=>new Vector3().fromArray(demo.panel.positions,i*3).applyMatrix4(inverse));
+  demo.body.velocity.y=1.5;
+  let sag=0;
+  for(let i=0;i<360;i++){
+    demo.advance(1/120,neutral);const inverse=hood.matrix().invert();
+    for(let j=0;j<rest.length;j++)sag=Math.max(sag,rest[j].y-new Vector3().fromArray(demo.panel.positions,j*3).applyMatrix4(inverse).y);
+  }
+  assert.ok(sag<0.05,`vertical hop hood sag ${sag}m, permanent damage ${demo.panel.permanentDamage}`);
+  assert.ok(demo.panel.permanentDamage<0.001);assert.equal(hood.parent,demo.root);world.dispose();
 });

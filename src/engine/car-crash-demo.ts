@@ -23,7 +23,7 @@ export class CarCrashDemo {
   private localCenter: Vector3;
   private referenceInverse: Matrix4;
   private hoodSurface = { project: (p: Float64Array, previous: Float64Array, offset: number) => !this.panel.attached ? this.bodySurface?.project(p, previous, offset) : undefined };
-  constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength' | 'frequency'> = {}) {
+  constructor(readonly root: EnginePart, readonly hood: EnginePart, samples: ArrayLike<number>, readonly chassisBounds: Box3, material: Pick<PanelOptions, 'stiffness' | 'yieldStrain' | 'mountStrength' | 'frequency' | 'thickness'> = {}) {
     this.clock=new FixedClock(material.frequency??240,32);
     if (!hood.parent || hood.world !== root.world) throw new Error('Crash demo needs an installed hood');
     this.parent = hood.parent; this.parentSlot = hood.parentSlot!; this.ownSlot = hood.ownSlot!; this.originalLocal = hood.local.clone();

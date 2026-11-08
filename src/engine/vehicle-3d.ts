@@ -186,7 +186,9 @@ export class Vehicle3D extends CarCrashDemo {
     }
   }
   constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision,readonly physicsFrequency=REFERENCE_PHYSICS_HZ) {
-    super(root, hood, samples, chassisBounds, { stiffness: 500000, yieldStrain: 0.012, mountStrength: 60000,frequency:physicsFrequency });
+    // The legacy hood cage was softer and shallower than other metal panels.
+    // Reinforcement depth resists bending without increasing mass or solver iterations.
+    super(root, hood, samples, chassisBounds, { stiffness: 750000, thickness: 0.12, yieldStrain: 0.018, mountStrength: 60000,frequency:physicsFrequency });
     this.clock = new FixedClock(this.physicsFrequency,physicsTickBudget(this.physicsFrequency));
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);
@@ -299,6 +301,22 @@ export class Vehicle3D extends CarCrashDemo {
     for (const r of this.rigid.values()) { r.body.setMass(mass(r.part)); r.body.center.copy(r.body.bounds.getCenter(new Vector3())); r.body.setFrame(r.part.matrix()); r.previous.copy(r.part.matrix()); r.peakForce = 0; }
     if (this.triangleSource) { super.setBodyTriangles(this.triangleSource, true); this.rigidSurface = this.bodySurface;this.invalidateSurfaceCache(); }
     this.configureStructure();
+  }
+  /** Initialize suspension support before publishing a new vehicle, without damage ticks. */
+  settleSpawn(){
+    const dt=this.physicsDt;
+    for(let tick=0;tick<Math.ceil(1.5/dt);tick++){
+      this.suspension.step(dt,{throttle:0,steer:0,brake:false});
+      this.body.integrate(dt);
+      for(const point of this.body.corners()){
+        const height=this.terrain.height(point.x,point.z,point.y);
+        if(point.y<height)this.body.contact(point,this.terrain.normal(point.x,point.z,point.y),height-point.y,0);
+      }
+      this.syncBody();
+    }
+    this.body.velocity.set(0,0,0);this.body.setAngularVelocity(new Vector3());
+    this.lastVelocity.set(0,0,0);this.lastOmega.set(0,0,0);this.pendingShock=false;
+    this.syncRecordedPose();this.invalidateSurfaceCache();
   }
   placeAt(position: Vector3, yaw: number) { this.spawn = { position: position.clone(), yaw }; this.reset(); }
   disableObstacle() {

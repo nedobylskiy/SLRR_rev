@@ -1,7 +1,8 @@
+import { Group, Mesh, MeshStandardMaterial, Texture } from 'three';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parsePartConfig, secondaryRenders } from '../src/formats/cfg';
-import { cfgRenderVisible, applyCfgRenderChannels } from '../src/render/vehicle-lights';
+import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, configureCfgLampEmission } from '../src/render/vehicle-lights';
 import { vehicleLight } from '../src/engine/vehicle-light';
 import { Assets } from '../src/assets';
 import type { RpkPack } from '../src/formats/rpk';
@@ -49,4 +50,55 @@ test('lamp channels switch without recreating a part or hiding its base mesh', (
   applyCfgRenderChannels(group, 0); assert.deepEqual(group.children.map(c => c.visible), [true, false, false]);
   applyCfgRenderChannels(group, 1); assert.deepEqual(group.children.map(c => c.visible), [true, true, false]);
   applyCfgRenderChannels(group, 2); assert.deepEqual(group.children.map(c => c.visible), [true, false, true]);
+});
+
+
+test('night lights persist with the engine running, preserve other channels and stop in daylight', () => {
+  assert.equal(drivingLightMask(16, false, false, true, 23 * 3600), 20);
+  assert.equal(drivingLightMask(20, true, true, true, 2 * 3600), 23);
+  assert.equal(drivingLightMask(23, false, false, false, 2 * 3600), 16);
+  assert.equal(drivingLightMask(20, false, false, true, 12 * 3600), 16);
+  assert.equal(drivingLightMask(0, false, false, true, 18 * 3600), 4);
+  assert.equal(drivingLightMask(4, false, false, true, 6 * 3600), 0);
+  assert.equal(drivingLightMask(0, false, false, true, -3600), 4);
+});
+
+test('headlight resolves both attenuation textures relative to the owning resource pack', async () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+  const entries = [
+    { typeId: 8, type: 13, data: encode('type spot\nlf_texture 0x100\nattH_texture 11\nattV_texture 12\ndiffuse 1 0.7 0.8 0.9\nrange 800\ntheta 0.896\nphi 2.5') },
+    { typeId: 256, type: 7, data: encode('sourcefile glow.ptx') },
+    { typeId: 11, type: 7, data: encode('sourcefile horizontal.dds') },
+    { typeId: 12, type: 7, data: encode('sourcefile vertical.png') },
+  ];
+  const assets = new Assets([], async () => new Uint8Array());
+  const packs: string[] = [];
+  assets.resource = async (pack, id) => {
+    packs.push(pack);
+    return { packPath: 'cars/racers.rpk', entry: entries.find(entry => entry.typeId === id)! } as any;
+  };
+  const source = await vehicleLight(assets, 'cars/racers/Einvagen.rpk', 8);
+  assert.deepEqual(source!.beam, { horizontal: 'horizontal.dds', vertical: 'vertical.png',
+    color: [0.7, 0.8, 0.9], range: 800, innerCone: 0.896 });
+  assert.ok(packs.slice(1).every(pack => pack === 'cars/racers.rpk'));
+});
+
+
+test('only switched lamp overlays emit their texture; the unlit base lens stays unchanged', () => {
+  const texture = new Texture();
+  const lens = new MeshStandardMaterial({ map: texture });
+  const switched = new MeshStandardMaterial({ map: texture });
+  const group = new Group(); const overlay = new Group();
+  group.add(new Mesh(undefined, lens), overlay); overlay.add(new Mesh(undefined, switched));
+  configureCfgLampEmission(group, 0);
+  assert.equal(lens.emissive.getHex(), 0);
+  configureCfgLampEmission(overlay, 4);
+  assert.equal(switched.emissiveMap, texture);
+  assert.equal(switched.emissive.getHex(), 0xffffff);
+  assert.ok(switched.emissiveIntensity > 1);
+  assert.equal(lens.emissiveMap, null); assert.equal(lens.emissive.getHex(), 0);
+  overlay.userData.lightFlags = 4;
+  applyCfgRenderChannels(group, 0); assert.equal(overlay.visible, false);
+  applyCfgRenderChannels(group, 4); assert.equal(overlay.visible, true);
+  texture.dispose(); lens.dispose(); switched.dispose();
 });

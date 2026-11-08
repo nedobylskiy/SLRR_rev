@@ -192,3 +192,50 @@ test('hiding a Java OSD also hides its text and dark overlay', () => {
   bridge.syncVisibility();
   assert.equal(shown, false);
 });
+
+
+test('Java TextBox width normalization matches CSS pixels independently of configured resolution and viewport width',async()=>{
+  const sources:Record<string,string>={
+    'java.util.Config':'package java.util; class Config { static int video_x=800; }',
+    'java.render.Text':`package java.render; import java.util.*;
+      class Text { public static native float getWidthPixels(String text,ResourceRef font);
+        public static float getWidth(String text,ResourceRef font,Viewport viewport){return 2*getWidthPixels(text,font)/(Config.video_x*viewport.getWidth());}
+      }`,
+    'java.render.Viewport':'package java.render; class Viewport { native float getWidth(); }',
+  };
+  const jvm=new SlrrJvm({resolveImport:({className})=>sources[className]?{path:className+'.java',source:sources[className]}:null});
+  jvm.natives.register('java.util.resource.ResourceRef','id',[],()=>jv('int',0x20));
+  let viewportWidth=.75;let stage={width:1440,height:810};
+  jvm.natives.register('java.render.Viewport','getWidth',[],()=>jv('float',viewportWidth));
+  new OsdTextNative(jvm,undefined,undefined,()=>stage);
+  await jvm.loadClass('java.render.Text');await jvm.loadClass('java.util.Config');
+  const font=jv('ResourceRef',{className:'java.util.resource.ResourceRef',fields:new Map()}),viewport=jv('Viewport',{className:'java.render.Viewport',fields:new Map()});
+  const baseline=new SlrrJvm({resolveImport:()=>null});baseline.natives.register('java.util.resource.ResourceRef','id',[],()=>jv('int',0x20));new OsdTextNative(baseline);
+  for(const configured of [800,1920])for(const stageWidth of [1024,1440])for(const fraction of [.75,1]){
+    jvm.set(jv('class','java.util.Config'),'video_x',jv('int',configured));stage={width:stageWidth,height:stageWidth*9/16};viewportWidth=fraction;
+    for(const text of ['garage.','Drop parts here from the Parts Bin to repair them!']){
+      const pixels=Number(baseline.natives.invoke('java.render.Text','getWidthPixels',jv('class','java.render.Text'),[jv('String',text),font])!.value);
+      const width=Number((await jvm.invokeAsync(jv('class','java.render.Text'),'getWidth',[jv('String',text),font,viewport])).value);
+      // TextBox centers a left-anchored line by subtracting half this normalized width.
+      const left=(1-width/2)*stageWidth*fraction/2;
+      assert.ok(Math.abs(left+pixels/2-stageWidth*fraction/2)<1e-3,'long and short lines share the same physical midpoint');
+    }
+  }
+});
+
+
+test('TextBox line spacing and font height use physical OSD stage pixels, including sub-viewports',()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null});let stage={width:1440,height:810},fraction=.7;
+  jvm.natives.register('java.util.resource.ResourceRef','id',[],()=>jv('int',0x139));
+  jvm.natives.register('java.render.Viewport','getHeight',[],()=>jv('float',fraction));
+  jvm.natives.register('java.render.Viewport','getWidth',[],()=>jv('float',fraction));
+  new OsdTextNative(jvm,undefined,undefined,()=>stage);
+  const font=jv('ResourceRef',{className:'java.util.resource.ResourceRef',fields:new Map()}),viewport=jv('Viewport',{className:'java.render.Viewport',fields:new Map()});
+  const metric=(name:string)=>Number(jvm.natives.invoke('java.render.Text',name,jv('class','java.render.Text'),[font,viewport])!.value);
+  for(const height of [600,810,1080])for(const region of [.5,.7,1]){
+    stage={width:height*16/9,height};fraction=region;
+    assert.ok(Math.abs(metric('getLineSpacing')*height*region/2-18.75)<1e-6,'15px font advances 18.75px per line at every screen height');
+    assert.ok(Math.abs(metric('getHeight')*height*region/2-15)<1e-6);
+    assert.ok(Math.abs(metric('getCharWidth')*stage.width*region/2-15)<1e-6);
+  }
+});

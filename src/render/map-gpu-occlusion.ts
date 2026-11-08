@@ -83,6 +83,9 @@ export class MapGpuOcclusion {
   private reduce:RawShaderMaterial;
   private test:RawShaderMaterial;
   private pending?:Ticket;
+  private readbackFrameFence?:WebGLSync;
+  private earlyReadback=false;
+  private emptyCandidates=false;
   private staged?:DepthStage;
   private frame=0;private lastSubmit=-Infinity;
   private latency=0;private latencyMs=0;private tested=0;private rejected=0;private submissions=0;private maxLatency=0;
@@ -169,8 +172,8 @@ export class MapGpuOcclusion {
     try{return work();}finally{const restoreStart=this.workProfile.start();for(const m of hidden)m.visible=true;for(const p of proxies)p.removeFromParent();this.hiddenMain=[];this.workProfile.end("main_proxy_restore_ms",restoreStart);}
   }
   private release(s:Source){s.depth?.removeFromParent();s.depth?.dispose();if(s.depth)(s.depth.material as MeshBasicMaterial).dispose();s.proxy?.removeFromParent();s.proxy?.dispose();}
-  reset(){this.cancel();for(const [mesh,listener] of this.sourceDisposals)mesh.removeEventListener("dispose",listener);this.sourceDisposals.clear();for(const s of this.states.values())this.release(s);for(const s of this.dormant.values())this.release(s);this.dormant.clear();this.states.clear();this.candidates=[];this.candidatesDirty=true;this.verdicts=new WeakMap();this.recentHidden=[];this.tested=0;this.lastStreamRevision=undefined;this.lastSubmit=-Infinity;this.submissions=this.rejected=this.maxLatency=this.latency=this.latencyMs=0;this.extraDraws=this.extraTriangles=0;}
-  private cancel(){this.staged=undefined;if(this.pending){const gl=this.renderer.getContext() as WebGL2RenderingContext;gl.deleteSync(this.pending.sync);gl.deleteBuffer(this.pending.buffer);this.pending=undefined;}}
+  reset(){this.cancel();this.emptyCandidates=false;for(const [mesh,listener] of this.sourceDisposals)mesh.removeEventListener("dispose",listener);this.sourceDisposals.clear();for(const s of this.states.values())this.release(s);for(const s of this.dormant.values())this.release(s);this.dormant.clear();this.states.clear();this.candidates=[];this.candidatesDirty=true;this.verdicts=new WeakMap();this.recentHidden=[];this.tested=0;this.lastStreamRevision=undefined;this.lastSubmit=-Infinity;this.submissions=this.rejected=this.maxLatency=this.latency=this.latencyMs=0;this.extraDraws=this.extraTriangles=0;}
+  private cancel(){this.staged=undefined;if(this.readbackFrameFence){(this.renderer.getContext() as WebGL2RenderingContext).deleteSync(this.readbackFrameFence);this.readbackFrameFence=undefined;}if(this.pending){const gl=this.renderer.getContext() as WebGL2RenderingContext;gl.deleteSync(this.pending.sync);gl.deleteBuffer(this.pending.buffer);this.pending=undefined;}}
   private showAll(){for(const s of this.states.values()){s.hidden=0;s.proxy?.removeFromParent();s.kept='';}}
   private collect(root:Group,changes?:readonly InstancedMesh[]){if(!this.workProfile.enabled)return this.collectCore(root,changes);return this.workProfile.measure("collect_ms",()=>this.collectCore(root,changes));}
   private collectCore(root:Group,changes?:readonly InstancedMesh[]){
@@ -301,6 +304,52 @@ export class MapGpuOcclusion {
       for(let i=0;i<kept.length;i++){p.instanceMatrix.array.set(s.mesh.instanceMatrix.array.subarray(kept[i]*16,kept[i]*16+16),i*16);if(s.mesh.instanceColor){this.instanceColor.fromArray(s.mesh.instanceColor.array,kept[i]*3);p.setColorAt(i,this.instanceColor);}}
       p.count=kept.length;p.instanceMatrix.needsUpdate=true;if(p.instanceColor)p.instanceColor.needsUpdate=true;p.computeBoundingSphere();s.kept=key;
   }
+  private hasCandidateSources(){
+    for(const state of this.states.values())if(!state.depth&&state.mesh.count>0&&state.bounds.length>0)return true;
+    return false;
+  }
+  private skipEmptyCandidates(){
+    this.cancel();this.emptyCandidates=true;this.tested=0;
+    this.lastDraws=this.lastDepthDraws=this.lastTriangles=0;
+    this.latency=this.latencyMs=0;this.error='';
+    this.workProfile.add('empty_candidate_frames_count');
+  }
+  /** Read before this RAF submits any GPU rendering or buffer updates. */
+  beginFrame(){
+    this.earlyReadback=true;
+    if(!this.enabled||!this.pending)return;
+    if(!this.pending.items.length||!this.hasCandidateSources()){this.skipEmptyCandidates();return;}
+    try{this.pollReadback();}catch(error){this.error=String(error);this.cancel();}
+  }
+  /** Fence the submission frame once; replacing it each RAF can starve readback. */
+  endFrame(){
+    if(!this.pending||this.readbackFrameFence)return;
+    const gl=this.renderer.getContext() as WebGL2RenderingContext;
+    this.readbackFrameFence=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0)??undefined;
+    if(!this.readbackFrameFence){this.error='GPU frame fence allocation failed';this.cancel();return;}
+    gl.flush();
+  }
+  private pollReadback(){
+    const gl=this.renderer.getContext() as WebGL2RenderingContext;
+    if(gl.isContextLost()){this.reset();return;}
+    if(this.readbackFrameFence){
+      const start=this.workProfile.start(),status=gl.clientWaitSync(this.readbackFrameFence,0,0);
+      this.workProfile.end('frame_fence_poll_ms',start);
+      if(status===gl.WAIT_FAILED){this.cancel();this.error='GPU frame fence failed';return;}
+      if(status===gl.TIMEOUT_EXPIRED){this.workProfile.add('readback_deferred_busy_frame_count');return;}
+      gl.deleteSync(this.readbackFrameFence);this.readbackFrameFence=undefined;
+    }
+    if(this.pending){const pollStart=this.workProfile.start();const t=this.pending,status=gl.clientWaitSync(t.sync,0,0);this.workProfile.end("fence_poll_ms",pollStart);
+        if(status===gl.WAIT_FAILED){this.cancel();this.error='GPU fence failed';return;}
+        if(status!==gl.TIMEOUT_EXPIRED){
+          this.latency=this.frame-t.frame;this.latencyMs=performance.now()-t.time;this.maxLatency=Math.max(this.maxLatency,this.latencyMs);
+          const previous=gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);gl.bindBuffer(gl.PIXEL_PACK_BUFFER,t.buffer);
+          const readStart=this.workProfile.start();
+          try{gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,t.bytes);this.workProfile.end("readback_copy_ms",readStart);this.workProfile.add("readback_bytes_count",t.bytes.length);}finally{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,previous);}
+          this.apply(t);this.cancel();
+      }
+    }
+  }
   prepare(camera:Camera,root:Group|undefined,bypass=false,streamRevision?:number,changes?:MapStreamChanges){
     this.frame++;this.extraDraws=this.extraTriangles=0;this.bypassed=bypass;
     if(!this.enabled||!root||bypass){this.showAll();this.cancel();return;}
@@ -315,16 +364,16 @@ export class MapGpuOcclusion {
         const incremental=changes&&!changes.full&&changes.fromRevision===this.lastStreamRevision&&changes.revision===streamRevision;
         this.collect(root,incremental?changes.meshes:undefined);collectedFull=!incremental;this.lastStreamRevision=streamRevision;
       }
-      if(this.pending){const pollStart=this.workProfile.start();const t=this.pending,status=gl.clientWaitSync(t.sync,0,0);this.workProfile.end("fence_poll_ms",pollStart);
-        if(status===gl.WAIT_FAILED){this.cancel();this.error='GPU fence failed';return;}
-        if(status!==gl.TIMEOUT_EXPIRED){
-          this.latency=this.frame-t.frame;this.latencyMs=performance.now()-t.time;this.maxLatency=Math.max(this.maxLatency,this.latencyMs);
-          const previous=gl.getParameter(gl.PIXEL_PACK_BUFFER_BINDING);gl.bindBuffer(gl.PIXEL_PACK_BUFFER,t.buffer);
-          const readStart=this.workProfile.start();
-          try{gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,t.bytes);this.workProfile.end("readback_copy_ms",readStart);this.workProfile.add("readback_bytes_count",t.bytes.length);}finally{gl.bindBuffer(gl.PIXEL_PACK_BUFFER,previous);}
-          this.apply(t);this.cancel();
+      if(!this.hasCandidateSources()){
+        // Audit unversioned scene changes at normal cadence, not every empty RAF.
+        if(!collectedFull&&this.frame-this.lastSubmit>=this.intervalFrames){this.collect(root);collectedFull=true;}
+        if(!this.hasCandidateSources()){
+          if(collectedFull)this.lastSubmit=this.frame;
+          this.skipEmptyCandidates();return;
         }
       }
+      this.emptyCandidates=false;
+      if(!this.earlyReadback)this.pollReadback();
       // Finish the captured depth snapshot before starting another generation.
       // Neither a pending stage nor a pending fence changes the last applied mask.
       if(this.staged){this.submit();this.error='';return;}
@@ -360,7 +409,8 @@ export class MapGpuOcclusion {
       if(!camera)return;
       items=this.prepareCandidates();
       // Never partially evaluate a source when the bounded result texture is full.
-      if(!items.length||items.length>32768)return;
+      if(!items.length){this.skipEmptyCandidates();return;}
+      if(items.length>32768)return;
       this.depthNearFar.set('near' in camera?Number(camera.near):.1,'far' in camera?Number(camera.far):5000);
     }
     const r=this.renderer,previous=r.getRenderTarget(),face=r.getActiveCubeFace(),mip=r.getActiveMipmapLevel(),viewport=r.getViewport(new Vector4()),scissor=r.getScissor(new Vector4()),scissorTest=r.getScissorTest(),auto=r.autoClear,shadows=r.shadowMap.enabled,xr=r.xr.enabled;
@@ -418,7 +468,7 @@ export class MapGpuOcclusion {
       }
     }finally{r.setViewport(viewport);r.setScissor(scissor);r.setScissorTest(scissorTest);r.autoClear=auto;r.info.autoReset=reset;r.shadowMap.enabled=shadows;}
   }
-  stats(){return {enabled:this.enabled,pipeline_stage:this.staged?'depth-ready':this.pending?'readback-pending':'idle',split_across_frames:true,recent_applied_hidden_min:this.recentHidden.length?Math.min(...this.recentHidden):0,recent_applied_hidden_max:this.recentHidden.length?Math.max(...this.recentHidden):0,visibility_camera:'primary',observer_view:this.observerView,bypassed:this.bypassed,apply_results:this.applyResults,debug_mode:this.debugMode,frozen:this.freeze,interval_frames:this.intervalFrames,tested_instances:this.tested,depth_only_instances:[...this.states.values()].filter(s=>s.depth).reduce((n,s)=>n+s.mesh.count,0),candidate_instances:[...this.states.values()].filter(s=>!s.depth).reduce((n,s)=>n+s.mesh.count,0),depth_terrain_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='terrain').length,depth_structure_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='structure').length,excluded_prop_batches:[...this.states.values()].filter(s=>s.mesh.userData.mapOcclusionRole==='prop').length,hidden_instances:[...this.states.values()].reduce((n,s)=>n+s.hidden,0),hidden_draws:[...this.states.values()].filter(s=>s.hidden===s.mesh.count).length,latency_frames:this.latency,latency_ms:this.latencyMs,max_latency_ms:this.maxLatency,rejected_results:this.rejected,submissions:this.submissions,depth_draws:this.lastDepthDraws,extra_draws_per_update:this.lastDraws,extra_triangles_per_update:this.lastTriangles,error:this.error};}
+  stats(){return {enabled:this.enabled,empty_candidates:this.emptyCandidates,pipeline_stage:this.staged?'depth-ready':this.pending?'readback-pending':this.emptyCandidates?'empty':'idle',split_across_frames:true,recent_applied_hidden_min:this.recentHidden.length?Math.min(...this.recentHidden):0,recent_applied_hidden_max:this.recentHidden.length?Math.max(...this.recentHidden):0,visibility_camera:'primary',observer_view:this.observerView,bypassed:this.bypassed,apply_results:this.applyResults,debug_mode:this.debugMode,frozen:this.freeze,interval_frames:this.intervalFrames,tested_instances:this.tested,depth_only_instances:[...this.states.values()].filter(s=>s.depth).reduce((n,s)=>n+s.mesh.count,0),candidate_instances:[...this.states.values()].filter(s=>!s.depth).reduce((n,s)=>n+s.mesh.count,0),depth_terrain_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='terrain').length,depth_structure_batches:[...this.states.values()].filter(s=>s.depth&&s.mesh.userData.mapOcclusionRole==='structure').length,excluded_prop_batches:[...this.states.values()].filter(s=>s.mesh.userData.mapOcclusionRole==='prop').length,hidden_instances:[...this.states.values()].reduce((n,s)=>n+s.hidden,0),hidden_draws:[...this.states.values()].filter(s=>s.hidden===s.mesh.count).length,latency_frames:this.latency,latency_ms:this.latencyMs,max_latency_ms:this.maxLatency,rejected_results:this.rejected,submissions:this.submissions,depth_draws:this.lastDepthDraws,extra_draws_per_update:this.lastDraws,extra_triangles_per_update:this.lastTriangles,error:this.error};}
   lines(){const s=this.stats();return [`GPU Hi-Z occlusion: ${this.enabled?'on':'off'} · tested ${s.tested_instances} · hidden instances ${s.hidden_instances} / whole draws ${s.hidden_draws} · depth 512×256, every ${this.intervalFrames} frames`,
     `GPU visibility pipeline: split depth / next-frame test · stage ${s.pipeline_stage}`,
     `GPU visibility readback: ${s.latency_frames} frames / ${s.latency_ms.toFixed(1)} ms (max ${s.max_latency_ms.toFixed(1)}) · rejected ${s.rejected_results} · extra draws/update ${s.extra_draws_per_update} (depth ${s.depth_draws})${s.error?` · ERROR ${s.error}`:''}`,

@@ -4,6 +4,20 @@ import { Color, Group, Matrix4, Material, Mesh, MeshDepthMaterial, MeshStandardM
 /** Cached static-scene projection for ground without authored lightmap textures. */
 export class StaticMapShadows {
   readonly enabled = {value:0};
+  readonly hard = {value:0};
+  readonly texel = {value:1/2048};
+  private nightResolution=false;
+
+  setNightQuality(night:boolean){
+    if(night===this.nightResolution)return;
+    this.nightResolution=night;this.hard.value=night?1:0;
+    const radius=night?80:160;
+    Object.assign(this.camera,{left:-radius,right:radius,top:radius,bottom:-radius});
+    this.camera.updateProjectionMatrix();
+    this.texel.value=1/(night?3072:2048);
+    // Keep the previous projection until a new capture succeeds.
+    this.revision=-1;
+  }
   readonly available = {value:0};
   readonly matrix = {value:new Matrix4()};
   readonly texture = {value:null as WebGLRenderTarget['texture'] | null};
@@ -22,6 +36,8 @@ export class StaticMapShadows {
       previous.call(material,shader,renderer);
       shader.uniforms.slrrStaticEnabled = this.enabled;
       shader.uniforms.slrrStaticAvailable = this.available;
+      shader.uniforms.slrrStaticHard = this.hard;
+      shader.uniforms.slrrStaticTexel = this.texel;
       shader.uniforms.slrrStaticMap = this.texture;
       shader.uniforms.slrrStaticMatrix = this.matrix;
       shader.vertexShader = shader.vertexShader
@@ -36,6 +52,8 @@ vSlrrStaticCoord = slrrStaticMatrix * modelMatrix * slrrStaticWorld;`);
         .replace('#include <common>',`#include <common>
 uniform float slrrStaticEnabled;
 uniform float slrrStaticAvailable;
+uniform float slrrStaticHard;
+uniform float slrrStaticTexel;
 uniform sampler2D slrrStaticMap;
 varying vec4 vSlrrStaticCoord;`)
         .replace('#include <opaque_fragment>',`
@@ -43,16 +61,21 @@ if (slrrStaticEnabled > 0.5 && slrrStaticAvailable > 0.5) {
   vec3 p = vSlrrStaticCoord.xyz / vSlrrStaticCoord.w;
   if (all(greaterThan(p,vec3(0.001))) && all(lessThan(p,vec3(0.999)))) {
     float lit = 0.0;
+    if (slrrStaticHard > 0.5) {
+      lit = step(p.z-0.0006, unpackRGBAToDepth(texture2D(slrrStaticMap,p.xy)));
+    } else {
     for (int x=-1;x<=1;x++) for (int y=-1;y<=1;y++) {
-      float depth = unpackRGBAToDepth(texture2D(slrrStaticMap,p.xy+vec2(float(x),float(y))/2048.0));
+      float depth = unpackRGBAToDepth(texture2D(slrrStaticMap,p.xy+vec2(float(x),float(y))*slrrStaticTexel));
       lit += step(p.z-0.0006,depth);
     }
-    outgoingLight = (outgoingLight-totalEmissiveRadiance) * mix(0.55,1.0,lit/9.0) + totalEmissiveRadiance;
+    lit /= 9.0;
+    }
+    outgoingLight = (outgoingLight-totalEmissiveRadiance) * mix(0.55,1.0,lit) + totalEmissiveRadiance;
   }
 }
 #include <opaque_fragment>`);
     };
-    material.customProgramCacheKey = () => `${key}|slrr-static-shadow-v1`;
+    material.customProgramCacheKey = () => `${key}|slrr-static-shadow-v2`;
   }
 
   private depth(source: Material) {
@@ -71,10 +94,13 @@ if (slrrStaticEnabled > 0.5 && slrrStaticAvailable > 0.5) {
   update(renderer: WebGLRenderer, root: Group | undefined, focus: Vector3, direction: Vector3, revision: number, now: number) {
     if (!this.enabled.value || !root || !root.children.length) return;
     const moved = !this.focus || this.focus.distanceToSquared(focus)>40*40;
+    const resized = !!this.target && this.target.width !== (this.nightResolution?3072:2048);
     const turned = this.direction.distanceToSquared(direction)>1e-5;
-    if (!moved && !turned && this.revision===revision) return;
-    if (this.available.value && now-this.updated<1000 && !moved && !turned) return;
-    this.target ??= new WebGLRenderTarget(2048,2048,{minFilter:NearestFilter,magFilter:NearestFilter});
+    if (!moved && !turned && !resized && this.revision===revision) return;
+    if (this.available.value && now-this.updated<1000 && !moved && !turned && !resized) return;
+    const resolution=this.nightResolution?3072:2048;
+    this.target ??= new WebGLRenderTarget(resolution,resolution,{minFilter:NearestFilter,magFilter:NearestFilter});
+    if(resized){this.target.setSize(resolution,resolution);this.available.value=0;}
     this.camera.position.copy(focus).addScaledVector(direction,350);
     this.camera.lookAt(focus);this.camera.updateMatrixWorld(true);
     const projection = new Matrix4().set(0.5,0,0,0.5, 0,0.5,0,0.5, 0,0,0.5,0.5, 0,0,0,1)

@@ -293,3 +293,80 @@ test('prepare accepts contiguous deltas but uses full collection after missing c
   cull.prepare(camera,root,false,5,{fromRevision:4,revision:5,full:false,meshes:[]});assert.equal(cull.workProfile.drain().full_collects_count,1);
   cull.dispose();mesh.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();
 });
+
+
+test('readback retains its submission-frame fence across busy frames without starving the hidden mask',()=>{
+  let frameReady=false,reads=0,deleted=0,fences=0;
+  const ticketFence={ticket:true};
+  const gl={TIMEOUT_EXPIRED:1,WAIT_FAILED:2,ALREADY_SIGNALED:3,PIXEL_PACK_BUFFER_BINDING:4,PIXEL_PACK_BUFFER:5,SYNC_GPU_COMMANDS_COMPLETE:6,
+    isContextLost:()=>false,clientWaitSync:(sync:unknown)=>sync===ticketFence||frameReady?3:1,
+    fenceSync:()=>{fences++;return {frame:true};},flush:()=>{},getParameter:()=>null,bindBuffer:()=>{},
+    getBufferSubData:(_target:number,_offset:number,bytes:Uint8Array)=>{reads++;bytes.fill(255);},
+    deleteSync:()=>{deleted++;},deleteBuffer:()=>{}};
+  const renderer={shadowMap:{render:()=>{}},getContext:()=>gl} as unknown as WebGLRenderer;
+  const cull=new MapGpuOcclusion(renderer),root=new Group(),camera=new PerspectiveCamera();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),1);root.add(mesh);
+  mesh.setMatrixAt(0,new Matrix4().makeTranslation(0,0,-10));mesh.instanceMatrix.needsUpdate=true;
+  root.updateMatrixWorld(true);(cull as any).collect(root);const state=(cull as any).states.get(mesh);
+  (cull as any).apply({items:[{state,slot:0}],bytes:new Uint8Array(4)});
+  cull.enabled=true;cull.freeze=true;(cull as any).submissions=1;(cull as any).lastStreamRevision=0;
+  (cull as any).pending={sync:ticketFence,buffer:{},bytes:new Uint8Array(4),items:[{state,slot:0}],frame:0,time:performance.now()};
+  cull.endFrame();
+  for(let frame=0;frame<3;frame++){
+    cull.beginFrame();cull.prepare(camera,root,false,0);
+    assert.equal(reads,0,'signaled ticket alone must not trigger synchronous readback');
+    assert.equal(cull.stats().hidden_instances,1);
+    cull.endFrame();
+  }
+  assert.equal(fences,1,'waiting for readiness must not replace the fence with newer GPU work');
+  frameReady=true;cull.beginFrame();
+  assert.equal(reads,1);assert.equal(cull.stats().hidden_instances,0,'new ready mask replaces old mask');
+  cull.prepare(camera,root,false,0);assert.equal(reads,1,'prepare does not repeat early readback');
+  assert.equal(deleted,2,'submission-frame fence and consumed ticket are released');
+  cull.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
+});
+
+test('candidate list becoming empty cancels old depth/readback work without clearing cached placement verdicts',()=>{
+  let polls=0,reads=0,syncDeletes=0,bufferDeletes=0;
+  const gl={isContextLost:()=>false,clientWaitSync:()=>{polls++;return 3;},
+    getBufferSubData:()=>{reads++;},deleteSync:()=>syncDeletes++,deleteBuffer:()=>bufferDeletes++};
+  const renderer={getContext:()=>gl,shadowMap:{render:()=>{}}} as unknown as WebGLRenderer;
+  const cull=new MapGpuOcclusion(renderer),root=new Group(),camera=new PerspectiveCamera();
+  const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardMaterial(),1);root.add(mesh);
+  mesh.setMatrixAt(0,new Matrix4().makeTranslation(0,0,-10));mesh.instanceMatrix.needsUpdate=true;
+  root.updateMatrixWorld(true);(cull as any).collect(root);
+  const state=(cull as any).states.get(mesh);
+  (cull as any).apply({items:[{state,slot:0}],bytes:new Uint8Array(4)});
+  cull.enabled=true;(cull as any).lastStreamRevision=0;
+  (cull as any).pending={sync:{},buffer:{},bytes:new Uint8Array(4),items:[{state,slot:0}],frame:0,time:performance.now()};
+  (cull as any).readbackFrameFence={};(cull as any).staged={items:[{state,slot:0}]};
+  (cull as any).tested=1;(cull as any).lastDraws=28;
+  root.remove(mesh);
+  cull.prepare(camera,root,false,1,{fromRevision:0,revision:1,full:false,meshes:[mesh]});
+  assert.equal(polls,0);assert.equal(reads,0);
+  assert.equal(syncDeletes,2);assert.equal(bufferDeletes,1);
+  assert.equal((cull as any).pending,undefined);assert.equal((cull as any).staged,undefined);
+  assert.equal(cull.stats().pipeline_stage,'empty');assert.equal(cull.stats().tested_instances,0);
+  assert.equal(cull.stats().extra_draws_per_update,0);
+  cull.workProfile.setEnabled(true);
+  for(let i=0;i<10;i++){cull.beginFrame();cull.prepare(camera,root,false,1);cull.endFrame();}
+  assert.equal(cull.workProfile.drain().full_collects_count??0,0,'empty scene does not rescan or submit GPU work every RAF');
+  let submitted=0;(cull as any).submit=()=>{submitted++;};
+  root.add(mesh);root.updateMatrixWorld(true);
+  cull.prepare(camera,root,false,2,{fromRevision:1,revision:2,full:false,meshes:[mesh]});
+  assert.equal(cull.stats().empty_candidates,false);
+  assert.equal(cull.stats().hidden_instances,1,'temporary empty list must not erase the saved hidden verdict');
+  for(let i=0;i<12;i++)cull.prepare(camera,root,false,2);
+  assert.ok(submitted>0,'candidates re-entering the streamer resume normal occlusion');
+  cull.dispose();mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();mesh.dispose();
+});
+
+test('empty pending ticket is discarded before polling or allocating a new frame fence',()=>{
+  let deleted=0;
+  const gl={deleteSync:()=>deleted++,deleteBuffer:()=>deleted++};
+  const cull=new MapGpuOcclusion({getContext:()=>gl,shadowMap:{render:()=>{}}} as unknown as WebGLRenderer);
+  cull.enabled=true;(cull as any).pending={sync:{},buffer:{},bytes:new Uint8Array(1024),items:[]};
+  cull.beginFrame();cull.endFrame();
+  assert.equal(deleted,2);assert.equal(cull.stats().empty_candidates,true);
+  cull.dispose();
+});

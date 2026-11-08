@@ -1,4 +1,4 @@
-import { Color, DirectionalLight, MeshStandardMaterial, Vector3 } from 'three';
+import { BasicShadowMap, PCFSoftShadowMap, Color, DirectionalLight, MeshStandardMaterial, Vector3, type WebGLRenderer } from 'three';
 
 /** Debug switches for renderer lighting; original baked lighting is left intact. */
 export class SceneLighting {
@@ -6,6 +6,21 @@ export class SceneLighting {
   readonly vertexColors = { value: 1 };
   readonly direction = new Vector3(3, 5, 4).normalize();
   shadows = false;
+  private nightShadowMode=false;
+
+  /** Change only on a day/night transition; no per-frame map allocation. */
+  setNightShadows(renderer: WebGLRenderer, sun: DirectionalLight, night: boolean): boolean {
+    if (night === this.nightShadowMode) return false;
+    this.nightShadowMode = night;
+    renderer.shadowMap.type = night ? BasicShadowMap : PCFSoftShadowMap;
+    const size = night ? 3072 : 2048, radius = night ? 40 : 100;
+    sun.shadow.mapSize.set(size, size);
+    sun.shadow.map?.dispose(); sun.shadow.map = null;
+    Object.assign(sun.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius, near: night ? 210 : 1, far: night ? 290 : 500 });
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.shadow.needsUpdate = true;
+    return true;
+  }
 
   configureMaterial(material: MeshStandardMaterial, hasVertexColors = false, paintMask = false, paintColor = new Color(1, 1, 1)) {
     // Paint is custom shader state, not fully represented by standard material fields.
@@ -36,9 +51,9 @@ export class SceneLighting {
         .replace('#include <color_fragment>', '')
         .replace('#include <common>', '#include <common>\nuniform float slrrDynamicLighting;')
         .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n#include <shadowmask_pars_fragment>')
-        .replace('#include <opaque_fragment>', 'outgoingLight = mix( diffuseColor.rgb * getShadowMask() + totalEmissiveRadiance, outgoingLight, slrrDynamicLighting );\n#include <opaque_fragment>');
+        .replace('#include <opaque_fragment>', 'if (slrrDynamicLighting < 0.5) { outgoingLight = diffuseColor.rgb * getShadowMask() + totalEmissiveRadiance; }\n#include <opaque_fragment>');
     };
-    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v4|colors:${hasVertexColors}|paint:${paintMask}`;
+    material.customProgramCacheKey = () => `${key}|slrr-debug-lighting-v5|colors:${hasVertexColors}|paint:${paintMask}`;
   }
 
   configureSun(sun: DirectionalLight) {

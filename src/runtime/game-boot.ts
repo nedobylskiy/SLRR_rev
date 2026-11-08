@@ -218,7 +218,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const { width, height } = viewportSize();
     return height > 0 ? width / height : 16 / 9;
   };
-  const osdText = new OsdTextNative(jvm, osd, viewportLayout);
+  const osdText = new OsdTextNative(jvm, osd, viewportLayout, viewportSize);
   const osdButtons = new OsdButtonNative(jvm, osd,
     error => report({ level: 'error', message: `OSD click: ${error.message}` }), viewportLayout, stageAspect);
   let osdRectangles: OsdRectangleNative | undefined;

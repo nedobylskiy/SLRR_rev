@@ -6,6 +6,7 @@ export interface VehicleLight {
   texture: string; color: Triple; alpha: number;
   position: Triple; direction: Triple; cone: number; size: number; offset: number;
   textureMode?: number;
+  beam?: { horizontal: string; vertical: string; color: Triple; range: number; innerCone: number };
 }
 
 /** Type 13 lamp resources are lights, not external SCX meshes. Colors are A,R,G,B. */
@@ -26,10 +27,21 @@ export async function vehicleLight(assets: Assets, pack: string, id: number): Pr
     ? numbers('diffuse', [1, 1, 1, 1]) : numbers('lf_glow_color', [1, 1, 1, 1]);
   const position = numbers('position', [0, 0, 0]), direction = numbers('direction', [0, 0, -1]);
   const size = numbers('lf_glow_maxsize', [10])[0], offset = numbers('lf_glow_offset', [0])[0], cone = numbers('phi', [Math.PI])[0];
+  const texturePath = async (key: string) => {
+    const id = fields.get(key); if (!id) return;
+    const textureResource = await assets.resource(resource.packPath, Number(id));
+    return entryProperties(textureResource.entry).find(property => property.key === 'sourcefile')?.value;
+  };
+  const [horizontal, vertical] = await Promise.all([texturePath('atth_texture'), texturePath('attv_texture')]);
+  const diffuse = numbers('diffuse', [1, 1, 1, 1]);
   if (color.length !== 3 || position.length !== 3 || direction.length !== 3 ||
       [...color, ...position, ...direction, alpha, size, offset, cone].some(value => !Number.isFinite(value)))
     throw new Error(`Invalid vehicle light ${resource.packPath}:${id}`);
   return { texture: path, color: color as Triple, alpha, position: position as Triple,
     ...(fields.has('lf_texturemode') ? { textureMode: Number(fields.get('lf_texturemode')) } : {}),
-    direction: direction as Triple, cone, size, offset };
+    direction: direction as Triple, cone, size, offset,
+    ...(fields.get('type') === 'spot' && horizontal && vertical ? { beam: {
+      horizontal, vertical, color: diffuse.slice(1) as Triple,
+      range: numbers('range', [100])[0], innerCone: numbers('theta', [cone * 0.7])[0],
+    } } : {}) };
 }

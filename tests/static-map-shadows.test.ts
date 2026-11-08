@@ -40,6 +40,15 @@ test('static shadow cache excludes vehicles, preserves cutouts and restores rend
   assert.equal(captures,4,'sub-tolerance sun jitter does not recapture every frame');
   assert.equal(root.parent,scene);assert.equal(tree.material,source);assert.equal(tree.visible,true);
   assert.equal(renderer.autoClear,false);assert.equal(renderer.shadowMap.autoUpdate,true);
+  cache.setNightQuality(true);update(3300,3);
+  assert.equal(cache.texture.value!.image.width,3072);
+  assert.equal(cache.texel.value,1/3072);
+  const nightCaptures=captures;
+  cache.setNightQuality(true);update(4400,3);
+  assert.equal(captures,nightCaptures,'stable night quality reuses its shadow map');
+  cache.setNightQuality(false);update(4500,3);
+  assert.equal(cache.texture.value!.image.width,2048);
+  assert.equal(cache.texel.value,1/2048);
   fail=true;
   const projection = cache.matrix.value.clone();
   assert.throws(()=>update(5000,4,new Vector3(100,0,0)),/capture failed/);

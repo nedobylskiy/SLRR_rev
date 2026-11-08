@@ -46,13 +46,20 @@ async function glowImage(assets: Assets, path: string): Promise<HTMLCanvasElemen
 
 /** A depth-tested, additive halo. Lamp resources provide its color and viewing cone. */
 export async function createVehicleFlare(source: VehicleLight, assets: Assets, lensRadius = 0, flags = 0): Promise<Sprite> {
-  const map = new CanvasTexture(await glowImage(assets, source.texture)); map.colorSpace = SRGBColorSpace;
+  let image = await glowImage(assets, source.texture);
   // The original mode-2 flare sheet places the main glow in its upper-left quadrant.
   // PNG replacements can contain the same atlas as PTX rather than a single glow.
   if (source.textureMode === 2 && !/\.ptx$/i.test(source.texture)) {
-    map.repeat.set(0.5, 0.5); map.offset.set(0, 0.5);
+    const tile = document.createElement('canvas');
+    tile.width = image.width / 2; tile.height = image.height / 2;
+    const context = tile.getContext('2d');
+    if (!context) throw new Error('Lamp flare atlas canvas unavailable');
+    context.drawImage(image, 0, 0, tile.width, tile.height, 0, 0, tile.width, tile.height);
+    image = tile;
   }
-  const material = new SpriteMaterial({ map, color: new Color(...source.color), blending: AdditiveBlending,
+  // Bake the atlas selection: Lensflare shaders do not apply Texture.repeat/offset.
+  const map = new CanvasTexture(image); map.colorSpace = SRGBColorSpace;
+  const material = new SpriteMaterial({ map, color: new Color(...source.color).multiplyScalar(source.beam ? 8 : 1), blending: AdditiveBlending,
     transparent: true, depthWrite: false, depthTest: true, toneMapped: false, fog: true });
   const sprite = new Sprite(material);
   const brake = (flags & 1) !== 0;
@@ -61,7 +68,7 @@ export async function createVehicleFlare(source: VehicleLight, assets: Assets, l
   sprite.position.copy(origin);
   // Native glow sizes are screen-oriented; this metre-scale approximation retains
   // perspective and avoids a fullscreen postprocess for two small lamps.
-  sprite.scale.setScalar(Math.max(0.05, Math.min(2, source.size * 0.075)) * (brake ? 3 : 1));
+  sprite.scale.setScalar(Math.max(0.05, Math.min(2, source.size * 0.14)) * (brake ? 3 : 1));
   const direction = new Vector3(...source.direction).normalize();
   const lightPosition = new Vector3(), toCamera = new Vector3(), forward = new Vector3(), inverse = new Matrix4();
   sprite.onBeforeRender = (_renderer, _scene, camera) => {

@@ -13,13 +13,27 @@ export class OsdTextNative {
   private measureContext?: CanvasRenderingContext2D | null;
 
   constructor(private readonly jvm: SlrrJvm, private readonly layer?: Pick<OsdLayer, 'createText'>,
-    private readonly viewportLayout: (group: JavaValue) => OsdViewport = () => FULL_OSD_VIEWPORT) {
+    private readonly viewportLayout: (group: JavaValue) => OsdViewport = () => FULL_OSD_VIEWPORT,
+    private readonly stageSize?:()=>{width:number;height:number}) {
     const owner = 'java.render.Text';
     const nil = () => jv('void', undefined);
     jvm.natives.register(owner, 'getWidthPixels', ['String', 'ResourceRef'], ({ args }) => {
       const value = args[0].value == null ? '' : String(args[0].value);
       const fontId = Number(jvm.natives.invoke('java.util.resource.ResourceRef', 'id', args[1], [])?.value ?? 0) & 0xffff;
-      return jv('float', this.widthPixels(value, this.fontSize(fontId)));
+      return jv('float', this.widthPixels(value, this.fontSize(fontId))*this.javaPixelScale());
+    });
+    // TextBox uses these metrics to position each line itself. Its configured
+    // video resolution may differ from the CSS stage that actually draws fonts.
+    if(this.stageSize)for(const [name,axis,factor] of [
+      ['getLineSpacing','height',1.25],['getHeight','height',1],['getCharWidth','width',1],
+    ] as const)jvm.natives.register(owner,name,['ResourceRef','Viewport'],({args})=>{
+      const fontId=Number(jvm.natives.invoke('java.util.resource.ResourceRef','id',args[0],[])?.value??0)&0xffff;
+      const fraction=Number(jvm.natives.invoke('java.render.Viewport',axis==='height'?'getHeight':'getWidth',args[1],[])?.value??1);
+      let dimension=this.stageSize!()[axis];
+      if(!(dimension>1)){
+        try{dimension=Number(jvm.get(jv('class','java.util.Config'),axis==='height'?'video_y':'video_x').value);}catch{/* Minimal hosts may lack Config. */}
+      }
+      return jv('float',2*factor*this.fontSize(fontId)/Math.max(1,dimension*fraction));
     });
     jvm.natives.register(owner, 'create', ['ResourceRef', 'ResourceRef', 'float', 'float'], ({ receiver, args }) => {
       const object = this.object(receiver);
@@ -90,6 +104,18 @@ export class OsdTextNative {
       if (state.element) state.element.node.style.fontSize = `${Math.max(1, state.fontSize * state.scaleY)}px`;
       return nil();
     });
+  }
+
+  /** Java Text.getWidth divides by Config.video_x; CSS glyphs use stage pixels.
+   * Return widths in Java's configured pixel units so its own TextBox layout
+   * normalizes to the same physical width that the HTML renderer displays. */
+  private javaPixelScale():number{
+    const width=this.stageSize?.().width;
+    if(!width||width<=1)return 1;
+    try{
+      const configured=Number(this.jvm.get(jv('class','java.util.Config'),'video_x').value);
+      return Number.isFinite(configured)&&configured>0?configured/width:1;
+    }catch{return 1;} // Minimal/headless hosts need not provide Config.
   }
 
   private fontSize(fontId: number): number {

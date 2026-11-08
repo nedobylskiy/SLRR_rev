@@ -7,7 +7,7 @@ export const PANEL_GROUND_CLEARANCE=.015;
 interface Beam { a: number; b: number; initial: number; rest: number; lambda: number; stiffness: number }
 export interface PanelBinding { nodes: number[]; weights: number[] }
 export interface PanelMount { nodes: number[]; broken: boolean; force: number; overload: number }
-export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
+export interface PanelOptions { frequency?:number;mass: number; mount: [number, number, number]; stiffness?: number; yieldStrain?: number; mountStrength?: number; volume?: boolean; thickness?: number; resolution?: [number, number]; gravity?: number; anchorLayout?: 'panel' | 'central-four'; backend?: SoftBodyBackend }
 export type Triple = [number, number, number];
 export interface PanelCollider { min: Triple; max: Triple; restitution?: number; friction?: number }
 export interface PanelContact { normal: Triple; point: Triple; velocity?: Triple; restitution?: number; friction?: number; collider?: boolean; impulse?: (impulse: Triple, point: Triple) => void }
@@ -54,7 +54,8 @@ export class DeformablePanel {
     }
     if (this.maxX - this.minX < 0.01 || this.maxZ - this.minZ < 0.01) throw new Error('Panel requires an XZ surface');
     const ys = Array.from(samples).filter((_, i) => i % 3 === 1), minY = Math.min(...ys), maxY = Math.max(...ys);
-    this.thickness = options.volume ? Math.max(0.02, maxY - minY) : 0.08;
+    if(options.thickness!==undefined&&(!Number.isFinite(options.thickness)||options.thickness<=0))throw new Error('Invalid panel thickness');
+    this.thickness = options.thickness ?? (options.volume ? Math.max(0.02, maxY - minY) : 0.08);
     this.yieldStrain = options.yieldStrain ?? 0.008; this.mountStrength = options.mountStrength ?? 5000;
     const stiffness = options.stiffness ?? 400000;
     if (![this.yieldStrain, this.mountStrength, stiffness].every(v => Number.isFinite(v) && v > 0)) throw new Error('Invalid panel material');
