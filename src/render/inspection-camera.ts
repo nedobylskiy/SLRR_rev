@@ -31,6 +31,7 @@ export class InspectionCamera {
     this.enabled=enabled;this.surface.style.display=enabled?'block':'none';this.helpers.visible=enabled;
   }
   reset(target:Vector3){this.camera.copy(this.primary);this.controls.target.copy(target);this.controls.update();}
+  focus(target:Vector3){this.controls.target.copy(target);this.camera.position.copy(target).add(new Vector3(16,10,16));this.controls.update();}
   update(width:number,height:number,focus:Vector3,range:number) {
     if(!this.enabled)return;
     this.camera.aspect=width/Math.max(1,height);this.camera.updateProjectionMatrix();if(!this.replay)this.controls.update();

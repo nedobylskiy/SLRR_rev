@@ -1,4 +1,5 @@
 import { intersectPartGeometry } from './part-picking';
+import {VehiclePairTest,type VehiclePairScenario} from '../engine/vehicle-pair-test';
 import { applySavedPanel, restoreReferenceGeometry } from './saved-panel';
 import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from '../engine/driving-helping';
 import {parseScxAsync} from '../formats/scx-worker-client';
@@ -20,8 +21,9 @@ import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
-import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission } from './vehicle-lights';
+import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
+import { trafficLampDefinitions, createTrafficLamps, type TrafficLamp } from './traffic-lamps';
 import { createVehicleBeam, createHeadlightCameraFlare } from './vehicle-beam';
 import { linkedRenderPose } from '../engine/linked-render';
 import { selectLinkedRule } from '../engine/linked-slots';
@@ -35,7 +37,7 @@ import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel, ScxMesh } from '../formats/scx';
 import type { Assets } from '../assets';
 import { scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
-import { poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
+import { PartFactory, poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { loadPartCollision } from '../engine/part-collision';
 import { DrivingDemo, keyboardDrivingInput } from '../engine/driving-demo';
@@ -58,6 +60,18 @@ import { stockContainerTexture } from './stock-container-texture';
 import {mapObjectCategory,type MapObjectCategory} from './map-object-category';
 import { MapObjectStream, type StreamPlacement } from './map-object-stream';
 import { MapDebugView, type MapDebugLayer } from './map-debug-view';
+import { MapRoadDebug, type RoadDebugLayer } from './map-road-debug';
+import { loadMapRoads } from '../engine/map-roads';
+import { RoadTrafficCar } from '../engine/road-traffic';
+import { Bot } from '../engine/bot';
+import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
+import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
+import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel} from '../engine/traffic-models';
+import { TrafficVehicle } from '../engine/traffic-vehicle';
+import { TrafficDamageView } from './traffic-damage-view';
+import { TrafficAudio, type TrafficVoice } from '../audio/traffic-audio';
+import { vehiclePairContact } from '../engine/vehicle-pair-test';
+import type { CfgWheel } from '../formats/cfg';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
 import { RenderObject } from '../runtime/render-object';
@@ -69,6 +83,12 @@ import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 import type { JavaSceneCamera } from '../runtime/java-scene-camera';
+import { FixedClock } from '../runtime/fixed-clock';
+import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
+import {createTrafficSignals} from './traffic-signals';
+
+type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]};
+type TrafficTestCar={ model:TrafficModel;active:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -368,6 +388,92 @@ export class Viewer {
   }
   private mapStreamFocus?: THREE.Vector3;
   private mapDebug?: MapDebugView;
+  private mapRoadDebug?: MapRoadDebug;
+  private mapRoadSource?: { assets: Assets; pack: string; groundId?: number; terrain?: MapTerrain; collision?: MapCollision };
+  private mapRoadRevision = 0;
+  private mapRoadPending?: Promise<void>;
+  private mapRoadLayers = new Set<RoadDebugLayer>();
+  roadDebugStatus = 'Road graph off';
+  private trafficTestEnabled = false;
+  private trafficTestRevision = 0;
+  private trafficCars:TrafficTestCar[]=[];
+  private get trafficTest(){return this.trafficCars.find(car=>car.active);}
+  private get trafficFollower(){return this.trafficCars.filter(car=>car.active)[1];}
+  private trafficCount=2;
+  private trafficPhysicsRadius=30;
+  private trafficSpawnRadius=100;
+  private trafficSpawnSphereRadius=4;
+  private trafficSpawnCenterHeight=1.5;
+  get trafficSpawnRange(){return this.trafficSpawnRadius;}
+  setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic spawn radius must be 25–500 m');this.trafficSpawnRadius=radius;}
+  private trafficOccupant(body:import('../engine/rigid-body-3d').RigidBody3D):TrafficOccupant {const point=body.position.clone() as TrafficOccupant,size=body.bounds.getSize(new THREE.Vector3());point.trafficRadius=Math.hypot(size.x,size.z)*.5;point.trafficVelocity=body.velocity.clone();return point;}
+  private chooseTrafficSpawn(occupied:readonly TrafficOccupant[],bounds?:THREE.Box3,height=0){
+    if(bounds){const sphere=bounds.getBoundingSphere(new THREE.Sphere());this.trafficSpawnSphereRadius=sphere.radius+Math.hypot(sphere.center.x,sphere.center.z)+.5;this.trafficSpawnCenterHeight=height-.1+sphere.center.y;}
+    const radius=Math.min(this.trafficSpawnRadius,this.mapStreamRange);
+    // The primary/player camera owns spawning; the independent inspection camera must not affect it.
+    this.camera.updateMatrixWorld();
+    const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
+    const sphere=new THREE.Sphere(new THREE.Vector3(),this.trafficSpawnSphereRadius);
+    const center=this.trafficFocus(),forward=this.trafficPeer?new THREE.Vector3(0,0,-1).applyQuaternion(this.trafficPeer.body.orientation):this.camera.getWorldDirection(new THREE.Vector3());forward.y=0;forward.normalize();
+    const speed=this.trafficPeer?.body.velocity.length()??0,bodyRadius=bounds?Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5:6;
+    const offscreen=(spawn:TrafficSpawn)=>{
+      sphere.center.copy(spawn.position);sphere.center.y+=this.trafficSpawnCenterHeight;
+      return !frustum.intersectsSphere(sphere);
+    };
+    return this.trafficSpawns&&chooseSafeTrafficSpawn(this.trafficSpawns,center,radius,this.mapStreamRange,occupied,forward,speed,bodyRadius,offscreen);
+  }
+  private trafficSpawns?:TrafficSpawnIndex;
+  private trafficRefillAt=0;
+  get trafficAmount(){return this.trafficCount;}
+  get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
+  setTrafficPhysicsRadius(radius:number){if(!Number.isFinite(radius)||radius<5||radius>200)throw Error("Traffic physics radius must be 5–200 m");this.trafficPhysicsRadius=radius;}
+  async setTrafficCount(count:number){
+    if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error("Traffic count must be an integer from 0 to 50");
+    this.trafficCount=count;this.trafficTestEnabled=true;
+    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;car.group.visible=false;car.voice?.setActive(false);}});
+    if(this.mapRoadSource&&(!this.trafficControl||this.trafficCars.length<count))await this.restartTrafficTest(true);
+  }
+  private trafficFocus(){return this.trafficPeer?.body.position??this.mapStreamFocus??this.camera.position;}
+  private trafficPrevious?:number;
+  private trafficClock=new FixedClock(60,15);
+  private mapTrafficFixtures:TrafficFixture[]=[];
+  private trafficControl?:TrafficControl;
+  private trafficSignals?:Awaited<ReturnType<typeof createTrafficSignals>>;
+  private trafficSignalError?:string;
+  private trafficTemplates=new Map<Assets,Map<string,Promise<TrafficTemplate>>>();
+  private javaTrafficTypes?:readonly TrafficModel[];
+  private trafficModelErrors=new Map<string,string>();
+  setJavaTrafficTypes(types:readonly TrafficModel[]|undefined){
+    if(this.javaTrafficTypes===types)return;this.javaTrafficTypes=types;
+    if(this.trafficTestEnabled&&this.mapRoadSource)void this.restartTrafficTest();
+  }
+  private trafficAudio?:TrafficAudio;
+  private trafficAudioStart=()=>this.trafficAudio?.activate();
+  private trafficPeer?:Vehicle3D;
+  private playerTrafficDriver?:PlayerTrafficDriver;
+  private playerTrafficRevision=0;
+  get playerTrafficEnabled(){return !!this.playerTrafficDriver;}
+  playerTrafficInfo(){const bot=this.playerTrafficDriver?.bot;return bot?`Player bot · ${bot.mode} · target ${(bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${bot.route.phase} · ${bot.trafficStatus||'free'}`:'';}
+  async setPlayerTrafficEnabled(enabled:boolean){
+    const revision=++this.playerTrafficRevision,vehicle=this.trafficPeer;
+    if(!enabled){if(vehicle)vehicle.controlInput=undefined;this.playerTrafficDriver?.dispose();this.playerTrafficDriver=undefined;return;}
+    const source=this.mapRoadSource;
+    if(!vehicle||!source)throw Error('Start driving on a map with a road graph first.');
+    const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
+    if(revision!==this.playerTrafficRevision||vehicle!==this.trafficPeer)return;
+    if(!roads)throw Error('No traffic road graph on this map.');
+    const control=this.trafficControl??=new TrafficControl(roads.network,this.mapTrafficFixtures);
+    this.playerTrafficDriver?.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,roads.network,control);
+    vehicle.controlInput=dt=>{
+      const driver=this.playerTrafficDriver!;
+      this.trafficControl??=driver.control;
+      if(this.trafficControl&&driver.control!==this.trafficControl){driver.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,this.trafficControl.network,this.trafficControl);}
+      const current=this.playerTrafficDriver!;
+      if(!this.trafficTestEnabled)current.control.advance(dt);
+      return current.sample(dt,this.trafficCars.filter(car=>car.active).map(car=>car.vehicle.body));
+    };
+  }
+  trafficTestStatus = 'Traffic test off';
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
   private environmentTexture?: THREE.Texture;
   private environmentPath?:string;
@@ -428,6 +534,7 @@ export class Viewer {
     this.lighting.configureMaterial(this.ground.material);
     this.ground.receiveShadow = true;
     container.append(this.renderer.domElement);
+    container.addEventListener('pointerdown',this.trafficAudioStart,true);
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -459,6 +566,7 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      this.updateTrafficTest(now);
       // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
@@ -494,6 +602,9 @@ export class Viewer {
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
+      if(this.trafficCars.some(car=>car.voice))this.trafficAudio?.listener(renderCamera);
+      this.mapRoadDebug?.updateTraffic(this.trafficControl);
+      this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
       this.lighting.updateSun(this.sunLight, this.mapStreamFocus ?? this.controls.target);
@@ -501,16 +612,21 @@ export class Viewer {
         .addScaledVector(this.lighting.direction, 500);
       this.profiler.beginGpu();
       this.inspection.helpers.visible=false;
+      if(this.mapRoadDebug)this.mapRoadDebug.root.visible=false;
       try {
         this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
           this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.shadowRevision ?? 0,now)));
         this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
           this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
-      } finally {this.inspection.helpers.visible=this.inspection.enabled;}
+      } finally {this.inspection.helpers.visible=this.inspection.enabled;if(this.mapRoadDebug)this.mapRoadDebug.root.visible=true;}
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(renderCamera.position).add(offset);
       if(this.sunFlare)this.sunFlare.position.copy(renderCamera.position).addScaledVector(this.lighting.direction,500);
       this.gpuOcclusion.observerView=this.inspection.enabled;
+      this.gpuOcclusion.setDynamicObjects(this.camera,this.trafficCars.filter(car=>car.active).map(car=>({
+        object:car.group,bounds:car.vehicle.body.bounds.clone().applyMatrix4(car.vehicle.body.matrix()).expandByScalar(1),
+        padding:Math.max(1,car.vehicle.body.velocity.length()*(this.gpuOcclusion.intervalFrames/60+.1)),
+      })),this.inspection.enabled&&this.inspectResident);
       this.profiler.measure('GPU occlusion CPU',()=>this.graphicsDiagnostics.pass('GPU occlusion',()=>this.gpuOcclusion.prepare(this.camera,this.staticMapRoot,this.geometryCutoff||this.inspection.enabled&&this.inspectResident||this.rayOcclusion.enabled,this.mapStream?.revision??0,this.mapStream?.consumeOcclusionChanges())));
       this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>
         this.gpuOcclusion.renderMain(()=>this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera),this.earlyMapCulling?this.staticMapRoot:undefined))));
@@ -556,6 +672,7 @@ export class Viewer {
     this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
+    this.resetRoadDebug();
     this.scene.fog = null; this.scene.background = null;
     this.internalView = false;
     this.generation++;
@@ -814,7 +931,207 @@ export class Viewer {
     await this.setGlobalEnvmap({path,bytes:await assets.read(path)});
   }
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
+  private stopTrafficTest() {
+    this.trafficTestRevision++;
+    for(const test of this.trafficCars)this.disposeTrafficCar(test);
+    this.trafficCars=[];this.trafficSpawns=undefined;this.trafficPrevious=undefined;this.trafficClock=new FixedClock(60,15);
+    this.trafficSignals?.dispose();this.trafficSignals=undefined;this.trafficControl=undefined;
+    this.trafficSignalError=undefined;
+    this.trafficModelErrors.clear();this.trafficTestStatus='Traffic test off';
+  }
+  private disposeTrafficCar(test:TrafficTestCar){test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
+  async setTrafficPairEnabled(enabled:boolean){await this.setTrafficCount(enabled?2:1);}
+  private trafficTemplate(assets:Assets,key:TrafficModel=DEFAULT_TRAFFIC_MODELS[0]):Promise<TrafficTemplate>{
+    let cache=this.trafficTemplates.get(assets);if(!cache){cache=new Map();this.trafficTemplates.set(assets,cache);}
+    const identity=`${normalizePath(key.pack)}:${key.id}`;
+    let pending=cache.get(identity);if(pending)return pending;
+    const generation=this.generation;
+    pending=(async()=>{
+      const built=await new PartFactory(assets).stock({pack:key.pack,id:key.id});let group:THREE.Group|undefined;
+      try{
+        group=await this.createPreviewWorld(built.world,assets,false);
+        const bounds=new THREE.Box3().setFromObject(group),wheels=built.root.definition.config.wheels;
+        for(let i=0;i<wheels.length;i++){
+          const wheel=wheels[i];if(!wheel.render)throw Error('Traffic wheel has no inline render');
+          const resource=await assets.modelForResource(built.root.definition.key.pack,wheel.render.resource),model=await parseScxAsync(await assets.read(resource.path));
+          const mount=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.matrixAutoUpdate=false;mount.matrix.copy(poseMatrix(wheel));group.add(mount);
+          const rotor=new THREE.Group();mount.add(rotor);const mesh=new THREE.Group();mesh.matrixAutoUpdate=false;mesh.matrix.copy(modelMatrix(new THREE.Matrix4(),wheel.render.pose?poseMatrix(wheel.render.pose):undefined));rotor.add(mesh);
+          const warnings=await this.append(model,assets,resource.textures,mesh,generation,false,()=>generation===this.generation,undefined,undefined,false,THREE.FrontSide);
+          if(warnings.length)throw Error(warnings.join('\n'));
+        }
+        if(generation!==this.generation)throw Error('Traffic template load superseded');
+        const lamps=await trafficLampDefinitions(built.world,assets);
+        const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps};group=undefined;return result;
+      }finally{built.world.dispose();if(group)this.disposeGroup(group);}
+    })();
+    cache.set(identity,pending);pending.catch(()=>{if(cache!.get(identity)===pending)cache!.delete(identity);});return pending;
+  }
+  async setTrafficTestEnabled(enabled:boolean) {
+    this.trafficTestEnabled=enabled;
+    if(!enabled){this.stopTrafficTest();return;}
+    if(this.mapRoadSource&&!this.trafficTest)await this.restartTrafficTest();
+  }
+  async restartTrafficTest(preserve=false) {
+    if(!preserve)this.stopTrafficTest();else this.trafficTestRevision++;
+    const source=this.mapRoadSource;if(!source||!this.trafficTestEnabled)return;
+    const revision=this.trafficTestRevision,generation=this.generation;
+    const current=()=>revision===this.trafficTestRevision&&generation===this.generation&&this.trafficTestEnabled;
+    this.trafficTestStatus='Loading traffic models…';
+    const staged:TrafficTestCar[]=[];
+    try{
+      const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
+      if(!current())return;
+      if(!roads){this.trafficTestStatus='No road graph for traffic test';return;}
+      this.trafficSpawns??=new TrafficSpawnIndex(roads.network);
+      const control=this.trafficControl??new TrafficControl(roads.network,this.mapTrafficFixtures);
+      const models=this.javaTrafficTypes??DEFAULT_TRAFFIC_MODELS;
+      if(!source.terrain)throw Error('Traffic test requires map terrain');
+      for(let index=this.trafficCars.length;index<this.trafficCount;index++){
+        const model=pickTrafficModel(models.filter(model=>!this.trafficModelErrors.has(`${normalizePath(model.pack)}:${model.id}`)));
+        if(!model)break;
+        let template:TrafficTemplate;
+        try{template=await this.trafficTemplate(source.assets,model);}catch(error){if(!current())return;this.trafficModelErrors.set(`${normalizePath(model.pack)}:${model.id}`,String(error));index--;continue;}
+        if(!current())return;
+        const route=new RoadTrafficCar(roads.network,this.trafficFocus());
+        const lamps=await createTrafficLamps(template.lamps,source.assets);
+        if(!current()){lamps.dispose();return;}
+        const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
+        const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
+        vehicle.place(route.position,route.direction,template.height);
+        const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
+        const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
+        const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
+        group.name=`Traffic ${model.pack.split('/').at(-1)} ${index+1}`;group.visible=false;
+        staged.push({model,active:false,lod,car:route,bot,vehicle,damage,lamps,group,wheels});
+      }
+      this.trafficCars.push(...staged);
+      this.trafficControl=control;
+      const cars=staged.splice(0);for(const test of cars){
+        this.scene.add(test.group);
+        const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
+        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height);if(spawn)this.recycleTrafficCar(test,spawn);
+      }
+      this.trafficTestStatus=`Streaming active · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
+      for(const test of cars){
+        try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(generation===this.generation&&this.trafficCars.includes(test))test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
+      }
+      if(!this.trafficSignals&&control.signals.length)void createTrafficSignals(source.assets,control).then(signals=>{if(current()){this.trafficSignals=signals;this.scene.add(signals.root);}else signals.dispose();}).catch(error=>{if(current()){this.trafficSignalError=String(error);console.warn('Traffic signal glows:',error);}});
+    }catch(error){if(current())this.trafficTestStatus=`Traffic test: ${String(error)}`;}
+    finally{for(const test of staged)this.disposeTrafficCar(test);}
+  }
+  trafficTestInfo() {
+    const cars=this.trafficCars.filter(car=>car.active),physical=cars.filter(car=>car.lod.physical).length;
+    return `Traffic ${cars.length}/${this.trafficCount} · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · spawn ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
+      cars.map((test,i)=>`${test.model.pack.split('/').at(-1)?.replace(/\.rpk$/i,'')} ${i+1} · ${test.lod.physical?'physics':'puppet'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${test.car.phase} · ${test.bot.trafficStatus||'free'}`).join('\n')+
+      `\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
+  }
+  private recycleTrafficCar(test:TrafficTestCar,spawn:TrafficSpawn){
+    const network=this.trafficSpawns!.network,route=new RoadTrafficCar(network,spawn.position,Math.random,spawn.road);
+    test.damage.reset();test.vehicle.crush.offsets.fill(0);test.vehicle.crush.version=0;test.vehicle.collisionVersion=0;
+    test.vehicle.place(route.position,route.direction,test.lod.height);test.vehicle.setMode('cruise');
+    test.car=route;test.lod.route=route;test.lod.physical=false;test.lod.setMode('cruise');
+    test.lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
+    const peers=this.trafficCars.filter(car=>car.active&&car!==test).map(car=>car.vehicle.body);if(this.trafficPeer)peers.push(this.trafficPeer.body);
+    test.bot=initializeTrafficMotion(route,test.lod,this.trafficControl,peers);
+    test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+    test.active=true;test.group.visible=true;
+  }
+  focusTrafficTest() {
+    if(!this.trafficTest)return;
+    const target=this.trafficTest.vehicle.body.position.clone();if(this.trafficFollower)target.lerp(this.trafficFollower.vehicle.body.position,.5);
+    this.setInspectionCameraEnabled(true);this.inspection.focus(target);
+  }
+  impactTrafficTest(){
+    const test=this.trafficTest;if(!test)return;
+    const body=test.vehicle.body,impulse=new THREE.Vector3(1,.1,0).applyQuaternion(body.orientation).multiplyScalar(body.mass*5);
+    const point=new THREE.Vector3(.7,0,body.bounds.min.z).applyMatrix4(body.matrix());test.bot.hit(impulse,point,12);
+  }
+  private updateTrafficTest(now:number) {
+    if(!this.trafficControl||!this.trafficTestEnabled)return;
+    const center=this.trafficFocus();
+    for(const [i,test] of this.trafficCars.entries()){
+      const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
+      if(i>=this.trafficCount||distance>this.mapStreamRange+20||test.car.stopped&&distance>this.trafficPhysicsRadius+10){test.active=false;test.group.visible=false;}
+      else test.group.visible=test.active&&distance<=this.mapStreamRange;
+      test.voice?.setActive(test.active&&test.group.visible);
+    }
+    if(now>=this.trafficRefillAt&&this.trafficSpawns){
+      this.trafficRefillAt=now+200;
+      const test=this.trafficCars.slice(0,this.trafficCount).find(car=>!car.active);
+      if(test){const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
+        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height);
+        if(spawn)this.recycleTrafficCar(test,spawn);
+      }
+    }
+    const cars=this.trafficCars.filter(car=>car.active);
+    this.trafficAudio?.setHidden(document.hidden);
+    if(document.hidden){this.trafficPrevious=undefined;return;}
+    const time=this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:12*3600);
+    const peer=this.trafficPeer;
+    const bodies=cars.map(car=>car.vehicle.body);if(peer)bodies.push(peer.body);
+    if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
+      this.trafficControl?.advance(this.trafficClock.dt);
+      for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);test.bot.advance(this.trafficClock.dt,bodies);}
+      for(const [i,test] of cars.entries()){
+        if(peer&&test.lod.physical){
+          const hit=vehiclePairContact(peer.body,test.vehicle.body);
+          if(hit){
+            if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+            const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+            peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+          }
+        }
+        for(const other of cars.slice(i+1)){
+          if(!test.lod.physical&&!other.lod.physical)continue;
+          const a=test.vehicle.body,b=other.vehicle.body,hit=vehiclePairContact(a,b);if(!hit)continue;
+          if(hit.impulse.lengthSq()>1){test.bot.hit(hit.impulse,hit.point,hit.closing);other.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+          const total=1/a.mass+1/b.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+          a.position.addScaledVector(hit.normal,correction/a.mass/total);b.position.addScaledVector(hit.normal,-correction/b.mass/total);
+        }
+      }
+    });
+    this.trafficPrevious=now;
+    this.trafficSignals?.update();
+    for(const test of cars){
+      const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
+      test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time),test.vehicle.wheels[0]?.steer??0,test.vehicle.body.velocity.dot(forward),now/1000);
+      test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+      test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
+      test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
+    }
+  }
+  private resetRoadDebug() {
+    this.stopTrafficTest();
+    this.mapTrafficFixtures=[];
+    this.mapRoadRevision++; this.mapRoadDebug?.dispose(); this.mapRoadDebug=undefined;
+    this.mapRoadSource=undefined;this.mapRoadPending=undefined;this.mapRoadLayers.clear();this.roadDebugStatus='Road graph off';
+  }
+  async showRoadDebug(layer: RoadDebugLayer, visible: boolean): Promise<void> {
+    if(visible)this.mapRoadLayers.add(layer);else this.mapRoadLayers.delete(layer);
+    if(this.mapRoadDebug){this.mapRoadDebug.show(layer,visible);return;}
+    if(!visible)return;
+    const source=this.mapRoadSource;
+    if(!source){this.roadDebugStatus='No map loaded';return;}
+    if(this.mapRoadPending)return this.mapRoadPending;
+    const revision=this.mapRoadRevision;
+    this.roadDebugStatus='Loading road graph…';
+    const pending=(async()=>{
+      try{
+        const result=await loadMapRoads(source.assets,source.pack,source.groundId);
+        if(revision!==this.mapRoadRevision)return;
+        if(!result){this.roadDebugStatus='No TRC road graph declared for this map';return;}
+        this.mapRoadDebug=new MapRoadDebug(this.scene,this.container,result.network);
+        for(const enabled of this.mapRoadLayers)this.mapRoadDebug.show(enabled,true);
+        const network=result.network;
+        this.roadDebugStatus=`${result.path} · ${network.nodes.length} crossings · ${network.paths.length} paths · ${network.others.length} road records\nCyan: paths · green → red: road spline start → end · grey: crossing lanes · gold/pink: crossing pools A/B\nLabels: stored spline length, segment/link/lane counts. Raw tail fields: unverified meaning/units; speed limits and stop lines not identified.`;
+      }catch(error){if(revision===this.mapRoadRevision)this.roadDebugStatus=`Road graph: ${String(error)}`;}
+    })();
+    this.mapRoadPending=pending;
+    try{await pending;}finally{if(this.mapRoadPending===pending)this.mapRoadPending=undefined;}
+  }
   dispose() {
+    this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
+    for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
@@ -840,7 +1157,7 @@ export class Viewer {
     }
   }
   /** Build an isolated inventory mesh tree; never publish its objects/lights into the world. */
-  async createPreviewWorld(world: EngineWorld, assets: Assets): Promise<THREE.Group> {
+  async createPreviewWorld(world: EngineWorld, assets: Assets, unlitPreview = true): Promise<THREE.Group> {
     const root = new THREE.Group(), generation = this.generation;
     try {
       for (const part of world.parts.values()) {
@@ -855,17 +1172,19 @@ export class Viewer {
         for (const extra of part.definition.additionalModels ?? []) {
           const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
           sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
-          sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
+          const flags=cfgLampRenderFlags(extra.model.path,extra.flags);
+          sub.userData.lightFlags = flags; sub.visible = cfgRenderVisible(flags, world.lightMask);
           group.add(sub);
           const extraModel = await parseScxAsync(await assets.read(extra.model.path));
           bindLinkedRender(sub, extra.links, extraModel, extra.pose, extra.linkRules);
           await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint, false, THREE.FrontSide);
-          configureCfgLampEmission(sub, extra.flags);
+          configureCfgLampEmission(sub, flags);
         }
         syncLinkedRenders(part, group);
       }
       root.traverse(object => {
         if (!(object instanceof THREE.Mesh)) return;
+        if (!unlitPreview) { object.castShadow = object.receiveShadow = true; return; }
         const unlit = (source: THREE.MeshStandardMaterial) => {
             const material = previewMaterial(source);
           source.userData.reflectionTexture?.dispose();
@@ -958,12 +1277,13 @@ export class Viewer {
         const submodel = new THREE.Group();
         submodel.matrixAutoUpdate = false;
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
-        submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
+        const flags=cfgLampRenderFlags(extra.model.path,extra.flags);
+        submodel.userData.lightFlags = flags; submodel.visible = cfgRenderVisible(flags, world.lightMask);
         group.add(submodel);
         const extraModel = await parseScxAsync(await assets.read(extra.model.path));
         bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
         warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint, true, THREE.FrontSide));
-        configureCfgLampEmission(submodel, extra.flags);
+        configureCfgLampEmission(submodel, flags);
         if (generation !== this.generation) return warnings;
       }
       for (const light of part.definition.lights ?? []) {
@@ -1000,9 +1320,10 @@ export class Viewer {
     return warnings;
   }
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false,
-    options?: { groundId?: number; preserveCamera?: boolean }) {
+    options?: { groundId?: number; preserveCamera?: boolean;trafficTypes?:readonly TrafficModel[] }) {
     if (!keepWorld) this.clear(); const generation = this.generation;
     this.mapPackPath=packPath;
+    this.resetRoadDebug();this.javaTrafficTypes=options?.trafficTypes;this.mapRoadSource={assets,pack:packPath,groundId:options?.groundId};
     const pack = await assets.pack(packPath), warnings: string[] = [];
     const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
     const ground = groundEntry && groundRenderDefinition(groundEntry);
@@ -1124,6 +1445,9 @@ export class Viewer {
           const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
+          const nativeClass=new TextDecoder().decode(resource.entry.data.subarray(8,resource.entry.data.indexOf(0,8)));
+          const fixtureKind=trafficFixtureKind(resource.entry.alias,nativeClass);
+          if(fixtureKind)for(const instance of instances)this.mapTrafficFixtures.push({kind:fixtureKind,position:new THREE.Vector3(...instance.pose.position),pose:instance.pose});
           // Keep the highest-detail LOD for the nearby-object stream. Lower LODs
           // are substitutes, not extra pieces; loading all of them hides the map
           // behind overlapping tree/building meshes, while skipping them all
@@ -1198,6 +1522,8 @@ export class Viewer {
       await stream.setCachedCells(this.precachedObjectCells,this.objectCellSize);
       if(generation!==this.generation)return {loaded,total:ids.length,triangles,objects,warnings,terrain,collision};
       terrain.prepare(); this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position);
+      if(this.mapRoadSource){this.mapRoadSource.terrain=terrain;this.mapRoadSource.collision=collision;}
+      if(this.trafficTestEnabled)void this.restartTrafficTest();
     }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
@@ -1248,6 +1574,73 @@ export class Viewer {
     const stop = () => { if (stopped) return; stopped = true; this.frame = undefined; this.stopDriving = undefined; this.ground.visible = false; lab.dispose(); };
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
+  }
+  /** Same CFG/SCX physics construction used by the two-car stand. */
+  private pairVehicle(root:EnginePart) {
+    const positions=(part:EnginePart)=>{
+      const group=this.proxies.get(part);if(!group)throw new Error(`No render proxy for ${part.definition.alias}`);
+      const transform=modelMatrix(new THREE.Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose));
+      return group.children.filter((o):o is THREE.Mesh=>o instanceof THREE.Mesh).map(mesh=>{
+        const attribute=mesh.geometry.getAttribute('position'),out:number[]=[];
+        for(let i=0;i<attribute.count;i++)out.push(...new THREE.Vector3().fromBufferAttribute(attribute,i).applyMatrix4(transform).toArray());return out;
+      });
+    };
+    for(const part of root.world.parts.values()){const group=this.proxies.get(part);if(group)restoreReferenceGeometry(group);}
+    const hood=[...root.world.parts.values()].find(p=>p.parent===root&&(/(?:^|[\\/])hood(?:\.cfg|[_-])/i.test(p.definition.cfgPath)||/(?:^|[_-])hood(?:$|[_-])/i.test(p.definition.alias)))??root;
+    const bounds=new THREE.Box3();for(const samples of positions(root))for(let i=0;i<samples.length;i+=3)bounds.expandByPoint(new THREE.Vector3().fromArray(samples,i));
+    const car=new Vehicle3D(root,hood,positions(hood).flat(),bounds,undefined,undefined,DRIVING_PHYSICS_HZ);
+    const triangles:number[]=[],inverseRoot=root.matrix().invert();
+    for(const part of root.world.parts.values()){
+      if(part===hood&&hood!==root||!part.definition.model)continue;
+      const type=part.parent?.definition.config.slots.find(s=>s.id===part.parentSlot)?.type;
+      if(type===11)continue;
+      if(type!==undefined&&type>=101&&type<=104){car.register(part,positions(part).flat(),[]);continue;}
+      if(type!==undefined&&type>104&&type<200)continue;
+      const own=modelMatrix(new THREE.Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose)),faces:number[]=[];
+      for(const mesh of this.proxies.get(part)?.children??[])if(mesh instanceof THREE.Mesh){
+        const samples=mesh.geometry.getAttribute('position'),indices=mesh.geometry.getIndex();
+        if(indices)for(let i=0;i<indices.count;i++)faces.push(...new THREE.Vector3().fromBufferAttribute(samples,indices.getX(i)).applyMatrix4(own).toArray());
+      }
+      const physical=this.collisionMeshes.get(part)??[],collision=physical.length?physical:faces;
+      car.register(part,positions(part).flat(),collision);
+      if(!part.definition.mechanics){const frame=inverseRoot.clone().multiply(part.matrix());for(let i=0;i<collision.length;i+=3)triangles.push(...new THREE.Vector3().fromArray(collision,i).applyMatrix4(frame).toArray());}
+    }
+    car.setBodyTriangles(triangles);
+    return {car,positions};
+  }
+  vehiclePair(roots:[EnginePart,EnginePart],scenario:VehiclePairScenario,telemetry:(text:string)=>void) {
+    this.stopDriving?.();
+    const built=roots.map(root=>this.pairVehicle(root)),pair=new VehiclePairTest(built[0].car,built[1].car,scenario);
+    const barrier=scenario==='rear-chain'?new THREE.Mesh(new THREE.BoxGeometry(...pair.barrier.getSize(new THREE.Vector3()).toArray()),new THREE.MeshStandardMaterial({color:0xe7a44d,roughness:.8})):undefined;
+    if(barrier){barrier.position.copy(pair.barrier.getCenter(new THREE.Vector3()));this.model.add(barrier);}
+    const views:{view:PanelView;part:EnginePart;car:Vehicle3D}[]=[],soft=new Set<EnginePart>();
+    for(const {car,positions} of built)for(const state of car.soft.values()){
+      soft.add(state.part);views.push({view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part)),part:state.part,car});
+    }
+    this.ground.visible=true;this.grid.visible=false;this.driveGrid.visible=true;
+    this.model.position.set(0,0,0);this.model.scale.setScalar(1);this.controls.enabled=true;
+    this.controls.target.set(0,.8,scenario==='rear-chain'?14:0);this.camera.position.set(scenario==='rear-chain'?23:13,scenario==='rear-chain'?28:12,scenario==='rear-chain'?54:16);this.controls.update();
+    let last:number|undefined,paused=false,slow=false,stopped=false,lastText=-Infinity;
+    this.frame=now=>{
+      const dt=last===undefined||document.hidden?0:Math.max(0,(now-last)/1000);last=document.hidden?undefined:now;
+      if(!paused)pair.advance(dt*(slow?.25:1));
+      this.syncWorld(soft);
+      for(const {view,part,car} of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);
+      if(now-lastText>150){
+        lastText=now;telemetry([
+          scenario==='offset'?'Two cars · 50% overlap · 50 km/h each (100 km/h closing)':scenario==='side'?'Side impact · A: 50 km/h · B: stationary':'Chain impact · A: 50 km/h · B: 100 km/h · start together, 27.8 m gap',
+          `Time ${pair.time.toFixed(2)} s · shared physics ${DRIVING_PHYSICS_HZ} Hz · contacts ${pair.contacts}${paused?' · PAUSED':''}${slow?' · ×0.25':''}`,
+          `A ${(pair.a.velocity().length()*3.6).toFixed(1)} km/h · body ${(pair.a.osdDamageCondition*100).toFixed(0)}%`,
+          `B ${(pair.b.velocity().length()*3.6).toFixed(1)} km/h · body ${(pair.b.osdDamageCondition*100).toFixed(0)}%`,
+          pair.firstImpact?`First contact: ${(pair.firstImpact.closing*3.6).toFixed(1)} km/h closing`:'Approaching',
+          ...(scenario==='rear-chain'?[pair.rearImpact?`Rear hit at ${pair.rearImpact.time.toFixed(2)} s · B ${(pair.rearImpact.speed*3.6).toFixed(1)} km/h`:pair.obstacleImpact?'A hit the barrier · B approaching':'Both cars approaching the barrier']:[]),
+        ].join('\n'));
+      }
+    };
+    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;for(const {view} of views)view.dispose();if(barrier){barrier.removeFromParent();barrier.geometry.dispose();(barrier.material as THREE.Material).dispose();}this.driveGrid.visible=false;};
+    this.stopDriving=stop;
+    return Object.assign(stop,{reset:()=>{pair.reset();last=undefined;lastText=-Infinity;},pause:(value:boolean)=>{paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},
+      wireframe:(value:boolean)=>views.forEach(({view})=>view.wireframe(value)),chassisCrumple:(value:number)=>built.forEach(({car})=>car.setChassisCrumple(value)),pair});
   }
   drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
@@ -1311,6 +1704,7 @@ export class Viewer {
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); if (!track) this.model.add(obstacle);
     }
+    this.trafficPeer=crash instanceof Vehicle3D?crash:undefined;
     const demo = crash?.driving ?? new DrivingDemo(root);
     this.renderRecorder=crash instanceof Vehicle3D?crash.telemetry:undefined;
     if(crash instanceof Vehicle3D)crash.telemetry.setViewSource(()=>{
@@ -1394,8 +1788,9 @@ export class Viewer {
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
-      const input = java ? java.sample() : keyboardDrivingInput(keys);
+      let input = this.playerTrafficDriver?.input ?? (java ? java.sample() : keyboardDrivingInput(keys));
       if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if(this.playerTrafficDriver)input=this.playerTrafficDriver.input;
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
@@ -1495,6 +1890,7 @@ export class Viewer {
       java?.persist?.();
       if (this.mapStreamFocus === demo.position) this.mapStreamFocus = undefined;
       this.frame = undefined; this.stopDriving = undefined; this.drivingTimeOfDay = undefined;
+      if(this.trafficPeer===crash){void this.setPlayerTrafficEnabled(false);this.trafficPeer=undefined;}
       if(crash instanceof Vehicle3D&&this.renderRecorder===crash.telemetry)this.renderRecorder=undefined;
       releaseMouse();
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);

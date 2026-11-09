@@ -1,5 +1,14 @@
 import { Mesh, MeshStandardMaterial, type Object3D } from 'three';
 
+/** Stock Baiern's rear CITY/INDICATOR SCX overlays cover the opposite-colour lens sections. */
+export function cfgLampRenderFlags(path:string,flags=0){
+  const match=/^cars\/racers\/baiern_data\/meshes\/([lr])_taillights_(city|indicator)\.scx$/i.exec(path.replaceAll('\\','/'));
+  if(!match)return flags;
+  if(match[2].toLowerCase()==='city'&&flags===4)return match[1].toLowerCase()==='l'?16:32;
+  if(match[2].toLowerCase()==='indicator'&&(flags===16||flags===32))return 4;
+  return flags;
+}
+
 /** CFG render channels are activation conditions, not always-visible extra meshes. */
 export function isNightTime(timeSeconds: number): boolean {
   const hour = ((timeSeconds / 3600) % 24 + 24) % 24;

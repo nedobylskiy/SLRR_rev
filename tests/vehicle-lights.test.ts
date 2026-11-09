@@ -2,10 +2,22 @@ import { Group, Mesh, MeshStandardMaterial, Texture } from 'three';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parsePartConfig, secondaryRenders } from '../src/formats/cfg';
-import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, configureCfgLampEmission } from '../src/render/vehicle-lights';
+import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, configureCfgLampEmission, cfgLampRenderFlags } from '../src/render/vehicle-lights';
 import { vehicleLight } from '../src/engine/vehicle-light';
 import { Assets } from '../src/assets';
 import type { RpkPack } from '../src/formats/rpk';
+
+test('Baiern rear overlays assign red geometry to running lamps and amber geometry to indicators',()=>{
+  for(const [side,indicator] of [['L',16],['R',32]] as const){
+    const path=`cars\\racers\\Baiern_data\\meshes\\${side}_taillights_`;
+    const amber=cfgLampRenderFlags(path+'CITY.scx',4),red=cfgLampRenderFlags(path+'INDICATOR.scx',indicator);
+    assert.equal(amber,indicator);assert.equal(red,4);
+    assert.equal(cfgRenderVisible(amber,4),false);assert.equal(cfgRenderVisible(red,4),true);
+    assert.equal(cfgRenderVisible(amber,indicator),true);assert.equal(cfgRenderVisible(red,indicator),false);
+    assert.equal(cfgLampRenderFlags(path+'BRAKE.scx',1),1);assert.equal(cfgLampRenderFlags(path+'REVERSING.scx',2),2);
+  }
+  assert.equal(cfgLampRenderFlags('cars/racers/Einvagen_data/meshes/L_taillights_CITY.scx',4),4);
+});
 
 test('RPK lamp render resolves its own flare texture and ARGB settings instead of requiring SCX', async () => {
   const encoder = new TextEncoder();

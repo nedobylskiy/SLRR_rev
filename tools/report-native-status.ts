@@ -43,9 +43,9 @@ const annotate = (owner: string, methods: string[], status: Status, note: string
 };
 annotate('java.lang.GarbageCollector',['<init>','push','flush'],'mocked','No-op host adapter; no original collector lifecycle. JavaScript manages memory.');
 annotate('java.util.resource.ResourceRef',['precache','cache','unload'],'mocked','Logs the call; no original resource-cache operation or explicit unloading.');
-annotate('java.util.resource.GroundRef',['getNearestCross'],'mocked','Road graph absent. Distance 0 returns a copy of the input position; bounded searches or null input return null. This is not a nearest-crossing search.');
-annotate('java.util.resource.GroundRef',['delTraffic','addTrafficN'],'mocked','Traffic simulation absent. addTrafficN returns 0 and creates no traffic; delTraffic only logs.');
-annotate('java.util.resource.GroundRef',['addTrafficCar','notifyTrafficCar'],'mocked','Traffic simulation absent. Logs and returns 0; creates no traffic entity or notification subscription.');
+annotate('java.util.resource.GroundRef',['getNearestCross'],'implemented','Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed.');
+annotate('java.util.resource.GroundRef',['delTraffic','addTrafficN'],'implemented','Registers/clears per-ground Java model resources and density weights consumed by the host traffic stream (user cap 0–50). Remaining three parameters are preserved but not assigned unverified semantics. addTrafficN returns a host catalogue registration ID; original native ID parity is not claimed.');
+annotate('java.util.resource.GroundRef',['addTrafficCar','notifyTrafficCar'],'mocked','Individual Java Bot registration/notification is not bridged to the host traffic population. Logs and returns 0; creates no individual traffic entity or notification subscription.');
 annotate('java.util.resource.GroundRef',['setPedestrianDensityN','addPedestrianType'],'mocked','Accepts/logs the call; no pedestrian simulation.');
 annotate('java.util.resource.GroundRef',['setWater','addWaterLimit'],'mocked','Returns void; no water-plane rendering or water bounds.');
 annotate('java.util.resource.RenderRef',['lineCreate','lineAdd'],'mocked','lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible.');

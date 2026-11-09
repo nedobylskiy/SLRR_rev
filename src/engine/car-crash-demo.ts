@@ -130,5 +130,5 @@ export class CarCrashDemo {
     if (x.lengthSq() < 0.5 || y.lengthSq() < 0.5) return;
     return new Matrix4().makeBasis(x, y, z);
   }
-  dispose() { this.reset(); }
+  dispose() { if(!this.root.world.disposed)this.reset(); }
 }

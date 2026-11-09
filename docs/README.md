@@ -33,6 +33,10 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 |[Sources](sources.md)|Direct links, versions, reliability|
 |[Working archive Elias](elias-workspace-archive.md)|IDA, native ABI, wheel physics, third-party host boundaries|
 
+## Two-car collision tests
+
+[Two-car collision stand](vehicle-pair-tests.md) — 50% overlap at 50 km/h per car, a 50 km/h side strike, and two cars starting together toward a barrier at 50/100 km/h with a one-second following distance. Includes shared fixed-step physics, repeat controls and current contact-model limits.
+
 ## Native implementation inventory
 
 [Java native method inventory](native-status.md) — three sections: implemented handlers, temporary mocks, and methods not implemented. Includes per-overload signatures and current limitations. Regenerate with `npm run report:natives`; machine-readable output: [native-status.json](reports/native-status.json).
@@ -52,3 +56,7 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 `reports/inventory.json` - quantities, signatures, RPK and PE hashes, package dependencies. `reports/classes.json` - names and sizes of TUFA classes. `reports/native-candidates.json` - native/abstract/declaration candidates and explicit declarations from Java. An empty tree by itself does not prove that the method is native. `reports/pe-comparison.json` - comparative analysis of two EXEs and libcall.dll.
 
 The contents of game saves and the full source DLL are not published in these reports.
+
+[City road graph debug view](road-graph-debug.md) — original TRC road splines, crossings and metadata overlays; includes field-confidence limits and validation.
+
+[One-car traffic test](traffic-test.md) — original Pickup, 15 km/h, reverse road splines and random connected turns through intersections.

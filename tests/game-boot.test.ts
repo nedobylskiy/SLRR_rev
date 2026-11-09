@@ -78,13 +78,14 @@ test('GroundRef.setFog forwards the original color and distances to the map rend
   result.dispose();
 });
 
-test('unbounded city crossing fallback returns an independent vector usable by Java mul', async () => {
+test('GroundRef loads its own road graph and returns an independent vector usable by Java mul', async () => {
   const sources = new Map([
     ['system/scripts/util/resource/src/GameRef.java', 'package java.util.resource; class GameRef {}'],
     ['sl/scripts/game/src/Init.java', `package java.game; import java.util.resource.*;
       class Init extends GameType {
         Init(int id) { missingNext(); }
         Vector3 trafficSpawn(GroundRef map, Vector3 start) { return map.getNearestCross(start).mul(2.0); }
+        int declareTraffic(GroundRef map, GameRef type) { return map.addTrafficN(type,40,2.0,5.0,2.0); }
         int registerTraffic(GroundRef map, GameRef car, Vector3 pos) {
           int id=map.addTrafficCar(car,pos); return map.notifyTrafficCar(id,1);
         }
@@ -93,6 +94,7 @@ test('unbounded city crossing fallback returns an independent vector usable by J
       class GroundRef extends GameRef {
         Vector3 getNearestCross(Vector3 start) { return getNearestCross(start,0.0); }
         native Vector3 getNearestCross(Vector3 start, float distance);
+        native int addTrafficN(GameRef type, int count, float a, float b, float c);
         native int addTrafficCar(GameRef car, Vector3 pos);
         native int notifyTrafficCar(int id, int enabled);
       }`],
@@ -102,25 +104,36 @@ test('unbounded city crossing fallback returns an independent vector usable by J
       Vector3 mul(float n) { x*=n; y*=n; z*=n; return this; }
     }`],
   ]);
-  const assets = new Assets([...sources].map(([path,text])=>({path,size:text.length})),
-    async path=>new TextEncoder().encode(sources.get(path)!));
+  const roadPath='maps/native-test/ai/native.trc',bytes=new Uint8Array(44),view=new DataView(bytes.buffer);
+  view.setUint32(0,1,true);view.setUint32(4,1,true); // One pool-A crossing, zero links/lanes.
+  [12,-16,22].forEach((n,i)=>view.setFloat32(28+i*4,n,true));
+  const assets = new Assets([...sources].map(([path,text])=>({path,size:text.length})).concat([{path:roadPath,size:bytes.length}]),
+    async path=>path===roadPath?bytes:new TextEncoder().encode(sources.get(path)!));
+  assets.pack=async()=>({version:0x200,dependencies:[],warnings:[],entries:[{superId:0,typeId:7,type:1,flags:0,compatibility:0,offset:0,size:0,alias:'ground',data:new TextEncoder().encode(`road ${roadPath}`)}]});
   const result = await bootGame(assets,()=>{});
   try {
     assert.match(result.error?.message ?? '', /missingNext/);
     const jvm=result.jvm;
     const ground=jv('GroundRef',{className:'java.util.resource.GroundRef',fields:new Map()});
+    const groundId=result.gameTypes.remountSavedResource('maps/native-test.rpk',7);
+    jvm.natives.invoke('java.util.resource.ResourceRef','set',ground,[groundId]);
     const start=jv('Vector3',{className:'java.lang.Vector3',fields:new Map([
       ['x',jv('float',10)],['y',jv('float',-17)],['z',jv('float',20)],
     ])});
     const receiver=jv('Init',{className:'java.game.Init',fields:new Map()});
+    const taxi=jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()});
+    jvm.natives.invoke('java.util.resource.ResourceRef','set',taxi,[result.gameTypes.remountSavedResource('cars/traffic/Taxi.rpk',6)]);
+    assert.equal((await jvm.invokeAsync(receiver,'declareTraffic',[ground,taxi])).value,1);
+    assert.deepEqual(result.traffic.models(ground)?.map(model=>[model.pack,model.id,model.weight]),[['cars/traffic/taxi.rpk',6,40]]);
     const position=await jvm.invokeAsync(receiver,'trafficSpawn',[ground,start]);
-    assert.deepEqual(['x','y','z'].map(axis=>jvm.get(position,axis).value),[20,-34,40]);
+    assert.deepEqual(['x','y','z'].map(axis=>jvm.get(position,axis).value),[24,-32,44]);
     assert.deepEqual(['x','y','z'].map(axis=>jvm.get(start,axis).value),[10,-17,20],'traffic placement must not mutate the saved race start');
     assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,ground,position])).value,0,'city traffic mock accepts placement followed by notification without allocating a traffic ID');
     assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,ground,jv('Vector3',null)])).value,0,'the original optional null traffic position is accepted');
     for (const type of ['int','float']) {
-      assert.equal(jvm.natives.invoke('java.util.resource.GroundRef','getNearestCross',ground,[start,jv(type,100)])?.value,null,'bounded camera searches retain their no-crossing fallback');
-      assert.equal(jvm.natives.invoke('java.util.resource.GroundRef','getNearestCross',ground,[jv('Vector3',null),jv(type,0)])?.value,null);
+      const found=await jvm.natives.invokeAsync('java.util.resource.GroundRef','getNearestCross',ground,[start,jv(type,100)]);
+      assert.deepEqual(['x','y','z'].map(axis=>jvm.get(found!,axis).value),[12,-16,22],'radius is not a cutoff; returned vector is not shared with prior Java mul');
+      assert.equal((await jvm.natives.invokeAsync('java.util.resource.GroundRef','getNearestCross',ground,[jv('Vector3',null),jv(type,0)]))?.value,null);
     }
   } finally { result.dispose(); }
 });
