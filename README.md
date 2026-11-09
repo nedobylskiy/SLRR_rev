@@ -1,4 +1,29 @@
-# SLRR · WebGL Engine Remaster
+<p align="center">
+  <img src="docs/media/slrr-rev-logo.png" alt="SLRR REV logo" width="480">
+</p>
+
+<h1 align="center">SLRR REV</h1>
+
+<p align="center">
+  <strong>Street Legal Racing: Redline, rebuilt for the browser.</strong><br>
+  A WebGL 2 engine remaster running the original game's assets and Java scripts.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-in%20development-8b5cf6" alt="Status: in development">
+  <img src="https://img.shields.io/badge/platform-browser-0078d4" alt="Platform: browser">
+  <img src="https://img.shields.io/badge/renderer-WebGL%202-e99002" alt="Renderer: WebGL 2">
+  <img src="https://img.shields.io/badge/language-TypeScript-3178c6" alt="Language: TypeScript">
+  <a href="docs/soft-body-wasm.md"><img src="https://img.shields.io/badge/physics-C%2B%2B%20%2F%20WASM%20(optional)-00599c" alt="Optional C++ / WebAssembly physics"></a>
+  <a href="https://github.com/nedobylskiy/SLRR_rev/actions/workflows/ci.yml"><img src="https://github.com/nedobylskiy/SLRR_rev/actions/workflows/ci.yml/badge.svg" alt="CI: TypeScript and synthetic compatibility tests"></a>
+</p>
+
+<p align="center">
+  <a href="#launch">Run</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="#verification">Build and tests</a> ·
+  <a href="#projects-and-research-we-build-on">Sources and credits</a>
+</p>
 
 ![Street Legal Racing: Redline WebGL remaster demo](docs/media/slrr-webgl-demo.gif)
 
