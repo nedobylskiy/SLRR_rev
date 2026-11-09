@@ -4,6 +4,12 @@ import { parseConstants, parseTufa, parseTrees } from '../src/formats/tufa';
 import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../src/formats/scx';
 import { parseRpk, parseProperties, parseRdb } from '../src/formats/rpk';
 import { normalizePath } from '../src/assets';
+import {parsePartConfig} from '../src/formats/cfg';
+
+test('stock Taxi empty color palette accepts its trailing zero placeholder without accepting malformed colors',()=>{
+ assert.deepEqual(parsePartConfig('render 0x16\ncolors 0 0x00000000').renders[0].colors,[]);
+ assert.throws(()=>parsePartConfig('render 0x16\ncolors 0 0xff0000'),/invalid colors/);
+});
 
 function u32(...n: number[]) { const b = Buffer.alloc(n.length * 4); n.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4)); return b; }
 function chunk(tag: string, data: Uint8Array) { return Buffer.concat([Buffer.from(tag), u32(data.length), data]); }

@@ -38,6 +38,9 @@ export class TrafficVehicle implements BotVehicle {
   readonly body:RigidBody3D;
   readonly crush:TrafficCrush;
   readonly wheels:{mount:Vector3;center:Vector3;radius:number;length:number;spin:number;steer:number;contact:boolean}[];
+  readonly wheelbase:number;
+  readonly maxSteerAngle=.6;
+  readonly physicalSteering=true;
   collisionVersion=0;
   private mode:BotMode='cruise';
   setMode(mode:BotMode){this.mode=mode;}
@@ -45,6 +48,7 @@ export class TrafficVehicle implements BotVehicle {
   constructor(bounds:Box3,mass:number,wheels:readonly CfgWheel[],readonly terrain:Terrain,private collision?:MapCollision){
     this.body=new RigidBody3D(mass,bounds,new Vector3(0,Math.max(bounds.min.y+.4,-.35),0));this.crush=new TrafficCrush(bounds);
     this.wheels=wheels.map(w=>({mount:new Vector3(...w.position).add(new Vector3(0,.25,0)),center:new Vector3(...w.position),radius:w.radius??.36,length:.15,spin:0,steer:0,contact:false}));
+    this.wheelbase=this.wheels.length?Math.max(1,Math.max(...this.wheels.map(w=>w.mount.z))-Math.min(...this.wheels.map(w=>w.mount.z))):3;
   }
   place(position:Vector3,direction:Vector3,height:number){
     const root=position.clone();const ground=this.terrain.height(root.x,root.z,root.y+.5);if(ground>-999)root.y=ground+height-.1;

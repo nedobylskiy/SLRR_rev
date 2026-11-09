@@ -31,6 +31,39 @@ function parallelRoads():RoadNetwork {
   return network;
 }
 
+test('steering preview continues from a crossing onto its chosen exit without rerolling',()=>{
+  let calls=0;const route=new RoadTrafficCar(junction(),new Vector3(-1,0,0),()=>{calls++;return .999;});
+  route.follow(new Vector3(0,0,0));assert.equal(route.insideCrossing,true);
+  const point=new Vector3(),direction=new Vector3();route.targetAhead(12,point,direction);
+  assert.ok(point.z>10);assert.ok(direction.z>.99);const chosen=calls;
+  route.steeringTargetAhead(12,2,point,direction);assert.equal(calls,chosen);assert.ok(point.z>10);
+  route.follow(new Vector3(-2,0,2));assert.equal(route.insideCrossing,false);assert.equal(route.crossingsPassed,1);
+  assert.ok(route.junctionExitDistance!<.1);
+});
+
+test('a long physical bus clears a sharp crossing and continues along the exit',()=>{
+  const route=new RoadTrafficCar(junction(),new Vector3(-10,0,0),()=>.999);
+  const wheels=[[-1,-.7,-4],[1,-.7,-4],[-1,-.7,4],[1,-.7,4]].map(position=>({position:position as RoadPoint,rotation:[0,0,0] as RoadPoint,radius:.4,parameters:[]}));
+  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1.25,-.8,-6),new Vector3(1.25,2.5,6)),10000,wheels,{height:()=>0,normal:()=>new Vector3(0,1,0)});
+  vehicle.place(route.position,route.direction,1.1);vehicle.body.velocity.copy(route.direction).multiplyScalar(15/3.6);
+  const bot=new Bot(route,vehicle,()=>.5);let previous=vehicle.body.position.clone(),steer=0;
+  for(let i=0;i<1800;i++){
+    bot.advance(1/60);assert.ok(vehicle.body.position.distanceTo(previous)<.4,'physical motion never teleports');previous.copy(vehicle.body.position);
+    assert.ok(Math.abs(bot.input.steer-steer)<=2.5/60+1e-8);steer=bot.input.steer;
+  }
+  assert.equal(route.crossingsPassed,1);assert.equal(route.roadId,4);assert.equal(bot.mode,'cruise');
+  assert.ok(vehicle.body.position.z>25);assert.ok(Math.abs(vehicle.body.position.x+2)<1);
+});
+
+test('physical steering slows before a sharp crossing rather than waiting until the bend',()=>{
+  const route=new RoadTrafficCar(junction(),new Vector3(-10,0,0),()=>.999);
+  const wheels=[[-1,-.7,-4],[1,-.7,-4],[-1,-.7,4],[1,-.7,4]].map(position=>({position:position as RoadPoint,rotation:[0,0,0] as RoadPoint,radius:.4,parameters:[]}));
+  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1.25,-.8,-6),new Vector3(1.25,2.5,6)),10000,wheels,{height:()=>0,normal:()=>new Vector3(0,1,0)});
+  vehicle.place(route.position,route.direction,1.1);vehicle.body.velocity.copy(route.direction).multiplyScalar(20);
+  const bot=new Bot(route,vehicle,()=>.5,20);bot.command(1/60);
+  assert.equal(route.insideCrossing,false);assert.ok(bot.desiredSpeed<8);assert.equal(bot.input.brake,true);
+});
+
 test('lane changes use adjacent same-direction branch lanes and blend continuously',()=>{
   const graph=parallelRoads();
   const route=new RoadTrafficCar(graph,new Vector3(50,0,0),()=>0);

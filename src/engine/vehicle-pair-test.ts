@@ -6,9 +6,15 @@ import { physicsTickBudget } from './physics-timing';
 
 export type VehiclePairScenario = 'offset' | 'side' | 'rear-chain';
 const neutral={throttle:0,steer:0,brake:false};
+const contactRadius=(body:RigidBody3D)=>Math.hypot(
+  Math.max(Math.abs(body.bounds.min.x-body.center.x),Math.abs(body.bounds.max.x-body.center.x)),
+  Math.max(Math.abs(body.bounds.min.y-body.center.y),Math.abs(body.bounds.max.y-body.center.y)),
+  Math.max(Math.abs(body.bounds.min.z-body.center.z),Math.abs(body.bounds.max.z-body.center.z)));
 
 /** Shared contact: finite masses and world-space inertia on both sides. */
 export function vehiclePairContact(a:RigidBody3D,b:RigidBody3D) {
+  // Most streamed pairs are far apart. Reject them before allocating SAT corners/axes.
+  const reach=contactRadius(a)+contactRadius(b);if(a.position.distanceToSquared(b.position)>reach*reach)return;
   const bFrame=b.matrix().multiply(new Matrix4().setPosition(b.bounds.getCenter(new Vector3())));
   const hit=orientedBoxContact(a,bFrame,b.bounds.getSize(new Vector3()).multiplyScalar(.5));
   if(!hit)return;

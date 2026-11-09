@@ -65,6 +65,8 @@ import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
+import {TrafficSpawnIndex,TrafficVehicleLod,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
+import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel} from '../engine/traffic-models';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
 import { TrafficDamageView } from './traffic-damage-view';
 import { TrafficAudio, type TrafficVoice } from '../audio/traffic-audio';
@@ -85,7 +87,8 @@ import { FixedClock } from '../runtime/fixed-clock';
 import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
 import {createTrafficSignals} from './traffic-signals';
 
-type TrafficTestCar={ car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
+type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]};
+type TrafficTestCar={ model:TrafficModel;active:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -393,16 +396,54 @@ export class Viewer {
   roadDebugStatus = 'Road graph off';
   private trafficTestEnabled = false;
   private trafficTestRevision = 0;
-  private trafficTest?:TrafficTestCar;
-  private trafficFollower?:TrafficTestCar;
-  private trafficPairEnabled=true;
+  private trafficCars:TrafficTestCar[]=[];
+  private get trafficTest(){return this.trafficCars.find(car=>car.active);}
+  private get trafficFollower(){return this.trafficCars.filter(car=>car.active)[1];}
+  private trafficCount=2;
+  private trafficPhysicsRadius=30;
+  private trafficSpawnRadius=100;
+  private trafficSpawnSphereRadius=4;
+  private trafficSpawnCenterHeight=1.5;
+  get trafficSpawnRange(){return this.trafficSpawnRadius;}
+  setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic spawn radius must be 25–500 m');this.trafficSpawnRadius=radius;}
+  private trafficOccupant(body:import('../engine/rigid-body-3d').RigidBody3D):TrafficOccupant {const point=body.position.clone() as TrafficOccupant,size=body.bounds.getSize(new THREE.Vector3());point.trafficRadius=Math.hypot(size.x,size.z)*.5;return point;}
+  private chooseTrafficSpawn(occupied:readonly TrafficOccupant[],bounds?:THREE.Box3,height=0){
+    if(bounds){const sphere=bounds.getBoundingSphere(new THREE.Sphere());this.trafficSpawnSphereRadius=sphere.radius+Math.hypot(sphere.center.x,sphere.center.z)+.5;this.trafficSpawnCenterHeight=height-.1+sphere.center.y;}
+    const radius=Math.min(this.trafficSpawnRadius,this.mapStreamRange);
+    // The primary/player camera owns spawning; the independent inspection camera must not affect it.
+    this.camera.updateMatrixWorld();
+    const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
+    const sphere=new THREE.Sphere(new THREE.Vector3(),this.trafficSpawnSphereRadius);
+    return this.trafficSpawns?.choose(this.trafficFocus(),radius,occupied,Math.random,Math.min(15,radius*.25),true,spawn=>{
+      sphere.center.copy(spawn.position);sphere.center.y+=this.trafficSpawnCenterHeight;
+      return !frustum.intersectsSphere(sphere);
+    },bounds?Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5:6);
+  }
+  private trafficSpawns?:TrafficSpawnIndex;
+  private trafficRefillAt=0;
+  get trafficAmount(){return this.trafficCount;}
+  get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
+  setTrafficPhysicsRadius(radius:number){if(!Number.isFinite(radius)||radius<5||radius>200)throw Error("Traffic physics radius must be 5–200 m");this.trafficPhysicsRadius=radius;}
+  async setTrafficCount(count:number){
+    if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error("Traffic count must be an integer from 0 to 50");
+    this.trafficCount=count;this.trafficTestEnabled=true;
+    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;car.group.visible=false;car.voice?.setActive(false);}});
+    if(this.mapRoadSource&&(!this.trafficControl||this.trafficCars.length<count))await this.restartTrafficTest(true);
+  }
+  private trafficFocus(){return this.trafficPeer?.body.position??this.mapStreamFocus??this.camera.position;}
   private trafficPrevious?:number;
   private trafficClock=new FixedClock(60,15);
   private mapTrafficFixtures:TrafficFixture[]=[];
   private trafficControl?:TrafficControl;
   private trafficSignals?:Awaited<ReturnType<typeof createTrafficSignals>>;
   private trafficSignalError?:string;
-  private trafficTemplates=new Map<Assets,Promise<{group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]}>>();
+  private trafficTemplates=new Map<Assets,Map<string,Promise<TrafficTemplate>>>();
+  private javaTrafficTypes?:readonly TrafficModel[];
+  private trafficModelErrors=new Map<string,string>();
+  setJavaTrafficTypes(types:readonly TrafficModel[]|undefined){
+    if(this.javaTrafficTypes===types)return;this.javaTrafficTypes=types;
+    if(this.trafficTestEnabled&&this.mapRoadSource)void this.restartTrafficTest();
+  }
   private trafficAudio?:TrafficAudio;
   private trafficAudioStart=()=>this.trafficAudio?.activate();
   private trafficPeer?:Vehicle3D;
@@ -425,8 +466,8 @@ export class Viewer {
       this.trafficControl??=driver.control;
       if(this.trafficControl&&driver.control!==this.trafficControl){driver.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,this.trafficControl.network,this.trafficControl);}
       const current=this.playerTrafficDriver!;
-      if(!this.trafficTest)current.control.advance(dt);
-      return current.sample(dt,[this.trafficTest?.vehicle.body,this.trafficFollower?.vehicle.body].filter((body):body is import('../engine/rigid-body-3d').RigidBody3D=>!!body));
+      if(!this.trafficTestEnabled)current.control.advance(dt);
+      return current.sample(dt,this.trafficCars.filter(car=>car.active).map(car=>car.vehicle.body));
     };
   }
   trafficTestStatus = 'Traffic test off';
@@ -558,7 +599,7 @@ export class Viewer {
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
-      if(this.trafficTest?.voice||this.trafficFollower?.voice)this.trafficAudio?.listener(renderCamera);
+      if(this.trafficCars.some(car=>car.voice))this.trafficAudio?.listener(renderCamera);
       this.mapRoadDebug?.updateTraffic(this.trafficControl);
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
@@ -579,6 +620,10 @@ export class Viewer {
         group.position.copy(renderCamera.position).add(offset);
       if(this.sunFlare)this.sunFlare.position.copy(renderCamera.position).addScaledVector(this.lighting.direction,500);
       this.gpuOcclusion.observerView=this.inspection.enabled;
+      this.gpuOcclusion.setDynamicObjects(this.camera,this.trafficCars.filter(car=>car.active).map(car=>({
+        object:car.group,bounds:car.vehicle.body.bounds.clone().applyMatrix4(car.vehicle.body.matrix()).expandByScalar(1),
+        padding:Math.max(1,car.vehicle.body.velocity.length()*(this.gpuOcclusion.intervalFrames/60+.1)),
+      })),this.inspection.enabled&&this.inspectResident);
       this.profiler.measure('GPU occlusion CPU',()=>this.graphicsDiagnostics.pass('GPU occlusion',()=>this.gpuOcclusion.prepare(this.camera,this.staticMapRoot,this.geometryCutoff||this.inspection.enabled&&this.inspectResident||this.rayOcclusion.enabled,this.mapStream?.revision??0,this.mapStream?.consumeOcclusionChanges())));
       this.profiler.measure('Render CPU', () => this.graphicsDiagnostics.pass('Main color',()=>
         this.gpuOcclusion.renderMain(()=>this.rayOcclusion.renderMain(this.inspection.enabled&&this.inspectResident,()=>this.renderer.render(this.scene,renderCamera),this.earlyMapCulling?this.staticMapRoot:undefined))));
@@ -885,19 +930,21 @@ export class Viewer {
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   private stopTrafficTest() {
     this.trafficTestRevision++;
-    for(const test of [this.trafficTest,this.trafficFollower])if(test)this.disposeTrafficCar(test);
-    this.trafficTest=this.trafficFollower=undefined;this.trafficPrevious=undefined;this.trafficClock=new FixedClock(60,15);
+    for(const test of this.trafficCars)this.disposeTrafficCar(test);
+    this.trafficCars=[];this.trafficSpawns=undefined;this.trafficPrevious=undefined;this.trafficClock=new FixedClock(60,15);
     this.trafficSignals?.dispose();this.trafficSignals=undefined;this.trafficControl=undefined;
     this.trafficSignalError=undefined;
-    this.trafficTestStatus='Traffic test off';
+    this.trafficModelErrors.clear();this.trafficTestStatus='Traffic test off';
   }
   private disposeTrafficCar(test:TrafficTestCar){test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
-  async setTrafficPairEnabled(enabled:boolean){if(this.trafficPairEnabled===enabled)return;this.trafficPairEnabled=enabled;if(this.trafficTestEnabled&&this.mapRoadSource)await this.restartTrafficTest();}
-  private trafficTemplate(assets:Assets){
-    let pending=this.trafficTemplates.get(assets);if(pending)return pending;
+  async setTrafficPairEnabled(enabled:boolean){await this.setTrafficCount(enabled?2:1);}
+  private trafficTemplate(assets:Assets,key:TrafficModel=DEFAULT_TRAFFIC_MODELS[0]):Promise<TrafficTemplate>{
+    let cache=this.trafficTemplates.get(assets);if(!cache){cache=new Map();this.trafficTemplates.set(assets,cache);}
+    const identity=`${normalizePath(key.pack)}:${key.id}`;
+    let pending=cache.get(identity);if(pending)return pending;
     const generation=this.generation;
     pending=(async()=>{
-      const built=await new PartFactory(assets).stock({pack:'cars/traffic/Pickup.rpk',id:6});let group:THREE.Group|undefined;
+      const built=await new PartFactory(assets).stock({pack:key.pack,id:key.id});let group:THREE.Group|undefined;
       try{
         group=await this.createPreviewWorld(built.world,assets,false);
         const bounds=new THREE.Box3().setFromObject(group),wheels=built.root.definition.config.wheels;
@@ -914,55 +961,73 @@ export class Viewer {
         const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps};group=undefined;return result;
       }finally{built.world.dispose();if(group)this.disposeGroup(group);}
     })();
-    this.trafficTemplates.set(assets,pending);pending.catch(()=>{if(this.trafficTemplates.get(assets)===pending)this.trafficTemplates.delete(assets);});return pending;
+    cache.set(identity,pending);pending.catch(()=>{if(cache!.get(identity)===pending)cache!.delete(identity);});return pending;
   }
   async setTrafficTestEnabled(enabled:boolean) {
     this.trafficTestEnabled=enabled;
     if(!enabled){this.stopTrafficTest();return;}
     if(this.mapRoadSource&&!this.trafficTest)await this.restartTrafficTest();
   }
-  async restartTrafficTest() {
-    this.stopTrafficTest();
+  async restartTrafficTest(preserve=false) {
+    if(!preserve)this.stopTrafficTest();else this.trafficTestRevision++;
     const source=this.mapRoadSource;if(!source||!this.trafficTestEnabled)return;
     const revision=this.trafficTestRevision,generation=this.generation;
     const current=()=>revision===this.trafficTestRevision&&generation===this.generation&&this.trafficTestEnabled;
-    this.trafficTestStatus='Loading traffic Pickup…';
+    this.trafficTestStatus='Loading traffic models…';
     const staged:TrafficTestCar[]=[];
     try{
       const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
       if(!current())return;
       if(!roads){this.trafficTestStatus='No road graph for traffic test';return;}
-      const car=new RoadTrafficCar(roads.network);
-      const template=await this.trafficTemplate(source.assets);
-      if(!current())return;
+      this.trafficSpawns??=new TrafficSpawnIndex(roads.network);
+      const control=this.trafficControl??new TrafficControl(roads.network,this.mapTrafficFixtures);
+      const models=this.javaTrafficTypes??DEFAULT_TRAFFIC_MODELS;
       if(!source.terrain)throw Error('Traffic test requires map terrain');
-      const control=new TrafficControl(roads.network,this.mapTrafficFixtures);
-      const routes=[car];if(this.trafficPairEnabled)routes.push(car.spawnBehind(25));
-      for(const [index,route] of routes.entries()){
+      const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
+      for(let index=this.trafficCars.length;index<this.trafficCount;index++){
+        const model=pickTrafficModel(models.filter(model=>!this.trafficModelErrors.has(`${normalizePath(model.pack)}:${model.id}`)));
+        if(!model)break;
+        let template:TrafficTemplate;
+        try{template=await this.trafficTemplate(source.assets,model);}catch(error){if(!current())return;this.trafficModelErrors.set(`${normalizePath(model.pack)}:${model.id}`,String(error));index--;continue;}
+        if(!current())return;
+        const spawn=this.chooseTrafficSpawn(occupied,template.bounds,template.height);
+        const route=new RoadTrafficCar(roads.network,spawn?.position??this.trafficFocus(),Math.random,spawn?.road);
         const lamps=await createTrafficLamps(template.lamps,source.assets);
         if(!current()){lamps.dispose();return;}
         const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
         const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
         vehicle.place(route.position,route.direction,template.height);
-        const bot=new Bot(route,vehicle,Math.random,(index?30:15)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
+        const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
+        const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
         const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
-        group.name=`Traffic Pickup ${index?'B · 30':'A · 15'} km/h`;
-        staged.push({car:route,bot,vehicle,damage,lamps,group,wheels});
+        group.name=`Traffic ${model.pack.split('/').at(-1)} ${index+1}`;group.visible=!!spawn;
+        staged.push({model,active:!!spawn,lod,car:route,bot,vehicle,damage,lamps,group,wheels});if(spawn)occupied.push(this.trafficOccupant(vehicle.body));
       }
-      this.trafficTest=staged[0];this.trafficFollower=staged[1];
+      this.trafficCars.push(...staged);
       this.trafficControl=control;
       const cars=staged.splice(0);for(const test of cars)this.scene.add(test.group);
-      this.updateTrafficTest(performance.now());
+      this.trafficTestStatus=`Streaming active · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
       for(const test of cars){
-        try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(current())test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
+        try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(generation===this.generation&&this.trafficCars.includes(test))test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
       }
-      if(control.signals.length)void createTrafficSignals(source.assets,control).then(signals=>{if(current()){this.trafficSignals=signals;this.scene.add(signals.root);}else signals.dispose();}).catch(error=>{if(current()){this.trafficSignalError=String(error);console.warn('Traffic signal glows:',error);}});
+      if(!this.trafficSignals&&control.signals.length)void createTrafficSignals(source.assets,control).then(signals=>{if(current()){this.trafficSignals=signals;this.scene.add(signals.root);}else signals.dispose();}).catch(error=>{if(current()){this.trafficSignalError=String(error);console.warn('Traffic signal glows:',error);}});
     }catch(error){if(current())this.trafficTestStatus=`Traffic test: ${String(error)}`;}
     finally{for(const test of staged)this.disposeTrafficCar(test);}
   }
   trafficTestInfo() {
-    const test=this.trafficTest;if(!test)return this.trafficTestStatus;
-    return [test,this.trafficFollower].filter((car):car is TrafficTestCar=>!!car).map((test,i)=>`Pickup ${i?'B':'A'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${test.bot.mode} · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${Math.round(test.bot.rpm)} RPM\n${test.car.phase} · ${test.car.crossingsPassed} crossings · damage #${test.vehicle.crush.version} · ${test.bot.trafficStatus||'free'}\nXYZ ${test.vehicle.body.position.toArray().map(n=>n.toFixed(1)).join(', ')}${test.car.nextRoad===undefined?'':` · exit #${test.car.nextRoad}`}`).join('\n\n')+`\nIndependent routes · signals ${this.trafficControl?.signals.length??0} · glows ${this.trafficSignalError??(this.trafficSignals?'ready':'loading')} · stop/yield wait 5s`;
+    const cars=this.trafficCars.filter(car=>car.active),physical=cars.filter(car=>car.lod.physical).length;
+    return `Traffic ${cars.length}/${this.trafficCount} · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · spawn ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
+      cars.map((test,i)=>`${test.model.pack.split('/').at(-1)?.replace(/\.rpk$/i,'')} ${i+1} · ${test.lod.physical?'physics':'puppet'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${test.car.phase} · ${test.bot.trafficStatus||'free'}`).join('\n')+
+      `\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
+  }
+  private recycleTrafficCar(test:TrafficTestCar,spawn:TrafficSpawn){
+    const network=this.trafficSpawns!.network,route=new RoadTrafficCar(network,spawn.position,Math.random,spawn.road);
+    test.damage.reset();test.vehicle.crush.offsets.fill(0);test.vehicle.crush.version=0;test.vehicle.collisionVersion=0;
+    test.vehicle.place(route.position,route.direction,test.lod.height);test.vehicle.setMode('cruise');
+    test.car=route;test.lod.route=route;test.lod.physical=false;test.lod.setMode('cruise');
+    test.lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
+    test.bot=new Bot(route,test.lod,Math.random,(15+Math.random()*20)/3.6,this.trafficControl);
+    test.active=true;test.group.visible=true;
   }
   focusTrafficTest() {
     if(!this.trafficTest)return;
@@ -975,8 +1040,23 @@ export class Viewer {
     const point=new THREE.Vector3(.7,0,body.bounds.min.z).applyMatrix4(body.matrix());test.bot.hit(impulse,point,12);
   }
   private updateTrafficTest(now:number) {
-    if(!this.trafficTest)return;
-    const cars=[this.trafficTest,...(this.trafficFollower?[this.trafficFollower]:[])];
+    if(!this.trafficControl||!this.trafficTestEnabled)return;
+    const center=this.trafficFocus();
+    for(const [i,test] of this.trafficCars.entries()){
+      const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
+      if(i>=this.trafficCount||distance>this.mapStreamRange+20||test.car.stopped&&distance>this.trafficPhysicsRadius+10){test.active=false;test.group.visible=false;}
+      else test.group.visible=test.active&&distance<=this.mapStreamRange;
+      test.voice?.setActive(test.active&&test.group.visible);
+    }
+    if(now>=this.trafficRefillAt&&this.trafficSpawns){
+      this.trafficRefillAt=now+200;
+      const test=this.trafficCars.slice(0,this.trafficCount).find(car=>!car.active);
+      if(test){const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
+        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height);
+        if(spawn)this.recycleTrafficCar(test,spawn);
+      }
+    }
+    const cars=this.trafficCars.filter(car=>car.active);
     this.trafficAudio?.setHidden(document.hidden);
     if(document.hidden){this.trafficPrevious=undefined;return;}
     const time=this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:12*3600);
@@ -984,9 +1064,9 @@ export class Viewer {
     const bodies=cars.map(car=>car.vehicle.body);if(peer)bodies.push(peer.body);
     if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
       this.trafficControl?.advance(this.trafficClock.dt);
-      for(const test of cars)test.bot.advance(this.trafficClock.dt,bodies);
+      for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);test.bot.advance(this.trafficClock.dt,bodies);}
       for(const [i,test] of cars.entries()){
-        if(peer){
+        if(peer&&test.lod.physical){
           const hit=vehiclePairContact(peer.body,test.vehicle.body);
           if(hit){
             if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
@@ -995,6 +1075,7 @@ export class Viewer {
           }
         }
         for(const other of cars.slice(i+1)){
+          if(!test.lod.physical&&!other.lod.physical)continue;
           const a=test.vehicle.body,b=other.vehicle.body,hit=vehiclePairContact(a,b);if(!hit)continue;
           if(hit.impulse.lengthSq()>1){test.bot.hit(hit.impulse,hit.point,hit.closing);other.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
           const total=1/a.mass+1/b.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
@@ -1043,7 +1124,7 @@ export class Viewer {
   }
   dispose() {
     this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
-    for(const pending of this.trafficTemplates.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
+    for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
@@ -1230,10 +1311,10 @@ export class Viewer {
     return warnings;
   }
   async showMap(packPath: string, assets: Assets, progress?: (done: number, total: number) => void, keepWorld = false,
-    options?: { groundId?: number; preserveCamera?: boolean }) {
+    options?: { groundId?: number; preserveCamera?: boolean;trafficTypes?:readonly TrafficModel[] }) {
     if (!keepWorld) this.clear(); const generation = this.generation;
     this.mapPackPath=packPath;
-    this.resetRoadDebug();this.mapRoadSource={assets,pack:packPath,groundId:options?.groundId};
+    this.resetRoadDebug();this.javaTrafficTypes=options?.trafficTypes;this.mapRoadSource={assets,pack:packPath,groundId:options?.groundId};
     const pack = await assets.pack(packPath), warnings: string[] = [];
     const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
     const ground = groundEntry && groundRenderDefinition(groundEntry);

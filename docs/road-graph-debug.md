@@ -37,10 +37,16 @@ Coordinates, record framing/references, cubic Hermite geometry and stored segmen
 
 The first observed raw tail value is 13.888889 (numerically 50 / 3.6), followed by 0.9 and an unset/NaN word. The debug view does **not** label these as a speed limit or road friction: their gameplay semantics and units are unverified. These fields remain exact Uint32 words in the parsed data; display rounding does not modify them. Confirmed stop-line positions, bus-stop markers and traffic-light phase timing have not been identified. `.rest` alone is not sufficient evidence of vehicle stops.
 
-This visualization does not simulate traffic, classify priority or change the `getNearestCross` native. Its purpose is to verify the actual road data against city geometry before integrating behavior.
+The graph visualization is independent of traffic driving and the GroundRef native. `getNearestCross` now uses the same cached parsed TRC data through the receiver ground resource.
 
 ## Validation
 
 `tests/trc.test.ts` covers nontrivial Hermite curvature, group IDs/references, unknown-field preservation, malformed/truncated data, explicit map selection, caching and read-error retry. A local original-file verification consumed all 843,301 bytes and confirmed the record counts. The graph was visually checked over the original City map, including independent layer toggles and the displayed camera.
 
 Runtime policy (2026-11-09): after exiting a gold/pool-A crossing, traffic samples a 60–100 km/h cruise target; after pink/pool B, 15–35 km/h. This is the requested gameplay implementation of the observed regime correlation, not a decoded native speed-limit field.
+
+## GroundRef nearest crossing native
+
+`getNearestCross(Vector3, float)` and the host int overload are implemented. A zero distance selects the closest crossing in full 3D; nonzero distance minimizes `abs(distanceToCrossing - requestedDistance)` rather than imposing a search cutoff. Both pools participate, stable ties keep file order, and no vertical filter is applied. Each result is a new mutable Java Vector3. Null input or an unavailable/empty graph returns null; asset load/parse errors remain visible. Ground resource IDs are resolved back to local RPK IDs before selecting the ground’s explicit TRC path; another map’s City graph is never substituted.
+
+Validation includes Java source invoking the native and mutating its result, remounted ground IDs, independent receivers/results, radius matching beyond the requested radius, 3D height differences, ties, null/empty cases and cached graph loading. A local City check found Cross #260 at (-26.508474, 1.000036, 2.269919) for the origin query, and Cross #171 at (-54.032215, 7.294118, -131.048325) for desired radius 100 m (actual distance ~141.94 m). These match the prior local research example; exact x87 numerical parity with the original executable is not claimed.

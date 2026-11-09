@@ -98,6 +98,8 @@ export function parsePartConfig(source: string): PartConfig {
       case 'colors': {
         if (!result.renders.length) { result.unknown.push({ line, command, args }); break; }
         const count = integer(0);
+        // Original Taxi hood writes a zero placeholder after an empty palette.
+        if(count===0&&args.length===2&&/^(?:0x)?0+$/i.test(args[1])){result.renders.at(-1)!.colors=[];break;}
         if (args.length !== count + 1) throw fail();
         result.renders.at(-1)!.colors = args.slice(1).map(value => {
           if (!/^(?:0x)?[\da-f]+$/i.test(value)) throw fail();

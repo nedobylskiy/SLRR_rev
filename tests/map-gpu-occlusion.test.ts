@@ -1,8 +1,38 @@
 import {allocateMapPlacementIds,setMapPlacementIds} from '../src/render/map-placement-ids';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {BoxGeometry,Color,DoubleSide,FrontSide,BackSide,Group,InstancedMesh,Matrix4,Mesh,MeshStandardMaterial,PlaneGeometry,PerspectiveCamera,Vector3,type WebGLRenderer} from 'three';
+import {Box3,BoxGeometry,Color,DoubleSide,FrontSide,BackSide,Group,InstancedMesh,Matrix4,Mesh,MeshStandardMaterial,PlaneGeometry,PerspectiveCamera,Vector3,type WebGLRenderer} from 'three';
 import {MapGpuOcclusion,gpuDepthOccluder,gpuSourceKey} from '../src/render/map-gpu-occlusion';
+
+test('traffic groups outside the primary frustum skip color rendering but retain shadows and restore visibility',()=>{
+  const object=new Group(),scene=new Group();scene.add(object);
+  const renderer={shadowMap:{render:()=>assert.equal(object.visible,true)}} as unknown as WebGLRenderer;
+  const cull=new MapGpuOcclusion(renderer),camera=new PerspectiveCamera(60,1,.1,100);camera.updateProjectionMatrix();
+  const bounds=new Box3(new Vector3(40,-1,-11),new Vector3(42,1,-9));
+  cull.setDynamicObjects(camera,[{object,bounds}]);cull.applyResults=false;
+  assert.throws(()=>cull.renderMain(()=>{assert.equal(object.visible,false);renderer.shadowMap.render([],scene as any,camera);assert.equal(object.visible,false);throw Error('failed render');}),/failed render/);
+  assert.equal(object.visible,true);assert.equal(cull.stats().dynamic_outside_frustum,1);
+  cull.setDynamicObjects(camera,[{object,bounds}],true);cull.renderMain(()=>assert.equal(object.visible,true));
+  cull.dispose();
+});
+
+test('moving traffic consumes GPU flags, retains masks between passes, and rejects bounds it has left',()=>{
+  const cull=new MapGpuOcclusion({shadowMap:{render:()=>{}}} as unknown as WebGLRenderer),api=cull as any;
+  const object=new Group(),camera=new PerspectiveCamera(60,1,.1,100),bounds=new Box3(new Vector3(-1,-1,-11),new Vector3(1,1,-9));
+  cull.setDynamicObjects(camera,[{object,bounds,padding:2}]);
+  const captured=api.prepareCandidates();assert.equal(captured.length,1);assert.equal(api.depthScene.children.length,0,'cars do not become occluders');
+  api.apply({items:captured,bytes:new Uint8Array(4)});
+  for(let frame=0;frame<12;frame++){
+    cull.setDynamicObjects(camera,[{object,bounds:bounds.clone().translate(new Vector3(frame*.05,0,0)),padding:2}]);
+    cull.renderMain(()=>assert.equal(object.visible,false));assert.equal(object.visible,true);
+  }
+  const moved=bounds.clone().translate(new Vector3(3,0,0));cull.setDynamicObjects(camera,[{object,bounds:moved,padding:2}]);
+  cull.renderMain(()=>assert.equal(object.visible,true));api.apply({items:captured,bytes:new Uint8Array(4)});
+  cull.renderMain(()=>assert.equal(object.visible,true,'old readback cannot hide a car outside its captured box'));
+  const fresh=api.prepareCandidates();api.apply({items:fresh,bytes:new Uint8Array(4)});cull.renderMain(()=>assert.equal(object.visible,false));
+  api.apply({items:fresh,bytes:new Uint8Array([255,255,255,255])});cull.renderMain(()=>assert.equal(object.visible,true));
+  cull.setDynamicObjects(camera,[]);api.apply({items:fresh,bytes:new Uint8Array(4)});assert.equal(cull.stats().dynamic_candidates,0);cull.dispose();
+});
 
 test('GPU compacted main pass preserves source casters, colors, exception restoration and stale-source fallback',()=>{
   let duringShadow=()=>{};

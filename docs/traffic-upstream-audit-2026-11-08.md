@@ -48,7 +48,7 @@ Scratch verification: `.codex-attachments/inspect-city-road.mjs`. It verifies fr
 
 Local illustrative double-precision query: nearest to origin is second-pool index 206 at (−26.50847, 1.000036, 2.269919). With requested distance 100, the candidate is second-pool index 117 at (−54.03222, 7.294118, −131.04832), approximately 141.94 units from origin. This is an example of radius matching, not an original-executable parity claim.
 
-Our current mock copies the input only for distance 0, and returns null for nonzero distance. Both differ from a real graph lookup. The nonzero case should not be implemented as a bounded/radius cutoff.
+At the time of this audit, the mock copied the input only for distance 0 and returned null for nonzero distance. Both differed from a real graph lookup. The runtime implementation added on 2026-11-09 now follows the requested-radius selection over the receiver ground’s cached graph; see [native details](road-graph-debug.md#groundref-nearest-crossing-native). The nonzero case should not be implemented as a bounded/radius cutoff.
 
 ## Other useful road operations
 

@@ -198,7 +198,7 @@ async function runGameBoot() {
         }
         const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
-        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving });
+        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving,trafficTypes:result.traffic.models(selected.map) });
         if (source !== assets || run !== sequence || !javaTrackIsCurrent(result, selected)) {
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose(); return;
@@ -296,6 +296,7 @@ async function runGameBoot() {
       const javaStart = selected.start
         ? `${selected.start.x.toFixed(3)},${selected.start.y.toFixed(3)},${selected.start.z.toFixed(3)},${selected.start.yaw.toFixed(3)}` : '';
       const key = `${selected.mapPack}:${selected.mapResourceId}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
+      if(key===loadedTrackKey&&!loadingTrack)viewer?.setJavaTrafficTypes(result.traffic.models(selected.map));
       if (key === loadedTrackKey && !loadingTrack)
         sceneVehicles.update(!selected.driving && javaSceneCamera(result) ? selected.map : null, sceneTerrain);
       if (key === loadedTrackKey || loadingTrack) return;
@@ -527,20 +528,27 @@ for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(roadDebugStatus);
-const trafficTestLabel=textElement('label','Traffic bot · initial 15 km/h'),trafficTestCheck=document.createElement('input');
-trafficTestCheck.type='checkbox';trafficTestCheck.checked=true;trafficTestLabel.prepend(trafficTestCheck);mapDebugOptions.append(trafficTestLabel);
-const trafficPairLabel=textElement('label','Second Pickup · initial 30 km/h'),trafficPairCheck=document.createElement('input');
-trafficPairCheck.type='checkbox';trafficPairCheck.checked=true;trafficPairLabel.prepend(trafficPairCheck);mapDebugOptions.append(trafficPairLabel);
-trafficPairCheck.onchange=()=>{void viewer?.setTrafficPairEnabled(trafficPairCheck.checked);};
+const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 2'),trafficCountSlider=document.createElement('input');
+trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='2';trafficCountSlider.setAttribute('aria-label','Traffic cars');
+trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
+trafficCountSlider.oninput=()=>{const count=Number(trafficCountSlider.value);trafficCountValue.textContent=`Traffic cars: ${count}`;void viewer?.setTrafficCount(count);};
+const trafficRadiusLabel=textElement('label',''),trafficRadiusValue=textElement('span','Traffic physics radius: 30 m'),trafficRadiusSlider=document.createElement('input');
+trafficRadiusSlider.type='range';trafficRadiusSlider.min='5';trafficRadiusSlider.max='200';trafficRadiusSlider.step='5';trafficRadiusSlider.value='30';trafficRadiusSlider.setAttribute('aria-label','Traffic physics radius');
+trafficRadiusLabel.append(trafficRadiusValue,trafficRadiusSlider);mapDebugOptions.append(trafficRadiusLabel);
+trafficRadiusSlider.oninput=()=>{const radius=Number(trafficRadiusSlider.value);trafficRadiusValue.textContent=`Traffic physics radius: ${radius} m`;viewer?.setTrafficPhysicsRadius(radius);};
+const trafficSpawnLabel=textElement('label',''),trafficSpawnValue=textElement('span','Traffic spawn radius: 100 m'),trafficSpawnSlider=document.createElement('input');
+trafficSpawnSlider.type='range';trafficSpawnSlider.min='25';trafficSpawnSlider.max='500';trafficSpawnSlider.step='25';trafficSpawnSlider.value='100';trafficSpawnSlider.setAttribute('aria-label','Traffic spawn radius');
+trafficSpawnLabel.title='New cars appear on the nearest free graph lanes within this radius. Existing cars remain until they leave the map streaming radius.';
+trafficSpawnLabel.append(trafficSpawnValue,trafficSpawnSlider);mapDebugOptions.append(trafficSpawnLabel);
+trafficSpawnSlider.oninput=()=>{const radius=Number(trafficSpawnSlider.value);trafficSpawnValue.textContent=`Traffic spawn radius: ${radius} m`;viewer?.setTrafficSpawnRadius(radius);};
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
 const playerTrafficLabel=textElement('label','Traffic controls my car'),playerTrafficCheck=document.createElement('input');
 playerTrafficCheck.type='checkbox';playerTrafficLabel.prepend(playerTrafficCheck);mapDebugOptions.append(playerTrafficLabel);
 const playerTrafficStatus=textElement('span','');mapDebugOptions.append(playerTrafficStatus);
 playerTrafficCheck.onchange=()=>{playerTrafficStatus.textContent='';void viewer?.setPlayerTrafficEnabled(playerTrafficCheck.checked).catch(error=>{playerTrafficCheck.checked=false;playerTrafficStatus.textContent=String(error instanceof Error?error.message:error);});};
-trafficTestCheck.onchange=()=>{void viewer?.setTrafficTestEnabled(trafficTestCheck.checked).then(()=>{trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';});};
-const trafficRestart=textElement('button','Restart traffic near (0, 0, 0)');trafficRestart.setAttribute('type','button');
-trafficRestart.onclick=()=>{if(!trafficTestCheck.checked){trafficTestCheck.checked=true;void viewer?.setTrafficTestEnabled(true);}else void viewer?.restartTrafficTest();};mapDebugOptions.append(trafficRestart);
-const trafficFind=textElement('button','Inspect traffic Pickup');trafficFind.setAttribute('type','button');trafficFind.onclick=()=>{viewer?.focusTrafficTest();observerCheck.checked=true;};mapDebugOptions.append(trafficFind);
+const trafficRestart=textElement('button','Respawn traffic around player');trafficRestart.setAttribute('type','button');
+trafficRestart.onclick=()=>{void viewer?.restartTrafficTest();};mapDebugOptions.append(trafficRestart);
+const trafficFind=textElement('button','Inspect traffic');trafficFind.setAttribute('type','button');trafficFind.onclick=()=>{viewer?.focusTrafficTest();observerCheck.checked=true;};mapDebugOptions.append(trafficFind);
 const trafficHit=textElement('button','Test traffic impact');trafficHit.setAttribute('type','button');trafficHit.onclick=()=>viewer?.impactTrafficTest();mapDebugOptions.append(trafficHit);
 for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side faces'], ['boxes', 'CFG boxes']] as const) {
   const label = textElement('label', title), input = document.createElement('input'); input.type = 'checkbox';
@@ -1206,7 +1214,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); void viewer.setTrafficPairEnabled(trafficPairCheck.checked); void viewer.setTrafficTestEnabled(trafficTestCheck.checked); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

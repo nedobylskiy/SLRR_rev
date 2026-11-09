@@ -80,18 +80,20 @@ export class RoadTrafficCar {
   private at = 0;
   private pending?: TrafficTurn;
   private crossingTurn?: TrafficTurn;
+  private previousTurn?:TrafficTurn;
   private laneChange?:{source:TrafficCurve;start:number;length:number};
   lastCrossingGroup?:0|1;
   roadId = 0;
   crossingsPassed = 0;
   travelled = 0;
   stopped = false;
-  constructor(private network: RoadNetwork, spawn = new Vector3(), private random = Math.random) {
+  constructor(private network: RoadNetwork, spawn = new Vector3(), private random = Math.random, roadId?:number) {
     let graph=graphs.get(network);
     if(!graph){graph={connections:trafficConnections(network),curves:new Map(network.others.map(road=>[road.id,new TrafficCurve(road.segments)]))};graphs.set(network,graph);}
     this.connections = graph.connections;this.curves=graph.curves;
     this.curve = this.curves.values().next().value!;
-    this.rejoin(spawn);
+    if(roadId!==undefined&&this.curves.has(roadId)&&this.connections.get(roadId)?.length){this.roadId=roadId;this.curve=this.curves.get(roadId)!;this.at=this.curve.nearest(spawn,true).at;this.curve.sample(this.at,this.position,this.direction);}
+    else this.rejoin(spawn);
   }
   /** Place an independent cursor upstream on this lane, including explicit crossing connections. */
   spawnBehind(metres:number,random=Math.random):RoadTrafficCar {
@@ -121,25 +123,38 @@ export class RoadTrafficCar {
       if (candidate.distance < nearest) { nearest = candidate.distance; this.roadId = id; this.at = candidate.at; }
     }
     const curve = this.curves.get(this.roadId); if (!curve) throw Error('No connected traffic road near spawn');
-    this.curve = curve;this.pending=this.crossingTurn=undefined;this.laneChange=undefined;this.stopped=false;
+    this.curve = curve;this.pending=this.crossingTurn=this.previousTurn=undefined;this.laneChange=undefined;this.stopped=false;
     this.curve.sample(this.at, this.position, this.direction);
   }
   targetAhead(distance:number,position:Vector3,direction:Vector3){
     if(this.laneChange){this.sampleLaneChange(this.at+distance,position,direction);return;}
     if(!this.crossingTurn&&!this.pending&&this.curve.length-this.at<=Math.max(15,distance))this.pending=this.chooseTurn();
     const sample=this.at+distance;
-    if(sample>this.curve.length&&this.pending){crossingCurve(this.pending.segment).sample(sample-this.curve.length,position,direction);return;}
+    if(sample<0){
+      if(this.crossingTurn){this.curves.get(this.roadId)!.sample(this.curves.get(this.roadId)!.length+sample,position,direction);return;}
+      if(this.previousTurn?.outgoing===this.roadId){const curve=crossingCurve(this.previousTurn.segment);curve.sample(curve.length+sample,position,direction);return;}
+    }
+    if(sample>this.curve.length&&this.crossingTurn){this.curves.get(this.crossingTurn.outgoing)!.sample(sample-this.curve.length,position,direction);return;}
+    if(sample>this.curve.length&&this.pending){const curve=crossingCurve(this.pending.segment),offset=sample-this.curve.length;if(offset>curve.length)this.curves.get(this.pending.outgoing)!.sample(offset-curve.length,position,direction);else curve.sample(offset,position,direction);return;}
     this.curve.sample(sample,position,direction);
   }
+  /** Blend steering samples across actual connected joins. Navigation/signal progress keeps the original graph. */
+  steeringTargetAhead(distance:number,window:number,position:Vector3,direction:Vector3){
+    const point=new Vector3(),tangent=new Vector3();position.set(0,0,0);direction.set(0,0,0);
+    for(const [offset,weight] of [[-window,.25],[0,.5],[window,.25]]){this.targetAhead(distance+offset,point,tangent);position.addScaledVector(point,weight);direction.addScaledVector(tangent,weight);}
+    direction.normalize();
+  }
   /** Project progress onto the current spline; crossing transitions remain topology constrained. */
-  follow(position:Vector3,allowCrossing=true){
+  follow(position:Vector3,allowCrossing=true,corridor=1.5){
     const nearest=this.curve.nearest(position,true);this.at=Math.max(this.at,nearest.at);
     if(this.laneChange&&this.at>=this.laneChange.start+this.laneChange.length)this.laneChange=undefined;
     const end=this.curve.points.at(-1)!;
-    if(allowCrossing&&this.curve.length-this.at<1&&Math.hypot(position.x-end.x,position.z-end.z)<1.5)this.moveDistance(this.curve.length-this.at+.01);
+    if(allowCrossing&&this.curve.length-this.at<1&&Math.hypot(position.x-end.x,position.z-end.z)<corridor)this.moveDistance(this.curve.length-this.at+.01);
     if(this.laneChange)this.sampleLaneChange(this.at,this.position,this.direction);else this.curve.sample(this.at,this.position,this.direction);
   }
   get changingLane(){return !!this.laneChange;}
+  get insideCrossing(){return !!this.crossingTurn;}
+  get junctionExitDistance(){return !this.crossingTurn&&this.previousTurn?.outgoing===this.roadId?this.at:undefined;}
   /** Choose only an adjacent, parallel lane belonging to the same road branch. Body motion stays physical. */
   tryChangeLane(position:Vector3,length:number,isClear:(point:Vector3,direction:Vector3)=>boolean=()=>true){
     if(this.crossingTurn||this.laneChange||this.stopped||this.at<15||this.curve.length-this.at<length+20)return false;
@@ -197,6 +212,7 @@ export class RoadTrafficCar {
       const step = Math.min(remaining, this.curve.length - this.at); this.at += step; remaining -= step; this.travelled += step;
       if (this.at < this.curve.length - 1e-8) break;
       if (this.crossingTurn) {
+        this.previousTurn=this.crossingTurn;
         this.lastCrossingGroup=this.network.nodes.find(node=>node.id===this.crossingTurn!.crossing)?.group;
         this.roadId = this.crossingTurn.outgoing; this.curve = this.curves.get(this.roadId)!;
         this.crossingTurn = undefined; this.crossingsPassed++;

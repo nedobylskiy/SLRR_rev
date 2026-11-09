@@ -2,7 +2,7 @@ import { Vector3, Quaternion, type Camera } from 'three';
 import type { Assets } from '../assets';
 import { gameSoundVolume } from './audio-settings';
 
-export interface TrafficVoice { update(position:Vector3,rpm:number,throttle:number):void; dispose():void }
+export interface TrafficVoice { update(position:Vector3,rpm:number,throttle:number):void; setActive(active:boolean):void; dispose():void }
 /** One context and decoded sample cache for traffic; quiet low-pass engine only, no tyre effects. */
 export class TrafficAudio {
   private context=new AudioContext({latencyHint:'interactive'});
@@ -20,10 +20,11 @@ export class TrafficAudio {
     source.buffer=buffer;source.loop=true;filter.type='lowpass';filter.frequency.value=850;filter.Q.value=.5;gain.gain.value=0;
     pan.panningModel='HRTF';pan.distanceModel='inverse';pan.refDistance=4;pan.maxDistance=100;pan.rolloffFactor=1.2;
     source.connect(filter).connect(gain).connect(pan).connect(this.context.destination);source.start();
-    return {update:(position,rpm,throttle)=>{
+    let active=true;
+    return {setActive:value=>{if(active===value)return;active=value;if(!active)gain.gain.setTargetAtTime(0,this.context.currentTime,.05);},update:(position,rpm,throttle)=>{
       const time=this.context.currentTime;
       source.playbackRate.setTargetAtTime(Math.max(.65,Math.min(3.5,rpm/1100)),time,.1);
-      gain.gain.setTargetAtTime(gameSoundVolume*(.08+.06*Math.abs(throttle)),time,.1);
+      gain.gain.setTargetAtTime(active?gameSoundVolume*(.08+.06*Math.abs(throttle)):0,time,.1);
       pan.positionX.value=position.x;pan.positionY.value=position.y;pan.positionZ.value=position.z;
     },dispose:()=>{source.stop();source.disconnect();filter.disconnect();gain.disconnect();pan.disconnect();}};
   }

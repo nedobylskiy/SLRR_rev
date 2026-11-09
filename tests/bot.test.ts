@@ -87,6 +87,34 @@ test('queuing behind a car requests zero speed and does not trigger the stuck re
   peer.position.z=20;advance(bot,1.6,[peer]);assert.ok(bot.input.throttle>.5);
 });
 
+test('a blocked crossing starts recovery only with room behind and brakes if that room is occupied',()=>{
+  for(const rearBlocked of [false,true]){
+    const route=new RoadTrafficCar(network(),new Vector3(99,0,0),()=>0);route.follow(new Vector3(100,0,0));assert.equal(route.insideCrossing,true);
+    const vehicle=new HeldVehicle();vehicle.body.position.copy(route.position);
+    const bot=new Bot(route,vehicle,()=>0),front=new RigidBody3D(1400,bounds.clone()),rear=new RigidBody3D(1400,bounds.clone());
+    front.position.copy(vehicle.body.position).add(new Vector3(6,0,0));rear.position.copy(vehicle.body.position).add(new Vector3(-7,0,0));
+    const peers=rearBlocked?[front,rear]:[front];advance(bot,3.2,peers);
+    assert.equal(bot.mode,rearBlocked?'cruise':'reverse');
+    if(!rearBlocked){assert.ok(bot.input.throttle<0);bot.command(1/60,[front,rear]);assert.equal(bot.input.throttle,0);assert.equal(bot.input.brake,true);}
+  }
+});
+
+test('one stationary minute starts forward ramming despite a queue; contact restores normal impact recovery',()=>{
+  const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle,()=>0);
+  const front=new RigidBody3D(1400,bounds.clone());front.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
+  advance(bot,59.9,[front]);assert.equal(bot.mode,'cruise');assert.equal(bot.input.throttle,0);
+  advance(bot,.2,[front]);assert.equal(bot.mode,'ram');assert.ok(bot.input.throttle>.9);assert.equal(bot.input.brake,false);
+  vehicle.collisionVersion++;advance(bot,1/60,[front]);assert.equal(bot.mode,'impact');
+  advance(bot,.9,[front]);assert.equal(bot.mode,'impact');advance(bot,.2,[front]);assert.notEqual(bot.mode,'ram');
+});
+
+test('moving traffic resets the stationary minute instead of accumulating separate stops',()=>{
+  const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle,()=>0);
+  const front=new RigidBody3D(1400,bounds.clone());front.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
+  advance(bot,40,[front]);vehicle.body.position.x+=2;front.position.x+=2;advance(bot,40,[front]);assert.equal(bot.mode,'cruise');
+  advance(bot,20.2,[front]);assert.equal(bot.mode,'ram');
+});
+
 test('a nearly stopped queue holds the brake pedal and releases when the lead vehicle moves away',()=>{
   const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle);
   const peer=new RigidBody3D(1400,bounds.clone());peer.orientation.copy(vehicle.body.orientation);

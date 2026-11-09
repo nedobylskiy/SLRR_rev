@@ -2,6 +2,9 @@ import { SlrrJvm, jv, type JavaObject, type JavaValue, type ResourceIdentity } f
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
 import { GameTypeNative } from './game-type-native';
+import { GroundRoadNative } from './ground-road-native';
+import { TrafficNative } from './traffic-native';
+import { loadMapRoads } from '../engine/map-roads';
 import { resourceBoundsReader, resourceSizeReader } from './resource-size';
 import { MathNative } from './math-native';
 import { VectorNative } from './vector-native';
@@ -42,7 +45,7 @@ import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export interface JavaCallTiming { calls: number; averageMs: number; peakMs: number; lastAt: number }
-export type BootResult = { javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; osdButtons: OsdButtonNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
+export type BootResult = { traffic:TrafficNative; javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; osdButtons: OsdButtonNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -330,15 +333,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     setMapFog?.({ color, near, far });
     return voidValue();
   });
-  // MOCK: The road-intersection graph is not imported yet. Unbounded city traffic
-  // setup immediately mutates the result, so retain its seed position in a copy.
-  // Bounded camera searches still report no crossing instead of inventing one.
-  for (const distanceType of ['int', 'float'])
-    jvm.natives.register('java.util.resource.GroundRef', 'getNearestCross', ['Vector3', distanceType], ({ args }) => {
-      if (args[0].value == null || Number(args[1].value) !== 0) return jv('Vector3', null);
-      return jv('Vector3', { className: 'java.lang.Vector3', fields: new Map(
-        ['x', 'y', 'z'].map(axis => [axis, jv('float', Number(jvm.get(args[0], axis).value))])) });
-    });
+  new GroundRoadNative(jvm,async receiver=>{
+    const ground=gameTypes.getResource(receiver);
+    if(!ground?.resourcePack)return;
+    const localId=(resolveResourceIdentity(ground.typeId)?.id??ground.typeId)&0xffff;
+    return (await loadMapRoads(assets,ground.resourcePack,localId))?.network;
+  });
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
@@ -438,15 +438,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   native(collector, 'flush', []);
   native('java.util.resource.ResourceRef', 'precache', []);
   native('java.util.resource.ResourceRef', 'cache', []);
-  // MOCK: Track.exit cleanup for map systems not yet hosted by the engine.
-  native('java.util.resource.GroundRef', 'delTraffic', []);
+  // Capture the original Java map population and let the host stream its selected models.
+  const traffic=new TrafficNative(jvm,receiver=>receiver.value==null?undefined:gameTypes.getResource(receiver),value=>{
+    if(value.value==null)return;
+    const node=gameTypes.getResource(value);if(!node)return;
+    return resolveResourceIdentity(node.typeId)??(node.resourcePack?{pack:node.resourcePack,id:node.typeId&0xffff}:undefined);
+  });
   native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
-  // MOCK: Traffic simulation is not hosted yet. Let city setup finish; no traffic cars are spawned.
-  for (const countType of ['int', 'float']) jvm.natives.register('java.util.resource.GroundRef', 'addTrafficN',
-    ['GameRef', countType, 'float', 'float', 'float'], ({ args }) => {
-      report({ level: 'native', message: `Host mock: GroundRef.addTrafficN(${countType}) skipped ${Number(args[1].value)} traffic cars` });
-      return jv('int', 0);
-    });
   // MOCK: Individual traffic placement and its immediately following notification
   // are accepted without creating a traffic entity. Zero is the absent traffic ID.
   for (const [method, parameters] of [
@@ -587,11 +585,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
+    return { traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
+    return { traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }
