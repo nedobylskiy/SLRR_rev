@@ -62,14 +62,13 @@ export class Bot {
   private steeringCommand=0;
   private junctionStoppedFor=0;
   private idleFor=0;
-  private idleAnchor=new Vector3();
   get cruiseSetpoint(){return this.cruiseCommand;}
   trafficStatus='';
-  constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,public cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);this.idleAnchor.copy(vehicle.body.position);this.speedCrossings=route.crossingsPassed;this.cruiseCommand=cruiseSpeed;}
+  constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,public cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);this.speedCrossings=route.crossingsPassed;this.cruiseCommand=cruiseSpeed;}
   hit(impulse:Vector3,point:Vector3,closing:number,otherBounds?:Box3){
     this.vehicle.impact(impulse,point,closing,otherBounds);this.enterImpact();this.collisionVersion=this.vehicle.collisionVersion;
   }
-  private enterImpact(){this.mode='impact';this.stoppedFor=this.blockedFor=this.idleFor=0;this.idleAnchor.copy(this.vehicle.body.position);this.recoveryBound=false;this.holdingBrake=false;this.startDelay=undefined;}
+  private enterImpact(){this.mode='impact';this.stoppedFor=this.blockedFor=this.idleFor=0;this.recoveryBound=false;this.holdingBrake=false;this.startDelay=undefined;}
   private forwardSpeed(){this.forward.set(0,0,-1).applyQuaternion(this.vehicle.body.orientation);return this.vehicle.body.velocity.dot(this.forward);}
   private followingSpeed(peers:readonly RigidBody3D[],speed:number){
     const body=this.vehicle.body,own=body.bounds.getSize(new Vector3());
@@ -113,8 +112,8 @@ export class Bot {
   }
   private controls(dt:number,peers:readonly RigidBody3D[]){
     const body=this.vehicle.body,speed=this.forwardSpeed();
-    if(this.mode!=='impact'&&this.mode!=='ram'&&Math.abs(speed)<.5&&body.position.distanceToSquared(this.idleAnchor)<1)this.idleFor+=dt;
-    else {this.idleFor=0;this.idleAnchor.copy(body.position);}
+    if(this.mode!=='impact'&&this.mode!=='ram'&&body.velocity.lengthSq()<(3/3.6)**2)this.idleFor+=dt;
+    else this.idleFor=0;
     if(this.idleFor>60){this.mode='ram';this.idleFor=0;this.holdingBrake=false;this.startDelay=undefined;}
     const physical=this.vehicle.physicalSteering!==false&&this.vehicle.wheelbase!==undefined,wheelbase=this.vehicle.wheelbase??3;
     if(this.mode==='impact'){
@@ -138,25 +137,11 @@ export class Bot {
     this.route.follow(body.position,mayEnter,physical?Math.max(1.5,Math.min(4,wheelbase*.5)):1.5);
     if(this.route.crossingsPassed!==this.speedCrossings){
       this.speedCrossings=this.route.crossingsPassed;
-      if(this.route.lastCrossingGroup!==undefined){const fast=this.route.lastCrossingGroup===0;this.cruiseSpeed=((fast?60:15)+this.random()*(fast?40:20))/3.6;this.cruiseCommand=Math.max(0,speed);}
+      if(this.route.speedGroup!==undefined){const fast=this.route.speedGroup===0;this.cruiseSpeed=((fast?60:15)+this.random()*(fast?40:20))/3.6;this.cruiseCommand=Math.max(0,speed);}
     }
     // Ramp from the real exit speed, avoiding both hard braking and a surge back to the old cruise target.
     const cruiseDelta=this.cruiseSpeed-this.cruiseCommand;
     this.cruiseCommand+=Math.sign(cruiseDelta)*Math.min(Math.abs(cruiseDelta),(cruiseDelta>0?.8:1.2)*dt);
-    this.laneCheckSeconds+=dt;
-    if(this.laneCheckSeconds>=20-1e-9){
-      this.laneCheckSeconds=0;
-      if(this.mode==='cruise'&&speed>.5&&this.route.approach&&this.random()<.1){
-        const length=Math.max(25,speed*3.5);
-        this.route.tryChangeLane(body.position,length,(point,direction)=>peers.every(peer=>{
-          if(peer===body)return true;
-          const delta=peer.position.clone().sub(point),along=delta.dot(direction),lateral=Math.abs(delta.x*direction.z-delta.z*direction.x);
-          const size=peer.bounds.getSize(new Vector3()),own=body.bounds.getSize(new Vector3());
-          const rearSpeed=Math.max(0,peer.velocity.dot(direction));
-          return Math.abs(delta.y)>2.5||lateral>(Math.max(size.x,size.z)+own.x)*.5+.5||along>Math.max(12,speed*2)+(size.z+own.z)*.5||along< -Math.max(12,rearSpeed*2)-(size.z+own.z)*.5;
-        }));
-      }
-    }
     const lookahead=physical?Math.max(4,wheelbase*.8,Math.min(18,Math.abs(speed)*1.1+3)):Math.max(4,Math.min(12,Math.abs(speed)*1.3+3));
     if(physical)this.route.steeringTargetAhead(lookahead,Math.min(6,wheelbase*.5),this.target,this.tangent);
     else this.route.targetAhead(lookahead,this.target,this.tangent);
@@ -169,7 +154,7 @@ export class Bot {
     this.steeringCommand+=Math.sign(requested-this.steeringCommand)*Math.min(Math.abs(requested-this.steeringCommand),physical?dt*2.5:2);
     const steering=this.steeringCommand;
     if(this.mode==='ram'){
-      this.desiredSpeed=30/3.6;this.trafficStatus='ram · stationary for 60s';
+      this.desiredSpeed=30/3.6;this.trafficStatus='ram · below 3 km/h for 60s';
       return {throttle:Math.max(0,Math.min(1,(this.desiredSpeed-speed)*.8)),throttleMode:'directional' as const,steer:steering,brake:false,brakeAxis:0};
     }
     let desired=this.mode==='recover'?Math.max(30/3.6,this.cruiseSpeed):this.cruiseCommand;
@@ -201,7 +186,23 @@ export class Bot {
       }
       this.entryAllowedLastTick=this.clearedCrossing||signal==='green'||goOnYellow;
     }
-    desired=this.followingSpeed(peers,desired);if(this.route.stopped)desired=0;
+    const following=this.followingSpeed(peers,desired),limitedByLeader=following<desired-1e-6;
+    this.laneCheckSeconds+=dt;
+    const rural=this.route.speedGroup===0,lanePeriod=rural?10:20,laneChance=Math.max(rural?.25:.1,limitedByLeader?.2:0);
+    if(this.laneCheckSeconds>=lanePeriod-1e-9){
+      this.laneCheckSeconds=0;
+      if(this.mode==='cruise'&&speed>.5&&this.route.approach&&this.random()<laneChance){
+        const length=Math.max(25,speed*3.5);
+        this.route.tryChangeLane(body.position,length,(point,direction)=>peers.every(peer=>{
+          if(peer===body)return true;
+          const delta=peer.position.clone().sub(point),along=delta.dot(direction),lateral=Math.abs(delta.x*direction.z-delta.z*direction.x);
+          const size=peer.bounds.getSize(new Vector3()),own=body.bounds.getSize(new Vector3());
+          const rearSpeed=Math.max(0,peer.velocity.dot(direction));
+          return Math.abs(delta.y)>2.5||lateral>(Math.max(size.x,size.z)+own.x)*.5+.5||along>Math.max(12,speed*2)+(size.z+own.z)*.5||along< -Math.max(12,rearSpeed*2)-(size.z+own.z)*.5;
+        }));
+      }
+    }
+    desired=following;if(this.route.stopped)desired=0;
     // A queued car must hold its pedal instead of alternating tiny creep commands and no brake.
     // Hysteresis lets the lead car pull away before releasing, without flickering brake lamps.
     if(desired>.8&&this.holdingBrake){

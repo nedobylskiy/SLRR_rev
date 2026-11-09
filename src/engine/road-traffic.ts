@@ -66,6 +66,16 @@ class TrafficCurve {
   }
 }
 const graphs = new WeakMap<RoadNetwork, { connections: Map<number, TrafficTurn[]>; curves: Map<number, TrafficCurve> }>();
+const speedGroups=new WeakMap<RoadNetwork,Map<number,0|1>>();
+/** Either yellow endpoint selects the rural regime for the whole road. */
+export function trafficRoadSpeedGroups(network:RoadNetwork){
+  let groups=speedGroups.get(network);if(groups)return groups;
+  groups=new Map();const roads=new Set(network.others.map(road=>road.id));
+  for(const node of network.nodes)for(const link of node.links)if(roads.has(link.target)){
+    groups.set(link.target,node.group===0||groups.get(link.target)===0?0:1);
+  }
+  speedGroups.set(network,groups);return groups;
+}
 const turns=new WeakMap<RoadSegment,TrafficCurve>();
 function crossingCurve(segment:RoadSegment){let curve=turns.get(segment);if(!curve){curve=new TrafficCurve([segment]);turns.set(segment,curve);}return curve;}
 
@@ -86,6 +96,7 @@ export class RoadTrafficCar {
   roadId = 0;
   crossingsPassed = 0;
   travelled = 0;
+  get speedGroup(){return trafficRoadSpeedGroups(this.network).get(this.roadId);}
   stopped = false;
   constructor(private network: RoadNetwork, spawn = new Vector3(), private random = Math.random, roadId?:number) {
     let graph=graphs.get(network);

@@ -2,10 +2,11 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Box3,Vector3,Group,Mesh,BoxGeometry,MeshBasicMaterial,PerspectiveCamera,Frustum,Matrix4,Sphere} from 'three';
 import {TrafficDamageView} from '../src/render/traffic-damage-view';
-import {TrafficSpawnIndex,TrafficVehicleLod} from '../src/engine/traffic-stream';
+import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,safeTrafficSpawn,chooseSafeTrafficSpawn,trafficCruiseSpeed,type TrafficSpawn} from '../src/engine/traffic-stream';
 import {TrafficVehicle} from '../src/engine/traffic-vehicle';
-import {RoadTrafficCar} from '../src/engine/road-traffic';
+import {RoadTrafficCar,trafficRoadSpeedGroups} from '../src/engine/road-traffic';
 import {Bot} from '../src/engine/bot';
+import {TrafficControl} from '../src/engine/traffic-control';
 import type {RoadNetwork,RoadPoint,RoadSegment,RoadOther} from '../src/formats/trc';
 
 const segment=(start:RoadPoint,end:RoadPoint):RoadSegment=>{const tangent=end.map((n,i)=>n-start[i]) as RoadPoint;return {start,end,startTangent:tangent,endTangent:tangent,length:Math.hypot(...tangent),raw:new Uint32Array(14),flag:0};};
@@ -19,6 +20,68 @@ function car(){
  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1,-.8,-2.5),new Vector3(1,1.2,2.5)),1400,wheels,{height:()=>0,normal:()=>new Vector3(0,1,0)});
  vehicle.place(route.position,route.direction,1.107);const lod=new TrafficVehicleLod(vehicle,route,1.107),bot=new Bot(route,lod,()=>.5);return {route,vehicle,lod,bot};
 }
+
+test('spawn speed is rural with a yellow crossing at either end of the road',()=>{
+ const network=graph();
+ network.others.push({id:9,refs:[109,0],raw:new Uint32Array(12),extraRefs:[],tail:new Uint32Array(3),flag:0,segments:[segment([-2,0,0],[-100,0,0])]});
+ network.nodes.push({id:8,group:0,position:[0,0,0],raw:new Uint32Array(4),links:[{target:9,flag:1},{target:2,flag:0}],lanes:[{header:new Uint8Array(12),segment:segment([0,0,0],[-2,0,0])}]});
+ const groups=trafficRoadSpeedGroups(network);assert.equal(groups.get(2),0,'yellow upstream, pink downstream');assert.equal(groups.get(3),1);
+ const route=new RoadTrafficCar(network,new Vector3(100,0,0),()=>0,2),{vehicle}=car(),lod=new TrafficVehicleLod(vehicle,route,1.107);
+ vehicle.place(route.position,route.direction,1.107);const bot=initializeTrafficMotion(route,lod,undefined,[],()=>.5);
+ assert.ok(Math.abs(bot.cruiseSpeed*3.6-80)<1e-8);assert.ok(Math.abs(vehicle.body.velocity.length()*3.6-80)<1e-8);assert.ok(vehicle.body.velocity.dot(route.direction)>0);assert.ok(bot.rpm>850);
+ assert.ok(Math.abs(trafficCruiseSpeed(1,()=>0)*3.6-15)<1e-8);assert.ok(Math.abs(trafficCruiseSpeed(1,()=>1)*3.6-35)<1e-8);
+});
+
+test('yellow destination takes priority over pink origin and remains rural after exiting the pink crossing',()=>{
+ const network=graph();network.nodes.push({id:8,group:0,position:[1000,0,0],raw:new Uint32Array(4),links:[{target:3,flag:1}],lanes:[]});
+ const groups=trafficRoadSpeedGroups(network);assert.equal(groups.get(2),1);assert.equal(groups.get(3),0);
+ const reversed={...network,nodes:[...network.nodes].reverse()};assert.equal(trafficRoadSpeedGroups(reversed).get(3),0,'yellow wins regardless of record ordering');
+ const route=new RoadTrafficCar(network,new Vector3(499,0,0),()=>0,2),{vehicle}=car(),lod=new TrafficVehicleLod(vehicle,route,1.107);
+ vehicle.place(route.position,route.direction,1.107);const bot=initializeTrafficMotion(route,lod,undefined,[],()=>.5);
+ route.follow(new Vector3(500,0,0));route.follow(new Vector3(502,0,0));vehicle.body.position.copy(route.position);bot.command(1/60);
+ assert.equal(route.lastCrossingGroup,1);assert.equal(route.speedGroup,0);assert.ok(Math.abs(bot.cruiseSpeed*3.6-80)<1e-8);
+});
+
+test('spawn velocity respects an existing queue instead of appearing at cruise speed into a stopped car',()=>{
+ const {route,vehicle,lod}=car(),peer=car().vehicle.body;peer.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
+ const bot=initializeTrafficMotion(route,lod,undefined,[peer],()=>.5);
+ assert.ok(bot.cruiseSpeed>0);assert.equal(vehicle.body.velocity.length(),0);assert.equal(bot.desiredSpeed,0);
+});
+
+test('initial velocity is capped by a red light near the spawn point',()=>{
+ const network=graph(),route=new RoadTrafficCar(network,new Vector3(497,0,0),()=>0,2),{vehicle}=car(),lod=new TrafficVehicleLod(vehicle,route,1.107);
+ vehicle.place(route.position,route.direction,1.107);const control=new TrafficControl(network,[]);
+ control.rules.set(2,{kind:'signal',crossing:1,branch:102});
+ const bot=initializeTrafficMotion(route,lod,control,[],()=>.5);
+ assert.equal(vehicle.body.velocity.length(),0);assert.equal(bot.desiredSpeed,0);assert.match(bot.trafficStatus,/red/);
+});
+
+test('safe spawn rejects near visible/front cars, closing paths and leaves unfillable population slots empty',()=>{
+ const center=new Vector3(),forward=new Vector3(1,0,0);
+ const spawn=(x:number,z=0):TrafficSpawn=>({road:2,position:new Vector3(x,0,z),direction:forward.clone(),speedGroup:1});
+ assert.equal(safeTrafficSpawn(spawn(30),center,forward,0,true,[],3),false);
+ assert.equal(safeTrafficSpawn(spawn(30),center,forward,0,false,[],3),false,'looking away must not spawn immediately ahead of the car');
+ assert.equal(safeTrafficSpawn(spawn(90),center,forward,0,true,[],3),true);
+ assert.equal(safeTrafficSpawn(spawn(90),center,forward,30,true,[],3),false,'fast player gets a larger front exclusion zone');
+ assert.equal(safeTrafficSpawn(spawn(-40),center,forward,0,false,[],3),true);
+ const peer=Object.assign(new Vector3(100,0,0),{trafficRadius:3,trafficVelocity:new Vector3()});
+ assert.equal(safeTrafficSpawn(spawn(90),center,forward,0,true,[peer],3),false,'would catch a stationary car immediately');
+ const index=new TrafficSpawnIndex(graph()),focus=new Vector3(200,0,0),occupied:Vector3[]=[];
+ for(let i=0;i<50;i++){const found=index.choose(focus,40,occupied,()=>.5,15,true,undefined,3,s=>safeTrafficSpawn(s,focus,forward,0,true,occupied,3));if(found)occupied.push(found.position);}
+ assert.equal(occupied.length,0,'the requested cap cannot bypass the visible-distance rule');
+});
+
+test('safe streaming expands only into blind areas and treats quantity as a cap',()=>{
+ const index=new TrafficSpawnIndex(graph()),center=new Vector3(200,0,0),forward=new Vector3(1,0,0);
+ const blind=(s:TrafficSpawn)=>s.position.x<160;
+ const hidden=chooseSafeTrafficSpawn(index,center,40,150,[],forward,0,3,blind,()=>.5);
+ assert.ok(hidden);assert.ok(blind(hidden));assert.ok(hidden.position.distanceTo(center)>40);assert.ok(hidden.position.distanceTo(center)<=150);
+ assert.equal(chooseSafeTrafficSpawn(index,center,40,150,[],forward,0,3,()=>false),undefined,'visible positions outside the preferred radius are not fallback spawns');
+ assert.equal(chooseSafeTrafficSpawn(index,center,40,40,[],forward,0,3,blind),undefined,'never expand beyond map streaming');
+ const occupied:Vector3[]=[];
+ for(let i=0;i<50;i++){const spawn=chooseSafeTrafficSpawn(index,center,40,150,occupied,forward,0,3,blind,()=>.5);if(spawn)occupied.push(spawn.position.clone());}
+ assert.ok(occupied.length>0&&occupied.length<50);assert.ok(occupied.every(p=>p.x<160));
+});
 
 test('stream spawn samples belong to connected graph lanes, stay inside the radius and avoid occupied space',()=>{
  const index=new TrafficSpawnIndex(graph()),occupied:Vector3[]=[];

@@ -48,6 +48,25 @@ test('lane-change lottery runs once per twenty seconds with a ten percent chance
   }
 });
 
+test('yellow-linked roads attempt lane changes every ten seconds at 25 percent, with the same gap checks',()=>{
+  for(const sample of [.249,.25]){
+    const graph=network();graph.nodes[0].group=0;
+    const route=new RoadTrafficCar(graph,new Vector3(10,0,0),()=>0),vehicle=new HeldVehicle();vehicle.body.velocity.set(1,0,0);
+    let attempts=0,draws=0;route.tryChangeLane=()=>{attempts++;return false;};
+    const bot=new Bot(route,vehicle,()=>{draws++;return sample;});
+    advance(bot,9.9);assert.equal(draws,0);advance(bot,.2);assert.equal(draws,1);assert.equal(attempts,sample<.25?1:0);
+  }
+});
+
+test('a leader restricting target speed raises urban lane-change chance to twenty percent; a faster leader does not',()=>{
+  for(const [leadSpeed,sample,expected] of [[0,.199,1],[0,.2,0],[10,.15,0]] as const){
+    const route=new RoadTrafficCar(network(),new Vector3(10,0,0),()=>0),vehicle=new HeldVehicle();vehicle.body.velocity.set(1,0,0);
+    const peer=new RigidBody3D(1400,bounds.clone());peer.orientation.copy(vehicle.body.orientation);peer.position.copy(vehicle.body.position).add(new Vector3(leadSpeed?20:10,0,0));peer.velocity.set(leadSpeed,0,0);
+    let attempts=0;route.tryChangeLane=()=>{attempts++;return false;};
+    const bot=new Bot(route,vehicle,()=>sample);advance(bot,20.1,[peer]);assert.equal(attempts,expected);
+  }
+});
+
 test('crossing cruise changes ramp from actual exit speed in both directions; nearby cars still demand immediate braking',()=>{
   for(const [group,exitSpeed] of [[0,20],[1,80]] as const){
     const graph=network();graph.nodes[0].group=group;
@@ -108,11 +127,21 @@ test('one stationary minute starts forward ramming despite a queue; contact rest
   advance(bot,.9,[front]);assert.equal(bot.mode,'impact');advance(bot,.2,[front]);assert.notEqual(bot.mode,'ram');
 });
 
-test('moving traffic resets the stationary minute instead of accumulating separate stops',()=>{
+test('reaching 3 km/h resets the minute instead of accumulating separate slow periods',()=>{
   const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle,()=>0);
   const front=new RigidBody3D(1400,bounds.clone());front.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
-  advance(bot,40,[front]);vehicle.body.position.x+=2;front.position.x+=2;advance(bot,40,[front]);assert.equal(bot.mode,'cruise');
+  advance(bot,40,[front]);vehicle.body.velocity.set(3/3.6,0,0);advance(bot,1/60,[front]);vehicle.body.velocity.set(0,0,0);advance(bot,40,[front]);assert.equal(bot.mode,'cruise');
   advance(bot,20.2,[front]);assert.equal(bot.mode,'ram');
+});
+
+test('creeping below 3 km/h for a minute triggers ramming despite substantial distance travelled',()=>{
+  const vehicle=new HeldVehicle(),bot=new Bot(new RoadTrafficCar(network(),new Vector3(10,0,0)),vehicle,()=>0);
+  const front=new RigidBody3D(1400,bounds.clone());vehicle.body.velocity.set(2.9/3.6,0,0);
+  for(let i=0;i<3607;i++){
+    vehicle.body.position.addScaledVector(vehicle.body.velocity,1/60);front.position.copy(vehicle.body.position).add(new Vector3(6,0,0));
+    bot.advance(1/60,[front]);if(i===3593)assert.equal(bot.mode,'cruise');
+  }
+  assert.ok(vehicle.body.position.x>55);assert.equal(bot.mode,'ram');assert.ok(bot.input.throttle>.9);
 });
 
 test('a nearly stopped queue holds the brake pedal and releases when the lead vehicle moves away',()=>{

@@ -21,7 +21,7 @@ import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
 import { normalizePath } from '../assets';
-import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission } from './vehicle-lights';
+import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
 import { trafficLampDefinitions, createTrafficLamps, type TrafficLamp } from './traffic-lamps';
 import { createVehicleBeam, createHeadlightCameraFlare } from './vehicle-beam';
@@ -65,7 +65,7 @@ import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
-import {TrafficSpawnIndex,TrafficVehicleLod,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
+import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel} from '../engine/traffic-models';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
 import { TrafficDamageView } from './traffic-damage-view';
@@ -406,7 +406,7 @@ export class Viewer {
   private trafficSpawnCenterHeight=1.5;
   get trafficSpawnRange(){return this.trafficSpawnRadius;}
   setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic spawn radius must be 25–500 m');this.trafficSpawnRadius=radius;}
-  private trafficOccupant(body:import('../engine/rigid-body-3d').RigidBody3D):TrafficOccupant {const point=body.position.clone() as TrafficOccupant,size=body.bounds.getSize(new THREE.Vector3());point.trafficRadius=Math.hypot(size.x,size.z)*.5;return point;}
+  private trafficOccupant(body:import('../engine/rigid-body-3d').RigidBody3D):TrafficOccupant {const point=body.position.clone() as TrafficOccupant,size=body.bounds.getSize(new THREE.Vector3());point.trafficRadius=Math.hypot(size.x,size.z)*.5;point.trafficVelocity=body.velocity.clone();return point;}
   private chooseTrafficSpawn(occupied:readonly TrafficOccupant[],bounds?:THREE.Box3,height=0){
     if(bounds){const sphere=bounds.getBoundingSphere(new THREE.Sphere());this.trafficSpawnSphereRadius=sphere.radius+Math.hypot(sphere.center.x,sphere.center.z)+.5;this.trafficSpawnCenterHeight=height-.1+sphere.center.y;}
     const radius=Math.min(this.trafficSpawnRadius,this.mapStreamRange);
@@ -414,10 +414,13 @@ export class Viewer {
     this.camera.updateMatrixWorld();
     const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
     const sphere=new THREE.Sphere(new THREE.Vector3(),this.trafficSpawnSphereRadius);
-    return this.trafficSpawns?.choose(this.trafficFocus(),radius,occupied,Math.random,Math.min(15,radius*.25),true,spawn=>{
+    const center=this.trafficFocus(),forward=this.trafficPeer?new THREE.Vector3(0,0,-1).applyQuaternion(this.trafficPeer.body.orientation):this.camera.getWorldDirection(new THREE.Vector3());forward.y=0;forward.normalize();
+    const speed=this.trafficPeer?.body.velocity.length()??0,bodyRadius=bounds?Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5:6;
+    const offscreen=(spawn:TrafficSpawn)=>{
       sphere.center.copy(spawn.position);sphere.center.y+=this.trafficSpawnCenterHeight;
       return !frustum.intersectsSphere(sphere);
-    },bounds?Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5:6);
+    };
+    return this.trafficSpawns&&chooseSafeTrafficSpawn(this.trafficSpawns,center,radius,this.mapStreamRange,occupied,forward,speed,bodyRadius,offscreen);
   }
   private trafficSpawns?:TrafficSpawnIndex;
   private trafficRefillAt=0;
@@ -983,15 +986,13 @@ export class Viewer {
       const control=this.trafficControl??new TrafficControl(roads.network,this.mapTrafficFixtures);
       const models=this.javaTrafficTypes??DEFAULT_TRAFFIC_MODELS;
       if(!source.terrain)throw Error('Traffic test requires map terrain');
-      const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
       for(let index=this.trafficCars.length;index<this.trafficCount;index++){
         const model=pickTrafficModel(models.filter(model=>!this.trafficModelErrors.has(`${normalizePath(model.pack)}:${model.id}`)));
         if(!model)break;
         let template:TrafficTemplate;
         try{template=await this.trafficTemplate(source.assets,model);}catch(error){if(!current())return;this.trafficModelErrors.set(`${normalizePath(model.pack)}:${model.id}`,String(error));index--;continue;}
         if(!current())return;
-        const spawn=this.chooseTrafficSpawn(occupied,template.bounds,template.height);
-        const route=new RoadTrafficCar(roads.network,spawn?.position??this.trafficFocus(),Math.random,spawn?.road);
+        const route=new RoadTrafficCar(roads.network,this.trafficFocus());
         const lamps=await createTrafficLamps(template.lamps,source.assets);
         if(!current()){lamps.dispose();return;}
         const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
@@ -1000,12 +1001,16 @@ export class Viewer {
         const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
         const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
         const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
-        group.name=`Traffic ${model.pack.split('/').at(-1)} ${index+1}`;group.visible=!!spawn;
-        staged.push({model,active:!!spawn,lod,car:route,bot,vehicle,damage,lamps,group,wheels});if(spawn)occupied.push(this.trafficOccupant(vehicle.body));
+        group.name=`Traffic ${model.pack.split('/').at(-1)} ${index+1}`;group.visible=false;
+        staged.push({model,active:false,lod,car:route,bot,vehicle,damage,lamps,group,wheels});
       }
       this.trafficCars.push(...staged);
       this.trafficControl=control;
-      const cars=staged.splice(0);for(const test of cars)this.scene.add(test.group);
+      const cars=staged.splice(0);for(const test of cars){
+        this.scene.add(test.group);
+        const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
+        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height);if(spawn)this.recycleTrafficCar(test,spawn);
+      }
       this.trafficTestStatus=`Streaming active · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
       for(const test of cars){
         try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(generation===this.generation&&this.trafficCars.includes(test))test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
@@ -1026,7 +1031,9 @@ export class Viewer {
     test.vehicle.place(route.position,route.direction,test.lod.height);test.vehicle.setMode('cruise');
     test.car=route;test.lod.route=route;test.lod.physical=false;test.lod.setMode('cruise');
     test.lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
-    test.bot=new Bot(route,test.lod,Math.random,(15+Math.random()*20)/3.6,this.trafficControl);
+    const peers=this.trafficCars.filter(car=>car.active&&car!==test).map(car=>car.vehicle.body);if(this.trafficPeer)peers.push(this.trafficPeer.body);
+    test.bot=initializeTrafficMotion(route,test.lod,this.trafficControl,peers);
+    test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
     test.active=true;test.group.visible=true;
   }
   focusTrafficTest() {
@@ -1165,12 +1172,13 @@ export class Viewer {
         for (const extra of part.definition.additionalModels ?? []) {
           const sub = new THREE.Group(); sub.matrixAutoUpdate = false;
           sub.matrix.copy(pose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
-          sub.userData.lightFlags = extra.flags ?? 0; sub.visible = cfgRenderVisible(extra.flags, world.lightMask);
+          const flags=cfgLampRenderFlags(extra.model.path,extra.flags);
+          sub.userData.lightFlags = flags; sub.visible = cfgRenderVisible(flags, world.lightMask);
           group.add(sub);
           const extraModel = await parseScxAsync(await assets.read(extra.model.path));
           bindLinkedRender(sub, extra.links, extraModel, extra.pose, extra.linkRules);
           await this.append(extraModel, assets, extra.model.textures, sub, generation, false, () => true, undefined, paint, false, THREE.FrontSide);
-          configureCfgLampEmission(sub, extra.flags);
+          configureCfgLampEmission(sub, flags);
         }
         syncLinkedRenders(part, group);
       }
@@ -1269,12 +1277,13 @@ export class Viewer {
         const submodel = new THREE.Group();
         submodel.matrixAutoUpdate = false;
         submodel.matrix.copy(primaryPose.clone().invert().multiply(extra.pose ? poseMatrix(extra.pose) : new THREE.Matrix4()));
-        submodel.userData.lightFlags = extra.flags ?? 0; submodel.visible = cfgRenderVisible(extra.flags, world.lightMask);
+        const flags=cfgLampRenderFlags(extra.model.path,extra.flags);
+        submodel.userData.lightFlags = flags; submodel.visible = cfgRenderVisible(flags, world.lightMask);
         group.add(submodel);
         const extraModel = await parseScxAsync(await assets.read(extra.model.path));
         bindLinkedRender(submodel, extra.links, extraModel, extra.pose, extra.linkRules);
         warnings.push(...await this.append(extraModel, assets, extra.model.textures, submodel, generation, false, () => true, undefined, paint, true, THREE.FrontSide));
-        configureCfgLampEmission(submodel, extra.flags);
+        configureCfgLampEmission(submodel, flags);
         if (generation !== this.generation) return warnings;
       }
       for (const light of part.definition.lights ?? []) {
