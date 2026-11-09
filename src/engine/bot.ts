@@ -52,8 +52,10 @@ export class Bot {
   private speedCrossings=0;
   private yellowVisit='';
   private yellowGo=false;
+  private cruiseCommand:number;
+  get cruiseSetpoint(){return this.cruiseCommand;}
   trafficStatus='';
-  constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,public cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);this.speedCrossings=route.crossingsPassed;}
+  constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,public cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);this.speedCrossings=route.crossingsPassed;this.cruiseCommand=cruiseSpeed;}
   hit(impulse:Vector3,point:Vector3,closing:number,otherBounds?:Box3){
     this.vehicle.impact(impulse,point,closing,otherBounds);this.enterImpact();this.collisionVersion=this.vehicle.collisionVersion;
   }
@@ -97,8 +99,11 @@ export class Bot {
     this.route.follow(body.position,mayEnter);
     if(this.route.crossingsPassed!==this.speedCrossings){
       this.speedCrossings=this.route.crossingsPassed;
-      if(this.route.lastCrossingGroup!==undefined){const fast=this.route.lastCrossingGroup===0;this.cruiseSpeed=((fast?60:15)+this.random()*(fast?40:20))/3.6;}
+      if(this.route.lastCrossingGroup!==undefined){const fast=this.route.lastCrossingGroup===0;this.cruiseSpeed=((fast?60:15)+this.random()*(fast?40:20))/3.6;this.cruiseCommand=Math.max(0,speed);}
     }
+    // Ramp from the real exit speed, avoiding both hard braking and a surge back to the old cruise target.
+    const cruiseDelta=this.cruiseSpeed-this.cruiseCommand;
+    this.cruiseCommand+=Math.sign(cruiseDelta)*Math.min(Math.abs(cruiseDelta),(cruiseDelta>0?.8:1.2)*dt);
     this.laneCheckSeconds+=dt;
     if(this.laneCheckSeconds>=20-1e-9){
       this.laneCheckSeconds=0;
@@ -120,7 +125,7 @@ export class Bot {
     const angle=Math.atan2(Math.sin(targetYaw-yaw),Math.cos(targetYaw-yaw));
     if(this.mode==='recover'&&body.position.clone().sub(this.route.position).setY(0).length()<1.5&&this.forward.dot(this.route.direction)>.85){this.mode='cruise';this.recoveryBound=false;}
     const steering=Math.max(-1,Math.min(1,angle*2.2));
-    let desired=this.mode==='recover'?Math.max(30/3.6,this.cruiseSpeed):this.cruiseSpeed;
+    let desired=this.mode==='recover'?Math.max(30/3.6,this.cruiseSpeed):this.cruiseCommand;
     desired*=Math.max(.28,1-Math.abs(angle)*.5);
     this.trafficStatus='';
     const approach=this.route.approach,rule=approach&&this.traffic?.rule(approach.road);
@@ -177,5 +182,9 @@ export class Bot {
       const target=850+speed*290/gear+Math.abs(this.input.throttle)*500;
       this.rpm+=(target-this.rpm)*(1-Math.exp(-this.clock.dt*5));
     });
+  }
+  /** Control-only integration: the owner's normal physics clock advances the full vehicle exactly once. */
+  command(dt:number,peers:readonly RigidBody3D[]=[]):DrivingInput {
+    this.input=this.controls(dt,peers);return this.input;
   }
 }

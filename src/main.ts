@@ -510,6 +510,8 @@ window.setInterval(()=>{
   }
   if(mapDebugPanel.hidden||!mapDebugPanel.open)return;
   trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';
+  playerTrafficCheck.checked=viewer?.playerTrafficEnabled??false;
+  if(playerTrafficCheck.checked)playerTrafficStatus.textContent=viewer?.playerTrafficInfo()??'';
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
   graphicsReport.textContent=[
     ...(graphicsDetailsCheck.checked?viewer?.profiler.gpuSummaryLines()??[]:[]),
@@ -531,6 +533,10 @@ const trafficPairLabel=textElement('label','Second Pickup · initial 30 km/h'),t
 trafficPairCheck.type='checkbox';trafficPairCheck.checked=true;trafficPairLabel.prepend(trafficPairCheck);mapDebugOptions.append(trafficPairLabel);
 trafficPairCheck.onchange=()=>{void viewer?.setTrafficPairEnabled(trafficPairCheck.checked);};
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
+const playerTrafficLabel=textElement('label','Traffic controls my car'),playerTrafficCheck=document.createElement('input');
+playerTrafficCheck.type='checkbox';playerTrafficLabel.prepend(playerTrafficCheck);mapDebugOptions.append(playerTrafficLabel);
+const playerTrafficStatus=textElement('span','');mapDebugOptions.append(playerTrafficStatus);
+playerTrafficCheck.onchange=()=>{playerTrafficStatus.textContent='';void viewer?.setPlayerTrafficEnabled(playerTrafficCheck.checked).catch(error=>{playerTrafficCheck.checked=false;playerTrafficStatus.textContent=String(error instanceof Error?error.message:error);});};
 trafficTestCheck.onchange=()=>{void viewer?.setTrafficTestEnabled(trafficTestCheck.checked).then(()=>{trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';});};
 const trafficRestart=textElement('button','Restart traffic near (0, 0, 0)');trafficRestart.setAttribute('type','button');
 trafficRestart.onclick=()=>{if(!trafficTestCheck.checked){trafficTestCheck.checked=true;void viewer?.setTrafficTestEnabled(true);}else void viewer?.restartTrafficTest();};mapDebugOptions.append(trafficRestart);

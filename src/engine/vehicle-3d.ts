@@ -545,6 +545,7 @@ export class Vehicle3D extends CarCrashDemo {
     if (!this.collisionCue || speed * magnitude > this.collisionCue.speed * this.collisionCue.impulse)
       this.collisionCue = { speed, impulse: magnitude, position: position.clone() };
   }
+  controlInput?: (dt:number)=>DrivingInput;
   override advance(seconds: number, input: DrivingInput) {
     if (this.root.world.disposed) throw new Error('3D world disposed');
     if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
@@ -562,7 +563,7 @@ export class Vehicle3D extends CarCrashDemo {
       this.timings.ticks++;
       const dt = this.clock.dt, previous = this.root.matrix();
       let detached = this.releaseFailedWheels();
-      const tickInput=this.replayInput?.((tick-1)*dt)??input;
+      const tickInput=this.replayInput?.((tick-1)*dt)??this.controlInput?.(dt)??input;
       this.suspension.step(dt, tickInput); this.body.integrate(dt);
       this.timings.suspension += performance.now() - sectionStart; sectionStart = performance.now();
       const incomingVelocity = this.body.velocity.clone(), incomingOmega = this.body.omega, predicted = this.body.matrix();

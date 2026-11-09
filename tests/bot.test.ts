@@ -47,6 +47,21 @@ test('lane-change lottery runs once per twenty seconds with a ten percent chance
     advance(bot,19.9,[peer]);assert.equal(draws,2);assert.equal(attempts,sample<.1?2:0);
   }
 });
+
+test('crossing cruise changes ramp from actual exit speed in both directions; nearby cars still demand immediate braking',()=>{
+  for(const [group,exitSpeed] of [[0,20],[1,80]] as const){
+    const graph=network();graph.nodes[0].group=group;
+    const route=new RoadTrafficCar(graph,new Vector3(99,0,0),()=>0),vehicle=new HeldVehicle();vehicle.body.velocity.set(exitSpeed/3.6,0,0);
+    const bot=new Bot(route,vehicle,()=>.5,exitSpeed/3.6);
+    for(let i=0;i<20;i++)route.advance(.1);vehicle.body.position.copy(route.position);
+    bot.command(1/60);const initial=exitSpeed/3.6;
+    assert.ok(Math.abs(bot.cruiseSetpoint-initial)<=1.2/60+1e-9,'no sudden target jump');
+    let previous=bot.cruiseSetpoint;
+    for(let i=0;i<60;i++){bot.command(1/60);const current=bot.cruiseSetpoint;assert.ok(Math.abs(current-previous)<=1.2/60+1e-9);assert.equal(Math.sign(current-previous),group===0?1:-1);previous=current;}
+    const peer=new RigidBody3D(1400,bounds.clone());peer.position.copy(vehicle.body.position).add(new Vector3(5,0,0));
+    bot.command(1/60,[peer]);assert.equal(bot.desiredSpeed,0);assert.equal(bot.input.throttle,0);assert.equal(bot.input.brake,true);
+  }
+});
 function advance(bot:Bot,seconds:number,peers:RigidBody3D[]=[]){for(let i=0;i<Math.round(seconds*60);i++)bot.advance(1/60,peers);}
 
 test('bot waits one stopped second after impact, recovers without teleport, then resumes cruise',()=>{

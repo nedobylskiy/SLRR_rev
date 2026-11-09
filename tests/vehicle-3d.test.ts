@@ -2,6 +2,9 @@ import { MapCollision } from '../src/engine/map-collision';
 import type { ScxModel } from '../src/formats/scx';
 import { validateVehicleDamage } from '../src/engine/vehicle-damage';
 import {keyboardDrivingInput} from '../src/engine/driving-demo';
+import {PlayerTrafficDriver} from '../src/engine/player-traffic-driver';
+import {TrafficControl} from '../src/engine/traffic-control';
+import type {RoadNetwork,RoadPoint,RoadSegment} from '../src/formats/trc';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, BufferGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, MeshBasicMaterial, Vector3 } from 'three';
@@ -13,6 +16,26 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
+test('player traffic driver follows the graph with a full car through its normal solver',()=>{
+  const {demo,world}=setup(false);demo.disableObstacle();
+  const segment=(start:RoadPoint,end:RoadPoint):RoadSegment=>{const tangent=end.map((n,i)=>n-start[i]) as RoadPoint;return {start,end,startTangent:tangent,endTangent:tangent,length:Math.hypot(...tangent),raw:new Uint32Array(14),flag:0};};
+  const graph:RoadNetwork={version:1,bytes:0,paths:[],others:[{id:2,refs:[10,0],raw:new Uint32Array(12),extraRefs:[],tail:new Uint32Array(3),flag:0,segments:[segment([0,0,-200],[0,0,0])]},{id:3,refs:[20,0],raw:new Uint32Array(12),extraRefs:[],tail:new Uint32Array(3),flag:0,segments:[segment([0,0,-400],[0,0,-202])]}],nodes:[{id:1,group:1,position:[0,0,-200],links:[{target:2,flag:1},{target:3,flag:0}],raw:new Uint32Array(4),lanes:[{header:new Uint8Array(12),segment:segment([0,0,-202],[0,0,-200])}]}]};
+  const driver=new PlayerTrafficDriver(demo,graph,new TrafficControl(graph,[])),before=demo.body.position.clone();
+  driver.sample(demo.physicsDt,[]);assert.ok(demo.body.position.equals(before),'sampling does not integrate or teleport');
+  demo.controlInput=dt=>driver.sample(dt,[]);
+  for(let i=0;i<300;i++)demo.advance(1/60,neutral);
+  assert.ok(demo.body.position.z<before.z-2,`driven position ${demo.body.position.z}`);
+  demo.controlInput=undefined;world.dispose();
+});
+test('a driver input provider runs on the existing physics clock and can be removed without resetting the car',()=>{
+  const {demo,world}=setup();let calls=0,elapsed=0;
+  demo.controlInput=dt=>{calls++;elapsed+=dt;return {throttle:.2,steer:0,brake:false};};
+  demo.advance(4*demo.physicsDt,neutral);
+  assert.equal(calls,4);assert.ok(Math.abs(elapsed-4*demo.physicsDt)<1e-9);
+  const position=demo.body.position.clone(),velocity=demo.body.velocity.clone();demo.controlInput=undefined;
+  assert.ok(demo.body.position.equals(position));assert.ok(demo.body.velocity.equals(velocity));
+  demo.advance(demo.physicsDt,neutral);assert.equal(calls,4);world.dispose();
+});
 function setup(mechanical = false, terrain?: ConstructorParameters<typeof Vehicle3D>[4],frequency=240,mapCollision?:MapCollision,withBumper=false) {
   const world = new EngineWorld(), slots = [101, 102, 103, 104].map((type, i) => `slot 0 0 0 0 0 0 ${20 + i}\nslottype ${type}`).join('\n');
   const wheels = [[-0.7, -1.3], [0.7, -1.3], [-0.7, 1.3], [0.7, 1.3]].map(([x, z], i) => `type 10 sphere 0.3\nspring 0.29 0.1 0.05\nwheel ${x} -0.6 ${z} 0 0 0 ${i < 2 ? 1 : 0} 0 1 0`).join('\n');

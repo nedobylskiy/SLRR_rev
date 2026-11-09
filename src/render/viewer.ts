@@ -64,6 +64,7 @@ import { MapRoadDebug, type RoadDebugLayer } from './map-road-debug';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
+import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
 import { TrafficDamageView } from './traffic-damage-view';
 import { TrafficAudio, type TrafficVoice } from '../audio/traffic-audio';
@@ -405,6 +406,29 @@ export class Viewer {
   private trafficAudio?:TrafficAudio;
   private trafficAudioStart=()=>this.trafficAudio?.activate();
   private trafficPeer?:Vehicle3D;
+  private playerTrafficDriver?:PlayerTrafficDriver;
+  private playerTrafficRevision=0;
+  get playerTrafficEnabled(){return !!this.playerTrafficDriver;}
+  playerTrafficInfo(){const bot=this.playerTrafficDriver?.bot;return bot?`Player bot · ${bot.mode} · target ${(bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${bot.route.phase} · ${bot.trafficStatus||'free'}`:'';}
+  async setPlayerTrafficEnabled(enabled:boolean){
+    const revision=++this.playerTrafficRevision,vehicle=this.trafficPeer;
+    if(!enabled){if(vehicle)vehicle.controlInput=undefined;this.playerTrafficDriver?.dispose();this.playerTrafficDriver=undefined;return;}
+    const source=this.mapRoadSource;
+    if(!vehicle||!source)throw Error('Start driving on a map with a road graph first.');
+    const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
+    if(revision!==this.playerTrafficRevision||vehicle!==this.trafficPeer)return;
+    if(!roads)throw Error('No traffic road graph on this map.');
+    const control=this.trafficControl??=new TrafficControl(roads.network,this.mapTrafficFixtures);
+    this.playerTrafficDriver?.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,roads.network,control);
+    vehicle.controlInput=dt=>{
+      const driver=this.playerTrafficDriver!;
+      this.trafficControl??=driver.control;
+      if(this.trafficControl&&driver.control!==this.trafficControl){driver.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,this.trafficControl.network,this.trafficControl);}
+      const current=this.playerTrafficDriver!;
+      if(!this.trafficTest)current.control.advance(dt);
+      return current.sample(dt,[this.trafficTest?.vehicle.body,this.trafficFollower?.vehicle.body].filter((body):body is import('../engine/rigid-body-3d').RigidBody3D=>!!body));
+    };
+  }
   trafficTestStatus = 'Traffic test off';
   private mapFog: MapFogSettings = { ...DEFAULT_MAP_FOG };
   private environmentTexture?: THREE.Texture;
@@ -1674,8 +1698,9 @@ export class Viewer {
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
-      const input = java ? java.sample() : keyboardDrivingInput(keys);
+      let input = this.playerTrafficDriver?.input ?? (java ? java.sample() : keyboardDrivingInput(keys));
       if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if(this.playerTrafficDriver)input=this.playerTrafficDriver.input;
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
@@ -1775,7 +1800,7 @@ export class Viewer {
       java?.persist?.();
       if (this.mapStreamFocus === demo.position) this.mapStreamFocus = undefined;
       this.frame = undefined; this.stopDriving = undefined; this.drivingTimeOfDay = undefined;
-      if(this.trafficPeer===crash)this.trafficPeer=undefined;
+      if(this.trafficPeer===crash){void this.setPlayerTrafficEnabled(false);this.trafficPeer=undefined;}
       if(crash instanceof Vehicle3D&&this.renderRecorder===crash.telemetry)this.renderRecorder=undefined;
       releaseMouse();
       canvas.removeEventListener('keydown', down); canvas.removeEventListener('blur', release); canvas.removeEventListener('pointerdown', focus);
