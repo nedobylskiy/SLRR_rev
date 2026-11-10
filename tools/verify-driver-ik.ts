@@ -32,3 +32,23 @@ try{
  character.dispose();assert.equal(disposed,true);
  console.log('Java character reuse, cleanup and steering ownership: PASS');
 }finally{world.dispose();}
+
+for(const pack of ['Baiern','Yotta']){
+ const built=await new PartFactory(assets).stock({pack:`cars/racers/${pack}.rpk`,id:6}),fit=await DriverIk.create(built.root,assets,async()=>new Texture());
+ try{
+  const head=fit.character.skeleton.bones.find(b=>b.name==='Bip01 Head')!,pelvis=fit.character.skeleton.bones.find(b=>b.name==='Bip01 Pelvis')!;
+  const target=new Vector3(...built.root.definition.config.cameras[0].position),lengths=fit.character.skeleton.bones.map(b=>b.position.length());
+  fit.setHeadFit(false);fit.update();const before=head.getWorldPosition(new Vector3()).distanceTo(target),hips=pelvis.getWorldPosition(new Vector3());
+  fit.setHeadFit(true);fit.update();const after=head.getWorldPosition(new Vector3()).distanceTo(target),pose=head.getWorldPosition(new Vector3());
+  assert.ok(after<.002&&after<before*.3,`${pack} head fits the cockpit goal: ${after}`);
+  const spine=fit.character.skeleton.bones.find(b=>b.name==='Bip01 Spine')!,chest=fit.character.skeleton.bones.find(b=>b.name==='Bip01 Spine1')!;
+  const neck=fit.character.skeleton.bones.find(b=>b.name==='Bip01 Neck')!;assert.ok(head.getWorldPosition(new Vector3()).y>neck.getWorldPosition(new Vector3()).y+.04,'head remains above the neck');
+  const back=chest.getWorldPosition(new Vector3()),base=spine.getWorldPosition(new Vector3()),top=neck.getWorldPosition(new Vector3()),axis=top.clone().sub(base).normalize(),bend=back.clone().sub(base);bend.addScaledVector(axis,-bend.dot(axis));assert.ok(bend.z>.01,`${pack}: back bends toward the seat, not chest-first into the chin`);
+  const up=new Vector3(1,0,0).applyQuaternion(head.getWorldQuaternion(head.quaternion.clone()));assert.ok(up.y>.999,'head gaze stays level instead of following the torso bend');
+  assert.ok(pelvis.getWorldPosition(new Vector3()).distanceTo(hips)<1e-9,'head fit never moves the pelvis');
+  for(const angle of [-1,0,1]){fit.setSteeringAngle(angle);fit.update();for(const [side,goal] of [['L',fit.leftTarget],['R',fit.rightTarget]] as const)assert.ok(fit.gripPosition(side).distanceTo(goal)<.002,`${pack}: palms stay on the rim`);}
+  fit.character.skeleton.bones.forEach((bone,i)=>assert.ok(Math.abs(bone.position.length()-lengths[i])<1e-9,'head fit preserves bone lengths'));
+  fit.setHeadFit(false);fit.update();fit.setHeadFit(true);fit.update();assert.ok(head.getWorldPosition(new Vector3()).distanceTo(pose)<1e-9,'cached head fit restores the same pose');
+  console.log(JSON.stringify({car:pack,headErrorBeforeCm:before*100,headErrorAfterCm:after*100,pelvisFixed:true}));
+ }finally{fit.dispose();built.world.dispose();}
+}

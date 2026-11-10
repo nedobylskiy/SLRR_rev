@@ -1332,7 +1332,7 @@ export class Viewer {
     this.driverIk=driver;this.model.add(driver.root);this.scene.add(driver.character.helper);driver.update();
     const target=new THREE.Vector3(...root.definition.config.seat!.position).applyMatrix4(root.matrix()).applyMatrix4(this.model.matrixWorld);
     this.controls.target.copy(target).add(new THREE.Vector3(0,.35,0));this.camera.position.copy(target).add(new THREE.Vector3(-1.6,1.1,-1.6));this.controls.update();
-    return {wristPivot:(enabled:boolean)=>{driver.setWristPivot(enabled);driver.update();},steering:(degrees:number)=>{driver.setSteeringAngle(degrees*Math.PI/180);driver.update();this.syncWorld();},skeleton:(visible:boolean)=>{driver.character.helper.visible=visible;driver.debug.visible=visible;},cutaway:(enabled:boolean)=>this.setDriverCutaway(enabled),info:()=>driver.info()};
+    return {headFit:(enabled:boolean)=>{driver.setHeadFit(enabled);driver.update();},wristPivot:(enabled:boolean)=>{driver.setWristPivot(enabled);driver.update();},steering:(degrees:number)=>{driver.setSteeringAngle(degrees*Math.PI/180);driver.update();this.syncWorld();},skeleton:(visible:boolean)=>{driver.character.helper.visible=visible;driver.debug.visible=visible;},cutaway:(enabled:boolean)=>this.setDriverCutaway(enabled),info:()=>driver.info()};
   }
   async showSuspensionPlayground(assets:Assets){
     this.clear();const generation=this.generation;

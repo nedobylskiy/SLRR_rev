@@ -37,7 +37,7 @@ independent wheel, suspension, and strut branches selected by CFG slot types
 
 The numeric inputs allow exact values. The read-only JSON field can be copied
 to report a calibration; **Reset suspension alignment** restores zero values.
-Vehicle assembly now includes the user's measured +0.165 m Y correction in
+Vehicle assembly now includes the user's measured +0.140 m Y correction (reduced by 0.025 m from +0.165 m after inspecting the physical suspension) in
 the chassis wheel/hub/strut slot frames, plus the shared per-corner attachment
 offsets: FL `[0.055,0,0]`, FR `[-0.055,0,0]`, RL `[-0.075,0,0]`,
 RR `[0.075,0,0]`. Front attachments move 0.055 m inward and rear attachments
@@ -49,7 +49,7 @@ for an uncalibrated audit. Steering uses the same corrected carrier as the hub
 and wheel. Sliders stay at zero so calibration is not applied a second time.
 This is an explicit measured calibration, not a recovered original-game formula.
 
-For parked Java vehicles, the +0.165 m mount height is the fallback rest pose.
+For parked Java vehicles, the +0.140 m mount height is the fallback rest pose.
 When a corner has valid spring force/rest-length data, the native loaded pose
 (`CFG spring anchor − loaded spring length`) replaces that vertical fallback;
 adding both previously lowered complete cars by another 0.165 m relative to
@@ -60,8 +60,8 @@ wheel contact frames and tire radii, and WheelRefs are refreshed from the live
 Java chassis. Rebound/tuning or late component initialization can therefore
 update contact without requiring a new Java placement command.
 
-**Use base height (+0.165 m)** clears the extra visual Y offsets. Zero sliders
-therefore keep the corrected assembly height; setting +0.165 again would add it
+**Use base height (+0.140 m)** clears the extra visual Y offsets. Zero sliders
+therefore keep the corrected assembly height; setting +0.140 again would add it
 a second time visually.
 Settings last for the page session and apply to displayed vehicle instances,
 not inventory thumbnails. These are render-only diagnostics: Java slot data,

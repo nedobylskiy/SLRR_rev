@@ -18,6 +18,20 @@ export function solveDriverLimb(upper:Bone,lower:Bone,end:Bone,target:Vector3,po
   const along=(l1*l1-l2*l2+distance*distance)/(2*distance),height=Math.sqrt(Math.max(0,l1*l1-along*along)),elbow=a.clone().addScaledVector(direction,along).addScaledVector(bend,height);
   aim(upper,lower,elbow);aim(lower,end,a.clone().addScaledVector(direction,distance));
 }
+/** Bounded positional CCD for the seated torso/neck; never translate or scale bones. */
+export function fitDriverHead(chain:readonly Bone[],head:Bone,target:Vector3,neutral:readonly Quaternion[],limits:readonly number[]){
+  for(let pass=0;pass<32;pass++){
+    for(let i=chain.length-1;i>=0;i--){
+      const bone=chain[i],before=bone.quaternion.clone(),error=head.getWorldPosition(new Vector3()).distanceToSquared(target);
+      aim(bone,head,target,.25);
+      const delta=neutral[i].clone().invert().multiply(bone.quaternion),angle=delta.angleTo(new Quaternion());
+      if(angle>limits[i])bone.quaternion.copy(neutral[i]).multiply(new Quaternion().slerp(delta,limits[i]/angle));
+      bone.updateWorldMatrix(false,true);
+      if(head.getWorldPosition(new Vector3()).distanceToSquared(target)>error){bone.quaternion.copy(before);bone.updateWorldMatrix(false,true);}
+    }
+    if(head.getWorldPosition(new Vector3()).distanceToSquared(target)<1e-6)break;
+  }
+}
 /** One rotational degree of freedom at a fixed grip: no sliding or wrist translation. */
 export function wristPivot(grip:Quaternion,preferred:Quaternion,axis:Vector3,limit:number){
   const hinge=axis.clone().normalize(),from=new Vector3(1,0,0).applyQuaternion(grip),to=new Vector3(1,0,0).applyQuaternion(preferred);
@@ -39,6 +53,8 @@ export class DriverIk {
   private gripOffsets=[new Vector3(.0783,-.0044,-.0174),new Vector3(.0779,.0044,-.0174)];
   gripPosition(side:'L'|'R'){const index=side==='L'?0:1;return this.bones.get(`Bip01 ${side} Hand`)!.localToWorld(this.gripOffsets[index].clone());}
   private grips:(Quaternion|undefined)[]=[];private wristFree=true;
+  private headError=0;private headFit=true;private seatedPose?:Map<Bone,Quaternion>;
+  setHeadFit(enabled:boolean){this.headFit=enabled;}
   setWristPivot(enabled:boolean){this.wristFree=enabled;}
   constructor(readonly chassis:EnginePart,readonly wheel:EnginePart,readonly character:SkinnedCharacter,private center:Vector3,readonly radius:number,private ownsCharacter=true){
     if(!chassis.definition.config.seat)throw Error('Chassis has no CFG seat');
@@ -47,7 +63,7 @@ export class DriverIk {
     this.root.name='Seated driver IK';this.root.matrixAutoUpdate=false;this.root.add(character.root,this.debug);character.root.matrixAutoUpdate=false;character.root.matrix.copy(this.seat);character.helper.visible=false;
     for(const b of character.skeleton.bones)this.bones.set(b.name,b);
     for(const name of ['Bip01 Spine','Bip01 Head','Bip01 L UpperArm','Bip01 L Forearm','Bip01 L Hand','Bip01 R UpperArm','Bip01 R Forearm','Bip01 R Hand'])if(!this.bones.has(name))throw Error(`Driver bone missing: ${name}`);
-    for(const color of [0x54ffc0,0xffb552]){const marker=new Mesh(new SphereGeometry(.015,10,8),new MeshBasicMaterial({color,depthTest:false}));marker.renderOrder=100;this.debug.add(marker);this.markers.push(marker);}
+    for(const color of [0x54ffc0,0xffb552,0x7ab9ff]){const marker=new Mesh(new SphereGeometry(.015,10,8),new MeshBasicMaterial({color,depthTest:false}));marker.renderOrder=100;this.debug.add(marker);this.markers.push(marker);}
     const saved=wheel.local.clone();this.setSteeringAngle(0);this.update();wheel.local.copy(saved);
 
   }
@@ -72,7 +88,42 @@ export class DriverIk {
     this.character.skeleton.bones.forEach((b,i)=>{b.quaternion.copy(this.character.rest[i]);b.position.copy(this.character.restPositions[i]);});this.root.updateWorldMatrix(true,true);
     const cfg=this.chassis.definition.config,spine=this.bones.get('Bip01 Spine')!,head=this.bones.get('Bip01 Head')!,camera=cfg.cameras[0];
     // Seat fixes the hips; the authored cockpit point supplies a neutral torso posture.
-    if(camera)aim(spine,head,new Vector3(...camera.position).applyMatrix4(this.root.matrixWorld),.45);
+    if(camera&&(!this.headFit||!this.seatedPose))aim(spine,head,new Vector3(...camera.position).applyMatrix4(this.root.matrixWorld),.45);
+    if(camera&&this.headFit){
+      if(this.seatedPose){for(const [bone,rotation] of this.seatedPose)bone.quaternion.copy(rotation);this.root.updateWorldMatrix(false,true);}
+      else {
+        const chain=['Bip01 Spine','Bip01 Spine1','Bip01 Neck'].map(name=>this.bones.get(name)).filter((bone):bone is Bone=>!!bone);
+        const neutral=chain.map(bone=>this.character.rest[this.character.skeleton.bones.indexOf(bone)]);
+        const target=new Vector3(...camera.position).applyMatrix4(this.root.matrixWorld);
+        // Treat the cockpit point as the head-joint goal, not a detected roof plane.
+        // These swing limits are host approximations; native per-axis limits differ.
+        const neck=this.bones.get('Bip01 Neck');
+        const localRest=this.character.rest[this.character.skeleton.bones.indexOf(head)].clone();
+        let orientation=localRest.clone();let ancestor=head.parent as Bone;
+        while(ancestor?.isBone){orientation.premultiply(this.character.rest[this.character.skeleton.bones.indexOf(ancestor)]);ancestor=ancestor.parent as Bone;}
+        // Vin's head-local X is up. Level bind gaze before applying cockpit YPR.
+        orientation.premultiply(new Quaternion().setFromUnitVectors(new Vector3(1,0,0).applyQuaternion(orientation).normalize(),new Vector3(0,1,0)));
+        const restWorld=this.root.getWorldQuaternion(new Quaternion()).multiply(new Quaternion().setFromRotationMatrix(poseMatrix(camera))).multiply(orientation);
+        if(neck){
+          const neckRotation=restWorld.clone().multiply(localRest.clone().invert());
+          const offset=head.position.clone().multiply(head.getWorldScale(new Vector3())).applyQuaternion(neckRotation);
+          const torso=chain.filter(bone=>bone!==neck),torsoNeutral=torso.map(bone=>neutral[chain.indexOf(bone)]);
+          const neckTarget=target.clone().sub(offset),limits=torso.map(()=>1.8);
+          // Seed the bend explicitly: a perfectly straight spine is a CCD
+          // singularity and cannot shorten by rotating toward its own axis.
+          // Bias the middle of the back toward the seat (+Z), rather than
+          // folding the chest forward/up into the chin.
+          if(torso.length===2)solveDriverLimb(torso[0],torso[1],neck,neckTarget,new Vector3(0,0,1).transformDirection(this.root.matrixWorld));
+          torso.forEach((bone,i)=>{const delta=torsoNeutral[i].clone().invert().multiply(bone.quaternion),angle=delta.angleTo(new Quaternion());if(angle>limits[i])bone.quaternion.copy(torsoNeutral[i]).multiply(new Quaternion().slerp(delta,limits[i]/angle));});
+          this.root.updateWorldMatrix(false,true);fitDriverHead(torso,neck,neckTarget,torsoNeutral,limits);
+          neck.quaternion.copy(neck.parent!.getWorldQuaternion(new Quaternion()).invert().multiply(neckRotation));neck.updateWorldMatrix(false,true);
+          head.quaternion.copy(head.parent!.getWorldQuaternion(new Quaternion()).invert().multiply(restWorld));head.updateWorldMatrix(false,true);
+        }else fitDriverHead(chain,head,target,neutral,chain.map(()=>1.1));
+        this.seatedPose=new Map([...chain,head].map(bone=>[bone,bone.quaternion.clone()]));
+      }
+    }
+    this.markers[2].visible=!!camera;
+    if(camera){this.markers[2].position.set(...camera.position);this.headError=head.getWorldPosition(new Vector3()).distanceTo(new Vector3(...camera.position).applyMatrix4(this.root.matrixWorld))/this.root.getWorldScale(new Vector3()).x;}
     const wheelFrame=this.chassis.matrix().invert().multiply(this.wheel.matrix()).multiply(this.wheelRender),gripRadius=Math.max(.04,this.radius-.015);
     for(const [index,side] of ['L','R'].entries()){
       const sign=side==='L'?-1:1,angle=sign*1;
@@ -108,7 +159,7 @@ export class DriverIk {
     }
     this.character.refresh(false);
   }
-  info(){const scale=this.root.getWorldScale(new Vector3()).x;return `Vin · seat + two hand IK · wheel radius ${(this.radius*100).toFixed(1)} cm · grip error L/R ${(this.errors[0]/scale*100).toFixed(1)} / ${(this.errors[1]/scale*100).toFixed(1)} cm`;}
+  info(){const scale=this.root.getWorldScale(new Vector3()).x;return `Vin · seat + head + two hand IK · head error ${(this.headError*100).toFixed(1)} cm · wheel radius ${(this.radius*100).toFixed(1)} cm · grip error L/R ${(this.errors[0]/scale*100).toFixed(1)} / ${(this.errors[1]/scale*100).toFixed(1)} cm`;}
   dispose(){
     if(this.disposed)return;this.disposed=true;
     if(this.ownsCharacter){this.wheel.local.copy(this.wheelBase);this.character.dispose();}

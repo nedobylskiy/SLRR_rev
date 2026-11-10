@@ -379,8 +379,9 @@ const playgroundButton=textElement('button','Character playground');playgroundBu
 const vinControls=textElement('div','','hood-controls character-playground');vinControls.hidden=true;el('scene-help').before(vinControls);
 let vinTimer:number|undefined;
 const driverIkButton=textElement('button','Driver IK');driverIkButton.className='hood-button';playgroundButton.after(driverIkButton);
-driverIkButton.onclick=()=>{void (async()=>{
-  if(!assets||!viewer)return;const opening=openWorld('cars/racers/Baiern.rpk',6),request=sequence;await opening;
+driverIkButton.onclick=()=>{void openDriverIk();};
+async function openDriverIk(pack='cars/racers/Baiern.rpk'){
+  if(!assets||!viewer)return;const opening=openWorld(pack,6),request=sequence;await opening;
   if(request!==sequence||!engineRoot)return;
   try{
     const driver=await viewer.showDriverIk(engineRoot,assets);if(request!==sequence)return;
@@ -390,11 +391,13 @@ driverIkButton.onclick=()=>{void (async()=>{
     slider.oninput=()=>{const value=Number(slider.value);driver.steering(value);output.textContent=`${value}°`;info.textContent=driver.info();};label.append(slider,output);
     skeleton.type=cutaway.type='checkbox';skeleton.checked=cutaway.checked=true;skeletonLabel.prepend(skeleton);cutawayLabel.prepend(cutaway);skeleton.onchange=()=>driver.skeleton(skeleton.checked);cutaway.onchange=()=>driver.cutaway(cutaway.checked);
     const wristLabel=textElement('label','Wrist pivot'),wrist=document.createElement('input');wrist.type='checkbox';wrist.checked=true;wristLabel.prepend(wrist);wrist.onchange=()=>{driver.wristPivot(wrist.checked);info.textContent=driver.info();};
-    driver.skeleton(true);driver.cutaway(true);const row=textElement('div','','character-playground-row');row.append(label,skeletonLabel,cutawayLabel,wristLabel);vinControls.append(row,info);
-    el('format').textContent='DRIVER / SEAT + HAND IK';el('filename').textContent='Vin · Baiern seat and steering wheel';el('details').textContent='Original humans.rpk Vin render and vin.skl. Seat/pedals/cockpit reference come from chassis CFG. Hands follow two upper-rim targets on the installed steering wheel through its actual slot/render transforms. Three-link arm chain with fixed bone lengths; neutral seated leg pose. Prototype IK, not native solver parity. Gear shifting, reverse head movement and inertial body movement are not implemented.';
+    const model=document.createElement('select');model.setAttribute('aria-label','Driver IK car');for(const name of ['Baiern','Yotta']){const option=document.createElement('option');option.value=`cars/racers/${name}.rpk`;option.textContent=name;model.append(option);}model.value=pack;model.onchange=()=>{void openDriverIk(model.value);};
+    const headLabel=textElement('label','Fit head to cockpit'),headCheck=document.createElement('input');headCheck.type='checkbox';headCheck.checked=true;headLabel.prepend(headCheck);headCheck.onchange=()=>{driver.headFit(headCheck.checked);info.textContent=driver.info();};
+    driver.skeleton(true);driver.cutaway(true);const row=textElement('div','','character-playground-row');row.append(model,label,skeletonLabel,cutawayLabel,wristLabel,headLabel);vinControls.append(row,info);
+    el('format').textContent='DRIVER / SEAT + HAND IK';el('filename').textContent=`Vin · ${pack.includes('Yotta')?'Yotta':'Baiern'} seat and steering wheel`;el('details').textContent='Original humans.rpk Vin render and vin.skl. Seat/pedals/cockpit reference come from chassis CFG. Hands follow two upper-rim targets on the installed steering wheel through its actual slot/render transforms. Three-link arm chain with fixed bone lengths; neutral seated leg pose. A bounded torso/neck positional solve fits the head joint to the first cockpit camera, with neutral gaze and fixed pelvis/bone lengths. Blue marker: head goal. Fit head to cockpit allows comparison. The fitted upper-body pose is cached; hands continue to follow steering. Prototype IK, not native solver parity. Gear shifting, reverse head movement and inertial body movement are not implemented.';
     status('Driver IK ready');
   }catch(error){if(request===sequence){status('Driver IK error',true);el('details').textContent=String(error);}}
-})();};
+}
 
 const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';driverIkButton.after(suspensionButton);
 suspensionButton.onclick=()=>{void (async()=>{
@@ -801,7 +804,7 @@ softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.va
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 const suspensionDebugPanel = document.createElement('details');
 suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
-suspensionDebugPanel.append(textElement('p', 'Base suspension: height +0.165 m; front attachments 0.055 m inward, rear 0.075 m outward. Sliders add visual offsets (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
+suspensionDebugPanel.append(textElement('p', 'Base suspension: height +0.140 m; front attachments 0.055 m inward, rear 0.075 m outward. Sliders add visual offsets (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
 const suspensionSettings = defaultSuspensionDebug();
 let suspensionSteer: number | undefined;
 const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
@@ -863,7 +866,7 @@ hubGeometryCheck.type = 'checkbox'; hubGeometryLabel.prepend(hubGeometryCheck);
 hubGeometryLabel.title = 'Test native arm-circle and hub modes 0/-1. Unsupported corners use the existing pose. Driving forces are unchanged.';
 hubGeometryCheck.onchange = () => viewer?.setExperimentalHubGeometry(hubGeometryCheck.checked);
 suspensionDebugPanel.append(hubGeometryLabel);
-const suspensionHeightPreset = textElement('button', 'Use base height (+0.165 m)');
+const suspensionHeightPreset = textElement('button', 'Use base height (+0.140 m)');
 suspensionHeightPreset.onclick = () => {
   suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0;
   for (const offset of [suspensionSettings.frontLeftAttachmentOffset, suspensionSettings.frontRightAttachmentOffset,
