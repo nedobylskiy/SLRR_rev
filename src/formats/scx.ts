@@ -2,6 +2,7 @@ import { BinaryReader } from '../binary';
 
 export interface ScxMesh {
   name: string; positions: Float32Array; normals: Float32Array;
+  bonePalette?:Uint32Array; boneIndices?:Uint8Array; boneWeights?:Float32Array;
   uv: Float32Array; uv2?: Float32Array; uv3?: Float32Array;
   /** Packed diffuse RGB decoded as D3DCOLOR (ARGB). Alpha semantics remain unverified. */
   colors?: Uint8Array;
@@ -101,6 +102,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
     const directory = Array.from({ length: count }, () => ({ type: r.u32(), offset: r.u32() }));
     const physicsOnly = directory[0]?.type === 1;
     let current: Partial<ScxMesh> | undefined;
+    let bonePalette:Uint32Array|undefined;
     const finish = () => {
       if (!current) return;
       if (!current.positions || !current.indices) throw new Error('SCX v4: incomplete mesh group');
@@ -108,6 +110,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       const mesh: ScxMesh = { name: current.name ?? `material_${meshes.length}`, positions: current.positions,
         normals: current.normals ?? new Float32Array(vertices * 3), uv: current.uv ?? new Float32Array(vertices * 2),
         uv2: current.uv2, uv3: current.uv3, colors: current.colors, paintMask: current.paintMask, textureMap: current.textureMap,
+        bonePalette:current.bonePalette,boneIndices:current.boneIndices,boneWeights:current.boneWeights,
         lightmapIndex: current.lightmapIndex, lightmapMap: current.lightmapMap,
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
         illuminationIndex:current.illuminationIndex,illuminationMap:current.illuminationMap,
@@ -126,7 +129,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
       r.require(size - 8); // Includes the type/size header (confirmed against local v4 corpus).
       const end = item.offset + size;
       if (item.type === 0 || (item.type === 1 && physicsOnly)) {
-        finish(); current = {};
+        finish(); current = {};bonePalette=undefined;
         if (item.type === 0) {
           current.materialType = r.u32(); current.materialFlags = r.u32();
           const n = r.count(r.u32(), 4);
@@ -161,6 +164,10 @@ export function parseScx(bytes: Uint8Array): ScxModel {
             else throw new Error(`SCX v4: unknown material entry 0x${type.toString(16)}`);
           }
         }
+      } else if(item.type===2||item.type===3){
+        r.u32();const count=item.type===2?2:r.u32();r.count(count,4);
+        if(!count)throw Error('SCX v4: empty bone palette');
+        bonePalette=Uint32Array.from({length:count},()=>r.u32());
       } else if (item.type === 4) {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
@@ -172,6 +179,13 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);
         r.count(n, 12);
+        const influenceFlags=flags&0x1e;
+        if(influenceFlags&&(influenceFlags&(influenceFlags-1)))throw Error('SCX v4: conflicting bone influence flags');
+        const explicit=flags&4?1:flags&8?2:flags&16?3:0;
+        if((influenceFlags||flags&32)&&!bonePalette)throw Error('SCX v4: skin vertices without bone palette');
+        current.bonePalette=bonePalette;
+        if(influenceFlags)current.boneWeights=new Float32Array(n*4);
+        if(flags&32)current.boneIndices=new Uint8Array(n*4);
         current.positions = new Float32Array(n * 3); current.normals = new Float32Array(n * 3); current.uv = new Float32Array(n * 2);
         if (flags & 0x400) current.uv2 = new Float32Array(n * 2);
         if (flags & 0x800) current.uv3 = new Float32Array(n * 2);
@@ -179,8 +193,8 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         for (let i = 0; i < n; i++) {
           for (let j = 0; j < 3; j++) current.positions[i * 3 + j] = r.f32();
           // Weight flag encodes 1..4 influences; the last weight is implicit.
-          if (flags & 4) r.skip(4); else if (flags & 8) r.skip(8); else if (flags & 16) r.skip(12);
-          if (flags & 32) r.skip(4);
+          if(current.boneWeights){let sum=0;for(let k=0;k<explicit;k++){const w=r.f32();if(!Number.isFinite(w))throw Error('SCX v4: non-finite bone weight');current.boneWeights[i*4+k]=w;sum+=w;}current.boneWeights[i*4+explicit]=1-sum;}
+          if(current.boneIndices){for(let k=0;k<4;k++){const index=r.u8();current.boneIndices[i*4+k]=index;if(k<=explicit&&index>=bonePalette!.length)throw Error('SCX v4: bone index outside palette');}}
           if (flags & 0x40) for (let j = 0; j < 3; j++) current.normals[i * 3 + j] = r.f32();
           if (current.colors) {
             const packed = r.u32();
@@ -196,7 +210,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         if (!current) throw new Error('SCX v4: indices before mesh');
         const n = r.count(r.u32(), 2);
         current.indices = Uint32Array.from({ length: n }, () => r.u16());
-      } else if (item.type !== 1) warnings.push(`Chunk type ${item.type}: skeleton data retained in source, not rendered`);
+      } else if (item.type !== 1) warnings.push(`Chunk type ${item.type}: unsupported payload`);
       if (r.offset > end) throw new Error('SCX v4: chunk overrun');
     }
     finish();

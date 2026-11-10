@@ -297,7 +297,7 @@ export class PartFactory {
       // User-measured placement correction, shared by installation, linked
       // anchors and the physical suspension. Debug sliders remain additional.
       if (definition.config.wheels.length) {
-        root.wheelFrameOffsetY = options.suspensionMountOffsetY ?? 0.165;
+        root.wheelFrameOffsetY = options.suspensionMountOffsetY ?? 0.140;
         root.wheelFrameOffsets = (options.suspensionMountOffsets ?? SUSPENSION_ATTACHMENT_OFFSETS).map(offset => [...offset] as Triple);
       }
       const source = new OriginalStock(this.assets);

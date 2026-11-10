@@ -1,3 +1,4 @@
+import {deformationNormals} from './deformation-normals';
 import { BufferGeometry, Group, Matrix4, Mesh, Vector3 } from 'three';
 import type { TrafficCrush } from '../engine/traffic-vehicle';
 
@@ -14,6 +15,7 @@ export class TrafficDamageView {
         if(!(object instanceof Mesh))return;
         for(let parent=object.parent;parent&&parent!==this.group;parent=parent.parent)if(parent.userData.trafficWheel)return;
         const base=object.geometry,geometry=base.clone(),toRoot=inverse.clone().multiply(object.matrixWorld);
+        deformationNormals(geometry);
         object.geometry=geometry;this.skins.push({mesh:object,geometry,base,original:new Float32Array(geometry.getAttribute('position').array),toRoot,fromRoot:toRoot.clone().invert()});
       });
     }
@@ -23,7 +25,7 @@ export class TrafficDamageView {
       for(let i=0;i<attribute.count;i++){
         position.fromArray(skin.original,i*3).applyMatrix4(skin.toRoot);this.crush.displacement(position,delta);position.add(delta).applyMatrix4(skin.fromRoot);attribute.setXYZ(i,position.x,position.y,position.z);
       }
-      attribute.needsUpdate=true;skin.geometry.computeVertexNormals();skin.geometry.computeBoundingSphere();skin.geometry.computeBoundingBox();
+      attribute.needsUpdate=true;deformationNormals(skin.geometry).update();skin.geometry.computeBoundingSphere();skin.geometry.computeBoundingBox();
     }
     this.version=this.crush.version;
   }

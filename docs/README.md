@@ -10,6 +10,7 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 |[Installation map](installation.md)|Files, game layers, native border|
 | [RPK/RDB](formats/rpk.md) |Binary table, dependencies, resource IDs|
 | [SCX/SCY/TEX](formats/scx.md) |Geometry, materials, versions 3 and 4|
+|[Character skeleton research](character-skeleton-research.md)|Supplied archive, upstream skeleton/animation evidence, local human and vehicle bone inventory|
 |[Maps](maps.md)|Loading built-in Test Track and support boundaries|
 |[Music integration](music.md)|Original Java Sound calls, browser playback, and track metadata|
 | [TUFA/TREE](formats/tufa.md) |Original `.class`, constants, methods, nodes|

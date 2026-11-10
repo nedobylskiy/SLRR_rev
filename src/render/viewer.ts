@@ -1,4 +1,11 @@
+import {VehicleSuspensionSkin} from './vehicle-suspension-skin';
+import {SuspensionRoadTest} from '../engine/suspension-road-test';
+import {linkedSuspensionAnchors} from '../engine/linked-suspension';
+import {SuspensionSkin} from './suspension-playground';
+import {SuspensionPlayground} from './suspension-playground';
+import {DriverIk} from './driver-ik';
 import { intersectPartGeometry } from './part-picking';
+import {loadSkinnedCharacter,type SkinnedCharacter} from './skinned-character';
 import {VehiclePairTest,type VehiclePairScenario} from '../engine/vehicle-pair-test';
 import { applySavedPanel, restoreReferenceGeometry } from './saved-panel';
 import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from '../engine/driving-helping';
@@ -61,6 +68,9 @@ import {mapObjectCategory,type MapObjectCategory} from './map-object-category';
 import { MapObjectStream, type StreamPlacement } from './map-object-stream';
 import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { MapRoadDebug, type RoadDebugLayer } from './map-road-debug';
+import {MapPedestrianDebug,type PedestrianDebugLayer} from './map-pedestrian-debug';
+import {loadMapPedestrians} from '../engine/map-pedestrians';
+import {PedestrianCrowd} from './pedestrian-crowd';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
@@ -74,7 +84,7 @@ import { vehiclePairContact } from '../engine/vehicle-pair-test';
 import type { CfgWheel } from '../formats/cfg';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
-import { RenderObject } from '../runtime/render-object';
+import { RenderObject,type RenderAnimationState } from '../runtime/render-object';
 import type { RenderLightSettings, RenderFlareSource } from '../runtime/render-ref-native';
 import type { EnvironmentMapSource } from './environment-map';
 import { FrameProfiler } from './frame-profiler';
@@ -292,6 +302,7 @@ export class Viewer {
     `FPS ${this.fps}`,
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
+    `Suspension bone animation: ${this.suspensionBonesEnabled?'on':'off'} · bound parts ${this.suspensionSkins.size}`,
     `Static environment: ${this.environmentPath??'none'}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · brake helping ${this.drivingHelping.brake.toFixed(2)} · steer helping ${this.drivingHelping.steer.toFixed(2)} · clutch helping ${this.drivingHelping.clutch.toFixed(2)} · acceleration helping ${this.drivingHelping.acceleration.toFixed(2)} · ABS ${this.drivingHelping.abs.toFixed(2)} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
@@ -328,6 +339,11 @@ export class Viewer {
   private javaRenderRequests = new Map<number, number>();
   private javaRenderRevisions = new Map<number, number>();
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
+  private driverIk?:DriverIk;private driverCutawayVisibility=new Map<THREE.Group,boolean>();
+  private driverCameraChassis?:EnginePart;
+  private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
+  private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
+  private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
   private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
@@ -351,6 +367,13 @@ export class Viewer {
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private frame?: (now: number) => void;
   private afterFrame?:()=>void;
+  private suspensionPlayground?:SuspensionPlayground;
+  private suspensionSkins=new Map<EnginePart,VehicleSuspensionSkin>();
+  private suspensionBonesEnabled=true;
+  setSuspensionBonesEnabled(enabled:boolean){this.suspensionBonesEnabled=enabled;for(const binding of this.suspensionSkins.values())binding.setEnabled(enabled);}
+  private releaseSuspensionSkin(part:EnginePart){this.suspensionSkins.get(part)?.dispose();this.suspensionSkins.delete(part);}
+  private characterPreview?:SkinnedCharacter;
+  private characterFollowingRagdoll=false;
   private frameCapture?:{resolve:(blob:Blob)=>void;reject:(reason:Error)=>void};
   captureFrame(){return new Promise<Blob>((resolve,reject)=>{
     if(this.frameCapture){reject(Error('A frame capture is already pending'));return;}
@@ -394,6 +417,21 @@ export class Viewer {
   private mapRoadPending?: Promise<void>;
   private mapRoadLayers = new Set<RoadDebugLayer>();
   roadDebugStatus = 'Road graph off';
+  pedestrianDebugStatus='Pedestrian graph off';
+  pedestrianCrowdStatus='Walking pedestrians off';
+  private pedestrianCrowd?:PedestrianCrowd;
+  private pedestrianCrowdRevision=0;
+  private pedestrianCount=6;private pedestrianRadius=100;
+  private pedestrianSpawnFrustum=new THREE.Frustum();private pedestrianSpawnProjection=new THREE.Matrix4();private pedestrianSpawnSphere=new THREE.Sphere(new THREE.Vector3(),1.5);
+  private pedestrianOffscreen=(point:THREE.Vector3)=>{this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);};
+  private updatePedestrianSpawnView(){this.camera.updateMatrixWorld();this.pedestrianSpawnFrustum.setFromProjectionMatrix(this.pedestrianSpawnProjection.multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));}
+  setPedestrianCount(count:number){if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');this.pedestrianCount=count;this.pedestrianCrowd?.configure(count,this.pedestrianRadius);}
+  setPedestrianRadius(radius:number){if(!Number.isFinite(radius)||radius<50||radius>300)throw Error('Pedestrian radius must be 50–300 m');this.pedestrianRadius=radius;this.pedestrianCrowd?.configure(this.pedestrianCount,radius);}
+  pedestrianInfo(){const crowd=this.pedestrianCrowd;return crowd?`Pedestrians ${crowd.count}/${this.pedestrianCount} · ragdolls ${crowd.ragdollCount} · cached models ${crowd.cachedCount} · spawn ${this.pedestrianRadius} m · unload ${this.pedestrianRadius+50} m${crowd.lastError?' · '+crowd.lastError:''}`:this.pedestrianCrowdStatus;}
+
+  private mapPedestrianDebug?:MapPedestrianDebug;
+  private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
+  private mapPedestrianPending?:Promise<void>;
   private trafficTestEnabled = false;
   private trafficTestRevision = 0;
   private trafficCars:TrafficTestCar[]=[];
@@ -558,6 +596,20 @@ export class Viewer {
       this.profiler.beginFrame(now);
       try {
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.beginFrame());
+      this.suspensionPlayground?.update(now);
+      this.characterPreview?.update(now);
+      for(const actor of this.javaCharacters.values()){
+        actor.character.update(now,false);
+        if(actor.ready&&actor.node.animation)actor.node.animation.position=actor.character.playbackTime;
+      }
+      if(this.characterPreview&&(this.characterPreview.isRagdoll||this.characterFollowingRagdoll)){
+        const center=new THREE.Box3().setFromObject(this.characterPreview.root).getCenter(new THREE.Vector3());
+        const delta=center.sub(this.controls.target);
+        // Keep the same orbit/zoom while following the falling body and its reset.
+        delta.multiplyScalar(this.characterPreview.isRagdoll?.15:1);
+        this.camera.position.add(delta);this.controls.target.add(delta);this.controls.update();
+        this.characterFollowingRagdoll=this.characterPreview.isRagdoll;
+      }
       if (document.hidden) this.previousFrame = undefined;
       if (this.previousFrame !== undefined && now > this.previousFrame) {
         this.profiler.recordFrame(now - this.previousFrame);
@@ -566,7 +618,14 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      this.driverIk?.update();
+      for(const binding of this.javaDrivers.values())if(binding.driver){
+        binding.driver.root.visible=this.driverCameraChassis!==binding.chassis&&(this.javaRenderNodes.get(binding.node.id)?.visible??false);
+        binding.driver.update();
+      }
       this.updateTrafficTest(now);
+      if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
+      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen);}
       // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
@@ -649,6 +708,12 @@ export class Viewer {
     });
   }
   clear() {
+    this.suspensionPlayground?.dispose();this.suspensionPlayground=undefined;
+    this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;
+    for(const id of this.javaDrivers.keys())this.releaseJavaDriver(id);
+    for(const actor of this.javaCharacters.values())actor.character.dispose();this.javaCharacters.clear();
+    for(const texture of this.javaCharacterTextures.values())void texture.then(t=>t.dispose()).catch(()=>{});this.javaCharacterTextures.clear();
+    this.characterPreview?.dispose();this.characterPreview=undefined;
     this.frameCapture?.reject(Error('Scene cleared'));this.frameCapture=undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapPackPath=undefined;
@@ -669,12 +734,12 @@ export class Viewer {
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
-    this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.stopDriving?.(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.resetRoadDebug();
     this.scene.fog = null; this.scene.background = null;
-    this.internalView = false;
+    this.internalView = false;this.driverCameraChassis=undefined;
     this.generation++;
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
     this.camera.near = 0.01; this.normalCameraFar = 1000; this.updateFarPlane(); this.camera.updateProjectionMatrix();
@@ -691,6 +756,7 @@ export class Viewer {
     const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
     if (node.resourceType !== 3) {
+      this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
       this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
@@ -717,7 +783,8 @@ export class Viewer {
     const modelGroup = this.javaRenderModels.get(node.id)!;
     const revision = (this.javaRenderRevisions.get(node.id) ?? 0) + 1;
     this.javaRenderRevisions.set(node.id, revision);
-    modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
+    const unit=this.javaCharacters.has(node.id)?1:.01;
+    modelGroup.scale.set(unit * node.meshScale.x, unit * node.meshScale.y, unit * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
     if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node)) {
@@ -781,12 +848,28 @@ export class Viewer {
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
     const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}` : '';
-    if (this.javaRenderTypes.get(node.id) === key) return;
+    if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
+    this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
+    modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
     this.javaRenderTypes.set(node.id, key);
     modelGroup.clear();
     const request = (this.javaRenderRequests.get(node.id) ?? 0) + 1;
     this.javaRenderRequests.set(node.id, request);
     if (!identity) return;
+
+    const descriptor=await assets.resource(identity.pack,identity.id);
+    if(generation!==this.generation||this.javaRenderRequests.get(node.id)!==request||!group.parent)return;
+    if(entryProperties(descriptor.entry).some(p=>p.key==='skeleton')){
+      const character=await loadSkinnedCharacter(assets,async(bytes,path)=>{
+        const key=path.toLowerCase();let pending=this.javaCharacterTextures.get(key);
+        if(!pending){pending=this.texture(bytes,path);this.javaCharacterTextures.set(key,pending);}
+        return (await pending).clone();
+      },identity.pack,identity.id);
+      if(generation!==this.generation||this.javaRenderRequests.get(node.id)!==request||!group.parent){character.dispose();return;}
+      modelGroup.scale.set(node.meshScale.x,node.meshScale.y,node.meshScale.z);modelGroup.add(character.root);character.refresh();
+      for(const mesh of character.meshes){if(mesh.boundingSphere)mesh.boundingSphere.radius+=1;}
+      this.javaCharacters.set(node.id,{character,node,key:'',serial:0,ready:false});await this.syncJavaCharacter(node,assets);return;
+    }
 
     const templateKey = `${key}|${isSkyDome ? 'sky' : 'model'}`;
     let templatePromise = this.javaRenderTemplates.get(templateKey);
@@ -820,6 +903,52 @@ export class Viewer {
     if (generation !== this.generation || this.javaRenderRequests.get(node.id) !== request
       || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
     modelGroup.add(template.clone(true));
+  }
+  private releaseJavaDriver(id:number){
+    const binding=this.javaDrivers.get(id);this.javaDrivers.delete(id);binding?.driver?.dispose();
+  }
+  async bindJavaDriver(node:RenderObject,chassis:EnginePart,assets:Assets){
+    // Load the existing Java render first; an in-flight model replacement must not
+    // leave a binding referring to the character it just disposed.
+    await this.upsertJavaRenderObject(node,assets);
+    if(chassis.world.disposed||node.resourceType!==3)return;
+    this.releaseJavaDriver(node.id);
+    const binding:{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}={node,chassis};
+    this.javaDrivers.set(node.id,binding);
+    await this.attachJavaDriver(node,assets);
+  }
+  private async attachJavaDriver(node:RenderObject,assets:Assets){
+    const binding=this.javaDrivers.get(node.id),actor=this.javaCharacters.get(node.id);
+    if(!binding||binding.driver||binding.pending||!actor)return;
+    const generation=this.generation;
+    binding.pending=(async()=>{
+      const driver=await DriverIk.create(binding.chassis,assets,(bytes,path)=>this.texture(bytes,path),actor.character,()=>this.javaDrivers.get(node.id)===binding&&this.javaCharacters.get(node.id)===actor&&generation===this.generation&&!binding.chassis.world.disposed);
+      if(this.javaDrivers.get(node.id)!==binding||this.javaCharacters.get(node.id)!==actor||generation!==this.generation||binding.chassis.world.disposed){driver.dispose();return;}
+      actor.serial++;actor.ready=false;actor.key='';actor.character.animate(false);driver.debug.visible=false;driver.character.helper.visible=false;
+      this.model.add(driver.root);binding.driver=driver;driver.update();
+    })();
+    try{await binding.pending;}catch(error){if(this.javaDrivers.get(node.id)!==binding)return;this.releaseJavaDriver(node.id);throw error;}
+  }
+  private async syncJavaCharacter(node:RenderObject,assets:Assets){
+    const actor=this.javaCharacters.get(node.id);if(!actor)return;
+    if(this.javaDrivers.has(node.id)){await this.attachJavaDriver(node,assets);return;}
+    const state=node.animation,key=state?`${state.pack}:${state.id}`:'';
+    if(!state){actor.serial++;actor.ready=false;actor.key='';actor.state=undefined;actor.character.animate(false);return;}
+    if(actor.key!==key){
+      const serial=++actor.serial;actor.key=key;actor.ready=false;
+      try{
+        const {clip}=await actor.character.loadOriginalClip(assets,state.id,false,state.pack);
+        if(this.javaCharacters.get(node.id)!==actor||actor.serial!==serial)return;
+        actor.character.playClip(clip,false,state.loop);actor.ready=true;actor.state=undefined;
+      }catch(error){if(this.javaCharacters.get(node.id)===actor&&actor.serial===serial)actor.key='';throw error;}
+    }
+    const current=node.animation;
+    if(!actor.ready||!current||`${current.pack}:${current.id}`!==actor.key)return;
+    if(actor.state!==current||actor.revision!==current.revision){
+      actor.character.setPlaybackSpeed(current.speed);actor.character.setPlaybackLoop(current.loop);actor.character.setPlaybackPlaying(current.playing);actor.character.seek(current.position);
+      if(current.playing&&current.fade>0)actor.character.fadeIn(current.fade);
+      actor.state=current;actor.revision=current.revision;
+    }
   }
   setMapFog(settings: MapFogSettings) {
     if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
@@ -1101,6 +1230,8 @@ export class Viewer {
     }
   }
   private resetRoadDebug() {
+    this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
+    this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
     this.stopTrafficTest();
     this.mapTrafficFixtures=[];
     this.mapRoadRevision++; this.mapRoadDebug?.dispose(); this.mapRoadDebug=undefined;
@@ -1129,6 +1260,46 @@ export class Viewer {
     this.mapRoadPending=pending;
     try{await pending;}finally{if(this.mapRoadPending===pending)this.mapRoadPending=undefined;}
   }
+  inspectPedestrians(){
+    const point=this.pedestrianCrowd?.inspectionPoint;if(!point)return;
+    this.inspection.enabled=false;this.controls.target.copy(point).add(new THREE.Vector3(0,1,0));this.camera.position.copy(point).add(new THREE.Vector3(6,4,6));this.controls.update();
+  }
+  async showWalkingPedestrians(enabled:boolean){
+    const revision=++this.pedestrianCrowdRevision,source=this.mapRoadSource,mapRevision=this.mapRoadRevision;
+    this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
+    this.pedestrianCrowdStatus=enabled?'Loading walking pedestrians…':'Walking pedestrians off';
+    if(!enabled)return;
+    if(!source){this.pedestrianCrowdStatus='No map loaded';return;}
+    try{
+      const data=await loadMapPedestrians(source.assets,source.pack,source.groundId);
+      if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision)return;
+      if(!data){this.pedestrianCrowdStatus='No pedestrian AI files for this map';return;}
+      this.updatePedestrianSpawnView();
+      const crowd=await PedestrianCrowd.create(source.assets,data.walk,this.trafficPeer?.body.position??this.controls.target,async(bytes,path)=>{
+        const key=path.toLowerCase();let texture=this.javaCharacterTextures.get(key);
+        if(!texture){texture=this.texture(bytes,path);this.javaCharacterTextures.set(key,texture);texture.catch(()=>this.javaCharacterTextures.delete(key));}
+        return (await texture).clone();
+      },source.terrain?(point)=>source.terrain!.height(point.x,point.z,point.y+1):undefined,{count:this.pedestrianCount,radius:this.pedestrianRadius},this.pedestrianOffscreen);
+      if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision){crowd.dispose();return;}
+      this.pedestrianCrowd=crowd;crowd.configure(this.pedestrianCount,this.pedestrianRadius);this.scene.add(crowd.root);
+      this.pedestrianCrowdStatus=`${crowd.count} walking pedestrians · experimental zone routing / curved transitions / car avoidance / contact ragdoll. Toggle again to respawn nearby.`;
+    }catch(error){if(revision===this.pedestrianCrowdRevision)this.pedestrianCrowdStatus=String(error);}
+  }
+  async showPedestrianDebug(layer:PedestrianDebugLayer,visible:boolean){
+    visible?this.mapPedestrianLayers.add(layer):this.mapPedestrianLayers.delete(layer);
+    if(this.mapPedestrianDebug){this.mapPedestrianDebug.show(layer,visible);return;}
+    if(!visible)return;if(this.mapPedestrianPending)return this.mapPedestrianPending;
+    const source=this.mapRoadSource,revision=this.mapRoadRevision;
+    if(!source){this.pedestrianDebugStatus='No map loaded';return;}
+    this.pedestrianDebugStatus='Loading pedestrian AI…';
+    const pending=(async()=>{try{
+      const data=await loadMapPedestrians(source.assets,source.pack,source.groundId);if(revision!==this.mapRoadRevision)return;
+      if(!data){this.pedestrianDebugStatus='No pedestrian AI files for this map';return;}
+      this.mapPedestrianDebug=new MapPedestrianDebug(this.scene,data.walk,data.rest);for(const enabled of this.mapPedestrianLayers)this.mapPedestrianDebug.show(enabled,true);
+      this.pedestrianDebugStatus=`${data.path} · ${data.walk.length} walk records · ${data.rest.length} rest areas\nCyan: walking-zone boundaries · blue: goal/transition spans · yellow: transition-corridor boundaries (observed in original game)\nRest groups: purple / orange / green; no matching behavior confirmed. Lines do not indicate walking direction.`;
+    }catch(error){if(revision===this.mapRoadRevision)this.pedestrianDebugStatus=String(error);}})();
+    this.mapPedestrianPending=pending;try{await pending;}finally{if(this.mapPedestrianPending===pending)this.mapPedestrianPending=undefined;}
+  }
   dispose() {
     this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
     for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
@@ -1149,9 +1320,43 @@ export class Viewer {
     if (generation === this.generation) this.fit();
     return warnings;
   }
+  setDriverCutaway(enabled:boolean){
+    for(const [group,visible] of this.driverCutawayVisibility)group.visible=visible;this.driverCutawayVisibility.clear();
+    if(!enabled||!this.driverIk)return;
+    for(const [part,group] of this.proxies)if(part.world===this.driverIk.chassis.world&&!/(seat|steering|dashboard|console|interior|pedal)/i.test(part.definition.model?.path??'')){this.driverCutawayVisibility.set(group,group.visible);group.visible=false;}
+  }
+  async showDriverIk(root:EnginePart,assets:Assets){
+    this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;const generation=this.generation;
+    const driver=await DriverIk.create(root,assets,(bytes,path)=>this.texture(bytes,path));
+    if(generation!==this.generation||root.world.disposed){driver.dispose();throw Error('Driver preview superseded');}
+    this.driverIk=driver;this.model.add(driver.root);this.scene.add(driver.character.helper);driver.update();
+    const target=new THREE.Vector3(...root.definition.config.seat!.position).applyMatrix4(root.matrix()).applyMatrix4(this.model.matrixWorld);
+    this.controls.target.copy(target).add(new THREE.Vector3(0,.35,0));this.camera.position.copy(target).add(new THREE.Vector3(-1.6,1.1,-1.6));this.controls.update();
+    return {headFit:(enabled:boolean)=>{driver.setHeadFit(enabled);driver.update();},wristPivot:(enabled:boolean)=>{driver.setWristPivot(enabled);driver.update();},steering:(degrees:number)=>{driver.setSteeringAngle(degrees*Math.PI/180);driver.update();this.syncWorld();},skeleton:(visible:boolean)=>{driver.character.helper.visible=visible;driver.debug.visible=visible;},cutaway:(enabled:boolean)=>this.setDriverCutaway(enabled),info:()=>driver.info()};
+  }
+  async showSuspensionPlayground(assets:Assets){
+    this.clear();const generation=this.generation;
+    const lab=await SuspensionPlayground.create(assets,(bytes,path)=>this.texture(bytes,path));
+    if(generation!==this.generation){lab.dispose();throw Error('Suspension preview superseded');}
+    this.suspensionPlayground=lab;this.model.add(lab.root);this.fit();this.camera.position.set(1.5,1,8);this.controls.update();return lab;
+  }
+  async showVin(assets:Assets,id=0xc){
+    this.clear();this.characterFollowingRagdoll=false;const generation=this.generation;
+    const character=await loadSkinnedCharacter(assets,(bytes,path)=>this.texture(bytes,path),'humans.rpk',id);
+    if(generation!==this.generation){character.dispose();throw Error('Character preview superseded');}
+    this.characterPreview=character;this.model.add(character.root);this.scene.add(character.helper);this.fit();character.refresh();
+    const bounds=new THREE.Box3().setFromObject(this.model);this.model.position.y-=bounds.min.y;
+    this.model.updateMatrixWorld(true);character.refresh();
+    character.setRagdollFloor(character.root.worldToLocal(new THREE.Vector3(0,0,0)).y);
+    this.ground.visible=true;this.controls.target.set(0,bounds.getSize(new THREE.Vector3()).y/2,0);this.camera.position.set(6,5,6);this.controls.update();
+    return character;
+  }
   removeWorld(world: EngineWorld): void {
+    for(const [id,binding] of this.javaDrivers)if(binding.chassis.world===world)this.releaseJavaDriver(id);
+    if(this.driverIk?.chassis.world===world){this.setDriverCutaway(false);this.driverIk.dispose();this.driverIk=undefined;}
     for (const [part, group] of this.proxies) if (part.world === world) {
       applySavedPanel(group,part);
+      this.releaseSuspensionSkin(part);
       group.removeFromParent(); this.disposeGroup(group);
       this.proxies.delete(part); this.collisionMeshes.delete(part);
     }
@@ -1227,6 +1432,7 @@ export class Viewer {
     for (const [part, group] of this.proxies) if (part.world === world) {
       applySavedPanel(group,part);
       if (world.parts.get(part.id) !== part) {
+        this.releaseSuspensionSkin(part);
         group.removeFromParent(); this.disposeGroup(group);
         this.proxies.delete(part); this.collisionMeshes.delete(part);
         continue;
@@ -1236,6 +1442,7 @@ export class Viewer {
       group.visible = !group.userData.partLoading && this.partVisible(part);
       applyCfgRenderChannels(group, world.lightMask);
       syncLinkedRenders(part, group, this.suspensionDebug);
+      this.suspensionSkins.get(part)?.update();
     }
   }
   pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
@@ -1313,6 +1520,15 @@ export class Viewer {
       }
     }
     if (generation === this.generation && !world.disposed) {
+      for(const [part,group] of this.proxies)if(part.world===world&&!this.suspensionSkins.has(part)){
+        const kind=VehicleSuspensionSkin.kind(part);if(!kind||!part.parent)continue;
+        let root=part;while(root.parent)root=root.parent;if(!linkedSuspensionAnchors(root,part))continue;
+        try{
+          const skin=await SuspensionSkin.create(kind,assets,(bytes,path)=>this.texture(bytes,path));
+          if(generation!==this.generation||world.disposed||this.proxies.get(part)!==group){skin.dispose();return warnings;}
+          const binding=new VehicleSuspensionSkin(part,group,skin);this.suspensionSkins.set(part,binding);binding.setEnabled(this.suspensionBonesEnabled);
+        }catch(error){warnings.push(`Suspension skin ${part.definition.alias}: ${String(error)}`);}
+      }
       for (const group of staged) delete group.userData.partLoading;
       this.syncWorldVisuals(world);
     }
@@ -1542,6 +1758,7 @@ export class Viewer {
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
       group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
+      this.suspensionSkins.get(part)?.update();
     }
   }
   async hood(definition: PartDefinition, assets: Assets, telemetry: (text: string) => void) {
@@ -1574,6 +1791,39 @@ export class Viewer {
     const stop = () => { if (stopped) return; stopped = true; this.frame = undefined; this.stopDriving = undefined; this.ground.visible = false; lab.dispose(); };
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
+  }
+  async suspensionRoad(root:EnginePart,assets:Assets){
+    this.stopDriving?.();
+    const originals=new Map<THREE.Object3D,boolean>();
+    const skins=[...this.suspensionSkins.values()].filter(binding=>binding.part.world===root.world);
+    if(!skins.length)throw Error('No original spring/shock anchor pairs installed');
+    const bounds=new THREE.Box3(),proxy=this.proxies.get(root)!;
+    const transform=modelMatrix(new THREE.Matrix4(),root.definition.config.renderPose&&poseMatrix(root.definition.config.renderPose));
+    for(const mesh of proxy.children)if(mesh instanceof THREE.Mesh){const p=mesh.geometry.getAttribute('position');for(let i=0;i<p.count;i++)bounds.expandByPoint(new THREE.Vector3().fromBufferAttribute(p,i).applyMatrix4(transform));}
+    const test=new SuspensionRoadTest(root,bounds);
+    this.model.position.set(0,0,0);this.model.scale.setScalar(1);this.grid.visible=this.driveGrid.visible=this.ground.visible=false;this.controls.enabled=true;
+    const geometry=new THREE.PlaneGeometry(5,200,20,1000);geometry.rotateX(-Math.PI/2);geometry.translate(0,0,-70);
+    const colors=new Float32Array(geometry.getAttribute('position').count*3);geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));
+    const road=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));road.receiveShadow=true;this.model.add(road);
+    const rebuildRoad=()=>{const p=geometry.getAttribute('position');for(let i=0;i<p.count;i++){const h=test.terrain.height(p.getX(i),p.getZ(i));p.setY(i,h-.002);const c=h>.005?new THREE.Color(0x957146):new THREE.Color(Math.abs(p.getX(i))>2?0x4d6251:0x3e4a54);c.toArray(colors,i*3);}p.needsUpdate=true;geometry.getAttribute('color').needsUpdate=true;geometry.computeVertexNormals();geometry.computeBoundingSphere();};rebuildRoad();
+    for(const [part,group] of this.proxies)if(part.world===root.world){originals.set(group,group.visible);for(const child of group.children)originals.set(child,child.visible);}
+    let selected=0,showBody=false,showBones=true,slow=false,last:number|undefined,stopped=false;
+    const visibility=()=>{
+      for(const [part,group] of this.proxies)if(part.world===root.world){
+        const type=part.parent?.definition.config.slots.find(s=>s.id===part.parentSlot)?.type??0;
+        const mechanical=!!part.definition.mechanics||type>=101&&type<200;
+        const linked=group.children.some(c=>c.userData.linkedRender);
+        group.visible=showBody||mechanical||linked;
+        for(const child of group.children)child.visible=originals.get(child)!&&(showBody||mechanical||!!child.userData.linkedRender);
+        this.suspensionSkins.get(part)?.update();
+      }
+    };
+    const updateSkins=()=>{for(const binding of skins){binding.update();binding.skin.debug.visible=showBones&&this.suspensionBonesEnabled&&suspensionCorner(binding.part)===selected;}};
+    const focus=(reset=false)=>{const target=test.wheelPosition(selected),delta=target.clone().sub(this.controls.target);this.camera.position.add(delta);this.controls.target.copy(target);if(reset)this.camera.position.copy(target).add(new THREE.Vector3(Math.sign(test.suspension.wheels[selected].center.x)*1.8,.65,selected<2?-1.2:1.2).applyQuaternion(test.body.orientation));this.controls.update();};
+    this.syncWorld();visibility();updateSkins();focus(true);
+    this.frame=now=>{const elapsed=last===undefined?0:Math.min(.05,(now-last)/1000);last=now;test.advance(elapsed*(slow?.25:1));this.syncWorld();visibility();updateSkins();focus();};
+    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;test.dispose();for(const {skin} of skins)skin.debug.visible=false;road.removeFromParent();geometry.dispose();(road.material as THREE.Material).dispose();this.syncWorld();for(const [object,visible] of originals)object.visible=visible;for(const binding of skins)binding.update();this.grid.visible=true;};this.stopDriving=stop;
+    return {dispose:stop,wheel:(index:number)=>{selected=Math.max(0,Math.min(3,index));focus(true);},pause:(value:boolean)=>{test.paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},body:(value:boolean)=>{showBody=value;visibility();},bones:(value:boolean)=>{showBones=value;updateSkins();},speed:(kmh:number)=>{test.speed=THREE.MathUtils.clamp(kmh,0,40)/3.6;},bumps:(cm:number)=>{test.terrain.amplitude=THREE.MathUtils.clamp(cm,0,15)/100;rebuildRoad();},reset:()=>{test.reset();last=undefined;this.syncWorld();updateSkins();focus(true);},info:()=>`${['FL','FR','RL','RR'][selected]} · ${(test.speed*3.6).toFixed(0)} km/h · 120 Hz · travel ${test.suspension.wheels.map(w=>`${(w.length*100).toFixed(1)} cm${w.contact?'':' (air)'}`).join(' / ')} · ${skins.length} original skinned suspension parts`};
   }
   /** Same CFG/SCX physics construction used by the two-car stand. */
   private pairVehicle(root:EnginePart) {
@@ -1819,6 +2069,7 @@ export class Viewer {
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
+        this.driverCameraChassis=internalPose?root:undefined;
         if (internalPose) {
           cameraWasInternal = true;
           followCamera.reset();
@@ -1887,6 +2138,7 @@ export class Viewer {
     };
     const stop = () => {
       if (stopped) return; stopped = true;
+      if(this.driverCameraChassis===root)this.driverCameraChassis=undefined;
       java?.persist?.();
       if (this.mapStreamFocus === demo.position) this.mapStreamFocus = undefined;
       this.frame = undefined; this.stopDriving = undefined; this.drivingTimeOfDay = undefined;

@@ -54,7 +54,7 @@ test('global corner calibration applies once to loaded assemblies, physical carr
           const x = cfg.wheels[corner].position[0]+corrections[corner];
           assert.ok(Math.abs(suspension.wheels[corner].center.x-x)<1e-10);
           assert.ok(Math.abs(suspension.wheels[corner].hardpoint.x-x)<1e-10);
-          assert.ok(Math.abs(suspension.wheels[corner].center.y+0.435)<1e-10,'existing height is retained');
+          assert.ok(Math.abs(suspension.wheels[corner].center.y+0.460)<1e-10,'base height includes the additional -0.025 m correction');
           assert.ok(Math.abs(root.wheelFrame(corner).elements[12]-x)<1e-10);
           for (const group of [0,1,2]) {
             const part = root.children.get(1001+corner+group*100)!;

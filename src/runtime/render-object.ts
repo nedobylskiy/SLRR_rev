@@ -1,11 +1,13 @@
 import { ResourceObject } from './resource-object';
 import type { OrientationState, Vector3State } from './game-object';
+export interface RenderAnimationState {pack:string;id:number;speed:number;fade:number;playing:boolean;loop:boolean;position:number;revision:number}
 
 /** One visual instance created from a RenderRef resource type. */
 export class RenderObject extends ResourceObject {
   position: Vector3State = { x: 0, y: 0, z: 0 };
   orientation: OrientationState = { y: 0, p: 0, r: 0 };
   renderResource: { pack: string; id: number } | null = null;
+  animation:RenderAnimationState|null=null;
 
   constructor(id: number, className: string, public renderType: ResourceObject | null,
     alias: string) {

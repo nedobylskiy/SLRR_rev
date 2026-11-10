@@ -9,6 +9,7 @@ import { JavaPartPreviews } from './render/java-part-previews';
 import { JavaMouse } from './render/java-mouse';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
+import {RenderObject} from './runtime/render-object';
 import { replaceGarageCarTree } from './runtime/debug-garage-car';
 import { parseRpk, entryProperties } from './formats/rpk';
 
@@ -20,6 +21,8 @@ import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import {parseRouteBenchmark,restoreRouteVehicle,type RouteBenchmark,type RouteMode} from './engine/route-benchmark';
 import { Vector3 } from 'three';
+import type {SkinnedCharacter} from './render/skinned-character';
+import {loadCharacterCatalog,skeletonCompatibility} from './render/character-catalog';
 import { mountMainMenu } from './osd/main-menu';
 import { OsdLayer } from './osd/osd-layer';
 import { OsdVideo } from './osd/osd-video';
@@ -239,6 +242,10 @@ async function runGameBoot() {
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
                   result.gameTypes.updateTriggerContacts(car);
                 } });
+            const driverRender=result.gameTypes.getResource(result.jvm.get(player,'render'));
+            if(driverRender instanceof RenderObject){
+              try{await viewer!.bindJavaDriver(driverRender,built.root,source);}catch(reason){appendJavaEvent({level:'error',message:`Driver IK: ${String(reason)}`});}
+            }
             if (session.vehicle) persistPhysics = result.parts.bindPhysics(result.jvm.get(car, 'chassis'), session.vehicle);
             showVehicleDebug(built.root, session, () => [...result.javaProfile].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 3)
               .map(([name, t]) => `JVM ${name}: ${t.averageMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / calls ${t.calls} / ${((performance.now() - t.lastAt) / 1000).toFixed(1)}s ago (wall)`).join('\n'));
@@ -340,6 +347,11 @@ const mapButton = textElement('button', 'Test Track');
 const trackDriveButton = textElement('button', 'Drive Test Track');
 const viewportExpandButton = textElement('button', 'Expand view', 'viewport-expand-button');
 el('viewport').append(viewportExpandButton);
+const hideGameUiLabel = textElement('label', '', 'viewport-hide-game-ui');
+const hideGameUi = document.createElement('input'); hideGameUi.type = 'checkbox';
+hideGameUi.onchange = () => el('viewport').classList.toggle('game-ui-hidden', hideGameUi.checked);
+hideGameUiLabel.append(hideGameUi, 'Hide game UI');
+el('viewport').append(hideGameUiLabel);
 const viewportCollapseButton = textElement('button', 'Minimize view · Esc', 'viewport-window-button');
 viewportCollapseButton.hidden = true; el('viewport').after(viewportCollapseButton);
 let trackDriving = false;
@@ -363,6 +375,166 @@ const hoodButton = textElement('button', 'Hood impact test'); hoodButton.classNa
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const pairControls = textElement('div', '', 'hood-controls'); pairControls.hidden = true; el('scene-help').before(pairControls);
+const playgroundButton=textElement('button','Character playground');playgroundButton.className='hood-button';crashButton.after(playgroundButton);
+const vinControls=textElement('div','','hood-controls character-playground');vinControls.hidden=true;el('scene-help').before(vinControls);
+let vinTimer:number|undefined;
+const driverIkButton=textElement('button','Driver IK');driverIkButton.className='hood-button';playgroundButton.after(driverIkButton);
+driverIkButton.onclick=()=>{void openDriverIk();};
+async function openDriverIk(pack='cars/racers/Baiern.rpk'){
+  if(!assets||!viewer)return;const opening=openWorld(pack,6),request=sequence;await opening;
+  if(request!==sequence||!engineRoot)return;
+  try{
+    const driver=await viewer.showDriverIk(engineRoot,assets);if(request!==sequence)return;
+    vinControls.replaceChildren();vinControls.hidden=false;
+    const label=textElement('label','Steering wheel '),slider=document.createElement('input'),output=textElement('span','0°'),skeletonLabel=textElement('label','Skeleton / grip targets'),skeleton=document.createElement('input'),cutawayLabel=textElement('label','Cutaway'),cutaway=document.createElement('input'),info=textElement('span',driver.info());
+    slider.type='range';slider.min='-540';slider.max='540';slider.step='1';slider.value='0';slider.setAttribute('aria-label','Driver steering wheel');
+    slider.oninput=()=>{const value=Number(slider.value);driver.steering(value);output.textContent=`${value}°`;info.textContent=driver.info();};label.append(slider,output);
+    skeleton.type=cutaway.type='checkbox';skeleton.checked=cutaway.checked=true;skeletonLabel.prepend(skeleton);cutawayLabel.prepend(cutaway);skeleton.onchange=()=>driver.skeleton(skeleton.checked);cutaway.onchange=()=>driver.cutaway(cutaway.checked);
+    const wristLabel=textElement('label','Wrist pivot'),wrist=document.createElement('input');wrist.type='checkbox';wrist.checked=true;wristLabel.prepend(wrist);wrist.onchange=()=>{driver.wristPivot(wrist.checked);info.textContent=driver.info();};
+    const model=document.createElement('select');model.setAttribute('aria-label','Driver IK car');for(const name of ['Baiern','Yotta']){const option=document.createElement('option');option.value=`cars/racers/${name}.rpk`;option.textContent=name;model.append(option);}model.value=pack;model.onchange=()=>{void openDriverIk(model.value);};
+    const headLabel=textElement('label','Fit head to cockpit'),headCheck=document.createElement('input');headCheck.type='checkbox';headCheck.checked=true;headLabel.prepend(headCheck);headCheck.onchange=()=>{driver.headFit(headCheck.checked);info.textContent=driver.info();};
+    driver.skeleton(true);driver.cutaway(true);const row=textElement('div','','character-playground-row');row.append(model,label,skeletonLabel,cutawayLabel,wristLabel,headLabel);vinControls.append(row,info);
+    el('format').textContent='DRIVER / SEAT + HAND IK';el('filename').textContent=`Vin · ${pack.includes('Yotta')?'Yotta':'Baiern'} seat and steering wheel`;el('details').textContent='Original humans.rpk Vin render and vin.skl. Seat/pedals/cockpit reference come from chassis CFG. Hands follow two upper-rim targets on the installed steering wheel through its actual slot/render transforms. Three-link arm chain with fixed bone lengths; neutral seated leg pose. A bounded torso/neck positional solve fits the head joint to the first cockpit camera, with neutral gaze and fixed pelvis/bone lengths. Blue marker: head goal. Fit head to cockpit allows comparison. The fitted upper-body pose is cached; hands continue to follow steering. Prototype IK, not native solver parity. Gear shifting, reverse head movement and inertial body movement are not implemented.';
+    status('Driver IK ready');
+  }catch(error){if(request===sequence){status('Driver IK error',true);el('details').textContent=String(error);}}
+}
+
+const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';driverIkButton.after(suspensionButton);
+suspensionButton.onclick=()=>{void (async()=>{
+  if(!assets||!viewer)return;const request=++sequence;stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
+  el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;status('Loading suspension bones…');
+  try{
+    const lab=await viewer.showSuspensionPlayground(assets);if(request!==sequence)return;
+    vinControls.replaceChildren();vinControls.hidden=false;
+    const row=textElement('div','','character-playground-row'),model=document.createElement('select');model.setAttribute('aria-label','Suspension model');
+    for(const [value,label] of [['shock','Shock absorber'],['spring','Spring'],['both','Spring + shock']]){const option=document.createElement('option');option.value=value;option.textContent=label;model.append(option);}
+    const lengthLabel=textElement('label','Length '),length=document.createElement('input'),lengthValue=document.createElement('output');length.type='range';length.min='45';length.max='145';length.step='1';length.value='100';length.setAttribute('aria-label','Suspension length');lengthLabel.append(length,lengthValue);
+    const tiltLabel=textElement('label','Upper bone tilt '),tilt=document.createElement('input'),tiltValue=document.createElement('output');tilt.type='range';tilt.min='-25';tilt.max='25';tilt.step='1';tilt.value='0';tilt.setAttribute('aria-label','Suspension upper bone tilt');tiltLabel.append(tilt,tiltValue);
+    const playLabel=textElement('label','Animate compression'),play=document.createElement('input'),bonesLabel=textElement('label','Bones'),bones=document.createElement('input');play.type=bones.type='checkbox';bones.checked=true;playLabel.prepend(play);bonesLabel.prepend(bones);
+    const info=document.createElement('output'),reset=textElement('button','Reset suspension');
+    const update=()=>{lengthValue.textContent=`${length.value}%`;tiltValue.textContent=`${tilt.value}°`;lab.setPose(Number(length.value)/100,Number(tilt.value));info.textContent=lab.info();};
+    length.oninput=tilt.oninput=()=>{play.checked=false;lab.animate(false);update();};
+    model.onchange=()=>{lab.select(model.value as 'spring'|'shock'|'both');info.textContent=lab.info();};
+    play.onchange=()=>{lab.animate(play.checked);length.disabled=tilt.disabled=play.checked;};bones.onchange=()=>lab.skeleton(bones.checked);
+    reset.onclick=()=>{play.checked=false;length.disabled=tilt.disabled=false;lab.animate(false);length.value='100';tilt.value='0';update();};
+    row.append(model,lengthLabel,tiltLabel,playLabel,bonesLabel,reset);vinControls.append(row,info);update();vinTimer=window.setInterval(()=>{if(play.checked){length.value=String(Math.round(lab.lengthRatio*100));lengthValue.textContent=`${length.value}%`;info.textContent=lab.info();}},250);
+    el('format').textContent='SUSPENSION / BONE SKINNING VS SCALE';el('filename').textContent='Original spring and shock absorber · parts.rpk';el('details').textContent='Left: original SCX weights and paired two-root BON. Right: the identical mesh under uniform Y scaling. Bind bone span 24.5 cm. Upper bone tilt affects only the skinned example; it is an experiment, not recovered suspension physics. Damper weights are rigid 0/1, spring weights are blended. No files are exported.';
+    el('scene-help').textContent='Left: bone skinning · Right: scale Y · Left drag: orbit · Wheel: zoom · Right drag: pan';status('Suspension playground ready');
+  }catch(error){if(request===sequence){status('Suspension playground error',true);el('details').textContent=String(error);}}
+})();};
+
+const suspensionRoadButton=textElement('button','Suspension road test');suspensionRoadButton.className='hood-button';suspensionButton.after(suspensionRoadButton);
+suspensionRoadButton.onclick=()=>{void (async()=>{
+  if(!assets||!viewer)return;const opening=openWorld('cars/racers/Baiern.rpk',6),request=sequence;await opening;if(request!==sequence||!engineRoot)return;
+  status('Preparing suspension road…');
+  try{
+    const lab=await viewer.suspensionRoad(engineRoot,assets);if(request!==sequence){lab.dispose();return;}
+    disposeDriving=()=>lab.dispose();vinControls.replaceChildren();vinControls.hidden=false;
+    const row=textElement('div','','character-playground-row'),wheel=document.createElement('select');wheel.setAttribute('aria-label','Follow suspension wheel');
+    for(const [value,label] of [['0','FL · front left'],['1','FR · front right'],['2','RL · rear left'],['3','RR · rear right']]){const option=document.createElement('option');option.value=value;option.textContent=label;wheel.append(option);}wheel.onchange=()=>lab.wheel(Number(wheel.value));row.append(textElement('label','Follow wheel'),wheel);
+    const info=document.createElement('output');
+    for(const [label,min,max,initial,action] of [['Test speed',0,40,20,(v:number)=>lab.speed(v)],['Bump height',0,15,8,(v:number)=>lab.bumps(v)]] as const){
+      const box=textElement('label',label),slider=document.createElement('input'),value=document.createElement('output');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step='1';slider.value=String(initial);slider.setAttribute('aria-label',label);const update=()=>{action(Number(slider.value));value.textContent=`${slider.value}${label==='Test speed'?' km/h':' cm'}`;};slider.oninput=update;update();box.append(slider,value);row.append(box);
+    }
+    for(const [label,initial,action] of [['Pause',false,(v:boolean)=>lab.pause(v)],['Slow motion ×0.25',false,(v:boolean)=>lab.slowMotion(v)],['Show body',false,(v:boolean)=>lab.body(v)],['Bone anchors',true,(v:boolean)=>lab.bones(v)],['Suspension bone animation',suspensionBonesCheck.checked,(v:boolean)=>{suspensionBonesCheck.checked=v;viewer?.setSuspensionBonesEnabled(v);}]] as const){const box=textElement('label',label),check=document.createElement('input');check.type='checkbox';check.checked=initial;check.onchange=()=>action(check.checked);box.prepend(check);row.append(box);}
+    const reset=textElement('button','Restart road test');reset.onclick=()=>lab.reset();row.append(reset);vinControls.append(row,info);info.textContent=lab.info();vinTimer=window.setInterval(()=>{info.textContent=lab.info();},250);
+    el('format').textContent='SUSPENSION / UNEVEN ROAD';el('filename').textContent='Baiern · live suspension and original bone skins';el('details').textContent='Original complete Baiern assembly, body hidden by default. The 120 Hz suspension solver handles tyres, springs, dampers, vertical motion, pitch and roll. A longitudinal guide holds the requested speed and lane; engine/transmission and crash deformation are not part of this stand. The rendered road and physics share the same height field. Original spring/shock bones follow CFG-linked lower and upper mounts. Camera follows the selected wheel; orbit and zoom remain available.';el('scene-help').textContent='Camera follows selected wheel · Left drag: orbit · Wheel: zoom · Right drag: pan';status('Suspension road test ready');
+  }catch(error){if(request===sequence){stopDrive();status('Suspension road error',true);el('details').textContent=String(error);}}
+})();};
+
+playgroundButton.onclick=()=>{void openSkeletonPreview();};
+async function openSkeletonPreview(id=0xa){
+  if(!assets||!viewer)return;const request=++sequence;
+  stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
+  el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;
+  el('format').textContent='CHARACTER PLAYGROUND';status('Loading character…');
+  try{
+    const catalog=await loadCharacterCatalog(assets);if(request!==sequence)return;
+    const resource=catalog.models.find(m=>m.id===id);if(!resource)throw Error('Character render is not in the RPK catalog');
+    const character=await viewer.showVin(assets,id);if(request!==sequence)return;
+    el('filename').textContent=`${resource.name} · humans.rpk : 0x${id.toString(16).padStart(4,'0')}`;
+    vinControls.replaceChildren();vinControls.hidden=false;
+    const row=()=>textElement('div','','character-playground-row');
+    const selection=row(),playback=row(),manual=document.createElement('details');manual.append(textElement('summary','Manual bone pose'));const poseRow=row();manual.append(poseRow);
+    const model=document.createElement('select');model.setAttribute('aria-label','Character model');
+    for(const item of catalog.models){const option=document.createElement('option');option.value=String(item.id);option.textContent=`${item.name} · ${item.bones.length} bones · 0x${item.id.toString(16)}`;model.append(option);}model.value=String(id);
+    model.onchange=()=>{void openSkeletonPreview(Number(model.value));};
+    const animationSelect=document.createElement('select');animationSelect.setAttribute('aria-label','Character animation');
+    const foreign=document.createElement('input');foreign.type='checkbox';const foreignLabel=textElement('label',"Other models' animations");foreignLabel.prepend(foreign);
+    selection.append(textElement('label','Model'),model,textElement('label','Animation'),animationSelect,foreignLabel);
+    const message=document.createElement('output');message.setAttribute('aria-label','Animation compatibility');
+    const play=document.createElement('input');play.type='checkbox';const playLabel=textElement('label','Play animation');playLabel.prepend(play);
+    const loop=document.createElement('input');loop.type='checkbox';loop.checked=true;const loopLabel=textElement('label','Loop animation');loopLabel.prepend(loop);
+    const seek=document.createElement('input');seek.type='range';seek.min='0';seek.max='0';seek.step='0.001';seek.value='0';seek.setAttribute('aria-label','Animation time');
+    const clock=document.createElement('output');clock.setAttribute('aria-label','Animation playback');const restart=textElement('button','Restart animation') as HTMLButtonElement;
+    const skeleton=document.createElement('input');skeleton.type='checkbox';skeleton.checked=true;const skeletonLabel=textElement('label','Skeleton');skeletonLabel.prepend(skeleton);
+    skeleton.onchange=()=>{character.helper.visible=skeleton.checked;};
+    playback.append(playLabel,loopLabel,seek,clock,restart,skeletonLabel);
+    const ragdoll=textElement('button','Ragdoll') as HTMLButtonElement,restore=textElement('button','Back to animation') as HTMLButtonElement;restore.disabled=true;
+    playback.append(ragdoll,restore);
+    const bone=document.createElement('select');bone.setAttribute('aria-label','Character bone');
+    character.definitions.forEach((def,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=`${i}: ${def.name}`;bone.append(option);});bone.value=String(character.bone);
+    const axis=document.createElement('select');axis.setAttribute('aria-label','Rotation axis');for(const name of ['X','Y','Z']){const option=document.createElement('option');option.value=name;option.textContent=name;axis.append(option);}axis.value='Z';
+    const angle=document.createElement('input');angle.type='range';angle.min='-90';angle.max='90';angle.step='1';angle.value='0';angle.setAttribute('aria-label','Bone rotation');const value=document.createElement('output');value.textContent='0°';
+    const reset=textElement('button','Reset pose'),bend=textElement('button','Test bend 45°');const test=document.createElement('input');test.type='checkbox';const testLabel=textElement('label','Animate test');testLabel.prepend(test);
+    const info=document.createElement('output');info.setAttribute('aria-label','Skin deformation');
+    poseRow.append(bone,axis,angle,value,bend,reset,testLabel,info);
+    vinControls.append(selection,message,playback,manual);
+    let original:Awaited<ReturnType<SkinnedCharacter['loadOriginalClip']>>|undefined,clipRequest=0;
+    const updateInfo=()=>{const d=character.deformation();info.textContent=`${d.moved}/${d.total} vertices moved · max ${(d.max*100).toFixed(2)} cm`;};
+    const updatePlayback=()=>{seek.value=String(character.playbackTime);clock.textContent=original?`${character.playbackTime.toFixed(2)} / ${original.clip.duration.toFixed(2)} s · ${original.animation.times.length} keys/bone`:'Bind pose';};
+    const updateDetails=()=>{el('details').textContent=`${character.source.pack}:0x${id.toString(16)}\nMesh: ${character.source.mesh}\nSkeleton: ${character.source.skeleton}\n${character.definitions.length} bones · ${character.meshes.length} skinned sections\n${original?`Animation: ${original.path} · ${original.clip.tracks.length} native Three.js tracks`:'Bind pose; no original animation selected.'}\nJoint limits are metadata. No files are exported.`;};
+    const setPlaybackEnabled=(enabled:boolean)=>{play.disabled=seek.disabled=restart.disabled=loop.disabled=!enabled||character.isRagdoll;};
+    const updateRagdollControls=()=>{
+      const active=character.isRagdoll;ragdoll.disabled=active;restore.disabled=!active;animationSelect.disabled=foreign.disabled=active;
+      restore.textContent=original?'Back to animation':'Restore pose';setPlaybackEnabled(!!original);
+      for(const control of poseRow.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>('input,select,button'))control.disabled=active;
+    };
+    ragdoll.onclick=async()=>{
+      ++clipRequest;ragdoll.disabled=true;
+      try{await character.startRagdoll();if(request!==sequence)return;play.checked=false;test.checked=false;updateRagdollControls();clock.textContent='Ragdoll';}
+      catch(error){if(request===sequence){message.textContent=String(error);updateRagdollControls();}}
+    };
+    restore.onclick=()=>{const time=Number(seek.value);character.stopRagdoll();if(original){character.playClip(original.clip,true,loop.checked);character.seek(time);}else character.setPlaybackPlaying(false);play.checked=!!original;updateRagdollControls();updatePlayback();updateInfo();};
+    const loadAnimation=async()=>{
+      const pending=++clipRequest;play.checked=false;test.checked=false;original=undefined;character.setPose(character.bone,character.axis,0);setPlaybackEnabled(false);
+      updateRagdollControls();ragdoll.disabled=true;
+      if(!animationSelect.value){ragdoll.disabled=false;message.textContent='Bind pose';updateInfo();updatePlayback();updateDetails();return;}
+      message.textContent='Loading animation…';
+      try{
+        const animation=catalog.animations.find(a=>a.id===Number(animationSelect.value))!;
+        const transferred=animation.family!==resource.family;
+        const loaded=await character.loadOriginalClip(assets,animation.id,transferred);
+        if(request!==sequence||pending!==clipRequest)return;
+        original=loaded;seek.max=String(loaded.clip.duration);seek.value='0';angle.value='0';value.textContent='0°';play.checked=true;setPlaybackEnabled(true);character.playClip(loaded.clip,true,loop.checked);
+        updateRagdollControls();
+        message.textContent=transferred?'Shared skeleton: using this model’s bone lengths. Different bone axes still need retargeting.':`Original animation · ${animation.name}`;
+        updateInfo();updatePlayback();updateDetails();
+      }catch(error){if(request===sequence&&pending===clipRequest){message.textContent=String(error);updateRagdollControls();updatePlayback();updateDetails();}}
+    };
+    const populateAnimations=()=>{
+      const previous=animationSelect.value;animationSelect.replaceChildren();const bind=document.createElement('option');bind.value='';bind.textContent='Bind pose';animationSelect.append(bind);
+      for(const animation of catalog.animations){
+        if(!foreign.checked&&animation.family!==resource.family)continue;
+        const incompatible=skeletonCompatibility(character.definitions,animation.bones),option=document.createElement('option');option.value=String(animation.id);option.disabled=!!incompatible;
+        option.textContent=`${animation.name}${animation.family!==resource.family?' · other model':''}${incompatible?' · incompatible skeleton':''}`;option.title=incompatible??animation.path;animationSelect.append(option);
+      }
+      const options=Array.from(animationSelect.options),exact=catalog.animations.find(a=>a.path.replace(/\.matrixdata$/i,'').toLowerCase()===resource.path.replace(/\.skl$/i,'').toLowerCase());
+      animationSelect.value=options.some(o=>o.value===previous&&previous&&!o.disabled)?previous:exact&&options.some(o=>o.value===String(exact.id)&&!o.disabled)?String(exact.id):options.find(o=>o.value&&!o.disabled)?.value??'';
+      void loadAnimation();
+    };
+    animationSelect.onchange=()=>{void loadAnimation();};foreign.onchange=populateAnimations;
+    play.onchange=()=>{if(!original)return;test.checked=false;character.playClip(original.clip,play.checked,loop.checked);character.seek(Number(seek.value));};
+    loop.onchange=()=>character.setPlaybackLoop(loop.checked);
+    seek.oninput=()=>{if(!original)return;test.checked=false;play.checked=false;const time=Number(seek.value);character.playClip(original.clip,false,loop.checked);character.seek(time);updateInfo();updatePlayback();};
+    restart.onclick=()=>{if(!original)return;test.checked=false;play.checked=true;character.playClip(original.clip,true,loop.checked);updatePlayback();};
+    const pose=()=>{++clipRequest;play.checked=false;test.checked=false;character.setPose(Number(bone.value),axis.value as 'X'|'Y'|'Z',Number(angle.value));value.textContent=`${angle.value}°`;updateInfo();};
+    bone.onchange=pose;axis.onchange=pose;angle.oninput=pose;reset.onclick=()=>{angle.value='0';pose();};bend.onclick=()=>{angle.value='45';pose();};test.onchange=()=>{play.checked=false;character.animate(test.checked);};
+    populateAnimations();updateInfo();updatePlayback();updateDetails();
+    vinTimer=window.setInterval(()=>{if(request!==sequence)return;if(play.checked)updatePlayback();if(manual.open&&(play.checked||test.checked||character.isRagdoll))updateInfo();},100);
+    status(`${resource.name} ready`);
+  }catch(error){if(request===sequence){viewer.clear();status('Character load failed',true);el('details').textContent=String(error);}}
+}
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
 const garageCarButton = textElement('button','Replace car: Einvagen 110 GTK') as HTMLButtonElement;
 garageCarButton.hidden = true;
@@ -511,6 +683,7 @@ window.setInterval(()=>{
   }
   if(mapDebugPanel.hidden||!mapDebugPanel.open)return;
   trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';
+  pedestrianCrowdStatus.textContent=viewer?.pedestrianInfo()??'';
   playerTrafficCheck.checked=viewer?.playerTrafficEnabled??false;
   if(playerTrafficCheck.checked)playerTrafficStatus.textContent=viewer?.playerTrafficInfo()??'';
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
@@ -528,6 +701,25 @@ for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(roadDebugStatus);
+const pedestrianDebugStatus=textElement('pre','','map-debug-data');
+for(const [layer,title] of [['graph','Pedestrian graph'],['rest','Pedestrian rest areas']] as const){
+  const label=textElement('label',title),input=document.createElement('input');input.type='checkbox';
+  input.onchange=()=>{const pending=viewer?.showPedestrianDebug(layer,input.checked);pedestrianDebugStatus.textContent=viewer?.pedestrianDebugStatus??'';void pending?.then(()=>{pedestrianDebugStatus.textContent=viewer?.pedestrianDebugStatus??'';});};
+  label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
+}
+mapDebugOptions.append(pedestrianDebugStatus);
+const pedestrianCrowdLabel=textElement('label','Walking pedestrians'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
+pedestrianCrowdCheck.type='checkbox';pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
+for(const [title,min,max,step,initial,set] of [
+  ['Pedestrians',0,50,1,6,(n:number)=>viewer?.setPedestrianCount(n)],
+  ['Pedestrian spawn radius (m)',50,300,25,100,(n:number)=>viewer?.setPedestrianRadius(n)],
+] as const){
+  const label=textElement('label',''),value=textElement('span',`${title}: ${initial}`),slider=document.createElement('input');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step=String(step);slider.value=String(initial);slider.setAttribute('aria-label',title);
+  slider.oninput=()=>{const n=Number(slider.value);value.textContent=`${title}: ${n}`;set(n);};label.append(value,slider);mapDebugOptions.append(label);
+}
+const inspectPedestriansButton=textElement('button','Inspect pedestrians');inspectPedestriansButton.onclick=()=>viewer?.inspectPedestrians();mapDebugOptions.append(inspectPedestriansButton);
+pedestrianCrowdCheck.onchange=()=>{const pending=viewer?.showWalkingPedestrians(pedestrianCrowdCheck.checked);pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';void pending?.then(()=>{pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';});};
+
 const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 2'),trafficCountSlider=document.createElement('input');
 trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='2';trafficCountSlider.setAttribute('aria-label','Traffic cars');
 trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
@@ -559,6 +751,10 @@ const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), v
 vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
 const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
+const suspensionBonesLabel=textElement('label','Suspension bone animation'),suspensionBonesCheck=document.createElement('input');
+suspensionBonesCheck.type='checkbox';suspensionBonesCheck.checked=true;suspensionBonesLabel.prepend(suspensionBonesCheck);mapDebugOptions.append(suspensionBonesLabel);
+suspensionBonesLabel.title='Original spring and damper bone deformation. Disable to use the cheaper ordinary meshes; suspension physics stays unchanged.';
+suspensionBonesCheck.onchange=()=>viewer?.setSuspensionBonesEnabled(suspensionBonesCheck.checked);
 const inertialCameraLabel = textElement('label', 'Inertial chase camera'), inertialCameraCheck = document.createElement('input');
 inertialCameraCheck.type = 'checkbox'; inertialCameraLabel.prepend(inertialCameraCheck); mapDebugOptions.append(inertialCameraLabel);
 inertialCameraLabel.title = 'Experimental external camera with its own velocity and smooth catch-up; cockpit views stay unchanged';
@@ -608,7 +804,7 @@ softBodySelect.onchange = () => { softBodyRuntime.preference = softBodySelect.va
 softBodyLabel.append(softBodySelect); mapDebugPanel.append(softBodyLabel);
 const suspensionDebugPanel = document.createElement('details');
 suspensionDebugPanel.append(textElement('summary', 'Suspension alignment (visual debug)'));
-suspensionDebugPanel.append(textElement('p', 'Base suspension: height +0.165 m; front attachments 0.055 m inward, rear 0.075 m outward. Sliders add visual offsets (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
+suspensionDebugPanel.append(textElement('p', 'Base suspension: height +0.140 m; front attachments 0.055 m inward, rear 0.075 m outward. Sliders add visual offsets (zero keeps the base placement). Arm controls are independent and mirrored: positive X moves outward. Meters / degrees, XYZ order.'));
 const suspensionSettings = defaultSuspensionDebug();
 let suspensionSteer: number | undefined;
 const suspensionInputs: { key: keyof SuspensionDebugSettings; axis: number; range: HTMLInputElement; number: HTMLInputElement }[] = [];
@@ -670,7 +866,7 @@ hubGeometryCheck.type = 'checkbox'; hubGeometryLabel.prepend(hubGeometryCheck);
 hubGeometryLabel.title = 'Test native arm-circle and hub modes 0/-1. Unsupported corners use the existing pose. Driving forces are unchanged.';
 hubGeometryCheck.onchange = () => viewer?.setExperimentalHubGeometry(hubGeometryCheck.checked);
 suspensionDebugPanel.append(hubGeometryLabel);
-const suspensionHeightPreset = textElement('button', 'Use base height (+0.165 m)');
+const suspensionHeightPreset = textElement('button', 'Use base height (+0.140 m)');
 suspensionHeightPreset.onclick = () => {
   suspensionSettings.frontOffset[1] = suspensionSettings.rearOffset[1] = 0;
   for (const offset of [suspensionSettings.frontLeftAttachmentOffset, suspensionSettings.frontRightAttachmentOffset,
@@ -695,6 +891,7 @@ const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { w
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;
   roadDebugStatus.textContent='';
+  pedestrianDebugStatus.textContent='';pedestrianCrowdStatus.textContent='';
   vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
   if (map) mapDebugData.textContent = `Support triangles: ${map.terrain.faces.toLocaleString()}\nCollision walls: ${map.collision.walls.toLocaleString()}\nCFG collision boxes: ${map.collision.boxes.toLocaleString()}`;
 };
@@ -1045,25 +1242,27 @@ trackDriveButton.onclick = async () => {
     status('Driving on Test Track');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Drive unavailable', true); el('details').textContent = String(error); } }
 };
-mapButton.onclick = async () => {
+mapButton.onclick = () => {void previewMap('maps/test_track.rpk');};
+async function previewMap(packPath:string,groundId?:number) {
   if (!assets || !viewer) return;
   const request = ++sequence;
   stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined;
   disposeMemoryLab?.(); disposeMemoryLab = undefined;
   el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
-  el('filename').textContent = 'test_track · original geometry'; el('format').textContent = 'MAP / WEBGL';
-  status('Loading track…'); el('details').textContent = 'Reading SCX and textures from maps/test_track.rpk…';
+  el('filename').textContent = `${packPath} · original geometry`; el('format').textContent = 'MAP / WEBGL';
+  status('Loading map…'); el('details').textContent = `Reading SCX and textures from ${packPath}…`;
   try {
-    const result = await viewer.showMap('maps/test_track.rpk', assets, (done, total) => {
+    const result = await viewer.showMap(packPath, assets, (done, total) => {
       if (request === sequence) status(`Track ${done}/${total}`);
-    });
+    },false,{groundId});
     if (request !== sequence) return;
     showMapDebugControls(result);
     el('details').textContent = `${result.loaded}/${result.total} models · ${result.objects} placed RDB/CFG objects · ${result.triangles.toLocaleString('en-US')} map triangles. Geometry and textures come from the original RPK/SCX; objects use RDB coordinates. Road collision is still approximate.\n${result.warnings.slice(0, 12).join('\n')}`;
     status(result.loaded ? 'Track loaded' : 'No geometry', !result.loaded);
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
-};
+}
 function stopDrive() {
+  vinControls.hidden=true;clearInterval(vinTimer);vinTimer=undefined;
   pairControls.hidden=true;
   benchmarkRunning=false;
   routePreviewSession=undefined;routeSeek.disabled=true;routeScreenshot.disabled=true;
@@ -1319,6 +1518,9 @@ async function openAsset(file: Asset) {
           const row = document.createElement('details');
           row.append(textElement('summary', `0x${entry.typeId.toString(16).padStart(8, '0')}  ${entry.alias}  · type ${entry.type} · ${entry.size} B`));
           const props = entryProperties(entry);
+          if(entry.type===1&&/^maps[\\/]/i.test(file.path)){
+            const preview=textElement('button','Preview map');preview.onclick=()=>{void previewMap(file.path,entry.typeId);};row.append(preview);
+          }
           row.append(textElement('pre', props.length ? props.map(p => `${p.key} ${p.value}`).join('\n') : entry.data.length ? 'Binary payload: no decoder for this type yet.' : 'Empty payload'));
           if (props.some(p => p.key === 'native' && /^(car|part)\s/i.test(p.value))) {
             const spawn = textElement('button', 'Create in world');

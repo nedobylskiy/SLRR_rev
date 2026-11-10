@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/slrr-jvm"],
+  "workspaces": [
+    "packages/slrr-jvm"
+  ],
   "scripts": {
     "postinstall": "npm run build:jvm",
     "predev": "npm run build:jvm",
@@ -24,6 +26,9 @@
     "audit:java-math": "tsx tools/audit-java-math.ts",
     "verify:map-objects": "tsx tools/verify-map-objects.ts",
     "verify:game": "tsx tools/verify-game.ts",
+    "verify:skeleton": "tsx tools/verify-skeleton.ts",
+    "verify:ragdoll": "tsx tools/verify-ragdoll.ts",
+    "verify:pedestrians": "tsx tools/verify-pedestrians.ts",
     "verify:saves": "tsx tools/verify-saves.ts",
     "inspect:class": "tsx tools/inspect-class.ts",
     "verify:vm": "tsx tools/verify-vm.ts",
@@ -40,9 +45,13 @@
     "report:stock-benchmark": "tsx tools/report-stock-benchmark.ts",
     "report:natives": "tsx tools/report-native-status.ts",
     "measure:stock-drive": "tsx tools/measure-stock-drive.ts",
-    "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify"
+    "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify",
+    "verify:suspension-road": "tsx tools/verify-suspension-road.ts",
+    "verify:suspension-skinning": "tsx tools/verify-suspension-skinning.ts",
+    "verify:driver-ik": "tsx tools/verify-driver-ik.ts"
   },
   "dependencies": {
+    "cannon-es": "^0.20.0",
     "slrr-jvm": "file:packages/slrr-jvm",
     "slrr-jvm-decompiler": "github:nedobylskiy/SLRR-JVM-decompiler#54f953d",
     "three": "^0.180.0"
