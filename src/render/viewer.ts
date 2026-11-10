@@ -406,6 +406,14 @@ export class Viewer {
   pedestrianCrowdStatus='Walking pedestrians off';
   private pedestrianCrowd?:PedestrianCrowd;
   private pedestrianCrowdRevision=0;
+  private pedestrianCount=6;private pedestrianRadius=100;
+  private pedestrianSpawnFrustum=new THREE.Frustum();private pedestrianSpawnProjection=new THREE.Matrix4();private pedestrianSpawnSphere=new THREE.Sphere(new THREE.Vector3(),1.5);
+  private pedestrianOffscreen=(point:THREE.Vector3)=>{this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);};
+  private updatePedestrianSpawnView(){this.camera.updateMatrixWorld();this.pedestrianSpawnFrustum.setFromProjectionMatrix(this.pedestrianSpawnProjection.multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));}
+  setPedestrianCount(count:number){if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');this.pedestrianCount=count;this.pedestrianCrowd?.configure(count,this.pedestrianRadius);}
+  setPedestrianRadius(radius:number){if(!Number.isFinite(radius)||radius<50||radius>300)throw Error('Pedestrian radius must be 50–300 m');this.pedestrianRadius=radius;this.pedestrianCrowd?.configure(this.pedestrianCount,radius);}
+  pedestrianInfo(){const crowd=this.pedestrianCrowd;return crowd?`Pedestrians ${crowd.count}/${this.pedestrianCount} · ragdolls ${crowd.ragdollCount} · cached models ${crowd.cachedCount} · spawn ${this.pedestrianRadius} m · unload ${this.pedestrianRadius+50} m${crowd.lastError?' · '+crowd.lastError:''}`:this.pedestrianCrowdStatus;}
+
   private mapPedestrianDebug?:MapPedestrianDebug;
   private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
   private mapPedestrianPending?:Promise<void>;
@@ -595,7 +603,8 @@ export class Viewer {
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       this.updateTrafficTest(now);
-      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body.position);if(this.trafficPeer)cars.push(this.trafficPeer.body.position);this.pedestrianCrowd.update(now,cars);}
+      if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
+      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen);}
       // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
@@ -1215,14 +1224,15 @@ export class Viewer {
       const data=await loadMapPedestrians(source.assets,source.pack,source.groundId);
       if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision)return;
       if(!data){this.pedestrianCrowdStatus='No pedestrian AI files for this map';return;}
+      this.updatePedestrianSpawnView();
       const crowd=await PedestrianCrowd.create(source.assets,data.walk,this.trafficPeer?.body.position??this.controls.target,async(bytes,path)=>{
         const key=path.toLowerCase();let texture=this.javaCharacterTextures.get(key);
         if(!texture){texture=this.texture(bytes,path);this.javaCharacterTextures.set(key,texture);texture.catch(()=>this.javaCharacterTextures.delete(key));}
         return (await texture).clone();
-      });
+      },source.terrain?(point)=>source.terrain!.height(point.x,point.z,point.y+1):undefined,{count:this.pedestrianCount,radius:this.pedestrianRadius},this.pedestrianOffscreen);
       if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision){crowd.dispose();return;}
-      this.pedestrianCrowd=crowd;this.scene.add(crowd.root);
-      this.pedestrianCrowdStatus=`${crowd.count} walking pedestrians · experimental zone routing / curved transitions / car avoidance. Toggle again to respawn nearby.`;
+      this.pedestrianCrowd=crowd;crowd.configure(this.pedestrianCount,this.pedestrianRadius);this.scene.add(crowd.root);
+      this.pedestrianCrowdStatus=`${crowd.count} walking pedestrians · experimental zone routing / curved transitions / car avoidance / contact ragdoll. Toggle again to respawn nearby.`;
     }catch(error){if(revision===this.pedestrianCrowdRevision)this.pedestrianCrowdStatus=String(error);}
   }
   async showPedestrianDebug(layer:PedestrianDebugLayer,visible:boolean){

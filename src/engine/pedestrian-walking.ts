@@ -1,5 +1,6 @@
 import {Vector3} from 'three';
-import {constrainedTransition} from './pedestrian-transition';
+import {WALKING_CLEARANCE,insideTransition} from './pedestrian-transition';
+import {forwardWalkingRoutes} from './pedestrian-route';
 import type {PedestrianRecord,PedestrianWalk} from '../formats/pedestrian';
 
 interface Boundary {points:Vector3[];lengths:number[];length:number}
@@ -8,7 +9,13 @@ export interface WalkingZone {id:number;sides:[Boundary,Boundary];gates:[Walking
 const flatDistance=(a:Vector3,b:Vector3)=>Math.hypot(a.x-b.x,a.z-b.z);
 function boundary(points:Vector3[]):Boundary{const lengths=[0];for(let i=1;i<points.length;i++)lengths.push(lengths[i-1]+points[i].distanceTo(points[i-1]));return {points,lengths,length:lengths.at(-1)!};}
 function sample(side:Boundary,t:number){const d=Math.max(0,Math.min(1,t))*side.length;let i=1;while(i<side.lengths.length-1&&side.lengths[i]<d)i++;return side.points[i-1].clone().lerp(side.points[i],(d-side.lengths[i-1])/Math.max(1e-6,side.lengths[i]-side.lengths[i-1]));}
-export function zonePoint(zone:WalkingZone,t:number,lateral=.5){return sample(zone.sides[0],t).lerp(sample(zone.sides[1],t),Math.max(.15,Math.min(.85,lateral)));}
+export function zonePoint(zone:WalkingZone,t:number,lateral=.5){
+  const a=sample(zone.sides[0],t),b=sample(zone.sides[1],t),width=flatDistance(a,b),margin=Math.min(.5,Math.max(.15,WALKING_CLEARANCE/Math.max(1e-6,width)));
+  // Approach the goal span through its middle, then fan out gradually after entry.
+  // The two stored blue lines at a seam need not have matching lateral orientation.
+  const blend=Math.min(1,Math.min(t,1-t)*zone.length/4),offset=.5+(lateral-.5)*blend;
+  return a.lerp(b,Math.max(margin,Math.min(1-margin,offset)));
+}
 /** Experimental interpretation: paired type-23 boundaries form a corridor; type-22 IDs link its end gates. */
 export function buildWalkingZones(rows:PedestrianWalk[]){
   const zones:WalkingZone[]=[];
@@ -25,7 +32,7 @@ export function buildWalkingZones(rows:PedestrianWalk[]){
     zones.push({id:row.id,sides:[a,b],gates:ends.map((point,i)=>({junction:spans[i].id!,point})) as [WalkingGate,WalkingGate],length:(a.length+b.length)/2});
   }return zones;
 }
-interface Transition {from:Vector3;to:Vector3;path:Boundary;polygon:Vector3[];target:WalkingZone;entry:0|1;t:number;length:number}
+interface Transition {from:Vector3;to:Vector3;path:Boundary;polygon:Vector3[];polygons:Vector3[][];via:number[];target:WalkingZone;entry:0|1;t:number;length:number}
 export class WalkingPedestrian {
   readonly position=new Vector3();readonly direction=new Vector3(0,0,1);
   speed=0;fleeing=false;transition?:Transition;
@@ -41,7 +48,7 @@ export class WalkingPedestrian {
         [tr.from,tr.to]=[tr.to,tr.from];tr.path=boundary([...tr.path.points].reverse());const zone=this.zone,entry=(this.sign>0?1:0) as 0|1;this.zone=tr.target;this.sign=tr.entry===0?-1:1;tr.target=zone;tr.entry=entry;tr.t=1-tr.t;this.cooldown=2;
       }
       tr.t=Math.min(1,tr.t+this.speed*dt/tr.length);
-      this.position.copy(sample(tr.path,tr.t));
+      this.position.copy(sample(tr.path,tr.t));tr.polygon=tr.polygons.find(p=>insideTransition(this.position,p))??tr.polygon;
       if(tr.t>=1){this.zone=tr.target;this.t=tr.entry;this.sign=tr.entry===0?1:-1;this.transition=undefined;}
     }else{
       const ahead=zonePoint(this.zone,Math.max(0,Math.min(1,this.t+this.sign*.02)),this.lateral).sub(this.position);
@@ -52,14 +59,11 @@ export class WalkingPedestrian {
     const movement=this.position.clone().sub(before);movement.y=0;if(movement.lengthSq()>1e-8)this.direction.copy(movement.normalize());
   }
   private nextZone(){
-    const exit=this.sign===1?1:0,junction=this.zone.gates[exit].junction,row=this.rows.get(junction);
-    // Only original record links connect corridors: never jump to a nearby but unrelated sidewalk.
-    const links=new Set(row?.links??[]),choices=this.zones.flatMap(zone=>zone===this.zone||!links.has(zone.id)?[]:zone.gates.flatMap((gate,i)=>gate.junction===junction&&flatDistance(this.position,gate.point)<40?[{zone,entry:i as 0|1}]:[]));
-    if(!row||!choices.length){this.sign=this.sign===1?-1:1;return;}
-    const routes=choices.flatMap(chosen=>{const to=zonePoint(chosen.zone,chosen.entry,this.lateral),route=constrainedTransition(row,this.position,to);return route?[{chosen,to,route}]:[];});
+    const exit=this.sign===1?1:0,forward=zonePoint(this.zone,exit).sub(zonePoint(this.zone,exit===0?.02:.98)).setY(0).normalize();
+    const routes=forwardWalkingRoutes(this.zone,exit,this.position,forward,this.zones,this.rows,zonePoint);
     if(!routes.length){this.sign=this.sign===1?-1:1;return;}
-    const {chosen,to,route}=routes[Math.min(routes.length-1,Math.floor(this.random()*routes.length))],path=boundary(route.points);
-    this.transition={from:this.position.clone(),to,path,polygon:route.polygon,target:chosen.zone,entry:chosen.entry,t:0,length:Math.max(.01,path.length)};
+    const chosen=routes[Math.min(routes.length-1,Math.floor(this.random()*routes.length))],path=boundary(chosen.points),to=chosen.points.at(-1)!.clone();
+    this.transition={from:this.position.clone(),to,path,polygon:chosen.polygons[0],polygons:chosen.polygons,via:chosen.via,target:chosen.target,entry:chosen.entry,t:0,length:Math.max(.01,path.length)};
   }
 }
 export function spawnWalkingPedestrians(rows:PedestrianWalk[],focus:Vector3,count=6,random=Math.random){

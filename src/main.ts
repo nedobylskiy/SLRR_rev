@@ -614,6 +614,7 @@ window.setInterval(()=>{
   }
   if(mapDebugPanel.hidden||!mapDebugPanel.open)return;
   trafficTestStatus.textContent=viewer?.trafficTestInfo()??'';
+  pedestrianCrowdStatus.textContent=viewer?.pedestrianInfo()??'';
   playerTrafficCheck.checked=viewer?.playerTrafficEnabled??false;
   if(playerTrafficCheck.checked)playerTrafficStatus.textContent=viewer?.playerTrafficInfo()??'';
   viewer?.profiler.measure('Graphics debug UI CPU',()=>{
@@ -638,8 +639,15 @@ for(const [layer,title] of [['graph','Pedestrian graph'],['rest','Pedestrian res
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(pedestrianDebugStatus);
-const pedestrianCrowdLabel=textElement('label','Walking pedestrians (test)'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
+const pedestrianCrowdLabel=textElement('label','Walking pedestrians'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
 pedestrianCrowdCheck.type='checkbox';pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
+for(const [title,min,max,step,initial,set] of [
+  ['Pedestrians',0,50,1,6,(n:number)=>viewer?.setPedestrianCount(n)],
+  ['Pedestrian spawn radius (m)',50,300,25,100,(n:number)=>viewer?.setPedestrianRadius(n)],
+] as const){
+  const label=textElement('label',''),value=textElement('span',`${title}: ${initial}`),slider=document.createElement('input');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step=String(step);slider.value=String(initial);slider.setAttribute('aria-label',title);
+  slider.oninput=()=>{const n=Number(slider.value);value.textContent=`${title}: ${n}`;set(n);};label.append(value,slider);mapDebugOptions.append(label);
+}
 const inspectPedestriansButton=textElement('button','Inspect pedestrians');inspectPedestriansButton.onclick=()=>viewer?.inspectPedestrians();mapDebugOptions.append(inspectPedestriansButton);
 pedestrianCrowdCheck.onchange=()=>{const pending=viewer?.showWalkingPedestrians(pedestrianCrowdCheck.checked);pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';void pending?.then(()=>{pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';});};
 

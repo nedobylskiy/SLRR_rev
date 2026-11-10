@@ -6,7 +6,8 @@ import {parseSkeleton,type SkeletonBone} from '../formats/skeleton';
 import {parseScxAsync} from '../formats/scx-worker-client';
 import type {ScxMesh} from '../formats/scx';
 import {skeletonCompatibility} from './character-catalog';
-import type {CharacterRagdoll} from './character-ragdoll';
+import type {RagdollCar} from '../engine/pedestrian-contact';
+import type {RagdollActivation,CharacterRagdoll} from './character-ragdoll';
 
 /** Keys contain absolute local rotations and translations normalized by BON bone length.
  * The length interpretation matches shipped bind keys; it remains a playback inference. */
@@ -90,7 +91,9 @@ export class SkinnedCharacter {
   animate(enabled:boolean){this.stopRagdoll();this.mixer.stopAllAction();this.action=undefined;this.playing=enabled;this.lastTime=undefined;if(enabled)this.action=this.mixer.clipAction(this.testClip()).reset().play();}
   setRagdollFloor(y:number){this.ragdollFloor=y;}
   get isRagdoll(){return !!this.ragdoll;}
-  async startRagdoll(){
+  get ragdollPosition(){return this.ragdoll?.position;}
+  setRagdollVehicles(cars:readonly RagdollCar[],dt:number){this.ragdoll?.setVehicles(cars,dt);}
+  async startRagdoll(activation:RagdollActivation={}){
     if(this.ragdoll||this.disposed)return;
     const request=++this.ragdollRequest,{CharacterRagdoll}=await import('./character-ragdoll');
     if(request!==this.ragdollRequest||this.disposed||this.ragdoll)return;
@@ -98,7 +101,7 @@ export class SkinnedCharacter {
     const skin:{position:Vector3;bone:number}[]=[];
     for(const mesh of this.meshes){const indices=mesh.geometry.getAttribute('skinIndex'),weights=mesh.geometry.getAttribute('skinWeight');
       for(let i=0;i<indices.count;i++){let strongest=0;for(let k=1;k<4;k++)if(weights.getComponent(i,k)>weights.getComponent(i,strongest))strongest=k;skin.push({position:mesh.getVertexPosition(i,new Vector3()),bone:indices.getComponent(i,strongest)});}}
-    const ragdoll=new CharacterRagdoll(this.skeleton,this.root,this.ragdollFloor,skin);
+    const ragdoll=new CharacterRagdoll(this.skeleton,this.root,this.ragdollFloor,skin,activation);
     this.resumeState={positions:this.skeleton.bones.map(b=>b.position.clone()),rotations:this.skeleton.bones.map(b=>b.quaternion.clone()),scales:this.skeleton.bones.map(b=>b.scale.clone()),playing:this.playing};
     this.ragdoll=ragdoll;this.setPlaybackPlaying(false);this.lastTime=undefined;
   }
