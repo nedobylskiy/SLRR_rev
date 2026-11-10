@@ -45,7 +45,8 @@
     "report:stock-benchmark": "tsx tools/report-stock-benchmark.ts",
     "report:natives": "tsx tools/report-native-status.ts",
     "measure:stock-drive": "tsx tools/measure-stock-drive.ts",
-    "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify"
+    "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify",
+    "verify:driver-ik": "tsx tools/verify-driver-ik.ts"
   },
   "dependencies": {
     "cannon-es": "^0.20.0",

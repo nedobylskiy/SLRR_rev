@@ -1,3 +1,4 @@
+import {deformationNormals} from './deformation-normals';
 import * as THREE from 'three';
 import { DeformablePanel } from '../engine/deformable-panel';
 import type { PanelBinding } from '../engine/deformable-panel';
@@ -16,6 +17,7 @@ export class HoodLab {
     const samples = meshes.flatMap(m => Array.from(m.geometry.getAttribute('position').array));
     this.panel = new DeformablePanel(samples, { mass, mount });
     for (const mesh of meshes) {
+      deformationNormals(mesh.geometry);
       const position = mesh.geometry.getAttribute('position');
       const bindings = Array.from({ length: position.count }, (_, i) => this.panel.bind([position.getX(i), position.getY(i), position.getZ(i)]));
       this.skins.push({ geometry: mesh.geometry, bindings });
@@ -52,7 +54,7 @@ export class HoodLab {
     for (const { geometry, bindings } of this.skins) {
       const attribute = geometry.getAttribute('position');
       bindings.forEach((binding, i) => this.panel.skin(binding, attribute.array, i * 3));
-      attribute.needsUpdate = true; geometry.computeVertexNormals();
+      attribute.needsUpdate = true; deformationNormals(geometry).update();
     }
     const attribute = this.cage.geometry.getAttribute('position'), p = this.panel.positions;
     this.panel.beams.forEach((b, i) => { for (let axis = 0; axis < 3; axis++) { attribute.array[i * 6 + axis] = p[b.a * 3 + axis]; attribute.array[i * 6 + 3 + axis] = p[b.b * 3 + axis]; } });

@@ -1,3 +1,4 @@
+import {deformationNormals} from './deformation-normals';
 import { Matrix4, Mesh, Vector3, type Group, type BufferGeometry } from 'three';
 import type { EnginePart } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
@@ -10,7 +11,7 @@ export function restoreReferenceGeometry(group:Group) {
   for(const mesh of group.children) if(mesh instanceof Mesh){
     const geometry=mesh.geometry as BufferGeometry, original=geometry.userData.damageReference as Float32Array|undefined;
     if(original){geometry.getAttribute('position').array.set(original);geometry.getAttribute('position').needsUpdate=true;
-      geometry.computeVertexNormals();geometry.computeBoundingBox();geometry.computeBoundingSphere();}
+      deformationNormals(geometry).restore();geometry.computeBoundingBox();geometry.computeBoundingSphere();}
   }
 }
 export function applySavedPanel(group:Group,part:EnginePart) {
@@ -23,12 +24,13 @@ export function applySavedPanel(group:Group,part:EnginePart) {
   const inverse=frame.clone().invert();
   for(const mesh of group.children) if(mesh instanceof Mesh){
     const geometry=mesh.geometry as BufferGeometry,attribute=geometry.getAttribute('position');
+    deformationNormals(geometry);
     if(!geometry.userData.damageReference)geometry.userData.damageReference=new Float32Array(attribute.array);
     for(let i=0;i<attribute.count;i++){
       const point=new Vector3().fromBufferAttribute(attribute,i).applyMatrix4(frame);
       const deformed=skinSavedPanel(state,point).applyMatrix4(inverse);
       attribute.setXYZ(i,deformed.x,deformed.y,deformed.z);
     }
-    attribute.needsUpdate=true;geometry.computeVertexNormals();geometry.computeBoundingBox();geometry.computeBoundingSphere();
+    attribute.needsUpdate=true;deformationNormals(geometry).update();geometry.computeBoundingBox();geometry.computeBoundingSphere();
   }
 }

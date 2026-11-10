@@ -1,3 +1,4 @@
+import {DriverIk} from './driver-ik';
 import { intersectPartGeometry } from './part-picking';
 import {loadSkinnedCharacter,type SkinnedCharacter} from './skinned-character';
 import {VehiclePairTest,type VehiclePairScenario} from '../engine/vehicle-pair-test';
@@ -332,6 +333,9 @@ export class Viewer {
   private javaRenderRequests = new Map<number, number>();
   private javaRenderRevisions = new Map<number, number>();
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
+  private driverIk?:DriverIk;private driverCutawayVisibility=new Map<THREE.Group,boolean>();
+  private driverCameraChassis?:EnginePart;
+  private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
   private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
   private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
@@ -602,6 +606,11 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      this.driverIk?.update();
+      for(const binding of this.javaDrivers.values())if(binding.driver){
+        binding.driver.root.visible=this.driverCameraChassis!==binding.chassis&&(this.javaRenderNodes.get(binding.node.id)?.visible??false);
+        binding.driver.update();
+      }
       this.updateTrafficTest(now);
       if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
       if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen);}
@@ -687,6 +696,8 @@ export class Viewer {
     });
   }
   clear() {
+    this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;
+    for(const id of this.javaDrivers.keys())this.releaseJavaDriver(id);
     for(const actor of this.javaCharacters.values())actor.character.dispose();this.javaCharacters.clear();
     for(const texture of this.javaCharacterTextures.values())void texture.then(t=>t.dispose()).catch(()=>{});this.javaCharacterTextures.clear();
     this.characterPreview?.dispose();this.characterPreview=undefined;
@@ -715,7 +726,7 @@ export class Viewer {
     this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.resetRoadDebug();
     this.scene.fog = null; this.scene.background = null;
-    this.internalView = false;
+    this.internalView = false;this.driverCameraChassis=undefined;
     this.generation++;
     this.grid.visible = true; this.driveGrid.visible = false; this.ground.visible = false;
     this.camera.near = 0.01; this.normalCameraFar = 1000; this.updateFarPlane(); this.camera.updateProjectionMatrix();
@@ -732,7 +743,7 @@ export class Viewer {
     const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
     if (node.resourceType !== 3) {
-      this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
+      this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
       this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
@@ -825,7 +836,7 @@ export class Viewer {
       .sort().join(',') : '';
     const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}` : '';
     if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
-    this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
+    this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
     modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
     this.javaRenderTypes.set(node.id, key);
     modelGroup.clear();
@@ -880,8 +891,34 @@ export class Viewer {
       || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
     modelGroup.add(template.clone(true));
   }
+  private releaseJavaDriver(id:number){
+    const binding=this.javaDrivers.get(id);this.javaDrivers.delete(id);binding?.driver?.dispose();
+  }
+  async bindJavaDriver(node:RenderObject,chassis:EnginePart,assets:Assets){
+    // Load the existing Java render first; an in-flight model replacement must not
+    // leave a binding referring to the character it just disposed.
+    await this.upsertJavaRenderObject(node,assets);
+    if(chassis.world.disposed||node.resourceType!==3)return;
+    this.releaseJavaDriver(node.id);
+    const binding:{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}={node,chassis};
+    this.javaDrivers.set(node.id,binding);
+    await this.attachJavaDriver(node,assets);
+  }
+  private async attachJavaDriver(node:RenderObject,assets:Assets){
+    const binding=this.javaDrivers.get(node.id),actor=this.javaCharacters.get(node.id);
+    if(!binding||binding.driver||binding.pending||!actor)return;
+    const generation=this.generation;
+    binding.pending=(async()=>{
+      const driver=await DriverIk.create(binding.chassis,assets,(bytes,path)=>this.texture(bytes,path),actor.character,()=>this.javaDrivers.get(node.id)===binding&&this.javaCharacters.get(node.id)===actor&&generation===this.generation&&!binding.chassis.world.disposed);
+      if(this.javaDrivers.get(node.id)!==binding||this.javaCharacters.get(node.id)!==actor||generation!==this.generation||binding.chassis.world.disposed){driver.dispose();return;}
+      actor.serial++;actor.ready=false;actor.key='';actor.character.animate(false);driver.debug.visible=false;driver.character.helper.visible=false;
+      this.model.add(driver.root);binding.driver=driver;driver.update();
+    })();
+    try{await binding.pending;}catch(error){if(this.javaDrivers.get(node.id)!==binding)return;this.releaseJavaDriver(node.id);throw error;}
+  }
   private async syncJavaCharacter(node:RenderObject,assets:Assets){
     const actor=this.javaCharacters.get(node.id);if(!actor)return;
+    if(this.javaDrivers.has(node.id)){await this.attachJavaDriver(node,assets);return;}
     const state=node.animation,key=state?`${state.pack}:${state.id}`:'';
     if(!state){actor.serial++;actor.ready=false;actor.key='';actor.state=undefined;actor.character.animate(false);return;}
     if(actor.key!==key){
@@ -1270,6 +1307,20 @@ export class Viewer {
     if (generation === this.generation) this.fit();
     return warnings;
   }
+  setDriverCutaway(enabled:boolean){
+    for(const [group,visible] of this.driverCutawayVisibility)group.visible=visible;this.driverCutawayVisibility.clear();
+    if(!enabled||!this.driverIk)return;
+    for(const [part,group] of this.proxies)if(part.world===this.driverIk.chassis.world&&!/(seat|steering|dashboard|console|interior|pedal)/i.test(part.definition.model?.path??'')){this.driverCutawayVisibility.set(group,group.visible);group.visible=false;}
+  }
+  async showDriverIk(root:EnginePart,assets:Assets){
+    this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;const generation=this.generation;
+    const driver=await DriverIk.create(root,assets,(bytes,path)=>this.texture(bytes,path));
+    if(generation!==this.generation||root.world.disposed){driver.dispose();throw Error('Driver preview superseded');}
+    this.driverIk=driver;this.model.add(driver.root);this.scene.add(driver.character.helper);driver.update();
+    const target=new THREE.Vector3(...root.definition.config.seat!.position).applyMatrix4(root.matrix()).applyMatrix4(this.model.matrixWorld);
+    this.controls.target.copy(target).add(new THREE.Vector3(0,.35,0));this.camera.position.copy(target).add(new THREE.Vector3(-1.6,1.1,-1.6));this.controls.update();
+    return {wristPivot:(enabled:boolean)=>{driver.setWristPivot(enabled);driver.update();},steering:(degrees:number)=>{driver.setSteeringAngle(degrees*Math.PI/180);driver.update();this.syncWorld();},skeleton:(visible:boolean)=>{driver.character.helper.visible=visible;driver.debug.visible=visible;},cutaway:(enabled:boolean)=>this.setDriverCutaway(enabled),info:()=>driver.info()};
+  }
   async showVin(assets:Assets,id=0xc){
     this.clear();this.characterFollowingRagdoll=false;const generation=this.generation;
     const character=await loadSkinnedCharacter(assets,(bytes,path)=>this.texture(bytes,path),'humans.rpk',id);
@@ -1282,6 +1333,8 @@ export class Viewer {
     return character;
   }
   removeWorld(world: EngineWorld): void {
+    for(const [id,binding] of this.javaDrivers)if(binding.chassis.world===world)this.releaseJavaDriver(id);
+    if(this.driverIk?.chassis.world===world){this.setDriverCutaway(false);this.driverIk.dispose();this.driverIk=undefined;}
     for (const [part, group] of this.proxies) if (part.world === world) {
       applySavedPanel(group,part);
       group.removeFromParent(); this.disposeGroup(group);
@@ -1951,6 +2004,7 @@ export class Viewer {
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
+        this.driverCameraChassis=internalPose?root:undefined;
         if (internalPose) {
           cameraWasInternal = true;
           followCamera.reset();
@@ -2019,6 +2073,7 @@ export class Viewer {
     };
     const stop = () => {
       if (stopped) return; stopped = true;
+      if(this.driverCameraChassis===root)this.driverCameraChassis=undefined;
       java?.persist?.();
       if (this.mapStreamFocus === demo.position) this.mapStreamFocus = undefined;
       this.frame = undefined; this.stopDriving = undefined; this.drivingTimeOfDay = undefined;

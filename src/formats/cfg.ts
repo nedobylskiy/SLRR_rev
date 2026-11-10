@@ -12,6 +12,7 @@ export interface PartConfig {
   brakePower?: [number, number];
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
+  seat?:CfgPose; pedals?:Triple;
   wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; links?: number[]; linkRules?: number[][]; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
@@ -128,6 +129,8 @@ export function parsePartConfig(source: string): PartConfig {
       case 'wheel': inlineWheel = { ...pose(), radius, spring: spring && [...spring], parameters: args.slice(6).map((_, i) => number(i + 6)) }; result.wheels.push(inlineWheel); break;
       case 'camera': result.cameras.push({ ...pose(), fov: args[6] === undefined ? undefined : number(6) }); break;
       case 'steering': result.steering = pose(); break;
+      case 'seat': result.seat=pose();break;
+      case 'pedals': result.pedals=[number(0),number(1),number(2)];break;
       case 'maxsteer':
         result.maxSteer = number(0);
         if (result.maxSteer <= 0) throw fail();

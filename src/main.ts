@@ -9,6 +9,7 @@ import { JavaPartPreviews } from './render/java-part-previews';
 import { JavaMouse } from './render/java-mouse';
 import { JavaGauges } from './osd/java-gauges';
 import { jv } from 'slrr-jvm';
+import {RenderObject} from './runtime/render-object';
 import { replaceGarageCarTree } from './runtime/debug-garage-car';
 import { parseRpk, entryProperties } from './formats/rpk';
 
@@ -241,6 +242,10 @@ async function runGameBoot() {
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
                   result.gameTypes.updateTriggerContacts(car);
                 } });
+            const driverRender=result.gameTypes.getResource(result.jvm.get(player,'render'));
+            if(driverRender instanceof RenderObject){
+              try{await viewer!.bindJavaDriver(driverRender,built.root,source);}catch(reason){appendJavaEvent({level:'error',message:`Driver IK: ${String(reason)}`});}
+            }
             if (session.vehicle) persistPhysics = result.parts.bindPhysics(result.jvm.get(car, 'chassis'), session.vehicle);
             showVehicleDebug(built.root, session, () => [...result.javaProfile].sort((a, b) => b[1].lastAt - a[1].lastAt).slice(0, 3)
               .map(([name, t]) => `JVM ${name}: ${t.averageMs.toFixed(1)} ms / peak ${t.peakMs.toFixed(1)} / calls ${t.calls} / ${((performance.now() - t.lastAt) / 1000).toFixed(1)}s ago (wall)`).join('\n'));
@@ -373,6 +378,24 @@ const pairControls = textElement('div', '', 'hood-controls'); pairControls.hidde
 const playgroundButton=textElement('button','Character playground');playgroundButton.className='hood-button';crashButton.after(playgroundButton);
 const vinControls=textElement('div','','hood-controls character-playground');vinControls.hidden=true;el('scene-help').before(vinControls);
 let vinTimer:number|undefined;
+const driverIkButton=textElement('button','Driver IK');driverIkButton.className='hood-button';playgroundButton.after(driverIkButton);
+driverIkButton.onclick=()=>{void (async()=>{
+  if(!assets||!viewer)return;const opening=openWorld('cars/racers/Baiern.rpk',6),request=sequence;await opening;
+  if(request!==sequence||!engineRoot)return;
+  try{
+    const driver=await viewer.showDriverIk(engineRoot,assets);if(request!==sequence)return;
+    vinControls.replaceChildren();vinControls.hidden=false;
+    const label=textElement('label','Steering wheel '),slider=document.createElement('input'),output=textElement('span','0°'),skeletonLabel=textElement('label','Skeleton / grip targets'),skeleton=document.createElement('input'),cutawayLabel=textElement('label','Cutaway'),cutaway=document.createElement('input'),info=textElement('span',driver.info());
+    slider.type='range';slider.min='-540';slider.max='540';slider.step='1';slider.value='0';slider.setAttribute('aria-label','Driver steering wheel');
+    slider.oninput=()=>{const value=Number(slider.value);driver.steering(value);output.textContent=`${value}°`;info.textContent=driver.info();};label.append(slider,output);
+    skeleton.type=cutaway.type='checkbox';skeleton.checked=cutaway.checked=true;skeletonLabel.prepend(skeleton);cutawayLabel.prepend(cutaway);skeleton.onchange=()=>driver.skeleton(skeleton.checked);cutaway.onchange=()=>driver.cutaway(cutaway.checked);
+    const wristLabel=textElement('label','Wrist pivot'),wrist=document.createElement('input');wrist.type='checkbox';wrist.checked=true;wristLabel.prepend(wrist);wrist.onchange=()=>{driver.wristPivot(wrist.checked);info.textContent=driver.info();};
+    driver.skeleton(true);driver.cutaway(true);const row=textElement('div','','character-playground-row');row.append(label,skeletonLabel,cutawayLabel,wristLabel);vinControls.append(row,info);
+    el('format').textContent='DRIVER / SEAT + HAND IK';el('filename').textContent='Vin · Baiern seat and steering wheel';el('details').textContent='Original humans.rpk Vin render and vin.skl. Seat/pedals/cockpit reference come from chassis CFG. Hands follow two upper-rim targets on the installed steering wheel through its actual slot/render transforms. Three-link arm chain with fixed bone lengths; neutral seated leg pose. Prototype IK, not native solver parity. Gear shifting, reverse head movement and inertial body movement are not implemented.';
+    status('Driver IK ready');
+  }catch(error){if(request===sequence){status('Driver IK error',true);el('details').textContent=String(error);}}
+})();};
+
 playgroundButton.onclick=()=>{void openSkeletonPreview();};
 async function openSkeletonPreview(id=0xa){
   if(!assets||!viewer)return;const request=++sequence;
