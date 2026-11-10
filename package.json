@@ -46,6 +46,8 @@
     "report:natives": "tsx tools/report-native-status.ts",
     "measure:stock-drive": "tsx tools/measure-stock-drive.ts",
     "verify:stock-drive": "tsx tools/measure-stock-drive.ts --verify",
+    "verify:suspension-road": "tsx tools/verify-suspension-road.ts",
+    "verify:suspension-skinning": "tsx tools/verify-suspension-skinning.ts",
     "verify:driver-ik": "tsx tools/verify-driver-ik.ts"
   },
   "dependencies": {

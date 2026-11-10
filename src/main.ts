@@ -396,6 +396,49 @@ driverIkButton.onclick=()=>{void (async()=>{
   }catch(error){if(request===sequence){status('Driver IK error',true);el('details').textContent=String(error);}}
 })();};
 
+const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';driverIkButton.after(suspensionButton);
+suspensionButton.onclick=()=>{void (async()=>{
+  if(!assets||!viewer)return;const request=++sequence;stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
+  el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;status('Loading suspension bones…');
+  try{
+    const lab=await viewer.showSuspensionPlayground(assets);if(request!==sequence)return;
+    vinControls.replaceChildren();vinControls.hidden=false;
+    const row=textElement('div','','character-playground-row'),model=document.createElement('select');model.setAttribute('aria-label','Suspension model');
+    for(const [value,label] of [['shock','Shock absorber'],['spring','Spring'],['both','Spring + shock']]){const option=document.createElement('option');option.value=value;option.textContent=label;model.append(option);}
+    const lengthLabel=textElement('label','Length '),length=document.createElement('input'),lengthValue=document.createElement('output');length.type='range';length.min='45';length.max='145';length.step='1';length.value='100';length.setAttribute('aria-label','Suspension length');lengthLabel.append(length,lengthValue);
+    const tiltLabel=textElement('label','Upper bone tilt '),tilt=document.createElement('input'),tiltValue=document.createElement('output');tilt.type='range';tilt.min='-25';tilt.max='25';tilt.step='1';tilt.value='0';tilt.setAttribute('aria-label','Suspension upper bone tilt');tiltLabel.append(tilt,tiltValue);
+    const playLabel=textElement('label','Animate compression'),play=document.createElement('input'),bonesLabel=textElement('label','Bones'),bones=document.createElement('input');play.type=bones.type='checkbox';bones.checked=true;playLabel.prepend(play);bonesLabel.prepend(bones);
+    const info=document.createElement('output'),reset=textElement('button','Reset suspension');
+    const update=()=>{lengthValue.textContent=`${length.value}%`;tiltValue.textContent=`${tilt.value}°`;lab.setPose(Number(length.value)/100,Number(tilt.value));info.textContent=lab.info();};
+    length.oninput=tilt.oninput=()=>{play.checked=false;lab.animate(false);update();};
+    model.onchange=()=>{lab.select(model.value as 'spring'|'shock'|'both');info.textContent=lab.info();};
+    play.onchange=()=>{lab.animate(play.checked);length.disabled=tilt.disabled=play.checked;};bones.onchange=()=>lab.skeleton(bones.checked);
+    reset.onclick=()=>{play.checked=false;length.disabled=tilt.disabled=false;lab.animate(false);length.value='100';tilt.value='0';update();};
+    row.append(model,lengthLabel,tiltLabel,playLabel,bonesLabel,reset);vinControls.append(row,info);update();vinTimer=window.setInterval(()=>{if(play.checked){length.value=String(Math.round(lab.lengthRatio*100));lengthValue.textContent=`${length.value}%`;info.textContent=lab.info();}},250);
+    el('format').textContent='SUSPENSION / BONE SKINNING VS SCALE';el('filename').textContent='Original spring and shock absorber · parts.rpk';el('details').textContent='Left: original SCX weights and paired two-root BON. Right: the identical mesh under uniform Y scaling. Bind bone span 24.5 cm. Upper bone tilt affects only the skinned example; it is an experiment, not recovered suspension physics. Damper weights are rigid 0/1, spring weights are blended. No files are exported.';
+    el('scene-help').textContent='Left: bone skinning · Right: scale Y · Left drag: orbit · Wheel: zoom · Right drag: pan';status('Suspension playground ready');
+  }catch(error){if(request===sequence){status('Suspension playground error',true);el('details').textContent=String(error);}}
+})();};
+
+const suspensionRoadButton=textElement('button','Suspension road test');suspensionRoadButton.className='hood-button';suspensionButton.after(suspensionRoadButton);
+suspensionRoadButton.onclick=()=>{void (async()=>{
+  if(!assets||!viewer)return;const opening=openWorld('cars/racers/Baiern.rpk',6),request=sequence;await opening;if(request!==sequence||!engineRoot)return;
+  status('Preparing suspension road…');
+  try{
+    const lab=await viewer.suspensionRoad(engineRoot,assets);if(request!==sequence){lab.dispose();return;}
+    disposeDriving=()=>lab.dispose();vinControls.replaceChildren();vinControls.hidden=false;
+    const row=textElement('div','','character-playground-row'),wheel=document.createElement('select');wheel.setAttribute('aria-label','Follow suspension wheel');
+    for(const [value,label] of [['0','FL · front left'],['1','FR · front right'],['2','RL · rear left'],['3','RR · rear right']]){const option=document.createElement('option');option.value=value;option.textContent=label;wheel.append(option);}wheel.onchange=()=>lab.wheel(Number(wheel.value));row.append(textElement('label','Follow wheel'),wheel);
+    const info=document.createElement('output');
+    for(const [label,min,max,initial,action] of [['Test speed',0,40,20,(v:number)=>lab.speed(v)],['Bump height',0,15,8,(v:number)=>lab.bumps(v)]] as const){
+      const box=textElement('label',label),slider=document.createElement('input'),value=document.createElement('output');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step='1';slider.value=String(initial);slider.setAttribute('aria-label',label);const update=()=>{action(Number(slider.value));value.textContent=`${slider.value}${label==='Test speed'?' km/h':' cm'}`;};slider.oninput=update;update();box.append(slider,value);row.append(box);
+    }
+    for(const [label,initial,action] of [['Pause',false,(v:boolean)=>lab.pause(v)],['Slow motion ×0.25',false,(v:boolean)=>lab.slowMotion(v)],['Show body',false,(v:boolean)=>lab.body(v)],['Bone anchors',true,(v:boolean)=>lab.bones(v)],['Suspension bone animation',suspensionBonesCheck.checked,(v:boolean)=>{suspensionBonesCheck.checked=v;viewer?.setSuspensionBonesEnabled(v);}]] as const){const box=textElement('label',label),check=document.createElement('input');check.type='checkbox';check.checked=initial;check.onchange=()=>action(check.checked);box.prepend(check);row.append(box);}
+    const reset=textElement('button','Restart road test');reset.onclick=()=>lab.reset();row.append(reset);vinControls.append(row,info);info.textContent=lab.info();vinTimer=window.setInterval(()=>{info.textContent=lab.info();},250);
+    el('format').textContent='SUSPENSION / UNEVEN ROAD';el('filename').textContent='Baiern · live suspension and original bone skins';el('details').textContent='Original complete Baiern assembly, body hidden by default. The 120 Hz suspension solver handles tyres, springs, dampers, vertical motion, pitch and roll. A longitudinal guide holds the requested speed and lane; engine/transmission and crash deformation are not part of this stand. The rendered road and physics share the same height field. Original spring/shock bones follow CFG-linked lower and upper mounts. Camera follows the selected wheel; orbit and zoom remain available.';el('scene-help').textContent='Camera follows selected wheel · Left drag: orbit · Wheel: zoom · Right drag: pan';status('Suspension road test ready');
+  }catch(error){if(request===sequence){stopDrive();status('Suspension road error',true);el('details').textContent=String(error);}}
+})();};
+
 playgroundButton.onclick=()=>{void openSkeletonPreview();};
 async function openSkeletonPreview(id=0xa){
   if(!assets||!viewer)return;const request=++sequence;
@@ -705,6 +748,10 @@ const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), v
 vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
 const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
+const suspensionBonesLabel=textElement('label','Suspension bone animation'),suspensionBonesCheck=document.createElement('input');
+suspensionBonesCheck.type='checkbox';suspensionBonesCheck.checked=true;suspensionBonesLabel.prepend(suspensionBonesCheck);mapDebugOptions.append(suspensionBonesLabel);
+suspensionBonesLabel.title='Original spring and damper bone deformation. Disable to use the cheaper ordinary meshes; suspension physics stays unchanged.';
+suspensionBonesCheck.onchange=()=>viewer?.setSuspensionBonesEnabled(suspensionBonesCheck.checked);
 const inertialCameraLabel = textElement('label', 'Inertial chase camera'), inertialCameraCheck = document.createElement('input');
 inertialCameraCheck.type = 'checkbox'; inertialCameraLabel.prepend(inertialCameraCheck); mapDebugOptions.append(inertialCameraLabel);
 inertialCameraLabel.title = 'Experimental external camera with its own velocity and smooth catch-up; cockpit views stay unchanged';

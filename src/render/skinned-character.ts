@@ -141,8 +141,8 @@ export class SkinnedCharacter {
   dispose(){this.disposed=true;this.stopRagdoll();this.mixer.stopAllAction();this.mixer.uncacheRoot(this.root);this.helper.removeFromParent();this.helper.dispose();this.skeleton.dispose();for(const mesh of this.meshes){mesh.geometry.dispose();const material=mesh.material as MeshStandardMaterial;material.map?.dispose();material.dispose();}this.root.removeFromParent();}
 }
 
-export async function loadSkinnedCharacter(assets:Assets,loadTexture:(bytes:Uint8Array,path:string)=>Promise<Texture>,pack='humans.rpk',id=0xc){
-  const resolved=await assets.resource(pack,id),properties=entryProperties(resolved.entry),skeletonPath=properties.find(p=>p.key==='skeleton')?.value;
+export async function loadSkinnedCharacter(assets:Assets,loadTexture:(bytes:Uint8Array,path:string)=>Promise<Texture>,pack='humans.rpk',id=0xc,skeletonOverride?:string){
+  const resolved=await assets.resource(pack,id),properties=entryProperties(resolved.entry),skeletonPath=skeletonOverride??properties.find(p=>p.key==='skeleton')?.value;
   if(!skeletonPath)throw Error('RPK render has no skeleton descriptor');
   const model=await assets.modelForResource(pack,id),[parsed,bytes]=await Promise.all([parseScxAsync(await assets.read(model.path)),assets.read(skeletonPath)]);
   const definitions=parseSkeleton(new TextDecoder().decode(bytes)),rig=createCharacterSkeleton(definitions),character=new SkinnedCharacter(definitions,rig.skeleton,rig.root,{pack:resolved.packPath,id,mesh:model.path,skeleton:skeletonPath});

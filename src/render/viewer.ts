@@ -1,3 +1,8 @@
+import {VehicleSuspensionSkin} from './vehicle-suspension-skin';
+import {SuspensionRoadTest} from '../engine/suspension-road-test';
+import {linkedSuspensionAnchors} from '../engine/linked-suspension';
+import {SuspensionSkin} from './suspension-playground';
+import {SuspensionPlayground} from './suspension-playground';
 import {DriverIk} from './driver-ik';
 import { intersectPartGeometry } from './part-picking';
 import {loadSkinnedCharacter,type SkinnedCharacter} from './skinned-character';
@@ -297,6 +302,7 @@ export class Viewer {
     `FPS ${this.fps}`,
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
+    `Suspension bone animation: ${this.suspensionBonesEnabled?'on':'off'} · bound parts ${this.suspensionSkins.size}`,
     `Static environment: ${this.environmentPath??'none'}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · brake helping ${this.drivingHelping.brake.toFixed(2)} · steer helping ${this.drivingHelping.steer.toFixed(2)} · clutch helping ${this.drivingHelping.clutch.toFixed(2)} · acceleration helping ${this.drivingHelping.acceleration.toFixed(2)} · ABS ${this.drivingHelping.abs.toFixed(2)} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
@@ -361,6 +367,11 @@ export class Viewer {
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private frame?: (now: number) => void;
   private afterFrame?:()=>void;
+  private suspensionPlayground?:SuspensionPlayground;
+  private suspensionSkins=new Map<EnginePart,VehicleSuspensionSkin>();
+  private suspensionBonesEnabled=true;
+  setSuspensionBonesEnabled(enabled:boolean){this.suspensionBonesEnabled=enabled;for(const binding of this.suspensionSkins.values())binding.setEnabled(enabled);}
+  private releaseSuspensionSkin(part:EnginePart){this.suspensionSkins.get(part)?.dispose();this.suspensionSkins.delete(part);}
   private characterPreview?:SkinnedCharacter;
   private characterFollowingRagdoll=false;
   private frameCapture?:{resolve:(blob:Blob)=>void;reject:(reason:Error)=>void};
@@ -585,6 +596,7 @@ export class Viewer {
       this.profiler.beginFrame(now);
       try {
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.beginFrame());
+      this.suspensionPlayground?.update(now);
       this.characterPreview?.update(now);
       for(const actor of this.javaCharacters.values()){
         actor.character.update(now,false);
@@ -696,6 +708,7 @@ export class Viewer {
     });
   }
   clear() {
+    this.suspensionPlayground?.dispose();this.suspensionPlayground=undefined;
     this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;
     for(const id of this.javaDrivers.keys())this.releaseJavaDriver(id);
     for(const actor of this.javaCharacters.values())actor.character.dispose();this.javaCharacters.clear();
@@ -721,7 +734,7 @@ export class Viewer {
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
-    this.stopDriving?.(); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.stopDriving?.(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.resetRoadDebug();
@@ -1321,6 +1334,12 @@ export class Viewer {
     this.controls.target.copy(target).add(new THREE.Vector3(0,.35,0));this.camera.position.copy(target).add(new THREE.Vector3(-1.6,1.1,-1.6));this.controls.update();
     return {wristPivot:(enabled:boolean)=>{driver.setWristPivot(enabled);driver.update();},steering:(degrees:number)=>{driver.setSteeringAngle(degrees*Math.PI/180);driver.update();this.syncWorld();},skeleton:(visible:boolean)=>{driver.character.helper.visible=visible;driver.debug.visible=visible;},cutaway:(enabled:boolean)=>this.setDriverCutaway(enabled),info:()=>driver.info()};
   }
+  async showSuspensionPlayground(assets:Assets){
+    this.clear();const generation=this.generation;
+    const lab=await SuspensionPlayground.create(assets,(bytes,path)=>this.texture(bytes,path));
+    if(generation!==this.generation){lab.dispose();throw Error('Suspension preview superseded');}
+    this.suspensionPlayground=lab;this.model.add(lab.root);this.fit();this.camera.position.set(1.5,1,8);this.controls.update();return lab;
+  }
   async showVin(assets:Assets,id=0xc){
     this.clear();this.characterFollowingRagdoll=false;const generation=this.generation;
     const character=await loadSkinnedCharacter(assets,(bytes,path)=>this.texture(bytes,path),'humans.rpk',id);
@@ -1337,6 +1356,7 @@ export class Viewer {
     if(this.driverIk?.chassis.world===world){this.setDriverCutaway(false);this.driverIk.dispose();this.driverIk=undefined;}
     for (const [part, group] of this.proxies) if (part.world === world) {
       applySavedPanel(group,part);
+      this.releaseSuspensionSkin(part);
       group.removeFromParent(); this.disposeGroup(group);
       this.proxies.delete(part); this.collisionMeshes.delete(part);
     }
@@ -1412,6 +1432,7 @@ export class Viewer {
     for (const [part, group] of this.proxies) if (part.world === world) {
       applySavedPanel(group,part);
       if (world.parts.get(part.id) !== part) {
+        this.releaseSuspensionSkin(part);
         group.removeFromParent(); this.disposeGroup(group);
         this.proxies.delete(part); this.collisionMeshes.delete(part);
         continue;
@@ -1421,6 +1442,7 @@ export class Viewer {
       group.visible = !group.userData.partLoading && this.partVisible(part);
       applyCfgRenderChannels(group, world.lightMask);
       syncLinkedRenders(part, group, this.suspensionDebug);
+      this.suspensionSkins.get(part)?.update();
     }
   }
   pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
@@ -1498,6 +1520,15 @@ export class Viewer {
       }
     }
     if (generation === this.generation && !world.disposed) {
+      for(const [part,group] of this.proxies)if(part.world===world&&!this.suspensionSkins.has(part)){
+        const kind=VehicleSuspensionSkin.kind(part);if(!kind||!part.parent)continue;
+        let root=part;while(root.parent)root=root.parent;if(!linkedSuspensionAnchors(root,part))continue;
+        try{
+          const skin=await SuspensionSkin.create(kind,assets,(bytes,path)=>this.texture(bytes,path));
+          if(generation!==this.generation||world.disposed||this.proxies.get(part)!==group){skin.dispose();return warnings;}
+          const binding=new VehicleSuspensionSkin(part,group,skin);this.suspensionSkins.set(part,binding);binding.setEnabled(this.suspensionBonesEnabled);
+        }catch(error){warnings.push(`Suspension skin ${part.definition.alias}: ${String(error)}`);}
+      }
       for (const group of staged) delete group.userData.partLoading;
       this.syncWorldVisuals(world);
     }
@@ -1727,6 +1758,7 @@ export class Viewer {
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
       group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
+      this.suspensionSkins.get(part)?.update();
     }
   }
   async hood(definition: PartDefinition, assets: Assets, telemetry: (text: string) => void) {
@@ -1759,6 +1791,39 @@ export class Viewer {
     const stop = () => { if (stopped) return; stopped = true; this.frame = undefined; this.stopDriving = undefined; this.ground.visible = false; lab.dispose(); };
     this.stopDriving = stop;
     return { hit: (impulse: number) => lab.hit(impulse), reset: () => { lab.reset(); const delta = new THREE.Vector3(0, 0.9, 0).sub(this.controls.target); this.camera.position.add(delta); this.controls.target.add(delta); }, wireframe: (value: boolean) => lab.wireframe(value), dispose: stop };
+  }
+  async suspensionRoad(root:EnginePart,assets:Assets){
+    this.stopDriving?.();
+    const originals=new Map<THREE.Object3D,boolean>();
+    const skins=[...this.suspensionSkins.values()].filter(binding=>binding.part.world===root.world);
+    if(!skins.length)throw Error('No original spring/shock anchor pairs installed');
+    const bounds=new THREE.Box3(),proxy=this.proxies.get(root)!;
+    const transform=modelMatrix(new THREE.Matrix4(),root.definition.config.renderPose&&poseMatrix(root.definition.config.renderPose));
+    for(const mesh of proxy.children)if(mesh instanceof THREE.Mesh){const p=mesh.geometry.getAttribute('position');for(let i=0;i<p.count;i++)bounds.expandByPoint(new THREE.Vector3().fromBufferAttribute(p,i).applyMatrix4(transform));}
+    const test=new SuspensionRoadTest(root,bounds);
+    this.model.position.set(0,0,0);this.model.scale.setScalar(1);this.grid.visible=this.driveGrid.visible=this.ground.visible=false;this.controls.enabled=true;
+    const geometry=new THREE.PlaneGeometry(5,200,20,1000);geometry.rotateX(-Math.PI/2);geometry.translate(0,0,-70);
+    const colors=new Float32Array(geometry.getAttribute('position').count*3);geometry.setAttribute('color',new THREE.BufferAttribute(colors,3));
+    const road=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,side:THREE.DoubleSide}));road.receiveShadow=true;this.model.add(road);
+    const rebuildRoad=()=>{const p=geometry.getAttribute('position');for(let i=0;i<p.count;i++){const h=test.terrain.height(p.getX(i),p.getZ(i));p.setY(i,h-.002);const c=h>.005?new THREE.Color(0x957146):new THREE.Color(Math.abs(p.getX(i))>2?0x4d6251:0x3e4a54);c.toArray(colors,i*3);}p.needsUpdate=true;geometry.getAttribute('color').needsUpdate=true;geometry.computeVertexNormals();geometry.computeBoundingSphere();};rebuildRoad();
+    for(const [part,group] of this.proxies)if(part.world===root.world){originals.set(group,group.visible);for(const child of group.children)originals.set(child,child.visible);}
+    let selected=0,showBody=false,showBones=true,slow=false,last:number|undefined,stopped=false;
+    const visibility=()=>{
+      for(const [part,group] of this.proxies)if(part.world===root.world){
+        const type=part.parent?.definition.config.slots.find(s=>s.id===part.parentSlot)?.type??0;
+        const mechanical=!!part.definition.mechanics||type>=101&&type<200;
+        const linked=group.children.some(c=>c.userData.linkedRender);
+        group.visible=showBody||mechanical||linked;
+        for(const child of group.children)child.visible=originals.get(child)!&&(showBody||mechanical||!!child.userData.linkedRender);
+        this.suspensionSkins.get(part)?.update();
+      }
+    };
+    const updateSkins=()=>{for(const binding of skins){binding.update();binding.skin.debug.visible=showBones&&this.suspensionBonesEnabled&&suspensionCorner(binding.part)===selected;}};
+    const focus=(reset=false)=>{const target=test.wheelPosition(selected),delta=target.clone().sub(this.controls.target);this.camera.position.add(delta);this.controls.target.copy(target);if(reset)this.camera.position.copy(target).add(new THREE.Vector3(Math.sign(test.suspension.wheels[selected].center.x)*1.8,.65,selected<2?-1.2:1.2).applyQuaternion(test.body.orientation));this.controls.update();};
+    this.syncWorld();visibility();updateSkins();focus(true);
+    this.frame=now=>{const elapsed=last===undefined?0:Math.min(.05,(now-last)/1000);last=now;test.advance(elapsed*(slow?.25:1));this.syncWorld();visibility();updateSkins();focus();};
+    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;test.dispose();for(const {skin} of skins)skin.debug.visible=false;road.removeFromParent();geometry.dispose();(road.material as THREE.Material).dispose();this.syncWorld();for(const [object,visible] of originals)object.visible=visible;for(const binding of skins)binding.update();this.grid.visible=true;};this.stopDriving=stop;
+    return {dispose:stop,wheel:(index:number)=>{selected=Math.max(0,Math.min(3,index));focus(true);},pause:(value:boolean)=>{test.paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},body:(value:boolean)=>{showBody=value;visibility();},bones:(value:boolean)=>{showBones=value;updateSkins();},speed:(kmh:number)=>{test.speed=THREE.MathUtils.clamp(kmh,0,40)/3.6;},bumps:(cm:number)=>{test.terrain.amplitude=THREE.MathUtils.clamp(cm,0,15)/100;rebuildRoad();},reset:()=>{test.reset();last=undefined;this.syncWorld();updateSkins();focus(true);},info:()=>`${['FL','FR','RL','RR'][selected]} · ${(test.speed*3.6).toFixed(0)} km/h · 120 Hz · travel ${test.suspension.wheels.map(w=>`${(w.length*100).toFixed(1)} cm${w.contact?'':' (air)'}`).join(' / ')} · ${skins.length} original skinned suspension parts`};
   }
   /** Same CFG/SCX physics construction used by the two-car stand. */
   private pairVehicle(root:EnginePart) {
