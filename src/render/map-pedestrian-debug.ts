@@ -12,7 +12,9 @@ export class MapPedestrianDebug {
       const y=(row.box[1]+row.box[4])/2;
       const visit=(record:PedestrianRecord)=>{
         if(record.points)for(let i=1;i<record.points.length;i++)line(record.points[i-1],record.points[i],0x39e6d2);
-        else if(record.quad)line([record.quad[0],y,record.quad[1]],[record.quad[2],y,record.quad[3]],record.kind===21?0xffdf62:0x679cff);
+        // Junction quads are relative to the row's XZ origin. Corridor rows
+        // have a zero origin; their quads and type-23 points are already world-space.
+        else if(record.quad)line([record.quad[0]+row.origin[0],y,record.quad[1]+row.origin[1]],[record.quad[2]+row.origin[0],y,record.quad[3]+row.origin[1]],record.kind===21?0xffdf62:0x679cff);
         if(record.child)visit(record.child);
       };row.records.forEach(visit);
     }

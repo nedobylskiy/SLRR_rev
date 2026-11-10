@@ -64,6 +64,7 @@ import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { MapRoadDebug, type RoadDebugLayer } from './map-road-debug';
 import {MapPedestrianDebug,type PedestrianDebugLayer} from './map-pedestrian-debug';
 import {loadMapPedestrians} from '../engine/map-pedestrians';
+import {PedestrianCrowd} from './pedestrian-crowd';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
@@ -402,6 +403,9 @@ export class Viewer {
   private mapRoadLayers = new Set<RoadDebugLayer>();
   roadDebugStatus = 'Road graph off';
   pedestrianDebugStatus='Pedestrian graph off';
+  pedestrianCrowdStatus='Walking pedestrians off';
+  private pedestrianCrowd?:PedestrianCrowd;
+  private pedestrianCrowdRevision=0;
   private mapPedestrianDebug?:MapPedestrianDebug;
   private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
   private mapPedestrianPending?:Promise<void>;
@@ -591,6 +595,7 @@ export class Viewer {
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       this.updateTrafficTest(now);
+      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body.position);if(this.trafficPeer)cars.push(this.trafficPeer.body.position);this.pedestrianCrowd.update(now,cars);}
       // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
@@ -1166,6 +1171,7 @@ export class Viewer {
     }
   }
   private resetRoadDebug() {
+    this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
     this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
     this.stopTrafficTest();
     this.mapTrafficFixtures=[];
@@ -1195,6 +1201,30 @@ export class Viewer {
     this.mapRoadPending=pending;
     try{await pending;}finally{if(this.mapRoadPending===pending)this.mapRoadPending=undefined;}
   }
+  inspectPedestrians(){
+    const point=this.pedestrianCrowd?.inspectionPoint;if(!point)return;
+    this.inspection.enabled=false;this.controls.target.copy(point).add(new THREE.Vector3(0,1,0));this.camera.position.copy(point).add(new THREE.Vector3(6,4,6));this.controls.update();
+  }
+  async showWalkingPedestrians(enabled:boolean){
+    const revision=++this.pedestrianCrowdRevision,source=this.mapRoadSource,mapRevision=this.mapRoadRevision;
+    this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
+    this.pedestrianCrowdStatus=enabled?'Loading walking pedestrians…':'Walking pedestrians off';
+    if(!enabled)return;
+    if(!source){this.pedestrianCrowdStatus='No map loaded';return;}
+    try{
+      const data=await loadMapPedestrians(source.assets,source.pack,source.groundId);
+      if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision)return;
+      if(!data){this.pedestrianCrowdStatus='No pedestrian AI files for this map';return;}
+      const crowd=await PedestrianCrowd.create(source.assets,data.walk,this.trafficPeer?.body.position??this.controls.target,async(bytes,path)=>{
+        const key=path.toLowerCase();let texture=this.javaCharacterTextures.get(key);
+        if(!texture){texture=this.texture(bytes,path);this.javaCharacterTextures.set(key,texture);texture.catch(()=>this.javaCharacterTextures.delete(key));}
+        return (await texture).clone();
+      });
+      if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision){crowd.dispose();return;}
+      this.pedestrianCrowd=crowd;this.scene.add(crowd.root);
+      this.pedestrianCrowdStatus=`${crowd.count} walking pedestrians · experimental zone routing / curved transitions / car avoidance. Toggle again to respawn nearby.`;
+    }catch(error){if(revision===this.pedestrianCrowdRevision)this.pedestrianCrowdStatus=String(error);}
+  }
   async showPedestrianDebug(layer:PedestrianDebugLayer,visible:boolean){
     visible?this.mapPedestrianLayers.add(layer):this.mapPedestrianLayers.delete(layer);
     if(this.mapPedestrianDebug){this.mapPedestrianDebug.show(layer,visible);return;}
@@ -1206,7 +1236,7 @@ export class Viewer {
       const data=await loadMapPedestrians(source.assets,source.pack,source.groundId);if(revision!==this.mapRoadRevision)return;
       if(!data){this.pedestrianDebugStatus='No pedestrian AI files for this map';return;}
       this.mapPedestrianDebug=new MapPedestrianDebug(this.scene,data.walk,data.rest);for(const enabled of this.mapPedestrianLayers)this.mapPedestrianDebug.show(enabled,true);
-      this.pedestrianDebugStatus=`${data.path} · ${data.walk.length} walk records · ${data.rest.length} rest areas\nCyan: walking-zone boundaries · blue: goal/transition spans (observed in original game) · yellow: type 21, unverified\nRest groups: purple / orange / green; no matching behavior confirmed. Lines do not indicate walking direction.`;
+      this.pedestrianDebugStatus=`${data.path} · ${data.walk.length} walk records · ${data.rest.length} rest areas\nCyan: walking-zone boundaries · blue: goal/transition spans · yellow: transition-corridor boundaries (observed in original game)\nRest groups: purple / orange / green; no matching behavior confirmed. Lines do not indicate walking direction.`;
     }catch(error){if(revision===this.mapRoadRevision)this.pedestrianDebugStatus=String(error);}})();
     this.mapPedestrianPending=pending;try{await pending;}finally{if(this.mapPedestrianPending===pending)this.mapPedestrianPending=undefined;}
   }

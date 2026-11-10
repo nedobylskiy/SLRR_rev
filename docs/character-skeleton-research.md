@@ -144,6 +144,7 @@ The user compared the overlay with behavior in the original game on November 10,
 
 - Adjacent cyan boundaries delimit a pedestrian movement zone, usually followed lengthwise; they are not individual directed walking paths.
 - Blue spans act as goals or transition boundaries. Within a cyan zone, pedestrians head toward the nearest blue span. After crossing it, they follow a curved transition toward the next zone.
+- After correcting the debug renderer to translate local junction spans by their row's XZ origin, the user identified the yellow type-21 spans as boundaries of transition corridors between the cyan movement zones. Blue spans mark their entrances/exits. This visual observation establishes a geometric constraint for transitions; it does not establish the original curve-selection algorithm.
 - A nearby car makes pedestrians move away at differing, increased speeds while remaining inside their zone.
 - During a transition outside a zone, they hurry toward one of its blue endpoints. The endpoint appears to be the one farther from the car, but distance-based versus direction-based selection is not yet established.
 - No consistent behavior matching the `.rest` boxes was observed. Their original purpose, whether they were used at all, and any proposed free-movement/crossing semantics remain unknown.
@@ -165,3 +166,14 @@ Confirmed overlap: spring/shock skinning, wheel/steering frames, named attachmen
 5. Decode and play a walking clip, resolving the final vector's semantics and time interpolation against observed motion. Implement the Java Animation/RenderRef bridge only with explicit lifecycle and per-instance pose state.
 
 The archive and upstream code substantially reduce discovery work, but they do not remove the need for these pose and playback checks.
+
+
+### Experimental walking crowd
+
+**Walking pedestrians (test)** in Graphics / map debug creates up to six original pedestrian models near the player's car (or the preview camera target). **Inspect pedestrians** moves the orbit camera to the first walker. Toggling the checkbox off/on respawns the test group; changing maps disposes it and invalidates pending loads. This is an opt-in experiment, not the original density/registration native implementation.
+
+The controller pairs the two type-23 boundary chains of a record, aligns their endpoints, and interpolates a position between them. Of the stock city records, 788 meet this corridor interpretation and gate validation. Type-22 endpoint IDs and the linked junction record's IDs choose connected corridors; nearby but unlinked sidewalks are not joined. At a goal span, yellow type-21 walls and blue type-22 gates are translated by the junction origin and assembled into a closed XZ contour. A quadratic arc through the junction origin is accepted only if its sampled segments stay inside that contour. Otherwise a visibility-graph path goes around the walls, with safe corners rounded inside the contour. Routes are sampled by arc length for steady speed; reversing away from a car retraces the same constrained path. Endpoint elevations are interpolated along the route. Missing/open contours or unreachable exits cause a turnaround, not an unconstrained shortcut. A dead end also reverses direction. `.rest` does not determine routes.
+
+Walkers initially choose the nearer end of their zone, keep different lateral offsets and walking speeds, and use compatible original walking clips. Within 12 metres horizontally and four metres vertically of an active car, they accelerate to individually varied escape speeds. A threat ahead reverses the walking direction inside the zone; during a transition the curve can be reversed toward the farther endpoint. A two-second decision cooldown avoids rapid reversals. These distances, speeds, curve construction, wall-constrained routing and escape selection are host approximations, not recovered original constants. There is no pedestrian collision/ragdoll activation, mutual avoidance, traffic-light compliance or population streaming yet.
+
+Verification includes bounded continuous movement through stock linked zones, corridor containment, turning away from a nearby car, loading all six animated actors, and resource disposal. The existing fixed Java spectators remain a separate system.

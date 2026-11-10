@@ -638,6 +638,11 @@ for(const [layer,title] of [['graph','Pedestrian graph'],['rest','Pedestrian res
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(pedestrianDebugStatus);
+const pedestrianCrowdLabel=textElement('label','Walking pedestrians (test)'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
+pedestrianCrowdCheck.type='checkbox';pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
+const inspectPedestriansButton=textElement('button','Inspect pedestrians');inspectPedestriansButton.onclick=()=>viewer?.inspectPedestrians();mapDebugOptions.append(inspectPedestriansButton);
+pedestrianCrowdCheck.onchange=()=>{const pending=viewer?.showWalkingPedestrians(pedestrianCrowdCheck.checked);pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';void pending?.then(()=>{pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';});};
+
 const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 2'),trafficCountSlider=document.createElement('input');
 trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='2';trafficCountSlider.setAttribute('aria-label','Traffic cars');
 trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
@@ -805,7 +810,7 @@ const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { w
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;
   roadDebugStatus.textContent='';
-  pedestrianDebugStatus.textContent='';
+  pedestrianDebugStatus.textContent='';pedestrianCrowdStatus.textContent='';
   vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
   if (map) mapDebugData.textContent = `Support triangles: ${map.terrain.faces.toLocaleString()}\nCollision walls: ${map.collision.walls.toLocaleString()}\nCFG collision boxes: ${map.collision.boxes.toLocaleString()}`;
 };
