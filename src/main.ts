@@ -20,6 +20,8 @@ import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
 import {parseRouteBenchmark,restoreRouteVehicle,type RouteBenchmark,type RouteMode} from './engine/route-benchmark';
 import { Vector3 } from 'three';
+import type {SkinnedCharacter} from './render/skinned-character';
+import {loadCharacterCatalog,skeletonCompatibility} from './render/character-catalog';
 import { mountMainMenu } from './osd/main-menu';
 import { OsdLayer } from './osd/osd-layer';
 import { OsdVideo } from './osd/osd-video';
@@ -340,6 +342,11 @@ const mapButton = textElement('button', 'Test Track');
 const trackDriveButton = textElement('button', 'Drive Test Track');
 const viewportExpandButton = textElement('button', 'Expand view', 'viewport-expand-button');
 el('viewport').append(viewportExpandButton);
+const hideGameUiLabel = textElement('label', '', 'viewport-hide-game-ui');
+const hideGameUi = document.createElement('input'); hideGameUi.type = 'checkbox';
+hideGameUi.onchange = () => el('viewport').classList.toggle('game-ui-hidden', hideGameUi.checked);
+hideGameUiLabel.append(hideGameUi, 'Hide game UI');
+el('viewport').append(hideGameUiLabel);
 const viewportCollapseButton = textElement('button', 'Minimize view · Esc', 'viewport-window-button');
 viewportCollapseButton.hidden = true; el('viewport').after(viewportCollapseButton);
 let trackDriving = false;
@@ -363,6 +370,102 @@ const hoodButton = textElement('button', 'Hood impact test'); hoodButton.classNa
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const pairControls = textElement('div', '', 'hood-controls'); pairControls.hidden = true; el('scene-help').before(pairControls);
+const playgroundButton=textElement('button','Character playground');playgroundButton.className='hood-button';crashButton.after(playgroundButton);
+const vinControls=textElement('div','','hood-controls character-playground');vinControls.hidden=true;el('scene-help').before(vinControls);
+let vinTimer:number|undefined;
+playgroundButton.onclick=()=>{void openSkeletonPreview();};
+async function openSkeletonPreview(id=0xa){
+  if(!assets||!viewer)return;const request=++sequence;
+  stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
+  el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;
+  el('format').textContent='CHARACTER PLAYGROUND';status('Loading character…');
+  try{
+    const catalog=await loadCharacterCatalog(assets);if(request!==sequence)return;
+    const resource=catalog.models.find(m=>m.id===id);if(!resource)throw Error('Character render is not in the RPK catalog');
+    const character=await viewer.showVin(assets,id);if(request!==sequence)return;
+    el('filename').textContent=`${resource.name} · humans.rpk : 0x${id.toString(16).padStart(4,'0')}`;
+    vinControls.replaceChildren();vinControls.hidden=false;
+    const row=()=>textElement('div','','character-playground-row');
+    const selection=row(),playback=row(),manual=document.createElement('details');manual.append(textElement('summary','Manual bone pose'));const poseRow=row();manual.append(poseRow);
+    const model=document.createElement('select');model.setAttribute('aria-label','Character model');
+    for(const item of catalog.models){const option=document.createElement('option');option.value=String(item.id);option.textContent=`${item.name} · ${item.bones.length} bones · 0x${item.id.toString(16)}`;model.append(option);}model.value=String(id);
+    model.onchange=()=>{void openSkeletonPreview(Number(model.value));};
+    const animationSelect=document.createElement('select');animationSelect.setAttribute('aria-label','Character animation');
+    const foreign=document.createElement('input');foreign.type='checkbox';const foreignLabel=textElement('label',"Other models' animations");foreignLabel.prepend(foreign);
+    selection.append(textElement('label','Model'),model,textElement('label','Animation'),animationSelect,foreignLabel);
+    const message=document.createElement('output');message.setAttribute('aria-label','Animation compatibility');
+    const play=document.createElement('input');play.type='checkbox';const playLabel=textElement('label','Play animation');playLabel.prepend(play);
+    const loop=document.createElement('input');loop.type='checkbox';loop.checked=true;const loopLabel=textElement('label','Loop animation');loopLabel.prepend(loop);
+    const seek=document.createElement('input');seek.type='range';seek.min='0';seek.max='0';seek.step='0.001';seek.value='0';seek.setAttribute('aria-label','Animation time');
+    const clock=document.createElement('output');clock.setAttribute('aria-label','Animation playback');const restart=textElement('button','Restart animation') as HTMLButtonElement;
+    const skeleton=document.createElement('input');skeleton.type='checkbox';skeleton.checked=true;const skeletonLabel=textElement('label','Skeleton');skeletonLabel.prepend(skeleton);
+    skeleton.onchange=()=>{character.helper.visible=skeleton.checked;};
+    playback.append(playLabel,loopLabel,seek,clock,restart,skeletonLabel);
+    const ragdoll=textElement('button','Ragdoll') as HTMLButtonElement,restore=textElement('button','Back to animation') as HTMLButtonElement;restore.disabled=true;
+    playback.append(ragdoll,restore);
+    const bone=document.createElement('select');bone.setAttribute('aria-label','Character bone');
+    character.definitions.forEach((def,i)=>{const option=document.createElement('option');option.value=String(i);option.textContent=`${i}: ${def.name}`;bone.append(option);});bone.value=String(character.bone);
+    const axis=document.createElement('select');axis.setAttribute('aria-label','Rotation axis');for(const name of ['X','Y','Z']){const option=document.createElement('option');option.value=name;option.textContent=name;axis.append(option);}axis.value='Z';
+    const angle=document.createElement('input');angle.type='range';angle.min='-90';angle.max='90';angle.step='1';angle.value='0';angle.setAttribute('aria-label','Bone rotation');const value=document.createElement('output');value.textContent='0°';
+    const reset=textElement('button','Reset pose'),bend=textElement('button','Test bend 45°');const test=document.createElement('input');test.type='checkbox';const testLabel=textElement('label','Animate test');testLabel.prepend(test);
+    const info=document.createElement('output');info.setAttribute('aria-label','Skin deformation');
+    poseRow.append(bone,axis,angle,value,bend,reset,testLabel,info);
+    vinControls.append(selection,message,playback,manual);
+    let original:Awaited<ReturnType<SkinnedCharacter['loadOriginalClip']>>|undefined,clipRequest=0;
+    const updateInfo=()=>{const d=character.deformation();info.textContent=`${d.moved}/${d.total} vertices moved · max ${(d.max*100).toFixed(2)} cm`;};
+    const updatePlayback=()=>{seek.value=String(character.playbackTime);clock.textContent=original?`${character.playbackTime.toFixed(2)} / ${original.clip.duration.toFixed(2)} s · ${original.animation.times.length} keys/bone`:'Bind pose';};
+    const updateDetails=()=>{el('details').textContent=`${character.source.pack}:0x${id.toString(16)}\nMesh: ${character.source.mesh}\nSkeleton: ${character.source.skeleton}\n${character.definitions.length} bones · ${character.meshes.length} skinned sections\n${original?`Animation: ${original.path} · ${original.clip.tracks.length} native Three.js tracks`:'Bind pose; no original animation selected.'}\nJoint limits are metadata. No files are exported.`;};
+    const setPlaybackEnabled=(enabled:boolean)=>{play.disabled=seek.disabled=restart.disabled=loop.disabled=!enabled||character.isRagdoll;};
+    const updateRagdollControls=()=>{
+      const active=character.isRagdoll;ragdoll.disabled=active;restore.disabled=!active;animationSelect.disabled=foreign.disabled=active;
+      restore.textContent=original?'Back to animation':'Restore pose';setPlaybackEnabled(!!original);
+      for(const control of poseRow.querySelectorAll<HTMLInputElement|HTMLSelectElement|HTMLButtonElement>('input,select,button'))control.disabled=active;
+    };
+    ragdoll.onclick=async()=>{
+      ++clipRequest;ragdoll.disabled=true;
+      try{await character.startRagdoll();if(request!==sequence)return;play.checked=false;test.checked=false;updateRagdollControls();clock.textContent='Ragdoll';}
+      catch(error){if(request===sequence){message.textContent=String(error);updateRagdollControls();}}
+    };
+    restore.onclick=()=>{const time=Number(seek.value);character.stopRagdoll();if(original){character.playClip(original.clip,true,loop.checked);character.seek(time);}else character.setPlaybackPlaying(false);play.checked=!!original;updateRagdollControls();updatePlayback();updateInfo();};
+    const loadAnimation=async()=>{
+      const pending=++clipRequest;play.checked=false;test.checked=false;original=undefined;character.setPose(character.bone,character.axis,0);setPlaybackEnabled(false);
+      updateRagdollControls();ragdoll.disabled=true;
+      if(!animationSelect.value){ragdoll.disabled=false;message.textContent='Bind pose';updateInfo();updatePlayback();updateDetails();return;}
+      message.textContent='Loading animation…';
+      try{
+        const animation=catalog.animations.find(a=>a.id===Number(animationSelect.value))!;
+        const transferred=animation.family!==resource.family;
+        const loaded=await character.loadOriginalClip(assets,animation.id,transferred);
+        if(request!==sequence||pending!==clipRequest)return;
+        original=loaded;seek.max=String(loaded.clip.duration);seek.value='0';angle.value='0';value.textContent='0°';play.checked=true;setPlaybackEnabled(true);character.playClip(loaded.clip,true,loop.checked);
+        updateRagdollControls();
+        message.textContent=transferred?'Shared skeleton: using this model’s bone lengths. Different bone axes still need retargeting.':`Original animation · ${animation.name}`;
+        updateInfo();updatePlayback();updateDetails();
+      }catch(error){if(request===sequence&&pending===clipRequest){message.textContent=String(error);updateRagdollControls();updatePlayback();updateDetails();}}
+    };
+    const populateAnimations=()=>{
+      const previous=animationSelect.value;animationSelect.replaceChildren();const bind=document.createElement('option');bind.value='';bind.textContent='Bind pose';animationSelect.append(bind);
+      for(const animation of catalog.animations){
+        if(!foreign.checked&&animation.family!==resource.family)continue;
+        const incompatible=skeletonCompatibility(character.definitions,animation.bones),option=document.createElement('option');option.value=String(animation.id);option.disabled=!!incompatible;
+        option.textContent=`${animation.name}${animation.family!==resource.family?' · other model':''}${incompatible?' · incompatible skeleton':''}`;option.title=incompatible??animation.path;animationSelect.append(option);
+      }
+      const options=Array.from(animationSelect.options),exact=catalog.animations.find(a=>a.path.replace(/\.matrixdata$/i,'').toLowerCase()===resource.path.replace(/\.skl$/i,'').toLowerCase());
+      animationSelect.value=options.some(o=>o.value===previous&&previous&&!o.disabled)?previous:exact&&options.some(o=>o.value===String(exact.id)&&!o.disabled)?String(exact.id):options.find(o=>o.value&&!o.disabled)?.value??'';
+      void loadAnimation();
+    };
+    animationSelect.onchange=()=>{void loadAnimation();};foreign.onchange=populateAnimations;
+    play.onchange=()=>{if(!original)return;test.checked=false;character.playClip(original.clip,play.checked,loop.checked);character.seek(Number(seek.value));};
+    loop.onchange=()=>character.setPlaybackLoop(loop.checked);
+    seek.oninput=()=>{if(!original)return;test.checked=false;play.checked=false;const time=Number(seek.value);character.playClip(original.clip,false,loop.checked);character.seek(time);updateInfo();updatePlayback();};
+    restart.onclick=()=>{if(!original)return;test.checked=false;play.checked=true;character.playClip(original.clip,true,loop.checked);updatePlayback();};
+    const pose=()=>{++clipRequest;play.checked=false;test.checked=false;character.setPose(Number(bone.value),axis.value as 'X'|'Y'|'Z',Number(angle.value));value.textContent=`${angle.value}°`;updateInfo();};
+    bone.onchange=pose;axis.onchange=pose;angle.oninput=pose;reset.onclick=()=>{angle.value='0';pose();};bend.onclick=()=>{angle.value='45';pose();};test.onchange=()=>{play.checked=false;character.animate(test.checked);};
+    populateAnimations();updateInfo();updatePlayback();updateDetails();
+    vinTimer=window.setInterval(()=>{if(request!==sequence)return;if(play.checked)updatePlayback();if(manual.open&&(play.checked||test.checked||character.isRagdoll))updateInfo();},100);
+    status(`${resource.name} ready`);
+  }catch(error){if(request===sequence){viewer.clear();status('Character load failed',true);el('details').textContent=String(error);}}
+}
 const mapDebugPanel = document.createElement('details'); mapDebugPanel.className = 'map-debug-panel'; mapDebugPanel.hidden = true;
 const garageCarButton = textElement('button','Replace car: Einvagen 110 GTK') as HTMLButtonElement;
 garageCarButton.hidden = true;
@@ -528,6 +631,13 @@ for(const [layer,title] of [['graph','Road graph'],['crossings','Road crossings'
   label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
 }
 mapDebugOptions.append(roadDebugStatus);
+const pedestrianDebugStatus=textElement('pre','','map-debug-data');
+for(const [layer,title] of [['graph','Pedestrian graph'],['rest','Pedestrian rest areas']] as const){
+  const label=textElement('label',title),input=document.createElement('input');input.type='checkbox';
+  input.onchange=()=>{const pending=viewer?.showPedestrianDebug(layer,input.checked);pedestrianDebugStatus.textContent=viewer?.pedestrianDebugStatus??'';void pending?.then(()=>{pedestrianDebugStatus.textContent=viewer?.pedestrianDebugStatus??'';});};
+  label.prepend(input);mapDebugOptions.append(label);mapDebugChecks.push(input);
+}
+mapDebugOptions.append(pedestrianDebugStatus);
 const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 2'),trafficCountSlider=document.createElement('input');
 trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='2';trafficCountSlider.setAttribute('aria-label','Traffic cars');
 trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
@@ -695,6 +805,7 @@ const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { w
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;
   roadDebugStatus.textContent='';
+  pedestrianDebugStatus.textContent='';
   vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
   if (map) mapDebugData.textContent = `Support triangles: ${map.terrain.faces.toLocaleString()}\nCollision walls: ${map.collision.walls.toLocaleString()}\nCFG collision boxes: ${map.collision.boxes.toLocaleString()}`;
 };
@@ -1045,25 +1156,27 @@ trackDriveButton.onclick = async () => {
     status('Driving on Test Track');
   } catch (error) { if (request === sequence) { stopDrive(); viewer.clear(); status('Drive unavailable', true); el('details').textContent = String(error); } }
 };
-mapButton.onclick = async () => {
+mapButton.onclick = () => {void previewMap('maps/test_track.rpk');};
+async function previewMap(packPath:string,groundId?:number) {
   if (!assets || !viewer) return;
   const request = ++sequence;
   stopDrive(); engineRoot = undefined; engineWorld?.dispose(); engineWorld = undefined;
   disposeMemoryLab?.(); disposeMemoryLab = undefined;
   el('viewport').hidden = false; el('inspector').hidden = true; el('scene-help').hidden = false;
-  el('filename').textContent = 'test_track · original geometry'; el('format').textContent = 'MAP / WEBGL';
-  status('Loading track…'); el('details').textContent = 'Reading SCX and textures from maps/test_track.rpk…';
+  el('filename').textContent = `${packPath} · original geometry`; el('format').textContent = 'MAP / WEBGL';
+  status('Loading map…'); el('details').textContent = `Reading SCX and textures from ${packPath}…`;
   try {
-    const result = await viewer.showMap('maps/test_track.rpk', assets, (done, total) => {
+    const result = await viewer.showMap(packPath, assets, (done, total) => {
       if (request === sequence) status(`Track ${done}/${total}`);
-    });
+    },false,{groundId});
     if (request !== sequence) return;
     showMapDebugControls(result);
     el('details').textContent = `${result.loaded}/${result.total} models · ${result.objects} placed RDB/CFG objects · ${result.triangles.toLocaleString('en-US')} map triangles. Geometry and textures come from the original RPK/SCX; objects use RDB coordinates. Road collision is still approximate.\n${result.warnings.slice(0, 12).join('\n')}`;
     status(result.loaded ? 'Track loaded' : 'No geometry', !result.loaded);
   } catch (error) { if (request === sequence) { viewer.clear(); status('Map error', true); el('details').textContent = String(error); } }
-};
+}
 function stopDrive() {
+  vinControls.hidden=true;clearInterval(vinTimer);vinTimer=undefined;
   pairControls.hidden=true;
   benchmarkRunning=false;
   routePreviewSession=undefined;routeSeek.disabled=true;routeScreenshot.disabled=true;
@@ -1319,6 +1432,9 @@ async function openAsset(file: Asset) {
           const row = document.createElement('details');
           row.append(textElement('summary', `0x${entry.typeId.toString(16).padStart(8, '0')}  ${entry.alias}  · type ${entry.type} · ${entry.size} B`));
           const props = entryProperties(entry);
+          if(entry.type===1&&/^maps[\\/]/i.test(file.path)){
+            const preview=textElement('button','Preview map');preview.onclick=()=>{void previewMap(file.path,entry.typeId);};row.append(preview);
+          }
           row.append(textElement('pre', props.length ? props.map(p => `${p.key} ${p.value}`).join('\n') : entry.data.length ? 'Binary payload: no decoder for this type yet.' : 'Empty payload'));
           if (props.some(p => p.key === 'native' && /^(car|part)\s/i.test(p.value))) {
             const spawn = textElement('button', 'Create in world');

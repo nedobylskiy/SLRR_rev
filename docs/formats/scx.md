@@ -39,7 +39,7 @@ Material: flags, function word, property count, then typed properties. Colors 0.
 
 Vertex chunk: count u32, flags u32, interleaved records. Bits: position 0x1; influence group 0x2/4/8/10; bone indices 0x20; normal 0x40; emissive 0x80; color 0x100; UV1 0x200; UV2 0x400; UV3 0x800; tangent/bump normal 0x40000. UV2/UV3 are now readable and available to the material. An audit of the current installation found 13 environment models with additional UV channels and hundreds of diffuse map entries with scale/displacement other than one/zero.
 
-**The weights are not an independent float per bit set.** Group 0x2 means one die and 0 explicit weights; 0x4 - two dice and 1 weight; 0x8 - three and 2 weights; 0x10 - four and 3 weights. The last weight is not stored. This is tested on `humans/drivers/police.SCX`; an invalid stride breaks all subsequent data.
+**The weights are not an independent float per bit set.** Group 0x2 means one bone influence and 0 explicit weights; 0x4 means two influences and 1 weight; 0x8 means three and 2 weights; 0x10 means four and 3 weights. The last weight is not stored. This is tested on `humans/drivers/police.SCX`; an invalid stride breaks all subsequent data. The browser parser retains these values and section palettes for native Three.js skinning. See the [character skeleton research](../character-skeleton-research.md) for confirmed data, upstream evidence and remaining gaps.
 
 Index chunk: u32 number of **indices**, then u16[count], not count of triangles. One material group can have several vertex/index pairs (for example, by bone groups). The parser should not overwrite previous geometry.
 

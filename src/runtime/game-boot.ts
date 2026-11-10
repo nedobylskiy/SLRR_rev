@@ -29,6 +29,7 @@ import { entryProperties, type RpkPack } from '../formats/rpk';
 import { browserKeyValue, type KeyValue } from './key-value';
 import { VirtualFileSystem } from './virtual-file-system';
 import { RenderRefNative, type RenderLightSettings, type RenderFlareSource } from './render-ref-native';
+import {AnimationNative} from './animation-native';
 import type { RenderObject } from './render-object';
 import { OsdTextNative } from './osd-text-native';
 import { OsdButtonNative } from './osd-button-native';
@@ -414,6 +415,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       }
     });
   const cameras = new CameraNative(jvm, gameTypes, viewports);
+  const animations=new AnimationNative(jvm,gameTypes);
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
@@ -563,7 +565,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {

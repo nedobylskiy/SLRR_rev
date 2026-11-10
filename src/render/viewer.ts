@@ -1,4 +1,5 @@
 import { intersectPartGeometry } from './part-picking';
+import {loadSkinnedCharacter,type SkinnedCharacter} from './skinned-character';
 import {VehiclePairTest,type VehiclePairScenario} from '../engine/vehicle-pair-test';
 import { applySavedPanel, restoreReferenceGeometry } from './saved-panel';
 import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from '../engine/driving-helping';
@@ -61,6 +62,8 @@ import {mapObjectCategory,type MapObjectCategory} from './map-object-category';
 import { MapObjectStream, type StreamPlacement } from './map-object-stream';
 import { MapDebugView, type MapDebugLayer } from './map-debug-view';
 import { MapRoadDebug, type RoadDebugLayer } from './map-road-debug';
+import {MapPedestrianDebug,type PedestrianDebugLayer} from './map-pedestrian-debug';
+import {loadMapPedestrians} from '../engine/map-pedestrians';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
@@ -74,7 +77,7 @@ import { vehiclePairContact } from '../engine/vehicle-pair-test';
 import type { CfgWheel } from '../formats/cfg';
 import { TireEffects } from './tire-effects';
 import { VehicleAudio } from '../audio/vehicle-audio';
-import { RenderObject } from '../runtime/render-object';
+import { RenderObject,type RenderAnimationState } from '../runtime/render-object';
 import type { RenderLightSettings, RenderFlareSource } from '../runtime/render-ref-native';
 import type { EnvironmentMapSource } from './environment-map';
 import { FrameProfiler } from './frame-profiler';
@@ -328,6 +331,8 @@ export class Viewer {
   private javaRenderRequests = new Map<number, number>();
   private javaRenderRevisions = new Map<number, number>();
   private javaRenderTemplates = new Map<string, Promise<THREE.Group>>();
+  private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
+  private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
   private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
@@ -351,6 +356,8 @@ export class Viewer {
   private ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({ color: 0x171f25, roughness: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }));
   private frame?: (now: number) => void;
   private afterFrame?:()=>void;
+  private characterPreview?:SkinnedCharacter;
+  private characterFollowingRagdoll=false;
   private frameCapture?:{resolve:(blob:Blob)=>void;reject:(reason:Error)=>void};
   captureFrame(){return new Promise<Blob>((resolve,reject)=>{
     if(this.frameCapture){reject(Error('A frame capture is already pending'));return;}
@@ -394,6 +401,10 @@ export class Viewer {
   private mapRoadPending?: Promise<void>;
   private mapRoadLayers = new Set<RoadDebugLayer>();
   roadDebugStatus = 'Road graph off';
+  pedestrianDebugStatus='Pedestrian graph off';
+  private mapPedestrianDebug?:MapPedestrianDebug;
+  private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
+  private mapPedestrianPending?:Promise<void>;
   private trafficTestEnabled = false;
   private trafficTestRevision = 0;
   private trafficCars:TrafficTestCar[]=[];
@@ -558,6 +569,19 @@ export class Viewer {
       this.profiler.beginFrame(now);
       try {
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.beginFrame());
+      this.characterPreview?.update(now);
+      for(const actor of this.javaCharacters.values()){
+        actor.character.update(now,false);
+        if(actor.ready&&actor.node.animation)actor.node.animation.position=actor.character.playbackTime;
+      }
+      if(this.characterPreview&&(this.characterPreview.isRagdoll||this.characterFollowingRagdoll)){
+        const center=new THREE.Box3().setFromObject(this.characterPreview.root).getCenter(new THREE.Vector3());
+        const delta=center.sub(this.controls.target);
+        // Keep the same orbit/zoom while following the falling body and its reset.
+        delta.multiplyScalar(this.characterPreview.isRagdoll?.15:1);
+        this.camera.position.add(delta);this.controls.target.add(delta);this.controls.update();
+        this.characterFollowingRagdoll=this.characterPreview.isRagdoll;
+      }
       if (document.hidden) this.previousFrame = undefined;
       if (this.previousFrame !== undefined && now > this.previousFrame) {
         this.profiler.recordFrame(now - this.previousFrame);
@@ -649,6 +673,9 @@ export class Viewer {
     });
   }
   clear() {
+    for(const actor of this.javaCharacters.values())actor.character.dispose();this.javaCharacters.clear();
+    for(const texture of this.javaCharacterTextures.values())void texture.then(t=>t.dispose()).catch(()=>{});this.javaCharacterTextures.clear();
+    this.characterPreview?.dispose();this.characterPreview=undefined;
     this.frameCapture?.reject(Error('Scene cleared'));this.frameCapture=undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapPackPath=undefined;
@@ -691,6 +718,7 @@ export class Viewer {
     const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
     if (node.resourceType !== 3) {
+      this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
       this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
@@ -717,7 +745,8 @@ export class Viewer {
     const modelGroup = this.javaRenderModels.get(node.id)!;
     const revision = (this.javaRenderRevisions.get(node.id) ?? 0) + 1;
     this.javaRenderRevisions.set(node.id, revision);
-    modelGroup.scale.set(0.01 * node.meshScale.x, 0.01 * node.meshScale.y, 0.01 * node.meshScale.z);
+    const unit=this.javaCharacters.has(node.id)?1:.01;
+    modelGroup.scale.set(unit * node.meshScale.x, unit * node.meshScale.y, unit * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
     if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node)) {
@@ -781,12 +810,28 @@ export class Viewer {
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
     const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}` : '';
-    if (this.javaRenderTypes.get(node.id) === key) return;
+    if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
+    this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
+    modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
     this.javaRenderTypes.set(node.id, key);
     modelGroup.clear();
     const request = (this.javaRenderRequests.get(node.id) ?? 0) + 1;
     this.javaRenderRequests.set(node.id, request);
     if (!identity) return;
+
+    const descriptor=await assets.resource(identity.pack,identity.id);
+    if(generation!==this.generation||this.javaRenderRequests.get(node.id)!==request||!group.parent)return;
+    if(entryProperties(descriptor.entry).some(p=>p.key==='skeleton')){
+      const character=await loadSkinnedCharacter(assets,async(bytes,path)=>{
+        const key=path.toLowerCase();let pending=this.javaCharacterTextures.get(key);
+        if(!pending){pending=this.texture(bytes,path);this.javaCharacterTextures.set(key,pending);}
+        return (await pending).clone();
+      },identity.pack,identity.id);
+      if(generation!==this.generation||this.javaRenderRequests.get(node.id)!==request||!group.parent){character.dispose();return;}
+      modelGroup.scale.set(node.meshScale.x,node.meshScale.y,node.meshScale.z);modelGroup.add(character.root);character.refresh();
+      for(const mesh of character.meshes){if(mesh.boundingSphere)mesh.boundingSphere.radius+=1;}
+      this.javaCharacters.set(node.id,{character,node,key:'',serial:0,ready:false});await this.syncJavaCharacter(node,assets);return;
+    }
 
     const templateKey = `${key}|${isSkyDome ? 'sky' : 'model'}`;
     let templatePromise = this.javaRenderTemplates.get(templateKey);
@@ -820,6 +865,26 @@ export class Viewer {
     if (generation !== this.generation || this.javaRenderRequests.get(node.id) !== request
       || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
     modelGroup.add(template.clone(true));
+  }
+  private async syncJavaCharacter(node:RenderObject,assets:Assets){
+    const actor=this.javaCharacters.get(node.id);if(!actor)return;
+    const state=node.animation,key=state?`${state.pack}:${state.id}`:'';
+    if(!state){actor.serial++;actor.ready=false;actor.key='';actor.state=undefined;actor.character.animate(false);return;}
+    if(actor.key!==key){
+      const serial=++actor.serial;actor.key=key;actor.ready=false;
+      try{
+        const {clip}=await actor.character.loadOriginalClip(assets,state.id,false,state.pack);
+        if(this.javaCharacters.get(node.id)!==actor||actor.serial!==serial)return;
+        actor.character.playClip(clip,false,state.loop);actor.ready=true;actor.state=undefined;
+      }catch(error){if(this.javaCharacters.get(node.id)===actor&&actor.serial===serial)actor.key='';throw error;}
+    }
+    const current=node.animation;
+    if(!actor.ready||!current||`${current.pack}:${current.id}`!==actor.key)return;
+    if(actor.state!==current||actor.revision!==current.revision){
+      actor.character.setPlaybackSpeed(current.speed);actor.character.setPlaybackLoop(current.loop);actor.character.setPlaybackPlaying(current.playing);actor.character.seek(current.position);
+      if(current.playing&&current.fade>0)actor.character.fadeIn(current.fade);
+      actor.state=current;actor.revision=current.revision;
+    }
   }
   setMapFog(settings: MapFogSettings) {
     if (!Number.isInteger(settings.color) || settings.color < 0 || settings.color > 0xffffff || !Number.isFinite(settings.near) || !Number.isFinite(settings.far) || settings.near < 0 || settings.far <= settings.near) throw new Error('Invalid map fog settings');
@@ -1101,6 +1166,7 @@ export class Viewer {
     }
   }
   private resetRoadDebug() {
+    this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
     this.stopTrafficTest();
     this.mapTrafficFixtures=[];
     this.mapRoadRevision++; this.mapRoadDebug?.dispose(); this.mapRoadDebug=undefined;
@@ -1129,6 +1195,21 @@ export class Viewer {
     this.mapRoadPending=pending;
     try{await pending;}finally{if(this.mapRoadPending===pending)this.mapRoadPending=undefined;}
   }
+  async showPedestrianDebug(layer:PedestrianDebugLayer,visible:boolean){
+    visible?this.mapPedestrianLayers.add(layer):this.mapPedestrianLayers.delete(layer);
+    if(this.mapPedestrianDebug){this.mapPedestrianDebug.show(layer,visible);return;}
+    if(!visible)return;if(this.mapPedestrianPending)return this.mapPedestrianPending;
+    const source=this.mapRoadSource,revision=this.mapRoadRevision;
+    if(!source){this.pedestrianDebugStatus='No map loaded';return;}
+    this.pedestrianDebugStatus='Loading pedestrian AI…';
+    const pending=(async()=>{try{
+      const data=await loadMapPedestrians(source.assets,source.pack,source.groundId);if(revision!==this.mapRoadRevision)return;
+      if(!data){this.pedestrianDebugStatus='No pedestrian AI files for this map';return;}
+      this.mapPedestrianDebug=new MapPedestrianDebug(this.scene,data.walk,data.rest);for(const enabled of this.mapPedestrianLayers)this.mapPedestrianDebug.show(enabled,true);
+      this.pedestrianDebugStatus=`${data.path} · ${data.walk.length} walk records · ${data.rest.length} rest areas\nCyan: walking-zone boundaries · blue: goal/transition spans (observed in original game) · yellow: type 21, unverified\nRest groups: purple / orange / green; no matching behavior confirmed. Lines do not indicate walking direction.`;
+    }catch(error){if(revision===this.mapRoadRevision)this.pedestrianDebugStatus=String(error);}})();
+    this.mapPedestrianPending=pending;try{await pending;}finally{if(this.mapPedestrianPending===pending)this.mapPedestrianPending=undefined;}
+  }
   dispose() {
     this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
     for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
@@ -1148,6 +1229,17 @@ export class Viewer {
     const warnings = await this.append(model, assets, textures, this.model, generation);
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  async showVin(assets:Assets,id=0xc){
+    this.clear();this.characterFollowingRagdoll=false;const generation=this.generation;
+    const character=await loadSkinnedCharacter(assets,(bytes,path)=>this.texture(bytes,path),'humans.rpk',id);
+    if(generation!==this.generation){character.dispose();throw Error('Character preview superseded');}
+    this.characterPreview=character;this.model.add(character.root);this.scene.add(character.helper);this.fit();character.refresh();
+    const bounds=new THREE.Box3().setFromObject(this.model);this.model.position.y-=bounds.min.y;
+    this.model.updateMatrixWorld(true);character.refresh();
+    character.setRagdollFloor(character.root.worldToLocal(new THREE.Vector3(0,0,0)).y);
+    this.ground.visible=true;this.controls.target.set(0,bounds.getSize(new THREE.Vector3()).y/2,0);this.camera.position.set(6,5,6);this.controls.update();
+    return character;
   }
   removeWorld(world: EngineWorld): void {
     for (const [part, group] of this.proxies) if (part.world === world) {

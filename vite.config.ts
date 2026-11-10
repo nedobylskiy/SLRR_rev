@@ -7,7 +7,7 @@ import ffmpegPath from 'ffmpeg-static';
 import { gameRoot, walk, relativeGamePath, safeGamePath } from './tools/game-files';
 
 const audioTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav' };
-const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.class', '.java', '.cfg', '.tex', '.ptx', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', '.trc', ...Object.keys(audioTypes)]);
+const allowed = new Set(['.rpk', '.rdb', '.scx', '.scy', '.bon', '.skl', '.matrixdata', '.class', '.java', '.cfg', '.tex', '.ptx', '.dds', '.png', '.jpg', '.jpeg', '.tga', '.bmp', '.trc', '.walk', '.rest', ...Object.keys(audioTypes)]);
 function gameAssets(): Plugin {
   let index: Promise<{ path: string; size: number }[]> | undefined;
   const videos = new Map<string, Promise<Buffer>>();
