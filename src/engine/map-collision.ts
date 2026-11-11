@@ -131,15 +131,41 @@ export class MapCollision {
     }
     return nearest;
   }
-  contact(point: Vector3, radius = 0.2, includeBoxes = true): { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined {
+  /** Point probes can keep a broad lateral skin without extending a chassis
+   * down through its actual ground clearance. Sphere callers retain radius padding. */
+  contact(point: Vector3, radius = 0.2, includeBoxes = true, verticalPadding = radius): { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined {
     const list = this.cells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`);
     const boxes = includeBoxes ? this.boxCells.get(`${Math.floor(point.x / this.size)},${Math.floor(point.z / this.size)}`) : undefined;
     if (!list && !boxes) return;
     let nearest: { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined;
-    const closest = new Vector3();
+    const closest = new Vector3(), sliceA = new Vector3(), sliceB = new Vector3();
     for (const wall of list ?? []) {
-      if (point.y < wall.minY - radius || point.y > wall.maxY + radius) continue;
-      wall.triangle.closestPointToPoint(point, closest);
+      if (point.y < wall.minY - verticalPadding || point.y > wall.maxY + verticalPadding) continue;
+      if (verticalPadding < radius) {
+        // Slice at the chassis height, not the triangle-wide height range: a
+        // long curb on a grade can have a high far end but be low right here.
+        const y = Math.max(wall.minY, Math.min(wall.maxY, point.y));
+        let count = 0;
+        for(let i=0;i<3;i++){
+          const u=i===0?wall.triangle.a:i===1?wall.triangle.b:wall.triangle.c;
+          const v=i===0?wall.triangle.b:i===1?wall.triangle.c:wall.triangle.a;
+          if ((u.y < y && v.y < y) || (u.y > y && v.y > y)) continue;
+          const flat=Math.abs(v.y-u.y)<1e-10;
+          for(let endpoint=0;endpoint<(flat?2:1);endpoint++){
+            const t=flat?endpoint:(y-u.y)/(v.y-u.y);
+            const x=u.x+(v.x-u.x)*t,z=u.z+(v.z-u.z)*t;
+            if(!count){sliceA.set(x,y,z);count=1;}
+            else if((x-sliceA.x)**2+(z-sliceA.z)**2>1e-14){sliceB.set(x,y,z);count=2;}
+          }
+        }
+        if (!count) continue;
+        closest.copy(sliceA);
+        if (count>1) {
+          const dx=sliceB.x-sliceA.x,dz=sliceB.z-sliceA.z;
+          const t=Math.max(0,Math.min(1,((point.x-sliceA.x)*dx+(point.z-sliceA.z)*dz)/(dx*dx+dz*dz)));
+          closest.x+=dx*t; closest.z+=dz*t;
+        }
+      } else wall.triangle.closestPointToPoint(point, closest);
       const d2 = point.distanceToSquared(closest);
       if (d2 >= radius * radius) continue;
       const distance = Math.sqrt(d2), normal = distance > 1e-7
@@ -149,7 +175,7 @@ export class MapCollision {
       if (!nearest || depth > nearest.depth) nearest = { point: closest.clone(), normal, depth, bounds: wall.bounds };
     }
     for (const box of boxes ?? []) {
-      if (point.y < box.bounds.min.y - radius || point.y > box.bounds.max.y + radius) continue;
+      if (point.y < box.bounds.min.y - verticalPadding || point.y > box.bounds.max.y + verticalPadding) continue;
       const local = point.clone().applyMatrix4(box.inverse);
       closest.copy(local).clamp(box.half.clone().negate(), box.half);
       const delta = local.clone().sub(closest), distance = delta.length();

@@ -796,8 +796,8 @@ for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side f
   input.onchange = () => viewer?.showMapDebug(layer, input.checked);
   label.prepend(input); mapDebugOptions.append(label); mapDebugChecks.push(input);
 }
-const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), vehicleFramesCheck = document.createElement('input');
-vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
+const vehicleFramesLabel = textElement('label', 'Vehicle bounds: parts + chassis'), vehicleFramesCheck = document.createElement('input');
+vehicleFramesLabel.title = 'Green: chassis collision hull. Amber: body geometry AABB. Cyan: mechanical geometry AABB. Effects are excluded.'; vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
 const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
 const suspensionBonesLabel=textElement('label','Suspension bone animation'),suspensionBonesCheck=document.createElement('input');
