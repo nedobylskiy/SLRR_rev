@@ -14,6 +14,7 @@ test('global facades combine different models and bake all instance poses and pa
   const parent=new Group(),texture=new Texture(),a=source(texture),b=source(texture);parent.add(a,b);
   const original=Array.from(a.geometry.getAttribute('position').array),batch=new GlobalFacadeBatches(parent,[{mesh:a,placements:[placement(0,0xff0000),placement(10,0x00ff00)]},{mesh:b,placements:[placement(20)]}]);
   assert.equal(batch.meshes.length,1);assert.equal(batch.sourceCopies,3);assert.equal(batch.sources.size,2);assert.equal(batch.triangles,36);
+  assert.deepEqual(batch.meshes[0].userData.facadeContributions,[{name:'facade',copies:2,triangles:24},{name:'facade',copies:1,triangles:12}]);
   const mesh=batch.meshes[0],paint=mesh.geometry.getAttribute('slrrBuildingPaintTint');assert.equal(paint.getX(0),1);assert.equal(paint.getY(24),1);assert.ok(Math.abs(paint.getX(48)-.2)<1e-6);
   assert.equal(mesh.geometry.boundingBox!.max.x,20.5);assert.equal(mesh.geometry.boundingBox!.min.z,-20.5);
   assert.deepEqual(Array.from(a.geometry.getAttribute('position').array),original);assert.equal(a.parent,null);assert.ok(a.userData.globalFacadeSource);
@@ -27,7 +28,7 @@ test('global facades combine different models and bake all instance poses and pa
 test('material arrays stay separate and size budgets keep whole source models as fallbacks',()=>{
   const parent=new Group(),a=source(new Texture()),b=source(new Texture());
   const batch=new GlobalFacadeBatches(parent,[{mesh:a,placements:[placement(0),placement(10)]},{mesh:b,placements:[placement(20)]}],24,100);
-  assert.equal(batch.meshes.length,3);assert.ok(batch.meshes.every(m=>m.geometry.getAttribute('position').count<=24));batch.dispose();
+  assert.equal(batch.meshes.length,3);assert.ok(batch.meshes.every(m=>m.userData.facadeContributions.reduce((sum:number,c:{triangles:number})=>sum+c.triangles,0)===12),'per-batch provenance resets when the vertex limit splits a source');assert.ok(batch.meshes.every(m=>m.geometry.getAttribute('position').count<=24));batch.dispose();
   const limited=new GlobalFacadeBatches(parent,[{mesh:a,placements:[placement(0),placement(10)]}],24,24);
   assert.equal(limited.meshes.length,0);assert.equal(limited.skippedSources,1);assert.equal(a.userData.globalFacadeSource,undefined);limited.dispose();
 });

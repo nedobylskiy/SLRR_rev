@@ -12,6 +12,8 @@ Date of primary research: October 23, 2026. Object is a specific local Steam ins
 | [SCX/SCY/TEX](formats/scx.md) |Geometry, materials, versions 3 and 4|
 |[Character skeleton research](character-skeleton-research.md)|Supplied archive, upstream skeleton/animation evidence, local human and vehicle bone inventory|
 |[Maps](maps.md)|Loading built-in Test Track and support boundaries|
+|[Minimap research](minimap-research.md)|Upstream Navigator implementations, installed tiles, camera/marker behavior and implementation plan|
+|[Java traffic bridge](traffic-java-bridge.md)|Police/rival appearance notifications, live native poses, Java-owned cars and remaining pursuit work|
 |[Music integration](music.md)|Original Java Sound calls, browser playback, and track metadata|
 | [TUFA/TREE](formats/tufa.md) |Original `.class`, constants, methods, nodes|
 |[Other formats](formats/other.md)|CFG, textures, maps, animation, unknown|
@@ -61,3 +63,7 @@ The contents of game saves and the full source DLL are not published in these re
 [City road graph debug view](road-graph-debug.md) — original TRC road splines, crossings and metadata overlays; includes field-confidence limits and validation.
 
 [One-car traffic test](traffic-test.md) — original Pickup, 15 km/h, reverse road splines and random connected turns through intersections.
+
+Ctrl+Alt+U toggles all host debug UI without hiding the Java HUD or minimap.
+
+[City global facade audit](city-facade-audit.md) identifies the map-wide house/storefront batches and compares two live draw-call reports.

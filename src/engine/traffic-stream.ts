@@ -51,6 +51,13 @@ export class TrafficSpawnIndex {
       }
     }
   }
+  nearest(position:Vector3):TrafficSpawn|undefined {
+    const nearby=this.choose(position,200,[],()=>0,0,true,undefined,0,sample=>Math.abs(sample.position.y-position.y)<4);
+    if(nearby)return nearby;
+    let best:TrafficSpawn|undefined,distance=Infinity;
+    for(const cell of this.cells.values())for(const sample of cell){const d=sample.position.distanceToSquared(position);if(d<distance){distance=d;best=sample;}}
+    return best;
+  }
   choose(center:Vector3,radius:number,occupied:readonly TrafficOccupant[],random=Math.random,minDistance=15,preferNear=false,preferred?:(spawn:TrafficSpawn)=>boolean,bodyRadius=6,accept?:(spawn:TrafficSpawn)=>boolean):TrafficSpawn|undefined {
     let selected:TrafficSpawn|undefined,count=0,best=Infinity,selectedPreferred=false;
     for(let x=Math.floor((center.x-radius)/CELL);x<=Math.floor((center.x+radius)/CELL);x++)for(let z=Math.floor((center.z-radius)/CELL);z<=Math.floor((center.z+radius)/CELL);z++){

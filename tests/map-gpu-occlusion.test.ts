@@ -160,7 +160,7 @@ test('transparent two-pass shader recompilation preserves visibility keys, while
 });
 
 
-test('depth-pass instances stay out of candidate counters and bounding-box diagnostics',()=>{
+test('buildings remain visibility candidates while also supplying independent depth',()=>{
   const renderer={shadowMap:{enabled:true,render:()=>{}},info:{autoReset:true},autoClear:true,
     getViewport:(v:any)=>v.set(0,0,1280,720),getScissor:(v:any)=>v.set(0,0,1280,720),getScissorTest:()=>false,
     setViewport:()=>{},setScissor:()=>{},setScissorTest:()=>{},render:()=>{}} as unknown as WebGLRenderer;
@@ -168,8 +168,8 @@ test('depth-pass instances stay out of candidate counters and bounding-box diagn
   const wall=new InstancedMesh(new BoxGeometry(10,10,1),new MeshStandardMaterial(),2);wall.userData.mapOcclusionRole='structure';
   const prop=new InstancedMesh(new BoxGeometry(1,10,1),new MeshStandardMaterial(),3);prop.userData.mapOcclusionRole='prop';root.add(wall,prop);
   (cull as any).collect(root);cull.enabled=true;cull.debugMode='boxes';cull.renderDebug(new PerspectiveCamera());
-  assert.equal(cull.stats().depth_only_instances,2);assert.equal(cull.stats().candidate_instances,3);
-  assert.equal((cull as any).boxLines.geometry.attributes.position.count,3*24,'only prop boxes are diagnostic candidates');
+  assert.equal(cull.stats().depth_only_instances,0);assert.equal(cull.stats().candidate_instances,5);
+  assert.equal((cull as any).boxLines.geometry.attributes.position.count,5*24,'structures and props are diagnostic candidates');
   cull.dispose();for(const m of [wall,prop]){m.geometry.dispose();(m.material as MeshStandardMaterial).dispose();m.dispose();}
 });
 
@@ -264,7 +264,10 @@ test('depth GPU resources survive stream compaction, color changes and temporary
   assert.deepEqual(first.identities,ids,'old ticket metadata remains an immutable snapshot');assert.deepEqual(current.identities,[ids[1]]);
   mesh.removeFromParent();api.collect(root);assert.equal(depth.parent,null);assert.equal(disposed,0);
   root.add(mesh);api.collect(root);assert.equal(api.states.get(mesh).depth,depth);assert.equal(depth.parent,api.depthScene);
-  assert.equal(api.prepareCandidates().length,0,'depth sources never enter the candidate buffer');
+  assert.equal(api.prepareCandidates().length,1,'structures remain candidates after resuming');
+  const candidate=api.prepareCandidates()[0];api.apply({items:[candidate],bytes:new Uint8Array(4)});
+  cull.renderMain(()=>{assert.equal(mesh.visible,false);assert.equal(depth.visible,true);assert.equal(depth.count,1,'hidden color geometry still supplies full depth');});
+  assert.equal(mesh.visible,true);
   const work=cull.workProfile.drain();assert.equal(work.depth_proxies_created_count,1);assert.ok(work.depth_proxies_reused_count>=2);assert.equal(work.sources_resumed_count,1);
   mesh.dispose();assert.equal(disposed,1);assert.equal(materialDisposed,1);assert.equal(api.states.has(mesh),false);assert.equal(api.dormant.size,0);
   cull.dispose();assert.equal(disposed,1);mesh.geometry.dispose();(mesh.material as MeshStandardMaterial).dispose();

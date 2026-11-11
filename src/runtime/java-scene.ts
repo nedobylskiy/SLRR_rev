@@ -83,7 +83,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   };
   const project = async (native: ReturnType<typeof result.parts.installedTree>[number]): Promise<JavaInstalledPart> => ({
     nativeId: native.node.resourceId,
-    key: await resolve(native.node.typeId, native.node.resourcePack ?? chassisPack),
+    key: native.node.resourcePack?{pack:normalizeResourcePackPath(native.node.resourcePack),id:native.node.typeId&0xffff}:await resolve(native.node.typeId,chassisPack),
     parentSlot: native.parentSlot, ownSlot: native.ownSlot,
     positions: native.positions,
     render: native.renderType ? await resolve(native.renderType, native.node.resourcePack ?? chassisPack) : undefined,
