@@ -6,6 +6,50 @@ import { GameTypeNative } from '../src/runtime/game-type-native';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { SoundJavaBridge } from '../src/audio/sound-java';
 import type { MusicEngine } from '../src/audio/music-engine';
+import { compileSource } from 'slrr-jvm-compiler';
+
+test('avatar RID arithmetic retains the namespace of a class-only installation', async () => {
+  const source = `package java.game; class Init extends GameType {
+    static final int base = frontend:0x00dar;
+    Init(int id) { reachedInit(); }
+    static int avatar(int offset) { return base + offset; }
+  }`;
+  const assets = new Assets([{path:'frontend.rpk',size:0},
+    {path:'sl/scripts/game/src/Init.java',size:source.length}], async()=>new TextEncoder().encode(source));
+  assets.pack = async()=>({version:0x200,dependencies:[],warnings:[],entries:[]});
+  const result = await bootGame(assets,()=>{});
+  try {
+    assert.match(result.error?.message ?? '', /reachedInit/);
+    for (const offset of [0,1,38,59]) {
+      const value = await result.jvm.invokeAsync(jv('class','java.game.Init'),'avatar',[jv('int',offset)]);
+      assert.equal(result.resolveResourceIdentity(Number(value.value))?.pack.replace('.rpk',''),'frontend');
+      assert.equal(result.resolveResourceIdentity(Number(value.value))?.id,0xda+offset);
+    }
+  } finally { result.dispose(); }
+});
+
+test('class-only String loads Java token wrappers before game startup', async () => {
+  const compiled = compileSource(`package java.lang; public class String {
+    public String token(int index) { return token(index, " \\t\\n"); }
+    public native String token(int index, String separators);
+  }`);
+  assert.equal(compiled.ok, true, compiled.diagnostics.join('\n'));
+  const files = new Map<string, Uint8Array>([
+    ['system/scripts/lang/String.class', compiled.bytes],
+    ['sl/scripts/game/src/Init.java', new TextEncoder().encode(`package java.game;
+      class Init extends GameType { Init(int id) {
+        String mode = "1600\\t900\\n32";
+        if (mode.token(1) != "900") wrongToken();
+        reachedAfterToken();
+      } }`)],
+  ]);
+  const assets = new Assets([...files].map(([path, bytes]) => ({ path, size: bytes.length })),
+    async path => files.get(path)!);
+  const result = await bootGame(assets, () => {});
+  try {
+    assert.match(result.error?.message ?? '', /reachedAfterToken/);
+  } finally { result.dispose(); }
+});
 
 test('Init.java controls the OSD video through both GfxEngine.openVideo overloads', async () => {
   const sources = new Map([

@@ -1,5 +1,7 @@
 import { entryProperties } from '../formats/rpk';
 import type { Assets } from '../assets';
+import { ptxCanvas } from '../render/ptx-texture';
+import { decodeDdsImage } from '../formats/dds-image';
 
 export type OsdResource = { pack: string; id: number };
 export type OsdAlign = 'left' | 'center' | 'right';
@@ -136,7 +138,23 @@ export class OsdLayer {
         }
         if (!source) throw new Error(`OSD resource ${key} has no sourcefile`);
         const bytes = await this.assets.read(source);
-        const url = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: /\.png$/i.test(source) ? 'image/png' : 'image/jpeg' }));
+        let blob: Blob;
+        if (/\.(ptx|dds)$/i.test(source)) {
+          let canvas: HTMLCanvasElement;
+          if (/\.ptx$/i.test(source)) canvas = await ptxCanvas(bytes);
+          else {
+            const image = decodeDdsImage(bytes);
+            canvas = document.createElement('canvas');
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('DDS: canvas unavailable');
+            context.putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
+          }
+          blob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error(`Cannot encode OSD image ${source}`)), 'image/png');
+          });
+        } else blob = new Blob([bytes.slice().buffer], { type: /\.png$/i.test(source) ? 'image/png' : 'image/jpeg' });
+        const url = URL.createObjectURL(blob);
         if (this.disposed) URL.revokeObjectURL(url); else this.objectUrls.add(url);
         return url;
       })();

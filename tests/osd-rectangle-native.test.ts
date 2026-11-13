@@ -43,6 +43,15 @@ test('Java Rectangle resources become positioned OSD images and obey Group visib
   assert.ok(bounds.every((value, index) => Math.abs(value - [0.2, 0.4, 1.2, 0.3, 2][index]) < 0.001));
   assert.deepEqual(texture, { pack: 'frontend.rpk', id: 0xc00d });
   assert.equal(visible, true);
+  // A copied mesh is not an image, even when it carries a resource pack.
+  template.resourceReplacementPacks.set(0xd9, 'frontend');
+  template.resourceReplacements.delete(0xaf);
+  const otherRender = new RenderObject(5, 'java.util.resource.RenderRef', template, 'Rectangle');
+  otherRender.setParent(group);
+  texture = undefined;
+  rectangles.sync(otherRender);
+  assert.equal(texture, undefined);
+  template.resourceReplacements.set(0xaf, 0xc00d);
   groupObject.fields.set('active', jv('int', 0));
   rectangles.syncVisibility();
   assert.equal(visible, false);

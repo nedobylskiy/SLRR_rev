@@ -1,3 +1,4 @@
+import {registerFrontendAliases} from './frontend-aliases';
 import { VehicleHornNative } from './vehicle-horn-native';
 import {NavigatorNative} from './navigator-native';
 import { SlrrJvm, jv, type JavaObject, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
@@ -104,9 +105,17 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const sourcePacks = new Map<string, RpkPack>();
   const packedResources = new Map<number, ResourceIdentity | null>();
   const unlistedResourceSlots = new Map<string, number>();
+  const unlistedResourcePacks = new Map<number, string>();
   let nextUnlistedSlot = 0x7000;
+  const resolvePackedResource = (id: number): ResourceIdentity | undefined => {
+    const exact = packedResources.get(id);
+    if (exact) return exact;
+    // Java adds avatar indices to a packed base RID; the namespace survives that arithmetic.
+    const pack = unlistedResourcePacks.get(id >>> 16);
+    return pack ? { pack, id: id & 0xffff } : undefined;
+  };
   const resolveResourceIdentity = (id: number): ResourceIdentity | undefined =>
-    packedResources.get(id) ?? gameTypes?.resolveResourceIdentity(id);
+    resolvePackedResource(id) ?? gameTypes?.resolveResourceIdentity(id);
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
     if (path.endsWith('.java')) {
@@ -146,6 +155,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
             if (nextUnlistedSlot > 0x7fff) throw new Error('Unlisted resource slot range exhausted');
             slot = nextUnlistedSlot++;
             unlistedResourceSlots.set(pack, slot);
+            unlistedResourcePacks.set(slot, pack);
           }
           packed = (slot << 16) | resource.id;
         }
@@ -304,7 +314,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    }, id => packedResources.get(id) ?? undefined, node => { osdRectangles?.remove(node); renderChanged?.(node); },
+    }, resolvePackedResource, node => { osdRectangles?.remove(node); renderChanged?.(node); },
     async (receiver, cfgPath) => {
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);
@@ -347,7 +357,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
-    packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
+    resolvePackedResource(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
   chassisNative = new ChassisNative(jvm, gameTypes, readResourceBounds);
   const partFactory = new PartFactory(assets);
   partNative = new PartNative(jvm, gameTypes, async (parent, parentSlot, child, childSlot) => {
@@ -542,14 +552,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   if (realLoadingScreen) {
     jvm.natives.registerField('java.render.Frontend', 'render', renderSignal);
     jvm.natives.registerField('java.game.Frontend', 'render', renderSignal);
-    jvm.natives.registerField('java.game.Frontend', 'inputQueue',
-      jvm.get(jv('class', 'java.render.Frontend'), 'inputQueue'));
-    for (const name of ['largeFont', 'mediumFont', 'smallFont', 'largeFont_strong', 'smallFont_strong',
-      'largeFont_russian', 'largeFont_scale', 'smallFont_scale', 'largeFont_strong_scale',
-      'smallFont_strong_scale', 'largeFont_russian_scale', 'defLoadingPic', 'fadeRes', 'fadeRes_HD', 'pointers',
-      ...frontendSounds])
-      jvm.natives.registerField('java.game.Frontend', name,
-        jvm.get(jv('class', 'java.render.Frontend'), name));
+    await registerFrontendAliases(jvm);
   }
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
   if (!realLoadingScreen) for (const name of frontendSounds)
@@ -565,7 +568,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
-    if (['src', 'decompiled'].some(folder => assets.byPath.has(`system/scripts/lang/${folder}/string.java`)))
+    // String natives also have Java wrappers, including token(int), in class-only installations.
+    if (['src/string.java', 'decompiled/string.java', 'string.class']
+      .some(path => assets.byPath.has(`system/scripts/lang/${path}`)))
       await jvm.loadClass('java.lang.String');
     await jvm.loadClass('java.game.Init');
     if (realLoadingScreen) {

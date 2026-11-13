@@ -26,6 +26,7 @@ export class OsdRectangleNative {
     if (!group || !osd || !type) return true;
     const texture = [...type.resourceReplacements]
       .map(([slot, id]) => {
+        if (this.resources.getByResourceId(id)?.copiedFromResourceId != null) return undefined;
         const pack = type.resourceReplacementPacks.get(slot);
         return pack ? { pack, id: id & 0xffff } : this.resourceIdentity?.(id);
       }).find((identity): identity is ResourceIdentity => Boolean(identity));
