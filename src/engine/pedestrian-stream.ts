@@ -1,3 +1,4 @@
+import {AreaWalker,PedestrianAreas} from './pedestrian-areas';
 import {Vector3} from 'three';
 import type {PedestrianWalk} from '../formats/pedestrian';
 import {buildWalkingZones,WalkingPedestrian,zonePoint,type WalkingZone} from './pedestrian-walking';
@@ -6,8 +7,10 @@ export interface PedestrianObstacle {position:Vector3;radius:number;velocity?:Ve
 const CELL=64;
 /** Static corridor samples are indexed once; moving the player never rebuilds zones or skeletons. */
 export class PedestrianSpawnIndex {
+  private areas?:PedestrianAreas;
   readonly zones:WalkingZone[];private rows:Map<number,PedestrianWalk>;private cells=new Map<string,PedestrianSpawn[]>();
   constructor(rows:PedestrianWalk[]){
+    if(rows.some(row=>row.height!==undefined))this.areas=new PedestrianAreas(rows);
     this.zones=buildWalkingZones(rows);this.rows=new Map(rows.map(row=>[row.id,row]));
     for(const zone of this.zones){const steps=Math.max(1,Math.ceil(zone.length/8));for(let i=0;i<steps;i++)for(const lateral of [.25,.5,.75]){
       const t=(i+.5)/steps,position=zonePoint(zone,t,lateral),key=`${Math.floor(position.x/CELL)},${Math.floor(position.z/CELL)}`,cell=this.cells.get(key)??[];
@@ -24,5 +27,7 @@ export class PedestrianSpawnIndex {
       if(random()<1/++count)choice=p;
     }return choice;
   }
-  walker(spawn:PedestrianSpawn,random=Math.random){return new WalkingPedestrian(spawn.zone,spawn.t,spawn.t<.5?-1:1,spawn.lateral,this.zones,this.rows,random);}
+  walker(spawn:PedestrianSpawn,random=Math.random){if(this.areas){const sign=random()<.5?1:-1,t=Math.max(0,Math.min(1,spawn.t+sign*.01)),heading=zonePoint(spawn.zone,t,spawn.lateral).sub(spawn.position);return new AreaWalker(this.areas,{id:spawn.zone.id},spawn.position,heading);}return new WalkingPedestrian(spawn.zone,spawn.t,spawn.t<.5?-1:1,spawn.lateral,this.zones,this.rows,random);}
 }
+
+export type CrowdWalker=ReturnType<PedestrianSpawnIndex["walker"]>;

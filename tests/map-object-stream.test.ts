@@ -3,6 +3,22 @@ import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream, isMapTreeAlias } from '../src/render/map-object-stream';
 
+test('moved props update instance buffers and culling without rebuilding cached static cells',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  const placement={movable:true,position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)};
+  stream.add([placement],async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())],'bins');
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());
+  await stream.setCachedCells(true);
+  const mesh=parent.children.find(m=>m instanceof InstancedMesh) as InstancedMesh;
+  const version=mesh.instanceMatrix.version,shadows=stream.shadowRevision;
+  placement.position.x=5;placement.matrix.makeTranslation(5,0,-10);stream.placementsMoved([placement]);stream.update(new Vector3());
+  const matrix=new Matrix4();mesh.getMatrixAt(0,matrix);assert.equal(matrix.elements[12],5);
+  assert.ok(mesh.instanceMatrix.version>version);assert.equal(stream.shadowRevision,shadows,'moving props do not rebake the static city shadow map');
+  assert.match(stream.cachedCellInfo,/cells 0/);
+  placement.position.x=1000;placement.matrix.makeTranslation(1000,0,-10);stream.placementsMoved([placement]);stream.update(new Vector3());
+  assert.equal(mesh.count,0,'streaming uses the moved location');stream.dispose();
+});
+
 test('repeated tree parts share one instanced batch per geometry/material',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,500);
   const trunk=new Mesh(new BoxGeometry(),new MeshBasicMaterial()),leaves=new Mesh(new BoxGeometry(),new MeshBasicMaterial());

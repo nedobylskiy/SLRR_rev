@@ -4,7 +4,7 @@ import type { ScxModel } from '../formats/scx';
 import { orientedBoxContact, type RigidBody3D } from './rigid-body-3d';
 
 interface Wall { triangle: Triangle; normal: Vector3; minY: number; maxY: number; bounds: Box3 }
-interface StaticBox { matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: Box3 }
+interface StaticBox { interact?: (body:RigidBody3D,hit:NonNullable<ReturnType<typeof orientedBoxContact>>)=>void; matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: Box3 }
 
 /** Static, two-sided side contacts from original map meshes. Road support is handled by MapTerrain. */
 export class MapCollision {
@@ -16,10 +16,10 @@ export class MapCollision {
   walls = 0;
   boxes = 0;
   /** Original CFG `body ... box hx hy hz`, placed by the map object pose. */
-  addBox(matrix: Matrix4, half: Vector3) {
+  addBox(matrix: Matrix4, half: Vector3, interact?:StaticBox["interact"]) {
     if (![half.x, half.y, half.z].every(n => Number.isFinite(n) && n > 0)) return () => {};
     const bounds = new Box3(new Vector3(-half.x, -half.y, -half.z), half.clone()).applyMatrix4(matrix);
-    const box: StaticBox = { matrix: matrix.clone(), inverse: matrix.clone().invert(), half: half.clone(), bounds };
+    const box: StaticBox = { interact, matrix: matrix.clone(), inverse: matrix.clone().invert(), half: half.clone(), bounds };
     const x0 = Math.floor((bounds.min.x - 0.3) / this.size), x1 = Math.floor((bounds.max.x + 0.3) / this.size);
     const z0 = Math.floor((bounds.min.z - 0.3) / this.size), z1 = Math.floor((bounds.max.z + 0.3) / this.size);
     if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) return () => {};
@@ -94,6 +94,7 @@ export class MapCollision {
     const origin = new Vector3(x, fromY, z), direction = new Vector3(0, -1, 0);
     let best: { height: number; normal: Vector3 } | undefined;
     for (const box of boxes) {
+      if(box.interact)continue;
       profile?.add('object_box_candidates_count');
       if (x < box.bounds.min.x || x > box.bounds.max.x || z < box.bounds.min.z || z > box.bounds.max.z || fromY < box.bounds.min.y) continue;
       profile?.add('object_box_ray_tests_count');
@@ -127,6 +128,7 @@ export class MapCollision {
     for (const box of candidates) {
       if (!bounds.intersectsBox(box.bounds)) continue;
       const hit = orientedBoxContact(body, box.matrix, box.half);
+      if(hit&&box.interact){box.interact(body,hit);continue;}
       if (hit && (!nearest || hit.depth > nearest.depth)) nearest = { ...hit, bounds: box.bounds };
     }
     return nearest;
@@ -175,6 +177,7 @@ export class MapCollision {
       if (!nearest || depth > nearest.depth) nearest = { point: closest.clone(), normal, depth, bounds: wall.bounds };
     }
     for (const box of boxes ?? []) {
+      if(box.interact)continue;
       if (point.y < box.bounds.min.y - verticalPadding || point.y > box.bounds.max.y + verticalPadding) continue;
       const local = point.clone().applyMatrix4(box.inverse);
       closest.copy(local).clamp(box.half.clone().negate(), box.half);

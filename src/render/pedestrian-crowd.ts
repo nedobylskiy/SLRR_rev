@@ -3,12 +3,13 @@ import type {RigidBody3D} from '../engine/rigid-body-3d';
 import {PEDESTRIAN_CAR_REACTION,pedestrianCarContact,ragdollCar} from '../engine/pedestrian-contact';
 import type {Assets} from '../assets';
 import type {PedestrianWalk} from '../formats/pedestrian';
-import type {WalkingPedestrian} from '../engine/pedestrian-walking';
+import {AreaWalker} from '../engine/pedestrian-areas';
+import type {CrowdWalker} from '../engine/pedestrian-stream';
 import {PedestrianSpawnIndex,type PedestrianObstacle} from '../engine/pedestrian-stream';
 import {loadCharacterCatalog,skeletonCompatibility} from './character-catalog';
 import {loadSkinnedCharacter,type SkinnedCharacter} from './skinned-character';
 
-interface CrowdActor {walker:WalkingPedestrian;character:SkinnedCharacter;mount:Group;height:number;duration:number;active:boolean;revision:number;state:'walking'|'starting'|'ragdoll'|'failed'}
+interface CrowdActor {walker:CrowdWalker;character:SkinnedCharacter;mount:Group;height:number;duration:number;active:boolean;revision:number;state:'walking'|'starting'|'ragdoll'|'failed'}
 export interface PedestrianStreamSettings {count:number;radius:number}
 export class PedestrianCrowd {
   readonly root=new Group();private lastTime?:number;
@@ -16,7 +17,7 @@ export class PedestrianCrowd {
   private actors:CrowdActor[]=[];
   private ground?:(point:Vector3)=>number;
   private index!:PedestrianSpawnIndex;
-  private loadActor!:(walker:WalkingPedestrian)=>Promise<CrowdActor>;
+  private loadActor!:(walker:CrowdWalker)=>Promise<CrowdActor>;
   private spawning=false;private refillAt=0;private pruneAt=0;private focus=new Vector3();
   private focusSource?:Vector3;
   private settings:PedestrianStreamSettings={count:6,radius:100};
@@ -72,7 +73,7 @@ export class PedestrianCrowd {
     ...cars.map(car=>({position:car.position,radius:car.bounds.getSize(new Vector3()).length()*.5+1,velocity:car.velocity})),
   ];}
 
-  update(now:number,cars:readonly RigidBody3D[],focus?:Vector3,offscreen?:(point:Vector3)=>boolean){
+  update(now:number,cars:readonly RigidBody3D[],focus?:Vector3,offscreen?:(point:Vector3)=>boolean,timeScale=1){
     if(this.disposed)return;if(focus)this.focus.copy(focus);
     if(now>=this.pruneAt){
       const active=this.actors.filter(a=>a.active).sort((a,b)=>(b.character.ragdollPosition??b.walker.position).distanceToSquared(this.focus)-(a.character.ragdollPosition??a.walker.position).distanceToSquared(this.focus));
@@ -82,14 +83,14 @@ export class PedestrianCrowd {
       }this.pruneAt=now+500;
     }
     if(now>=this.refillAt){this.refillAt=now+250;void this.refill(this.obstacles(cars),offscreen).catch(error=>{this.lastError=String(error);console.error('Pedestrian stream load failed',error);});}
-    const dt=this.lastTime===undefined?0:Math.max(0,Math.min(.1,(now-this.lastTime)/1000));this.lastTime=now;
-    const positions=cars.map(car=>car.position),colliders=this.actors.some(a=>a.active&&a.state==='ragdoll')?cars.map(ragdollCar):[];
+    const dt=this.lastTime===undefined?0:Math.max(0,Math.min(.1,(now-this.lastTime)/1000*Math.max(0,timeScale)));this.lastTime=now;
+    const positions=cars.map(car=>car.position),threats=cars.map(car=>({position:car.position,velocity:car.velocity})),walkers=this.actors.filter(a=>a.active&&a.state==='walking').map(a=>a.walker).filter((w):w is AreaWalker=>w instanceof AreaWalker),colliders=this.actors.some(a=>a.active&&a.state==='ragdoll')?cars.map(ragdollCar):[];
     for(const actor of this.actors){if(!actor.active)continue;const {walker,character,mount}=actor;
-      if(actor.state==='ragdoll'){character.setRagdollVehicles(colliders,dt);character.update(now,true);continue;}
+      if(actor.state==='ragdoll'){if(timeScale<=0)continue;character.setRagdollVehicles(colliders,dt);character.update(now,true);continue;}
       if(actor.state!=='walking')continue;
-      walker.step(dt,positions);mount.position.copy(walker.position);
+      if(walker instanceof AreaWalker){walker.step(dt,threats,walkers);if(!walker.ok){this.retire(actor);continue;}}else walker.step(dt,positions);mount.position.copy(walker.position);
       const yaw=Math.atan2(walker.direction.x,walker.direction.z),delta=Math.atan2(Math.sin(yaw-mount.rotation.y),Math.cos(yaw-mount.rotation.y));mount.rotation.y+=Math.max(-dt*5,Math.min(dt*5,delta));
-      character.setPlaybackSpeed(walker.speed/1.2);character.update(now,false);
+      character.setPlaybackSpeed(dt>0?(walker instanceof AreaWalker?walker.gait:walker.speed)/1.2:0);character.update(now,false);
       const velocity=walker.direction.clone().multiplyScalar(walker.speed);
       for(const car of cars){
         const range=car.bounds.getSize(new Vector3()).length()*.5+actor.height+car.velocity.length()*dt+2;

@@ -8,7 +8,7 @@ import { splitMapGeometry } from './map-geometry-chunks';
 import {mergeStaticMapParts} from './map-static-batches';
 import {MapAutoLod} from './map-auto-lod';
 
-export interface StreamPlacement { matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+export interface StreamPlacement { movable?:boolean; matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
   const b = placement.bounds;
   if (b) return Math.hypot(Math.max(b.minX - camera.x, 0, camera.x - b.maxX), Math.max(b.minZ - camera.z, 0, camera.z - b.maxZ));
@@ -74,6 +74,7 @@ export class MapObjectStream {
   get hasPendingWork(){return this.scanQueue.size>0||this.drawQueue.size>0;}
   get queueInfo(){return `budget ${Number.isFinite(this.frameBudgetMs)?this.frameBudgetMs+' ms':'unlimited'} · scan queue ${this.scanQueue.size} · draw queue ${this.drawQueue.size}`;}
   private types: StreamType[] = [];
+  private placementTypes=new WeakMap<StreamPlacement,{type:StreamType;index:number}>();
   private ordered: StreamType[] = [];
   private lastCell = '';
   private dirty = true;
@@ -117,7 +118,7 @@ export class MapObjectStream {
     if(this.cellPreparation){await this.cellPreparation;if(!this.cachedCellsEnabled||this.disposed)return;}
     if(!this.cachedCellsEnabled||this.disposed)return;
     const generation=this.cellGeneration,size=this.cachedCellSize;
-    const queue=this.types.filter(t=>t.category&&!t.cachedCells);
+    const queue=this.types.filter(t=>t.category&&!t.cachedCells&&!t.placements.some(p=>p.movable));
     const prepare=async()=>{
       for(;;){const type=queue.shift();if(!type||this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
         if(!type.baseMeshes&&!type.failed)await (type.loadPromise??this.load(type,true));
@@ -189,9 +190,19 @@ export class MapObjectStream {
   }
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false) {
-    this.types.push({ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
-      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),farSlots:new Set() });
+    const type:StreamType={ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
+      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),farSlots:new Set() };
+    this.types.push(type);placements.forEach((placement,index)=>this.placementTypes.set(placement,{type,index}));
     this.dirty = true;
+  }
+
+  /** A moved prop invalidates its small model batch, not the city's static buffers. */
+  placementsMoved(placements:readonly StreamPlacement[]){
+    const affected=new Set<StreamType>();
+    for(const placement of placements){const entry=this.placementTypes.get(placement);if(entry){entry.type.instanceBounds.delete(entry.index);affected.add(entry.type);}}
+    for(const type of affected){type.meshDrawn.clear();type.chunkBounds.clear();type.boundsDirty=true;this.drawQueue.add(type);this.scanQueue.add(type);}
+    if([...affected].some(type=>!type.placements.every(p=>p.movable)))this.shadowRevision++;
+    this.viewDirty=true;
   }
 
   update(camera: Vector3, view?: Camera,continuation=false) {

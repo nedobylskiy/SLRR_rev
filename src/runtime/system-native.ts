@@ -8,6 +8,7 @@ export class SystemNative {
   private gameTimeSeconds = 0;
   private lastSample: number;
   private warp = 1;
+  get timeScale(){return this.warp;}
   private loadPriority = 0;
   private loading = false;
   private distanceMeasure = 1000;

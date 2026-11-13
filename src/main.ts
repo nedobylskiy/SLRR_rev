@@ -119,7 +119,7 @@ async function runGameBoot() {
   disposeMinimap=()=>minimap.dispose();
   disposeGameBoot = () => {disposeMinimap?.();disposeMinimap=undefined;activeNavigator=undefined;activeBoot=undefined;result.dispose();};
   viewer?.setJavaSceneCamera(() => javaSceneCamera(result),
-    () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value));
+    () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value),()=>result.system.timeScale,()=>music?.getVolume(0)??1);
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
   const javaMouse = new JavaMouse(el('viewport'), result, source,
     message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));

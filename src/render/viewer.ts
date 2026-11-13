@@ -1,3 +1,6 @@
+import {AmbientAudio} from '../audio/ambient-audio';
+import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
+import {MapProps} from '../engine/map-props';
 import {partGeometryBounds} from './part-geometry-bounds';
 import {trafficWheelIndex} from '../engine/traffic-running-gear';
 import {VehicleSuspensionSkin} from './vehicle-suspension-skin';
@@ -302,6 +305,8 @@ export class Viewer {
   resetInspectionCamera(){this.inspection.reset(this.controls.target);this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}
   graphicsDebugLines(fullReport=true){return [
     `FPS ${this.fps}`,
+    `Map ambience: emitters ${this.mapAmbience?.stats.emitters??0} · nearby ${this.mapAmbience?.stats.nearby??0} · voices ${this.mapAmbience?.stats.voices??0} · pending ${this.mapAmbience?.stats.pending??0}`,
+    ...(this.ambientAudio?[this.ambientAudio.diagnosticLine()]:[]),
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Suspension bone animation: ${this.suspensionBonesEnabled?'on':'off'} · bound parts ${this.suspensionSkins.size}`,
@@ -393,13 +398,17 @@ export class Viewer {
   private scriptCamera?: () => JavaSceneCamera | null;
   private scriptCameraId?: number;
   private scriptTimeOfDay?: () => number;
+  private scriptTimeScale?:()=>number;private ambientEffectsVolume?:()=>number;
+  private mapAmbience?:MapAmbience;private ambientAudio?:AmbientAudio;
   private drivingTimeOfDay?: () => number;
-  setJavaSceneCamera(reader?: () => JavaSceneCamera | null, timeOfDay?: () => number) {
+  setJavaSceneCamera(reader?: () => JavaSceneCamera | null, timeOfDay?: () => number, timeScale?:()=>number, soundVolume?:()=>number) {
     if (this.scriptCameraId !== undefined && !this.stopDriving) this.controls.enabled = true;
     this.scriptCamera = reader; this.scriptCameraId = undefined;
-    this.scriptTimeOfDay = timeOfDay;
+    this.scriptTimeOfDay = timeOfDay;this.scriptTimeScale=timeScale;this.ambientEffectsVolume=soundVolume;
   }
   private generation = 0;
+  private mapProps?:MapProps;
+  private previousPropFrame?:number;
   private mapStream?: MapObjectStream;
   private mapTextures = new TextureSourceCache();
   private vehicleTextures = new AssetTextureSources();
@@ -495,7 +504,8 @@ export class Viewer {
     if(this.trafficTestEnabled&&this.mapRoadSource)void this.restartTrafficTest(true);
   }
   private trafficAudio?:TrafficAudio;
-  private trafficAudioStart=()=>this.trafficAudio?.activate();
+  private ambienceVisibility=()=>this.ambientAudio?.pause(document.hidden||(this.scriptTimeScale?.()??1)<=0);
+  private trafficAudioStart=()=>{this.trafficAudio?.activate();this.ambientAudio?.activate();};
   private trafficPeer?:Vehicle3D;
   private playerTrafficDriver?:PlayerTrafficDriver;
   private playerTrafficRevision=0;
@@ -581,7 +591,7 @@ export class Viewer {
     this.lighting.configureMaterial(this.ground.material);
     this.ground.receiveShadow = true;
     container.append(this.renderer.domElement);
-    container.addEventListener('pointerdown',this.trafficAudioStart,true);
+    container.addEventListener('pointerdown',this.trafficAudioStart,true);document.addEventListener('keydown',this.trafficAudioStart,true);document.addEventListener('visibilitychange',this.ambienceVisibility);
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -627,6 +637,7 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000);this.previousPropFrame=now;
       this.driverIk?.update();
       for(const binding of this.javaDrivers.values())if(binding.driver){
         binding.driver.root.visible=this.driverCameraChassis!==binding.chassis&&(this.javaRenderNodes.get(binding.node.id)?.visible??false);
@@ -634,7 +645,7 @@ export class Viewer {
       }
       this.updateTrafficTest(now);
       if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
-      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen);}
+      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1);}
       // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
@@ -671,6 +682,7 @@ export class Viewer {
       this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
       if(this.trafficCars.some(car=>car.voice))this.trafficAudio?.listener(renderCamera);
+      if(this.mapAmbience){this.ambientAudio?.listener(renderCamera);this.mapAmbience.update(now,renderCamera.position,timeOfDay,document.hidden?0:this.scriptTimeScale?.()??1);}
       this.mapRoadDebug?.updateTraffic(this.trafficControl);
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
@@ -744,6 +756,8 @@ export class Viewer {
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
     this.stopDriving?.(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.mapAmbience?.dispose();this.mapAmbience=undefined;this.ambientAudio=undefined;
+    this.mapProps?.dispose();this.mapProps=undefined;this.previousPropFrame=undefined;
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.resetRoadDebug();
@@ -1334,7 +1348,7 @@ export class Viewer {
     this.mapPedestrianPending=pending;try{await pending;}finally{if(this.mapPedestrianPending===pending)this.mapPedestrianPending=undefined;}
   }
   dispose() {
-    this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
+    this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);document.removeEventListener('keydown',this.trafficAudioStart,true);document.removeEventListener('visibilitychange',this.ambienceVisibility);this.stopTrafficTest();this.trafficAudio?.dispose();
     for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
@@ -1606,6 +1620,8 @@ export class Viewer {
       : mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
+    this.mapAmbience?.dispose();this.ambientAudio=new AmbientAudio(assets,()=>this.ambientEffectsVolume?.()??1);this.mapAmbience=new MapAmbience(this.ambientAudio);this.ambientAudio.activate();
+    this.mapProps?.dispose();this.mapProps=new MapProps(collision,terrain);this.previousPropFrame=undefined;
     this.mapStream?.dispose(); this.mapStreamFocus = undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapDebug?.dispose(); this.mapDebug = undefined;
@@ -1679,7 +1695,7 @@ export class Viewer {
     let objects = 0;
     const unifyBuildings=this.unifiedBuildingMaterials||this.globalFacadeBatching;this.mapUnifiedBuildingMaterials=unifyBuildings;
     const globalFacades=this.globalFacadeBatching;this.mapGlobalFacadeBatching=globalFacades;
-    const objectBatches = new Map<string, { pack: string; id: number; alias: string; category?:MapObjectCategory; placements: StreamPlacement[] }>();
+    const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; placements: StreamPlacement[] }>();
     for (const source of room ? [] : mapSources) try {
       const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
       const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
@@ -1694,6 +1710,37 @@ export class Viewer {
           const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
+          const ambience=parseMapAmbience(cfg);
+          if(ambience.loop||ambience.randoms.length)for(const instance of instances)this.mapAmbience?.add(resource.packPath,new THREE.Vector3(...instance.pose.position),ambience);
+          const movableBounds=new THREE.Box3();
+          const movableBodies=cfg.bodies.filter(body=>body.mass>0&&body.collision!==false);
+          for(const body of movableBodies)try{
+            const bodyFrame=poseMatrix(body),half=body.shape.slice(1,4).map(Number);
+            if(body.shape[0]?.toLowerCase()==='box'&&half.length===3&&half.every(Number.isFinite)){
+              movableBounds.union(new THREE.Box3(new THREE.Vector3(-half[0],-half[1],-half[2]),new THREE.Vector3(...half as [number,number,number])).applyMatrix4(bodyFrame));
+            }else if(body.shape[0]?.toLowerCase().endsWith('.scx')){
+              const model=await parseScxAsync(await assets.read(body.shape[0]));const point=new THREE.Vector3();
+              for(const mesh of model.meshes)for(let i=0;i<mesh.positions.length;i+=3)movableBounds.expandByPoint(point.fromArray(mesh.positions,i).multiplyScalar(.01).applyMatrix4(bodyFrame));
+            }
+          }catch(error){warnings.push(`Prop collision ${resource.entry.alias}: ${String(error)}`);}
+          if(movableBodies.length){
+            const raw=cfg.unknown.find(command=>command.command==='bounds')?.args.slice(0,6).map(Number);
+            if(raw?.length===6&&raw.every(Number.isFinite)){
+              const declared=new THREE.Box3(new THREE.Vector3(raw[0],raw[1],raw[2]),new THREE.Vector3(raw[3],raw[4],raw[5]));
+              // Some legacy physical SCX origins disagree with their CFG body pose
+              // (e.g. tabla_c). Keep their collider within the declared object extent.
+              if(movableBounds.isEmpty()||!declared.clone().expandByScalar(.05).containsBox(movableBounds))movableBounds.copy(declared);
+            }
+          }
+          const movable=movableBodies.length>0&&!movableBounds.isEmpty();
+          const movingParts=new Map<number,Array<{placement:StreamPlacement;original:THREE.Matrix4}>>();
+          if(movable)for(const instance of instances){
+            const parts:Array<{placement:StreamPlacement;original:THREE.Matrix4}>=[];movingParts.set(instance.id,parts);
+            this.mapProps!.add(poseMatrix(instance.pose),movableBounds,movableBodies.reduce((n,b)=>n+b.mass,0),delta=>{
+              for(const {placement,original}of parts){placement.matrix.multiplyMatrices(delta,original);placement.position.setFromMatrixPosition(placement.matrix);}
+              stream.placementsMoved(parts.map(p=>p.placement));
+            });
+          }
           const nativeClass=new TextDecoder().decode(resource.entry.data.subarray(8,resource.entry.data.indexOf(0,8)));
           const fixtureKind=trafficFixtureKind(resource.entry.alias,nativeClass);
           if(fixtureKind)for(const instance of instances)this.mapTrafficFixtures.push({kind:fixtureKind,position:new THREE.Vector3(...instance.pose.position),pose:instance.pose});
@@ -1715,18 +1762,19 @@ export class Viewer {
               if (!id) continue;
               const color = render.colors?.length ? render.colors[seed % render.colors.length] : undefined;
               const category=mapObjectCategory(resource.entry.alias);
-              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}`;
+              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}:${movable?'movable':'static'}`;
               let batch = objectBatches.get(key);
               if (!batch) {
-                batch = { pack: resource.packPath, id, alias: resource.entry.alias, category, placements: [] };
+                batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, placements: [] };
                 objectBatches.set(key, batch);
               }
               const matrix = poseMatrix(instance.pose);
               if (render.pose) matrix.multiply(poseMatrix(render.pose));
-              batch.placements.push({ matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix), paintColor: color });
+              const placement:StreamPlacement={matrix,position:new THREE.Vector3().setFromMatrixPosition(matrix),paintColor:color,movable};
+              batch.placements.push(placement);movingParts.get(instance.id)?.push({placement,original:matrix.clone()});
             }
           }
-          for (const instance of instances) for (const body of cfg.bodies) {
+          if(!movable)for (const instance of instances) for (const body of cfg.bodies) {
             if (body.collision === false || body.shape[0]?.toLowerCase() !== 'box') continue;
             const half = body.shape.slice(1, 4).map(Number);
             if (half.length === 3) collision.addBox(poseMatrix(instance.pose).multiply(poseMatrix(body)), new THREE.Vector3(half[0], half[1], half[2]));
@@ -1759,7 +1807,10 @@ export class Viewer {
       }
       const parts=component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
       const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
-      for(const part of outputs)part.userData.mapOcclusionRole=batch.category?'prop':'structure';
+      for(const part of outputs){
+        part.userData.mapOcclusionRole=batch.movable||batch.category?'prop':'structure';
+        if(batch.movable){part.userData.staticMapCaster=false;const materials=Array.isArray(part.material)?part.material:[part.material];part.castShadow=materials.some(m=>!m.transparent);}
+      }
       return outputs;
     },batch.category,unifyBuildings&&isBuildingAlias(batch.alias));
     }
