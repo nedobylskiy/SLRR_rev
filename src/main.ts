@@ -1,3 +1,5 @@
+import {NavigatorView} from './render/navigator-view';
+import type {NavigatorMode,NavigatorNative} from './runtime/navigator-native';
 import {DEFAULT_DRIVING_HELPING,type DrivingHelping} from './engine/driving-helping';
 import {parseScxAsync} from './formats/scx-worker-client';
 import './style.css';
@@ -41,9 +43,21 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <main><aside><div class="eyebrow">ORIGINAL ASSETS</div><h1>Under the hood.</h1><p class="intro">An open-source engine remaster of Street Legal Racing: Redline, rebuilt for the browser with WebGL 2.</p><div id="counts"></div><input id="search" type="search" placeholder="Search: Baiern, chassis, GameLogic…" aria-label="Search assets"><nav id="filters"><button data-kind="scx" class="active">Models</button><button data-kind="rpk">Packages</button><button data-kind="class">Scripts</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Cars</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
 <section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">JAVA / ENTRY POINT</span><div id="filename">Waiting for Init.java</div></div><span class="badge" id="state">Idle</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">Left drag: rotate &nbsp; · &nbsp; Wheel: zoom &nbsp; · &nbsp; Right drag: pan</div><div class="detail"><div class="eyebrow">DIAGNOSTICS</div><div id="details">Loading game catalog…</div></div></section></main><footer><span>JAVA SOURCE / WEBGL 2</span><span>Original Init.java runs first · GameLogic is under implementation</span><span id="total"></span></footer>`;
 
+// Keep Java OSD, minimap and native cursor independent of host diagnostics.
+window.addEventListener('keydown', event => {
+  if (event.code !== 'KeyU' || !event.ctrlKey || !event.altKey || event.metaKey) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  if (!event.repeat) document.body.classList.toggle('debug-ui-hidden');
+}, { capture: true });
+
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 let assets: Assets, kind = 'scx', viewer: Viewer | undefined, sequence = 0, disposeMemoryLab: (() => void) | undefined;
 let disposeJavaInput: (() => void) | undefined;
+let minimapMode:NavigatorMode='java',activeNavigator:NavigatorNative|undefined;
+let minimapZoomScale=2;
+try{const saved=Number(localStorage.getItem('slrr-minimap-zoom-scale'));if(Number.isFinite(saved)&&saved>=.25&&saved<=12)minimapZoomScale=saved;}catch{/* Use the default scale when storage is unavailable. */}
+let activeBoot:Awaited<ReturnType<typeof bootGame>>|undefined;
+let disposeMinimap:(()=>void)|undefined;
 let disposeGameBoot: (() => void) | undefined;
 let disposeGameOsd: (() => void) | undefined;
 let disposeJavaScene: (() => void) | undefined;
@@ -100,7 +114,10 @@ async function runGameBoot() {
     texture => source === assets && run === sequence ? viewer?.setGlobalEnvmap(texture) : undefined,
     flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
-  disposeGameBoot = () => result.dispose();
+  activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
+  const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);});
+  disposeMinimap=()=>minimap.dispose();
+  disposeGameBoot = () => {disposeMinimap?.();disposeMinimap=undefined;activeNavigator=undefined;activeBoot=undefined;result.dispose();};
   viewer?.setJavaSceneCamera(() => javaSceneCamera(result),
     () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value));
   const detachKeyboard = result.input.attachBrowserKeyboard(window);
@@ -108,8 +125,8 @@ async function runGameBoot() {
     message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));
   const poll = window.setInterval(() => {
     try {
-      if(viewer)viewer.profiler.measure('Java input poll CPU',()=>result.input.pollCooperative());
-      else result.input.pollCooperative();
+      if(viewer)viewer.profiler.measure('Java input poll CPU',()=>{result.horns.update();result.input.pollCooperative();});
+      else {result.horns.update();result.input.pollCooperative();}
     }
     catch (reason) {
       window.clearInterval(poll);
@@ -201,7 +218,7 @@ async function runGameBoot() {
         }
         const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
-        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving,trafficTypes:result.traffic.models(selected.map) });
+        }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving,trafficTypes:result.traffic.models(selected.map),trafficBridge:result.traffic.bridge(selected.map,selected.state,async(car,pack)=>javaStockSelection(result,source,pack,jv('Vehicle',{className:'java.game.Vehicle',fields:new Map([['chassis',car]])}))) });
         if (source !== assets || run !== sequence || !javaTrackIsCurrent(result, selected)) {
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose(); return;
@@ -300,6 +317,7 @@ async function runGameBoot() {
         pendingTrackKey = '';
         return;
       }
+      if(selected.driving&&selected.carPose)void result.traffic.advanceDistant(selected.map,selected.carPose,(viewer?.trafficPhysicalRange??30)+20).catch(error=>appendJavaEvent({level:'error',message:`Distant rivals: ${String(error)}`}));
       const javaStart = selected.start
         ? `${selected.start.x.toFixed(3)},${selected.start.y.toFixed(3)},${selected.start.z.toFixed(3)},${selected.start.yaw.toFixed(3)}` : '';
       const key = `${selected.mapPack}:${selected.mapResourceId}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
@@ -397,6 +415,37 @@ async function openDriverIk(pack='cars/racers/Baiern.rpk'){
     el('format').textContent='DRIVER / SEAT + HAND IK';el('filename').textContent=`Vin · ${pack.includes('Yotta')?'Yotta':'Baiern'} seat and steering wheel`;el('details').textContent='Original humans.rpk Vin render and vin.skl. Seat/pedals/cockpit reference come from chassis CFG. Hands follow two upper-rim targets on the installed steering wheel through its actual slot/render transforms. Three-link arm chain with fixed bone lengths; neutral seated leg pose. A bounded torso/neck positional solve fits the head joint to the first cockpit camera, with neutral gaze and fixed pelvis/bone lengths. Blue marker: head goal. Fit head to cockpit allows comparison. The fitted upper-body pose is cached; hands continue to follow steering. Prototype IK, not native solver parity. Gear shifting, reverse head movement and inertial body movement are not implemented.';
     status('Driver IK ready');
   }catch(error){if(request===sequence){status('Driver IK error',true);el('details').textContent=String(error);}}
+}
+
+const minimapPreviewButton=textElement('button','Minimap preview');minimapPreviewButton.className='hood-button';driverIkButton.after(minimapPreviewButton);
+minimapPreviewButton.onclick=()=>{void openMinimapPreview();};
+async function openMinimapPreview(map='city'){
+  if(!activeBoot||!assets||!viewer){status('Wait for Java initialization',true);return;}
+  const result=activeBoot,source=assets;stopDrive();const request=++sequence;viewer.clear();
+  // Only the preview hides the game OSD; its independent canvas stays inspectable.
+  hideGameUi.checked=true;hideGameUi.onchange?.(new Event('change'));status('Loading Java Navigator…');
+  let nav:import('slrr-jvm').JavaValue|undefined,mover:import('slrr-jvm').JavaValue|undefined,preview:NavigatorView|undefined,stage:HTMLDivElement|undefined;
+  try{
+    const script=map==='city'?'Valocity':'TestTrack',java=new TextDecoder().decode(await source.read(`sl/scripts/game/src/${script}.java`));
+    const call=/new\s+Navigator\s*\(([^;]+)\)/.exec(java);if(!call)throw Error('Map has no classic Navigator constructor');const args=call[1].split(',').map(s=>s.trim());
+    const numeric=(text:string)=>{if(!/^[\d.\s+-]+$/.test(text))throw Error('Unsupported Navigator numeric argument');return (text.replace(/\s/g,'').match(/[+-]?[\d.]+/g)??[]).reduce((sum,n)=>sum+Number(n),0);};
+    const values=args.map((arg,index)=>{if(index>=3&&index<=5){const match=/([\w.]+):0x([\da-f]+)r/i.exec(arg);if(!match)throw Error('Unsupported Navigator resource');return result.gameTypes.remountSavedResource(match[1],parseInt(match[2],16));}return jv(index<3?'float':'int',numeric(arg));});
+    nav=await result.jvm.constructAsync('java.game.Navigator',values);mover=await result.jvm.constructAsync('java.util.resource.Dummy',[]);const followed=result.gameTypes.get(mover)!;
+    const center=map==='city'?{x:0,z:0}:{x:-456,z:-1503};followed.position={...center,y:0};
+    await result.jvm.invokeAsync(nav,'show');await result.jvm.invokeAsync(nav,'changeSize',[jv('float',.02),jv('float',.02),jv('float',.96),jv('float',.96)]);
+    const type=async(id:number)=>result.jvm.constructAsync('java.util.resource.RenderRef',[result.gameTypes.remountSavedResource('frontend.rpk',id)]);
+    await result.jvm.invokeAsync(nav,'addMarker',[await type(0x5c),mover]);
+    for(const [id,x,z]of [[0x5b,-200,100],[0x5f,100,-200],[0x5a,2500,1000]]){const point=await result.jvm.constructAsync('java.lang.Vector3',[jv('float',center.x+x),jv('float',0),jv('float',center.z+z)]);await result.jvm.invokeAsync(nav,'addMarker',[await type(id),point,jv('int',0)]);}
+    await result.jvm.invokeAsync(nav,'updateNavigator',[mover,jv('int',0)]);
+    if(sequence!==request||activeBoot!==result)throw Error('Navigator preview superseded');
+    stage=document.createElement('div');stage.style.cssText='position:absolute;inset:48px 5% 5%;pointer-events:none;';el('viewport').append(stage);
+    preview=new NavigatorView(stage,source,()=>result.navigator.frames(stage!.clientWidth/stage!.clientHeight).filter(frame=>frame.id===nav!.value),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);});
+    vinControls.replaceChildren();vinControls.hidden=false;const row=textElement('div','','character-playground-row'),maps=document.createElement('select');maps.setAttribute('aria-label','Minimap preview map');for(const [value,label]of [['city','City'],['test_track','Test Track']]){const option=document.createElement('option');option.value=value;option.textContent=label;maps.append(option);}maps.value=map;maps.onchange=()=>{void openMinimapPreview(maps.value);};row.append(maps);
+    const modes=document.createElement('select');modes.setAttribute('aria-label','Minimap preview mode');for(const [value,label]of [['java','Java / original'],['north','North up'],['heading','Follow heading']]){const option=document.createElement('option');option.value=value;option.textContent=label;modes.append(option);}modes.value=minimapMode;modes.onchange=()=>{minimapMode=modes.value as NavigatorMode;result.navigator.mode=minimapMode;minimapModeSelect.value=minimapMode;};row.append(modes);
+    for(const [name,min,max,initial,apply]of [['Preview X',center.x-1000,center.x+1000,center.x,(v:number)=>{followed.position.x=v;}],['Preview Z',center.z-1000,center.z+1000,center.z,(v:number)=>{followed.position.z=v;}],['Preview heading',-180,180,0,(v:number)=>{followed.orientation.y=v*Math.PI/180;}],['Minimap zoom',1,15,4.5,(v:number)=>{const cam=result.gameTypes.getRender(result.jvm.get(nav!,'cam'));if(cam)cam.position.y=v;}]]as const){const label=textElement('label',name),slider=document.createElement('input');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step=name==='Minimap zoom'?'.1':'1';slider.value=String(initial);slider.setAttribute('aria-label',name);slider.oninput=()=>apply(Number(slider.value));label.append(slider);row.append(label);}
+    vinControls.append(row);el('format').textContent='MINIMAP / JAVA NAVIGATOR';el('filename').textContent=`${script} · original tile resources and marker symbols`;el('details').textContent='Original Navigator.java creates the tiles and viewport. Preview adds a moving player, two static garage symbols and an off-screen finish symbol. Sliders move only the test marker. Normal gameplay uses the original Java marker lists. Tile resources are cached, loaded three at a time, and frustum-culled by the independent unlit minimap renderer.';status('Minimap preview ready');
+    const savedNav=nav,savedMover=mover,savedPreview=preview,savedStage=stage;disposeDriving=()=>{savedPreview.dispose();savedStage.remove();void result.jvm.invokeAsync(savedNav,'hide').then(()=>result.jvm.invokeAsync(savedNav,'finalize')).finally(()=>result.jvm.invokeAsync(savedMover,'finalize')).catch(()=>{});};
+  }catch(error){preview?.dispose();stage?.remove();if(nav)void result.jvm.invokeAsync(nav,'hide').catch(()=>{});status('Minimap preview error',true);el('details').textContent=String(error);}
 }
 
 const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';driverIkButton.after(suspensionButton);
@@ -747,8 +796,8 @@ for (const [layer, title] of [['terrain', 'Support surfaces'], ['walls', 'Side f
   input.onchange = () => viewer?.showMapDebug(layer, input.checked);
   label.prepend(input); mapDebugOptions.append(label); mapDebugChecks.push(input);
 }
-const vehicleFramesLabel = textElement('label', 'Vehicle part bounds (AABB)'), vehicleFramesCheck = document.createElement('input');
-vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
+const vehicleFramesLabel = textElement('label', 'Vehicle bounds: parts + chassis'), vehicleFramesCheck = document.createElement('input');
+vehicleFramesLabel.title = 'Green: chassis collision hull. Amber: body geometry AABB. Cyan: mechanical geometry AABB. Effects are excluded.'; vehicleFramesCheck.type = 'checkbox'; vehicleFramesLabel.prepend(vehicleFramesCheck); mapDebugOptions.append(vehicleFramesLabel);
 const bodyVisibleLabel = textElement('label', 'Show body shell'), bodyVisibleCheck = document.createElement('input');
 bodyVisibleCheck.type = 'checkbox'; bodyVisibleCheck.checked = true; bodyVisibleLabel.prepend(bodyVisibleCheck); mapDebugOptions.append(bodyVisibleLabel);
 const suspensionBonesLabel=textElement('label','Suspension bone animation'),suspensionBonesCheck=document.createElement('input');
@@ -759,6 +808,14 @@ const inertialCameraLabel = textElement('label', 'Inertial chase camera'), inert
 inertialCameraCheck.type = 'checkbox'; inertialCameraLabel.prepend(inertialCameraCheck); mapDebugOptions.append(inertialCameraLabel);
 inertialCameraLabel.title = 'Experimental external camera with its own velocity and smooth catch-up; cockpit views stay unchanged';
 inertialCameraCheck.onchange = () => viewer?.setInertialCameraEnabled(inertialCameraCheck.checked);
+const minimapModeLabel=textElement('label','Minimap mode'),minimapModeSelect=document.createElement('select');minimapModeSelect.setAttribute('aria-label','Minimap mode');
+for(const [value,label] of [['java','Java / original'],['north','North up'],['heading','Follow heading']]){const option=document.createElement('option');option.value=value;option.textContent=label;minimapModeSelect.append(option);}minimapModeSelect.onchange=()=>{minimapMode=minimapModeSelect.value as NavigatorMode;if(activeNavigator)activeNavigator.mode=minimapMode;};minimapModeLabel.append(minimapModeSelect);mapDebugOptions.append(minimapModeLabel);
+const minimapZoomLabel=textElement('label','Minimap scale'),minimapZoomInput=document.createElement('input'),minimapZoomValue=textElement('span',`×${minimapZoomScale.toFixed(2)}`);
+minimapZoomInput.type='range';minimapZoomInput.min='.25';minimapZoomInput.max='12';minimapZoomInput.step='.05';minimapZoomInput.value=String(minimapZoomScale);minimapZoomInput.setAttribute('aria-label','Minimap scale');
+minimapZoomLabel.title='Higher values zoom in. ×1 uses the scale requested by Java.';
+minimapZoomInput.oninput=()=>{minimapZoomScale=Number(minimapZoomInput.value);minimapZoomValue.textContent=`×${minimapZoomScale.toFixed(2)}`;if(activeNavigator)activeNavigator.zoomScale=minimapZoomScale;};
+minimapZoomInput.onchange=()=>{try{localStorage.setItem('slrr-minimap-zoom-scale',String(minimapZoomScale));}catch{/* Live adjustment remains available without storage. */}};
+minimapZoomLabel.append(minimapZoomInput,minimapZoomValue);mapDebugOptions.append(minimapZoomLabel);
 const fogLabel = textElement('label', 'Fog'), fogCheck = document.createElement('input');
 fogCheck.type = 'checkbox'; fogCheck.checked = true; fogLabel.prepend(fogCheck); mapDebugOptions.append(fogLabel);
 const shadowsLabel = textElement('label', 'Dynamic shadows'), shadowsCheck = document.createElement('input');

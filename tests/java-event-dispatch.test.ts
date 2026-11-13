@@ -273,6 +273,43 @@ test('GameType timers deliver EVENT_TIME and can be cancelled', async () => {
   gameTypes.dispose();
 });
 
+test('a timer can open an asynchronous dialog while later timer events keep flowing', async () => {
+  const timerSource = `package demo;
+    class Dialog { static native void display(); }
+    class Handler {
+      int started; int finished;
+      void handleEvent(Object source, int type, int value) {
+        started++;
+        if(value == 1) Dialog.display();
+        finished++;
+      }
+    }`;
+  const jvm = new SlrrJvm({resolveImport:()=>({path:'Timer.java',source:timerSource})});
+  let close!:()=>void, opened!:()=>void;
+  const shown=new Promise<void>(resolve=>{opened=resolve;});
+  jvm.natives.registerAsync('demo.Dialog','display',[],()=>new Promise(resolve=>{
+    close=()=>resolve(jv('void',undefined));opened();
+  }));
+  const errors:string[]=[];
+  const gameTypes=new GameTypeNative(jvm,event=>{if(event.level==='error')errors.push(event.message);});
+  try {
+    await jvm.loadClass('demo.Handler');
+    const handler=await jvm.constructAsync('demo.Handler',[]);
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',handler,[]);
+    jvm.natives.invoke('java.lang.GameType','setEventMask',handler,[jv('int',EVENT_TIME)]);
+    jvm.natives.invoke('java.lang.GameType','addTimer',handler,[jv('float',0),jv('int',1)]);
+    await Promise.race([shown,new Promise((_,reject)=>setTimeout(()=>reject(Error('Timer did not open dialog')),1000))]);
+    assert.equal(jvm.get(handler,'finished').value,0);
+    jvm.natives.invoke('java.lang.GameType','addTimer',handler,[jv('float',0),jv('int',2)]);
+    await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(jvm.get(handler,'started').value,2);
+    assert.equal(jvm.get(handler,'finished').value,1);
+    close();await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(jvm.get(handler,'finished').value,2);
+    assert.deepEqual(errors,[]);
+  } finally { close?.();gameTypes.dispose(); }
+});
+
 test('cooperative input dispatch keeps delivering events while a Java dialog waits', async () => {
   const dialogSource = `package demo;
     class Pause { static native void waitForClick(); }

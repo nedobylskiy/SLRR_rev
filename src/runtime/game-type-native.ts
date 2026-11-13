@@ -58,6 +58,7 @@ export class GameTypeNative {
   private partCategoryReader?: (receiver: JavaValue) => number;
   private driveTypeReader?: (receiver: JavaValue) => number;
   private removalReader?: (receiver: JavaValue) => number;
+  private trafficInfoReader?: (receiver:JavaValue,query:number)=>JavaValue|undefined;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
   private readonly resourceDestroyListeners = new Set<(receiver: JavaValue) => void>();
 
@@ -341,7 +342,7 @@ export class GameTypeNative {
         if (!this.get(receiver)) return;
         try {
           this.queueIntEvent(receiver, jv('GameRef', null), EVENT_TIME, Number(args[1].value));
-          this.dispatchQueuedEvents();
+          this.dispatchQueuedEventsCooperative(1000, 'Java timer');
         } catch (error) {
           this.report({ level: 'error', message: `Java timer: ${error instanceof Error ? error.message : String(error)}` });
         }
@@ -439,6 +440,7 @@ export class GameTypeNative {
     });
     const getInfo = (receiver: JavaValue, query: number, index = 0): JavaValue => {
       const node = this.require(receiver);
+      const traffic=this.trafficInfoReader?.(receiver,query);if(traffic)return traffic;
       switch (query) {
         case 0: return jv('int', 0); // GII_NULL
         // MOCK: The host has no separate animated bone node yet. Use the live
@@ -462,6 +464,7 @@ export class GameTypeNative {
         case 48: return jv('int', this.renderCountReader?.(receiver) ?? 0); // GII_RENDER: CFG camera count.
         case 52: return jv('int', this.driveTypeReader?.(receiver) ?? 0); // GII_CAR_DRIVETYPE
         case 55: return jv('int', this.partCategoryReader?.(receiver) ?? 0); // GII_PART_CATEGORY: original CFG category.
+        case 56: return jv('int',0); // GII_CAR_TRAFFICPTR: no traffic registration.
         case 41: return jv('int', this.removalReader?.(receiver) ?? -1); // GII_GETOUT_OK
         default: throw new Error(`GameRef.getInfo query ${query} is not implemented`);
       }
@@ -516,6 +519,12 @@ export class GameTypeNative {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
             if (verb === 'render') node.cameraRendering = true;
             if (verb === 'hide') node.cameraRendering = false;
+            if (verb === 'sethorn') {
+              const words = args[2].value.trim().split(/\s+/);
+              const value = Number(words[1]);
+              if (words.length !== 2 || !Number.isFinite(value)) throw new Error(`Invalid horn command: ${args[2].value}`);
+              node.hornInput = value !== 0; node.hornCommandRevision++;
+            }
             if (verb === 'setsteer') {
               const words = args[2].value.trim().split(/\s+/);
               const value = Number(words[1]);
@@ -650,6 +659,7 @@ export class GameTypeNative {
   setAxisReader(reader: (receiver: JavaValue, axis: number) => number): void { this.axisReader = reader; }
   setRenderCountReader(reader: (receiver: JavaValue) => number): void { this.renderCountReader = reader; }
   setObjectCategoryReader(reader: (receiver: JavaValue) => number): void { this.objectCategoryReader = reader; }
+  setTrafficInfoReader(reader:(receiver:JavaValue,query:number)=>JavaValue|undefined):void {this.trafficInfoReader=reader;}
   setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
   addResourceDestroyListener(listener: (receiver: JavaValue) => void): void { this.resourceDestroyListeners.add(listener); }
   setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
@@ -779,7 +789,7 @@ export class GameTypeNative {
   }
 
   /** Browser input handlers may wait for a modal dialog while later input keeps flowing. */
-  dispatchQueuedEventsCooperative(limit = 1000): number {
+  dispatchQueuedEventsCooperative(limit = 1000, errorContext = 'Java input'): number {
     if (this.dispatchingEvents) return 0;
     this.dispatchingEvents = true;
     let count = 0;
@@ -790,7 +800,7 @@ export class GameTypeNative {
         const node = this.get(event.receiver);
         if (!node?.acceptsEvent(event.type)) continue;
         void this.jvm.invokeAsync(event.receiver, event.method ?? 'handleEvent', event.arguments).catch(error => {
-          this.report({ level: 'error', message: `Java input: ${error instanceof Error ? error.message : String(error)}` });
+          this.report({ level: 'error', message: `${errorContext}: ${error instanceof Error ? error.message : String(error)}` });
         });
         count++;
       }

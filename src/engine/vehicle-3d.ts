@@ -579,7 +579,9 @@ export class Vehicle3D extends CarCrashDemo {
             if (speed > 8 && j.length() > this.body.mass * 0.5)
               this.soft.get(this.root)?.panel.impulseAt(j.clone().multiplyScalar(0.02).toArray() as Triple, p.toArray() as Triple);
           }
-          const wall = this.mapCollision?.contact(p, 0.2, false);
+          // The 20 cm lateral probe must not erase the clearance under the body:
+          // a curb below the chassis is wheel support, not a bumper collision.
+          const wall = this.mapCollision?.contact(p, 0.2, false, 0.02);
           if (wall) {
             const speed = Math.max(0, -this.body.pointVelocity(wall.point).dot(wall.normal));
             const j=this.body.contact(wall.point, wall.normal, wall.depth, 0.18);
@@ -607,6 +609,7 @@ export class Vehicle3D extends CarCrashDemo {
         }
       }
       this.timings.contacts += performance.now() - sectionStart; sectionStart = performance.now();
+      this.suspension.resolveGroundContacts();
       this.syncBody(); this.bodySurface?.setFrames(previous, this.root.matrix());
       const omega = this.body.omega;
       // Gravity and normal suspension load alone do not require a node solve. Hard accelerations,

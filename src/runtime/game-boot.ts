@@ -1,3 +1,5 @@
+import { VehicleHornNative } from './vehicle-horn-native';
+import {NavigatorNative} from './navigator-native';
 import { SlrrJvm, jv, type JavaObject, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
@@ -15,7 +17,7 @@ import { InputNative } from './input-native';
 import { FileNative } from './file-native';
 import { AssetCatalogAdapter, FindFileNative } from './find-file-native';
 import { ResourceCatalog } from './resource-catalog';
-import { packedResourceId } from './resource-ids';
+import { packedResourceId, instanceResourceIdentity } from './resource-ids';
 import { StringNative } from './string-native';
 import { PartFactory } from '../engine/world';
 import { repairDecompiledSource } from './source-repairs';
@@ -46,7 +48,7 @@ import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export interface JavaCallTiming { calls: number; averageMs: number; peakMs: number; lastAt: number }
-export type BootResult = { traffic:TrafficNative; javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; osdButtons: OsdButtonNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
+export type BootResult = { horns:VehicleHornNative; navigator:NavigatorNative; traffic:TrafficNative; javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; osdButtons: OsdButtonNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -334,12 +336,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     setMapFog?.({ color, near, far });
     return voidValue();
   });
-  new GroundRoadNative(jvm,async receiver=>{
+  const groundRoadNetwork=async (receiver:JavaValue)=>{
     const ground=gameTypes.getResource(receiver);
     if(!ground?.resourcePack)return;
     const localId=(resolveResourceIdentity(ground.typeId)?.id??ground.typeId)&0xffff;
     return (await loadMapRoads(assets,ground.resourcePack,localId))?.network;
-  });
+  };
+  new GroundRoadNative(jvm,groundRoadNetwork);
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
@@ -348,11 +351,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   chassisNative = new ChassisNative(jvm, gameTypes, readResourceBounds);
   const partFactory = new PartFactory(assets);
   partNative = new PartNative(jvm, gameTypes, async (parent, parentSlot, child, childSlot) => {
-    const key = (node: typeof parent) => {
-      const identity = resolveResourceIdentity(node.typeId);
-      return identity ? { pack: normalizeResourcePackPath(identity.pack), id: identity.id }
-        : node.resourcePack ? { pack: normalizeResourcePackPath(node.resourcePack), id: node.typeId } : null;
-    };
+    const key = (node: typeof parent) => instanceResourceIdentity(node,resolveResourceIdentity);
     const parentKey = key(parent), childKey = key(child);
     return !!parentKey && !!childKey && await partFactory.compatibleSlots(parentKey, parentSlot, childKey, childSlot);
   });
@@ -415,10 +414,19 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       }
     });
   const cameras = new CameraNative(jvm, gameTypes, viewports);
+  const navigator=new NavigatorNative(jvm,gameTypes,viewports,cameras);
   const animations=new AnimationNative(jvm,gameTypes);
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
+  const hornSound = jv('SfxRef', { className: 'java.util.resource.SfxRef', fields: new Map<string, JavaValue>() });
+  jvm.natives.invoke('java.util.resource.ResourceRef', 'set', hornSound, [gameTypes.remountSavedResource('sound.rpk', 0x15)]);
+  const horns = new VehicleHornNative(jvm, gameTypes, controllers, {
+    start: () => Number(jvm.natives.invoke('java.util.resource.SfxRef', 'nplay',
+      hornSound, [jv('Vector3', null),
+        jv('float', 20), jv('float', 1), jv('float', 1), jv('int', 1), jv('int', 0)])!.value),
+    stop: handle => { jvm.natives.invoke('java.util.resource.SfxRef', 'stop', jv('SfxRef', null), [jv('int', handle)]); },
+  });
   osdButtons.setCursorEvents((code, physics) => input.cursorEvent(code, {
     id: 0, physicsId: gameTypes.getResource(physics)?.resourceId ?? 0, local: [0, 0, 0], world: [0, 0, 0],
   }));
@@ -444,18 +452,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const traffic=new TrafficNative(jvm,receiver=>receiver.value==null?undefined:gameTypes.getResource(receiver),value=>{
     if(value.value==null)return;
     const node=gameTypes.getResource(value);if(!node)return;
-    return resolveResourceIdentity(node.typeId)??(node.resourcePack?{pack:node.resourcePack,id:node.typeId&0xffff}:undefined);
-  });
+    return instanceResourceIdentity(node,resolveResourceIdentity);
+  },gameTypes,groundRoadNetwork);
   native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
-  // MOCK: Individual traffic placement and its immediately following notification
-  // are accepted without creating a traffic entity. Zero is the absent traffic ID.
-  for (const [method, parameters] of [
-    ['addTrafficCar', ['GameRef', 'Vector3']],
-    ['notifyTrafficCar', ['int', 'int']],
-  ] as const) jvm.natives.register('java.util.resource.GroundRef', method, parameters, () => {
-    report({ level: 'native', message: `Host mock: GroundRef.${method} skipped (traffic simulation unavailable)` });
-    return jv('int', 0);
-  });
   // MOCK: Pedestrian simulation is not hosted yet; accept registrations so city setup can continue.
   native('java.util.resource.GroundRef', 'addPedestrianType', ['GameRef']);
   // MOCK: Water-plane rendering is pending; Track.animate still needs its water bounds calls.
@@ -499,9 +498,6 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       jv('int', video?.openVideo(String(args[0].value), Number(args[1].value) !== 0) ?? 1));
   jvm.natives.register('java.render.GfxEngine', 'closeVideo', [], () => { video?.closeVideo(); return voidValue(); });
   jvm.natives.register('java.render.GfxEngine', 'isPlayingVideo', [], () => jv('int', video?.isPlayingVideo() ?? 0));
-  // Navigator.java owns route data and camera setup. Its engine update is
-  // deferred until the navigator viewport can render a map in the browser.
-  jvm.natives.register('java.game.Navigator', 'updateNavigator', ['GameRef', 'int'], () => voidValue());
   native('java.sound.Sound', 'init', []);
   for (const [name, signature, resultType] of [
     ['changeMusicSet', ['int'], 'void'], ['nextTrack', [], 'void'], ['prevTrack', [], 'void'],
@@ -565,7 +561,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    horns.dispose();traffic.dispose();navigator.dispose();animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
@@ -587,11 +583,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
+    return { horns, navigator, traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
+    return { horns, navigator, traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }

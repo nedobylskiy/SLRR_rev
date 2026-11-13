@@ -1,0 +1,5155 @@
+{
+  "note": "CPU replay of original assets and real preparation methods; not measured draw calls. Match triangles/copies to live report before attributing numbered batches.",
+  "totals": {
+    "sourceParts": 363,
+    "copies": 3526,
+    "batches": 45,
+    "triangles": 721020,
+    "buffersMiB": 85.48126983642578,
+    "arrays": 45
+  },
+  "models": [
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3bd",
+      "scx": "objects\\meshes\\_uvw\\vreklam3ab.SCX",
+      "placements": 226
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3bb",
+      "scx": "objects\\meshes\\_uvw\\vreklam3aa.SCX",
+      "placements": 220
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3c6",
+      "scx": "objects\\meshes\\_uvw\\vreklam3af.SCX",
+      "placements": 219
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3c4",
+      "scx": "objects\\meshes\\_uvw\\vreklam3ae.SCX",
+      "placements": 230
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3c2",
+      "scx": "objects\\meshes\\_uvw\\vreklam3ad.SCX",
+      "placements": 227
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3bf",
+      "scx": "objects\\meshes\\_uvw\\vreklam3ac.SCX",
+      "placements": 233
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x37b",
+      "scx": "objects\\meshes\\_uvw\\reklam1nab.SCX",
+      "placements": 61
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x378",
+      "scx": "objects\\meshes\\_uvw\\reklam1naa.SCX",
+      "placements": 56
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x361",
+      "scx": "objects\\meshes\\_uvw\\reklam1fab.SCX",
+      "placements": 69
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x384",
+      "scx": "objects\\meshes\\_uvw\\reklam1naf.SCX",
+      "placements": 48
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x388",
+      "scx": "objects\\meshes\\_uvw\\reklam1nbb.SCX",
+      "placements": 74
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x35f",
+      "scx": "objects\\meshes\\_uvw\\reklam1faa.SCX",
+      "placements": 54
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x36a",
+      "scx": "objects\\meshes\\_uvw\\reklam1faf.SCX",
+      "placements": 57
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x366",
+      "scx": "objects\\meshes\\_uvw\\reklam1fad.SCX",
+      "placements": 124
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x390",
+      "scx": "objects\\meshes\\_uvw\\reklam1nbf.SCX",
+      "placements": 64
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x381",
+      "scx": "objects\\meshes\\_uvw\\reklam1nae.SCX",
+      "placements": 64
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x37d",
+      "scx": "objects\\meshes\\_uvw\\reklam1nac.SCX",
+      "placements": 62
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x374",
+      "scx": "objects\\meshes\\_uvw\\reklam1fbe.SCX",
+      "placements": 66
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x372",
+      "scx": "objects\\meshes\\_uvw\\reklam1fbd.SCX",
+      "placements": 57
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x368",
+      "scx": "objects\\meshes\\_uvw\\reklam1fae.SCX",
+      "placements": 69
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x363",
+      "scx": "objects\\meshes\\_uvw\\reklam1fac.SCX",
+      "placements": 59
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x370",
+      "scx": "objects\\meshes\\_uvw\\reklam1fbc.SCX",
+      "placements": 58
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x38c",
+      "scx": "objects\\meshes\\_uvw\\reklam1nbd.SCX",
+      "placements": 59
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x38a",
+      "scx": "objects\\meshes\\_uvw\\reklam1nbc.SCX",
+      "placements": 60
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x36e",
+      "scx": "objects\\meshes\\_uvw\\reklam1fbb.SCX",
+      "placements": 69
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x38e",
+      "scx": "objects\\meshes\\_uvw\\reklam1nbe.SCX",
+      "placements": 55
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x386",
+      "scx": "objects\\meshes\\_uvw\\reklam1nba.SCX",
+      "placements": 59
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x376",
+      "scx": "objects\\meshes\\_uvw\\reklam1fbf.SCX",
+      "placements": 68
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x37f",
+      "scx": "objects\\meshes\\_uvw\\reklam1nad.SCX",
+      "placements": 58
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x132",
+      "scx": "objects\\meshes\\redony3a\\redony3a.scx",
+      "placements": 419
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3c",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 59
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x114",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 63
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x14",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 49
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x38",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 42
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x30",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 46
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x13a",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 42
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x13c",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 54
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x13e",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 50
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x3a",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 66
+    },
+    {
+      "alias": "03x6_ajto",
+      "resource": "objects.rpk:0x7",
+      "scx": "objects\\meshes\\03x6_ajto\\03x6_ajto.scx",
+      "placements": 43
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x148",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 61
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x146",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 42
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x144",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 44
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x155",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 53
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x151",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 41
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x153",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 50
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x1aa",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 52
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x157",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 35
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x140",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 46
+    },
+    {
+      "alias": "04x6_alap",
+      "resource": "objects.rpk:0x159",
+      "scx": "objects\\meshes\\04x6_alap\\04x6_alap.scx",
+      "placements": 43
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1b1",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 29
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1de",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 25
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1b3",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 26
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1b5",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 27
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1af",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 34
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1ad",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 23
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1bd",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 25
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1bb",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 24
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1b9",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 29
+    },
+    {
+      "alias": "06p5x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x1b7",
+      "scx": "objects\\meshes\\06p5x6_lepcsosboltiv\\06p5x6_lepcsosboltiv.scx",
+      "placements": 21
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x136",
+      "scx": "objects\\meshes\\redony6a\\redony6a.scx",
+      "placements": 150
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x1e6",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 10
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x1e4",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 5
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x234",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 5
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x21a",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 11
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x22a",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 9
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x1e0",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 8
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x22f",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 10
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x1e2",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 8
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x23d",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 6
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x23f",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 8
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x241",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 9
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x239",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 9
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x23e",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 8
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x23b",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 7
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x242",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 10
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x237",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 4
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x240",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 13
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0x23c",
+      "scx": "objects\\meshes\\06x5_shop\\06x5_shop.scx",
+      "placements": 7
+    },
+    {
+      "alias": "06x5_shop",
+      "resource": "objects.rpk:0xc3",
+      "scx": "objects\\meshes\\06x5_shop_uveg\\06x5_shop_uveg.scx",
+      "placements": 81
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x249",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 5
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x243",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 8
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x248",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 6
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x247",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 7
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x245",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 5
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x246",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 14
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x24a",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 9
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x244",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 7
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x24b",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 8
+    },
+    {
+      "alias": "06x7_2ajtos",
+      "resource": "objects.rpk:0x24c",
+      "scx": "objects\\meshes\\06x7_2ajtos\\06x7_2ajtos.scx",
+      "placements": 10
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x257",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 21
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x250",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 24
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x24e",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 25
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x24d",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 19
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x254",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 23
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x255",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 28
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x24f",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 22
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x251",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 24
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x252",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 17
+    },
+    {
+      "alias": "08p5x4_shop",
+      "resource": "objects.rpk:0x256",
+      "scx": "objects\\meshes\\08p5x4_shop\\08p5x4_shop.scx",
+      "placements": 15
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x25d",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 19
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x25f",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 13
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x25c",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 21
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x258",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 20
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x25e",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 17
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x25a",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 22
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x25b",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 17
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x260",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 20
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x261",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 23
+    },
+    {
+      "alias": "09x6_shop",
+      "resource": "objects.rpk:0x259",
+      "scx": "objects\\meshes\\09x6_shop\\09x6_shop.scx",
+      "placements": 14
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x72",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok12c.SCX",
+      "placements": 71
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x36",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok12b.SCX",
+      "placements": 61
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x21",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok12a.SCX",
+      "placements": 56
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x78",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok12f.SCX",
+      "placements": 60
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x76",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok12e.SCX",
+      "placements": 78
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x74",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok12d.SCX",
+      "placements": 57
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x266",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 15
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x268",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 22
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x265",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 19
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x264",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 12
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x26a",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 18
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x262",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 19
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x26b",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 15
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x269",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 10
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x267",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 13
+    },
+    {
+      "alias": "12p5x6_lepcsos",
+      "resource": "objects.rpk:0x263",
+      "scx": "objects\\meshes\\12p5x6_lepcsos\\12p5x6_lepcsos.scx",
+      "placements": 16
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x295",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 10
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x28c",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 18
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x28f",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 13
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x28d",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 12
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x292",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 12
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x28e",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 11
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x291",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 9
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x294",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 14
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x290",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 12
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x293",
+      "scx": "objects\\meshes\\13p5x6_alap\\13p5x6_alap.scx",
+      "placements": 12
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x80",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok13d.SCX",
+      "placements": 9
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x84",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok13f.SCX",
+      "placements": 10
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x7e",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok13c.SCX",
+      "placements": 15
+    },
+    {
+      "alias": "13p5x6_alap",
+      "resource": "objects.rpk:0x7a",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok13a.SCX",
+      "placements": 10
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x29d",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 8
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x29e",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 12
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x29b",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 12
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x299",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 11
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x298",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 10
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x296",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 15
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x29f",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 8
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x297",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 11
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x29a",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 11
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x29c",
+      "scx": "objects\\meshes\\13x6_ajto\\13x6_ajto.scx",
+      "placements": 4
+    },
+    {
+      "alias": "13x6_ajto",
+      "resource": "objects.rpk:0x7c",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok13b.SCX",
+      "placements": 6
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x2a2",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 18
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x2a3",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 13
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x63a",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 21
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x2a5",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 14
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x638",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 11
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x2a1",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 11
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x2a4",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 10
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x63b",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 13
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x639",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 9
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x2a0",
+      "scx": "objects\\meshes\\14x6_ketszintajtos\\14x6_ketszintajtos.scx",
+      "placements": 14
+    },
+    {
+      "alias": "14x6_ketszintajtos",
+      "resource": "objects.rpk:0x82",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok13e.SCX",
+      "placements": 14
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x63d",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 4
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x642",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 7
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x643",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 3
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x645",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 4
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x640",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 3
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x63e",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 6
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x63f",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 5
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x644",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 3
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x63c",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 5
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0x641",
+      "scx": "objects\\meshes\\15x9_shop\\15x9_shop.scx",
+      "placements": 4
+    },
+    {
+      "alias": "15x9_shop",
+      "resource": "objects.rpk:0xc8",
+      "scx": "objects\\meshes\\15x9_shop_uveg\\15x9_shop_uveg.scx",
+      "placements": 44
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x64b",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 10
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x64f",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 5
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x64d",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 8
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x64e",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 8
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x649",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 9
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x646",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 6
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x64c",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 6
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x648",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 8
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x647",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 9
+    },
+    {
+      "alias": "18x6_haromboltiv",
+      "resource": "objects.rpk:0x64a",
+      "scx": "objects\\meshes\\18x6_haromboltiv\\18x6_haromboltiv.scx",
+      "placements": 6
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x653",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 11
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x652",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 16
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x659",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 15
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x657",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 6
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x658",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 8
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x654",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 6
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x651",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 10
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x655",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 8
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x650",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 9
+    },
+    {
+      "alias": "19x6_garazs",
+      "resource": "objects.rpk:0x656",
+      "scx": "objects\\meshes\\19x6_garazs\\19x6_garazs.scx",
+      "placements": 9
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x66e",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 3
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x66a",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 5
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x66c",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 7
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x66b",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 8
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x665",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 3
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x667",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 7
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x668",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 5
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x669",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 4
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x66d",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 4
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x670",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 8
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x672",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 3
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x678",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 7
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x671",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 6
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x674",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 5
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x676",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 2
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x66f",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 3
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x673",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 4
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x677",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 3
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x675",
+      "scx": "objects\\meshes\\22x4_pub\\22x4_pub.scx",
+      "placements": 3
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x8c",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok22d.SCX",
+      "placements": 6
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x8a",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok22c.SCX",
+      "placements": 6
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x8e",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok22e.SCX",
+      "placements": 5
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x86",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok22a.SCX",
+      "placements": 3
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x88",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok22b.SCX",
+      "placements": 3
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x67d",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 6
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x679",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 4
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x67e",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 6
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x680",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 5
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x682",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 4
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x67b",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 3
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x681",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 7
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x67a",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 3
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x67f",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 2
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0xca",
+      "scx": "objects\\meshes\\23x5_shop_uveg\\23x5_shop_uveg.scx",
+      "placements": 41
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x9a",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok23e.SCX",
+      "placements": 6
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x9c",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok23f.SCX",
+      "placements": 2
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x96",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok23c.SCX",
+      "placements": 1
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x98",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok23d.SCX",
+      "placements": 2
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x94",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok23b.SCX",
+      "placements": 6
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x92",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok23a.SCX",
+      "placements": 1
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x277",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 6
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x280",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x27a",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 4
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x279",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x27d",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x287",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 5
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x282",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 1
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x284",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 5
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x288",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 3
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x286",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 2
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x285",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 3
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x28b",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 6
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x283",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 4
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0xc6",
+      "scx": "objects\\meshes\\12x6_uveges_uveg\\12x6_uveges_uveg.scx",
+      "placements": 34
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x272",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 2
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x26c",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 5
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x271",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 7
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x273",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x276",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 6
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x274",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 5
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x26e",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 8
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x275",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 6
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x26d",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x65d",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 7
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x662",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 7
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x65b",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 7
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x65f",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 5
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x65e",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 8
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x661",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 6
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x663",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 5
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x660",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 2
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x684",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 4
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x685",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 7
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x683",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 3
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x68a",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 2
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x688",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 2
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x689",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 6
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x686",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 5
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x68b",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 5
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x68c",
+      "scx": "objects\\meshes\\24x5_beugro\\24x5_beugro.scx",
+      "placements": 2
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0xa0",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok24b.SCX",
+      "placements": 3
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0xa2",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok24c.SCX",
+      "placements": 2
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0xa8",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok24f.SCX",
+      "placements": 2
+    },
+    {
+      "alias": "hotel_001_egyedi",
+      "resource": "objects.rpk:0x61a",
+      "scx": "objects\\meshes\\hotel_001_egyedi\\hotel_001_egyedi.scx",
+      "placements": 1
+    },
+    {
+      "alias": "hotel_005_egyedi",
+      "resource": "objects.rpk:0x620",
+      "scx": "objects\\meshes\\hotel_005_egyedi\\hotel_005_egyedi.scx",
+      "placements": 1
+    },
+    {
+      "alias": "hotel_007_egyedi",
+      "resource": "objects.rpk:0x628",
+      "scx": "objects\\meshes\\hotel_007_egyedi\\hotel_007_egyedi.scx",
+      "placements": 1
+    },
+    {
+      "alias": "hotel_006_egyedi",
+      "resource": "objects.rpk:0x626",
+      "scx": "objects\\meshes\\hotel_006_egyedi\\hotel_006_egyedi.scx",
+      "placements": 1
+    },
+    {
+      "alias": "hotel_013_egyedi",
+      "resource": "objects.rpk:0x62c",
+      "scx": "objects\\meshes\\hotel_013_egyedi\\hotel_013_egyedi.scx",
+      "placements": 1
+    },
+    {
+      "alias": "hotel_003_egyedi",
+      "resource": "objects.rpk:0x61d",
+      "scx": "objects\\meshes\\hotel_003_egyedi\\hotel_003_egyedi.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz03",
+      "resource": "objects.rpk:0x2b2",
+      "scx": "objects\\meshes\\krthaz03\\krthaz03.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz03",
+      "resource": "objects.rpk:0x2b3",
+      "scx": "objects\\meshes\\krthaz03\\krthaz03.scx",
+      "placements": 14
+    },
+    {
+      "alias": "krthaz03",
+      "resource": "objects.rpk:0x2b5",
+      "scx": "objects\\meshes\\krthaz03\\krthaz03.scx",
+      "placements": 8
+    },
+    {
+      "alias": "krthaz03",
+      "resource": "objects.rpk:0x2b4",
+      "scx": "objects\\meshes\\krthaz03\\krthaz03.scx",
+      "placements": 13
+    },
+    {
+      "alias": "krthaz04",
+      "resource": "objects.rpk:0x2b9",
+      "scx": "objects\\meshes\\krthaz04\\krthaz04.scx",
+      "placements": 15
+    },
+    {
+      "alias": "krthaz04",
+      "resource": "objects.rpk:0x2b8",
+      "scx": "objects\\meshes\\krthaz04\\krthaz04.scx",
+      "placements": 13
+    },
+    {
+      "alias": "krthaz04",
+      "resource": "objects.rpk:0x2ba",
+      "scx": "objects\\meshes\\krthaz04\\krthaz04.scx",
+      "placements": 20
+    },
+    {
+      "alias": "krthaz04",
+      "resource": "objects.rpk:0x2b6",
+      "scx": "objects\\meshes\\krthaz04\\krthaz04.scx",
+      "placements": 12
+    },
+    {
+      "alias": "krthaz04",
+      "resource": "objects.rpk:0x2b7",
+      "scx": "objects\\meshes\\krthaz04\\krthaz04.scx",
+      "placements": 9
+    },
+    {
+      "alias": "krthaz04",
+      "resource": "objects.rpk:0x2bb",
+      "scx": "objects\\meshes\\krthaz04\\krthaz04.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2da",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 10
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2df",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2e1",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2dc",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 16
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2dd",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2e0",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 8
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2db",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz10",
+      "resource": "objects.rpk:0x2de",
+      "scx": "objects\\meshes\\krthaz10\\krthaz10.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz13",
+      "resource": "objects.rpk:0x300",
+      "scx": "objects\\meshes\\krthaz13\\krthaz13.scx",
+      "placements": 10
+    },
+    {
+      "alias": "krthaz13",
+      "resource": "objects.rpk:0x2fe",
+      "scx": "objects\\meshes\\krthaz13\\krthaz13.scx",
+      "placements": 12
+    },
+    {
+      "alias": "krthaz13",
+      "resource": "objects.rpk:0x2ff",
+      "scx": "objects\\meshes\\krthaz13\\krthaz13.scx",
+      "placements": 15
+    },
+    {
+      "alias": "krthaz13",
+      "resource": "objects.rpk:0x2fd",
+      "scx": "objects\\meshes\\krthaz13\\krthaz13.scx",
+      "placements": 11
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x329",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 14
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x325",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 11
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x323",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 8
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x326",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 10
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x328",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 9
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x322",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 10
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x324",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 14
+    },
+    {
+      "alias": "krthaz18",
+      "resource": "objects.rpk:0x327",
+      "scx": "objects\\meshes\\krthaz18\\krthaz18.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x32f",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x32d",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 9
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x32b",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x32e",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x330",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x331",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x32c",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz19",
+      "resource": "objects.rpk:0x332",
+      "scx": "objects\\meshes\\krthaz19\\krthaz19.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x33a",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x339",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 12
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x338",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 12
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x33b",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x334",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x336",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 8
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x335",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz20",
+      "resource": "objects.rpk:0x337",
+      "scx": "objects\\meshes\\krthaz20\\krthaz20.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz05",
+      "resource": "objects.rpk:0x2c3",
+      "scx": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz05",
+      "resource": "objects.rpk:0x2be",
+      "scx": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz05",
+      "resource": "objects.rpk:0x2c0",
+      "scx": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz05",
+      "resource": "objects.rpk:0x2bc",
+      "scx": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz05",
+      "resource": "objects.rpk:0x2c2",
+      "scx": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz05",
+      "resource": "objects.rpk:0x2bd",
+      "scx": "objects\\meshes\\krthaz05\\krthaz05.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz06",
+      "resource": "objects.rpk:0x2c4",
+      "scx": "objects\\meshes\\krthaz06\\krthaz06.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz06",
+      "resource": "objects.rpk:0x2c6",
+      "scx": "objects\\meshes\\krthaz06\\krthaz06.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz06",
+      "resource": "objects.rpk:0x2c5",
+      "scx": "objects\\meshes\\krthaz06\\krthaz06.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz06",
+      "resource": "objects.rpk:0x2c7",
+      "scx": "objects\\meshes\\krthaz06\\krthaz06.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz08",
+      "resource": "objects.rpk:0x2cf",
+      "scx": "objects\\meshes\\krthaz08\\krthaz08.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz08",
+      "resource": "objects.rpk:0x2d1",
+      "scx": "objects\\meshes\\krthaz08\\krthaz08.scx",
+      "placements": 8
+    },
+    {
+      "alias": "krthaz08",
+      "resource": "objects.rpk:0x2ce",
+      "scx": "objects\\meshes\\krthaz08\\krthaz08.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz08",
+      "resource": "objects.rpk:0x2d0",
+      "scx": "objects\\meshes\\krthaz08\\krthaz08.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x309",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x303",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x305",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x307",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x308",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x306",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x302",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz14",
+      "resource": "objects.rpk:0x304",
+      "scx": "objects\\meshes\\krthaz14\\krthaz14.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x30e",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x310",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x30f",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x312",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x311",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x30d",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz15",
+      "resource": "objects.rpk:0x30b",
+      "scx": "objects\\meshes\\krthaz15\\krthaz15.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x319",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x315",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x316",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x314",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x31b",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x317",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz16",
+      "resource": "objects.rpk:0x31a",
+      "scx": "objects\\meshes\\krthaz16\\krthaz16.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d6",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d7",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d2",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d5",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d3",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d4",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d8",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz09",
+      "resource": "objects.rpk:0x2d9",
+      "scx": "objects\\meshes\\krthaz09\\krthaz09.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2ea",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2e3",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2e6",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2ec",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2e8",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2e9",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 5
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2f0",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2ee",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2f1",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2f2",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2e7",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2ed",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2ef",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2e4",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz11",
+      "resource": "objects.rpk:0x2eb",
+      "scx": "objects\\meshes\\krthaz11\\krthaz11.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz01",
+      "resource": "objects.rpk:0x2aa",
+      "scx": "objects\\meshes\\krthaz01\\krthaz01.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz01",
+      "resource": "objects.rpk:0x2a9",
+      "scx": "objects\\meshes\\krthaz01\\krthaz01.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz01",
+      "resource": "objects.rpk:0x2a6",
+      "scx": "objects\\meshes\\krthaz01\\krthaz01.scx",
+      "placements": 6
+    },
+    {
+      "alias": "krthaz01",
+      "resource": "objects.rpk:0x2a8",
+      "scx": "objects\\meshes\\krthaz01\\krthaz01.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz01",
+      "resource": "objects.rpk:0x2a7",
+      "scx": "objects\\meshes\\krthaz01\\krthaz01.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz07",
+      "resource": "objects.rpk:0x2c8",
+      "scx": "objects\\meshes\\krthaz07\\krthaz07.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz07",
+      "resource": "objects.rpk:0x2cb",
+      "scx": "objects\\meshes\\krthaz07\\krthaz07.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz07",
+      "resource": "objects.rpk:0x2c9",
+      "scx": "objects\\meshes\\krthaz07\\krthaz07.scx",
+      "placements": 10
+    },
+    {
+      "alias": "krthaz07",
+      "resource": "objects.rpk:0x2cc",
+      "scx": "objects\\meshes\\krthaz07\\krthaz07.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz07",
+      "resource": "objects.rpk:0x2cd",
+      "scx": "objects\\meshes\\krthaz07\\krthaz07.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz17",
+      "resource": "objects.rpk:0x31e",
+      "scx": "objects\\meshes\\krthaz17\\krthaz17.scx",
+      "placements": 2
+    },
+    {
+      "alias": "krthaz02",
+      "resource": "objects.rpk:0x2ae",
+      "scx": "objects\\meshes\\krthaz02\\krthaz02.scx",
+      "placements": 3
+    },
+    {
+      "alias": "krthaz02",
+      "resource": "objects.rpk:0x2b1",
+      "scx": "objects\\meshes\\krthaz02\\krthaz02.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz02",
+      "resource": "objects.rpk:0x2af",
+      "scx": "objects\\meshes\\krthaz02\\krthaz02.scx",
+      "placements": 1
+    },
+    {
+      "alias": "krthaz12",
+      "resource": "objects.rpk:0x2fa",
+      "scx": "objects\\meshes\\krthaz12\\krthaz12.scx",
+      "placements": 7
+    },
+    {
+      "alias": "krthaz12",
+      "resource": "objects.rpk:0x2f6",
+      "scx": "objects\\meshes\\krthaz12\\krthaz12.scx",
+      "placements": 4
+    },
+    {
+      "alias": "krthaz12",
+      "resource": "objects.rpk:0x2f4",
+      "scx": "objects\\meshes\\krthaz12\\krthaz12.scx",
+      "placements": 2
+    },
+    {
+      "alias": "12x6_ketszintteraszos",
+      "resource": "objects.rpk:0x270",
+      "scx": "objects\\meshes\\12x6_ketszintteraszos\\12x6_ketszintteraszos.scx",
+      "placements": 6
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x281",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 4
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x27e",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 2
+    },
+    {
+      "alias": "12x6_redonyos",
+      "resource": "objects.rpk:0x27f",
+      "scx": "objects\\meshes\\12x6_redonyos\\12x6_redonyos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x65c",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 3
+    },
+    {
+      "alias": "20x6_redonyos",
+      "resource": "objects.rpk:0x664",
+      "scx": "objects\\meshes\\20x6_redonyos\\20x6_redonyos.scx",
+      "placements": 2
+    },
+    {
+      "alias": "23x5_shop",
+      "resource": "objects.rpk:0x67c",
+      "scx": "objects\\meshes\\23x5_shop\\23x5_shop.scx",
+      "placements": 1
+    },
+    {
+      "alias": "06x4_pub",
+      "resource": "objects.rpk:0x22c",
+      "scx": "objects\\meshes\\06x4_pub\\06x4_pub.scx",
+      "placements": 3
+    },
+    {
+      "alias": "21x6_lepcsosboltiv",
+      "resource": "objects.rpk:0x666",
+      "scx": "objects\\meshes\\21x6_lepcsosboltiv\\21x6_lepcsosboltiv.scx",
+      "placements": 6
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x28a",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 4
+    },
+    {
+      "alias": "12x6_uveges",
+      "resource": "objects.rpk:0x289",
+      "scx": "objects\\meshes\\12x6_uveges\\12x6_uveges.scx",
+      "placements": 1
+    },
+    {
+      "alias": "22x4_pub",
+      "resource": "objects.rpk:0x90",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok22f.SCX",
+      "placements": 1
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0xa6",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok24e.SCX",
+      "placements": 4
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0x9e",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok24a.SCX",
+      "placements": 2
+    },
+    {
+      "alias": "24x5_beugro",
+      "resource": "objects.rpk:0xa4",
+      "scx": "objects\\meshes\\homlok_uvw\\homlok24d.SCX",
+      "placements": 3
+    }
+  ],
+  "batches": [
+    {
+      "batch": 0,
+      "triangles": 40092,
+      "bounds": [
+        [
+          -1086.977783203125,
+          -1,
+          -966.5152587890625
+        ],
+        [
+          1056.4110107421875,
+          25,
+          1256.580078125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 59,
+          "triangles": 4602
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 63,
+          "triangles": 4914
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 49,
+          "triangles": 3822
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 42,
+          "triangles": 3276
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 46,
+          "triangles": 3588
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 42,
+          "triangles": 3276
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 54,
+          "triangles": 4212
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 50,
+          "triangles": 3900
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 66,
+          "triangles": 5148
+        },
+        {
+          "name": "map object 03x6_ajto: 4_keretesajto / unified 3 parts",
+          "copies": 43,
+          "triangles": 3354
+        }
+      ]
+    },
+    {
+      "batch": 1,
+      "triangles": 60490,
+      "bounds": [
+        [
+          -1069.3809814453125,
+          -1.000000238418579,
+          -964.1448364257812
+        ],
+        [
+          1023.159423828125,
+          24,
+          1255.83203125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 29,
+          "triangles": 6670
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 25,
+          "triangles": 5750
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 26,
+          "triangles": 5980
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 27,
+          "triangles": 6210
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 34,
+          "triangles": 7820
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 23,
+          "triangles": 5290
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 25,
+          "triangles": 5750
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 24,
+          "triangles": 5520
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 29,
+          "triangles": 6670
+        },
+        {
+          "name": "map object 06p5x6_lepcsosboltiv: 4_keretesajto / unified 3 parts",
+          "copies": 21,
+          "triangles": 4830
+        }
+      ]
+    },
+    {
+      "batch": 2,
+      "triangles": 10212,
+      "bounds": [
+        [
+          -1085.5072021484375,
+          0,
+          -914.5505981445312
+        ],
+        [
+          933.70703125,
+          22,
+          859.2334594726562
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 10,
+          "triangles": 1480
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 5,
+          "triangles": 740
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 5,
+          "triangles": 740
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 11,
+          "triangles": 1628
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 9,
+          "triangles": 1332
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 8,
+          "triangles": 1184
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 10,
+          "triangles": 1480
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 8,
+          "triangles": 1184
+        },
+        {
+          "name": "map object 06x4_pub: 4_keretesajto / unified 5 parts",
+          "copies": 3,
+          "triangles": 444
+        }
+      ]
+    },
+    {
+      "batch": 3,
+      "triangles": 23768,
+      "bounds": [
+        [
+          -1015.8670043945312,
+          0,
+          -969.7999877929688
+        ],
+        [
+          967.0712280273438,
+          24,
+          1206.5684814453125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 6,
+          "triangles": 1056
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 8,
+          "triangles": 1408
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 9,
+          "triangles": 1584
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 9,
+          "triangles": 1584
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 8,
+          "triangles": 1408
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 7,
+          "triangles": 1232
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 10,
+          "triangles": 1760
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 4,
+          "triangles": 704
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 13,
+          "triangles": 2288
+        },
+        {
+          "name": "map object 06x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 7,
+          "triangles": 1232
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 6,
+          "triangles": 1392
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 4,
+          "triangles": 928
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 6,
+          "triangles": 1392
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 5,
+          "triangles": 1160
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 4,
+          "triangles": 928
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 3,
+          "triangles": 696
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 7,
+          "triangles": 1624
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 3,
+          "triangles": 696
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 2,
+          "triangles": 464
+        },
+        {
+          "name": "map object 23x5_shop: 6_boltbelso / unified 2 parts",
+          "copies": 1,
+          "triangles": 232
+        }
+      ]
+    },
+    {
+      "batch": 4,
+      "triangles": 19750,
+      "bounds": [
+        [
+          -941.2572021484375,
+          0,
+          -942.076416015625
+        ],
+        [
+          1037.2001953125,
+          23,
+          1256.35302734375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 5,
+          "triangles": 1250
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 8,
+          "triangles": 2000
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 6,
+          "triangles": 1500
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 7,
+          "triangles": 1750
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 5,
+          "triangles": 1250
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 14,
+          "triangles": 3500
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 9,
+          "triangles": 2250
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 7,
+          "triangles": 1750
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 8,
+          "triangles": 2000
+        },
+        {
+          "name": "map object 06x7_2ajtos: 3_kirakatuveg / unified 5 parts",
+          "copies": 10,
+          "triangles": 2500
+        }
+      ]
+    },
+    {
+      "batch": 5,
+      "triangles": 22236,
+      "bounds": [
+        [
+          -1093.240478515625,
+          -1.0002901554107666,
+          -964.2548828125
+        ],
+        [
+          991.3738403320312,
+          23,
+          1220.7210693359375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 21,
+          "triangles": 2142
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 24,
+          "triangles": 2448
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 25,
+          "triangles": 2550
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 19,
+          "triangles": 1938
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 23,
+          "triangles": 2346
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 28,
+          "triangles": 2856
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 22,
+          "triangles": 2244
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 24,
+          "triangles": 2448
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 17,
+          "triangles": 1734
+        },
+        {
+          "name": "map object 08p5x4_shop: 2_alloajto / unified 3 parts",
+          "copies": 15,
+          "triangles": 1530
+        }
+      ]
+    },
+    {
+      "batch": 6,
+      "triangles": 34968,
+      "bounds": [
+        [
+          -1093.0628662109375,
+          -1,
+          -959.13232421875
+        ],
+        [
+          1031.1728515625,
+          25,
+          1225.710693359375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 19,
+          "triangles": 3572
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 13,
+          "triangles": 2444
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 21,
+          "triangles": 3948
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 20,
+          "triangles": 3760
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 17,
+          "triangles": 3196
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 22,
+          "triangles": 4136
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 17,
+          "triangles": 3196
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 20,
+          "triangles": 3760
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 23,
+          "triangles": 4324
+        },
+        {
+          "name": "map object 09x6_shop: 2_alloajto / unified 4 parts",
+          "copies": 14,
+          "triangles": 2632
+        }
+      ]
+    },
+    {
+      "batch": 7,
+      "triangles": 23346,
+      "bounds": [
+        [
+          -1038.7779541015625,
+          6,
+          -973.27197265625
+        ],
+        [
+          1043.3314208984375,
+          26.049314498901367,
+          1233.096923828125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 12p5x6_lepcsos: 1 - Default / unified 2 parts",
+          "copies": 71,
+          "triangles": 3266
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 1 - Default / unified 2 parts",
+          "copies": 61,
+          "triangles": 2806
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 1 - Default / unified 2 parts",
+          "copies": 56,
+          "triangles": 2576
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 1 - Default / unified 2 parts",
+          "copies": 60,
+          "triangles": 2760
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 1 - Default / unified 2 parts",
+          "copies": 78,
+          "triangles": 3588
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 1 - Default / unified 2 parts",
+          "copies": 57,
+          "triangles": 2622
+        },
+        {
+          "name": "map object 13p5x6_alap: 1 - Default / unified 2 parts",
+          "copies": 9,
+          "triangles": 414
+        },
+        {
+          "name": "map object 13p5x6_alap: 1 - Default / unified 2 parts",
+          "copies": 10,
+          "triangles": 460
+        },
+        {
+          "name": "map object 13p5x6_alap: 1 - Default / unified 2 parts",
+          "copies": 15,
+          "triangles": 690
+        },
+        {
+          "name": "map object 13p5x6_alap: 1 - Default / unified 2 parts",
+          "copies": 10,
+          "triangles": 460
+        },
+        {
+          "name": "map object 13x6_ajto: 1 - Default / unified 2 parts",
+          "copies": 6,
+          "triangles": 276
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 1 - Default / unified 2 parts",
+          "copies": 14,
+          "triangles": 644
+        },
+        {
+          "name": "map object 22x4_pub: 1 - Default / unified 2 parts",
+          "copies": 6,
+          "triangles": 288
+        },
+        {
+          "name": "map object 22x4_pub: 1 - Default / unified 2 parts",
+          "copies": 6,
+          "triangles": 288
+        },
+        {
+          "name": "map object 22x4_pub: 1 - Default / unified 2 parts",
+          "copies": 5,
+          "triangles": 240
+        },
+        {
+          "name": "map object 22x4_pub: 1 - Default / unified 2 parts",
+          "copies": 3,
+          "triangles": 144
+        },
+        {
+          "name": "map object 22x4_pub: 1 - Default / unified 2 parts",
+          "copies": 3,
+          "triangles": 144
+        },
+        {
+          "name": "map object 23x5_shop: 1 - Default / unified 2 parts",
+          "copies": 6,
+          "triangles": 288
+        },
+        {
+          "name": "map object 23x5_shop: 1 - Default / unified 2 parts",
+          "copies": 2,
+          "triangles": 96
+        },
+        {
+          "name": "map object 23x5_shop: 1 - Default / unified 2 parts",
+          "copies": 1,
+          "triangles": 48
+        },
+        {
+          "name": "map object 23x5_shop: 1 - Default / unified 2 parts",
+          "copies": 2,
+          "triangles": 96
+        },
+        {
+          "name": "map object 23x5_shop: 1 - Default / unified 2 parts",
+          "copies": 6,
+          "triangles": 288
+        },
+        {
+          "name": "map object 23x5_shop: 1 - Default / unified 2 parts",
+          "copies": 1,
+          "triangles": 48
+        },
+        {
+          "name": "map object 24x5_beugro: 1 - Default / unified 2 parts",
+          "copies": 3,
+          "triangles": 144
+        },
+        {
+          "name": "map object 24x5_beugro: 1 - Default / unified 2 parts",
+          "copies": 2,
+          "triangles": 96
+        },
+        {
+          "name": "map object 24x5_beugro: 1 - Default / unified 2 parts",
+          "copies": 2,
+          "triangles": 96
+        },
+        {
+          "name": "map object 22x4_pub: 1 - Default / unified 2 parts",
+          "copies": 1,
+          "triangles": 48
+        },
+        {
+          "name": "map object 24x5_beugro: 1 - Default / unified 2 parts",
+          "copies": 4,
+          "triangles": 192
+        },
+        {
+          "name": "map object 24x5_beugro: 1 - Default / unified 2 parts",
+          "copies": 2,
+          "triangles": 96
+        },
+        {
+          "name": "map object 24x5_beugro: 1 - Default / unified 2 parts",
+          "copies": 3,
+          "triangles": 144
+        }
+      ]
+    },
+    {
+      "batch": 8,
+      "triangles": 44997,
+      "bounds": [
+        [
+          -1075.9000244140625,
+          -1,
+          -962.1051025390625
+        ],
+        [
+          1056.2423095703125,
+          25,
+          1190.8524169921875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 15,
+          "triangles": 4245
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 22,
+          "triangles": 6226
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 19,
+          "triangles": 5377
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 12,
+          "triangles": 3396
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 18,
+          "triangles": 5094
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 19,
+          "triangles": 5377
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 15,
+          "triangles": 4245
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 10,
+          "triangles": 2830
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 13,
+          "triangles": 3679
+        },
+        {
+          "name": "map object 12p5x6_lepcsos: 4_keretesajto / unified 5 parts",
+          "copies": 16,
+          "triangles": 4528
+        }
+      ]
+    },
+    {
+      "batch": 9,
+      "triangles": 11628,
+      "bounds": [
+        [
+          -1082.4853515625,
+          -0.9999982714653015,
+          -969.8952026367188
+        ],
+        [
+          1053.4862060546875,
+          24,
+          909.8451538085938
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 8,
+          "triangles": 912
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 12,
+          "triangles": 1368
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 12,
+          "triangles": 1368
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 11,
+          "triangles": 1254
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 10,
+          "triangles": 1140
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 15,
+          "triangles": 1710
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 8,
+          "triangles": 912
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 11,
+          "triangles": 1254
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 11,
+          "triangles": 1254
+        },
+        {
+          "name": "map object 13x6_ajto: 2_alloajto / unified 3 parts",
+          "copies": 4,
+          "triangles": 456
+        }
+      ]
+    },
+    {
+      "batch": 10,
+      "triangles": 36180,
+      "bounds": [
+        [
+          -948.4829711914062,
+          -0.9999997615814209,
+          -952.3985595703125
+        ],
+        [
+          1033.87255859375,
+          25,
+          1252.279296875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 18,
+          "triangles": 4860
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 13,
+          "triangles": 3510
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 21,
+          "triangles": 5670
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 14,
+          "triangles": 3780
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 11,
+          "triangles": 2970
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 11,
+          "triangles": 2970
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 10,
+          "triangles": 2700
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 13,
+          "triangles": 3510
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 9,
+          "triangles": 2430
+        },
+        {
+          "name": "map object 14x6_ketszintajtos: 4_keretesajto / unified 6 parts",
+          "copies": 14,
+          "triangles": 3780
+        }
+      ]
+    },
+    {
+      "batch": 11,
+      "triangles": 12584,
+      "bounds": [
+        [
+          -1026.459228515625,
+          3.999999523162842,
+          -950.1903076171875
+        ],
+        [
+          687.81640625,
+          23,
+          -107.32184600830078
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 4,
+          "triangles": 1144
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 7,
+          "triangles": 2002
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 3,
+          "triangles": 858
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 4,
+          "triangles": 1144
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 3,
+          "triangles": 858
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 6,
+          "triangles": 1716
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 5,
+          "triangles": 1430
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 3,
+          "triangles": 858
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 5,
+          "triangles": 1430
+        },
+        {
+          "name": "map object 15x9_shop: 9_2ablak / unified 4 parts",
+          "copies": 4,
+          "triangles": 1144
+        }
+      ]
+    },
+    {
+      "batch": 12,
+      "triangles": 40350,
+      "bounds": [
+        [
+          -1017.0946044921875,
+          0,
+          -906.9640502929688
+        ],
+        [
+          800.5731811523438,
+          24,
+          1240.2059326171875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 10,
+          "triangles": 5380
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 5,
+          "triangles": 2690
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 8,
+          "triangles": 4304
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 8,
+          "triangles": 4304
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 9,
+          "triangles": 4842
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 6,
+          "triangles": 3228
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 6,
+          "triangles": 3228
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 8,
+          "triangles": 4304
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 9,
+          "triangles": 4842
+        },
+        {
+          "name": "map object 18x6_haromboltiv: 7_2ajto / unified 5 parts",
+          "copies": 6,
+          "triangles": 3228
+        }
+      ]
+    },
+    {
+      "batch": 13,
+      "triangles": 20972,
+      "bounds": [
+        [
+          -1013.537841796875,
+          0.0000017152557347799302,
+          -972.0588989257812
+        ],
+        [
+          1047.057861328125,
+          24,
+          822.8936157226562
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 11,
+          "triangles": 2354
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 16,
+          "triangles": 3424
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 15,
+          "triangles": 3210
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 6,
+          "triangles": 1284
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 8,
+          "triangles": 1712
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 6,
+          "triangles": 1284
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 10,
+          "triangles": 2140
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 8,
+          "triangles": 1712
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 9,
+          "triangles": 1926
+        },
+        {
+          "name": "map object 19x6_garazs: 7_2ajto / unified 4 parts",
+          "copies": 9,
+          "triangles": 1926
+        }
+      ]
+    },
+    {
+      "batch": 14,
+      "triangles": 19084,
+      "bounds": [
+        [
+          -992.6854248046875,
+          -2.384185791015625e-7,
+          -859.4609985351562
+        ],
+        [
+          977.0708618164062,
+          22,
+          1247.4051513671875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 3,
+          "triangles": 1101
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 5,
+          "triangles": 1835
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 7,
+          "triangles": 2569
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 8,
+          "triangles": 2936
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 3,
+          "triangles": 1101
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 7,
+          "triangles": 2569
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 5,
+          "triangles": 1835
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 4,
+          "triangles": 1468
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 4,
+          "triangles": 1468
+        },
+        {
+          "name": "map object 21x6_lepcsosboltiv: 4_keretesajto / unified 4 parts",
+          "copies": 6,
+          "triangles": 2202
+        }
+      ]
+    },
+    {
+      "batch": 15,
+      "triangles": 11440,
+      "bounds": [
+        [
+          -930.4879760742188,
+          3,
+          -950.5890502929688
+        ],
+        [
+          1016.3917846679688,
+          22,
+          1212.5560302734375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 8,
+          "triangles": 2080
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 3,
+          "triangles": 780
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 7,
+          "triangles": 1820
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 6,
+          "triangles": 1560
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 5,
+          "triangles": 1300
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 2,
+          "triangles": 520
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 3,
+          "triangles": 780
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 4,
+          "triangles": 1040
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 3,
+          "triangles": 780
+        },
+        {
+          "name": "map object 22x4_pub: 2_alloajto / unified 6 parts",
+          "copies": 3,
+          "triangles": 780
+        }
+      ]
+    },
+    {
+      "batch": 16,
+      "triangles": 10080,
+      "bounds": [
+        [
+          -1089.130126953125,
+          -1,
+          -968.5371704101562
+        ],
+        [
+          995.57958984375,
+          22,
+          1191.4210205078125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 6,
+          "triangles": 756
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 3,
+          "triangles": 378
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 4,
+          "triangles": 504
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 3,
+          "triangles": 378
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 3,
+          "triangles": 378
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 7,
+          "triangles": 882
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 7,
+          "triangles": 882
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 7,
+          "triangles": 882
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 5,
+          "triangles": 630
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 8,
+          "triangles": 1008
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 6,
+          "triangles": 756
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 5,
+          "triangles": 630
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 2,
+          "triangles": 252
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 4,
+          "triangles": 504
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 2,
+          "triangles": 252
+        },
+        {
+          "name": "map object 12x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 3,
+          "triangles": 378
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 3,
+          "triangles": 378
+        },
+        {
+          "name": "map object 20x6_redonyos: 3_kirakatuveg / unified 5 parts",
+          "copies": 2,
+          "triangles": 252
+        }
+      ]
+    },
+    {
+      "batch": 17,
+      "triangles": 3740,
+      "bounds": [
+        [
+          -1038.0006103515625,
+          -1,
+          -968.5977783203125
+        ],
+        [
+          949.517822265625,
+          21,
+          808.248779296875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 5,
+          "triangles": 550
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 1,
+          "triangles": 110
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 5,
+          "triangles": 550
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 3,
+          "triangles": 330
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 2,
+          "triangles": 220
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 3,
+          "triangles": 330
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 6,
+          "triangles": 660
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 4,
+          "triangles": 440
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 4,
+          "triangles": 440
+        },
+        {
+          "name": "map object 12x6_uveges: 6_boltbelso / unified 3 parts",
+          "copies": 1,
+          "triangles": 110
+        }
+      ]
+    },
+    {
+      "batch": 18,
+      "triangles": 14790,
+      "bounds": [
+        [
+          -1023.0625610351562,
+          2.384185791015625e-7,
+          -932.1015014648438
+        ],
+        [
+          935.3583984375,
+          22,
+          720.1965942382812
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 2,
+          "triangles": 580
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 5,
+          "triangles": 1450
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 7,
+          "triangles": 2030
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 3,
+          "triangles": 870
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 6,
+          "triangles": 1740
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 5,
+          "triangles": 1450
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 8,
+          "triangles": 2320
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 6,
+          "triangles": 1740
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 3,
+          "triangles": 870
+        },
+        {
+          "name": "map object 12x6_ketszintteraszos: 8_hablak / unified 4 parts",
+          "copies": 6,
+          "triangles": 1740
+        }
+      ]
+    },
+    {
+      "batch": 19,
+      "triangles": 5904,
+      "bounds": [
+        [
+          -1002.9996337890625,
+          2,
+          -942.5969848632812
+        ],
+        [
+          910.59228515625,
+          24,
+          1250.56103515625
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 4,
+          "triangles": 656
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 7,
+          "triangles": 1148
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 3,
+          "triangles": 492
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 2,
+          "triangles": 328
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 2,
+          "triangles": 328
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 6,
+          "triangles": 984
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 5,
+          "triangles": 820
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 5,
+          "triangles": 820
+        },
+        {
+          "name": "map object 24x5_beugro: 1_fal / unified 3 parts",
+          "copies": 2,
+          "triangles": 328
+        }
+      ]
+    },
+    {
+      "batch": 20,
+      "triangles": 201,
+      "bounds": [
+        [
+          104.28652954101562,
+          -0.09659912437200546,
+          -1707.4920654296875
+        ],
+        [
+          174.3314666748047,
+          19.056598663330078,
+          -1632.491943359375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object hotel_001_egyedi: Material #617 / unified 7 parts",
+          "copies": 1,
+          "triangles": 201
+        }
+      ]
+    },
+    {
+      "batch": 21,
+      "triangles": 160,
+      "bounds": [
+        [
+          -328.6669921875,
+          0.5680000185966492,
+          -1698.8079833984375
+        ],
+        [
+          -193.66700744628906,
+          24.56800079345703,
+          -1578.8079833984375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object hotel_005_egyedi: Material #626 / unified 6 parts",
+          "copies": 1,
+          "triangles": 160
+        }
+      ]
+    },
+    {
+      "batch": 22,
+      "triangles": 639,
+      "bounds": [
+        [
+          -549.5228881835938,
+          -0.000011199951586604584,
+          -1728.149169921875
+        ],
+        [
+          -440.67510986328125,
+          55.11201095581055,
+          -1619.73486328125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object hotel_007_egyedi: ablakok21 / unified 5 parts",
+          "copies": 1,
+          "triangles": 639
+        }
+      ]
+    },
+    {
+      "batch": 23,
+      "triangles": 790,
+      "bounds": [
+        [
+          -26.19997215270996,
+          1.8084969520568848,
+          -1587.7734375
+        ],
+        [
+          105.95796966552734,
+          43.81150436401367,
+          -1442.2666015625
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object hotel_013_egyedi: Material #617 / unified 4 parts",
+          "copies": 1,
+          "triangles": 790
+        }
+      ]
+    },
+    {
+      "batch": 24,
+      "triangles": 932,
+      "bounds": [
+        [
+          195.18548583984375,
+          -0.000019073486328125,
+          -1687.72314453125
+        ],
+        [
+          249.6185302734375,
+          35.00001907348633,
+          -1558.1688232421875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object hotel_003_egyedi: Material #626 / unified 5 parts",
+          "copies": 1,
+          "triangles": 932
+        }
+      ]
+    },
+    {
+      "batch": 25,
+      "triangles": 11088,
+      "bounds": [
+        [
+          -758.02392578125,
+          0.6699997782707214,
+          485.787841796875
+        ],
+        [
+          1059.4617919921875,
+          23.184467315673828,
+          1291.5550537109375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz03: ajto / unified 7 parts",
+          "copies": 7,
+          "triangles": 1848
+        },
+        {
+          "name": "map object krthaz03: ajto / unified 7 parts",
+          "copies": 14,
+          "triangles": 3696
+        },
+        {
+          "name": "map object krthaz03: ajto / unified 7 parts",
+          "copies": 8,
+          "triangles": 2112
+        },
+        {
+          "name": "map object krthaz03: ajto / unified 7 parts",
+          "copies": 13,
+          "triangles": 3432
+        }
+      ]
+    },
+    {
+      "batch": 26,
+      "triangles": 30020,
+      "bounds": [
+        [
+          -760.5035400390625,
+          0.6128807663917542,
+          479.633544921875
+        ],
+        [
+          1055.1422119140625,
+          21.518051147460938,
+          1285.62890625
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz04: Material #29 / unified 8 parts",
+          "copies": 15,
+          "triangles": 5925
+        },
+        {
+          "name": "map object krthaz04: Material #29 / unified 8 parts",
+          "copies": 13,
+          "triangles": 5135
+        },
+        {
+          "name": "map object krthaz04: Material #29 / unified 8 parts",
+          "copies": 20,
+          "triangles": 7900
+        },
+        {
+          "name": "map object krthaz04: Material #29 / unified 8 parts",
+          "copies": 12,
+          "triangles": 4740
+        },
+        {
+          "name": "map object krthaz04: Material #29 / unified 8 parts",
+          "copies": 9,
+          "triangles": 3555
+        },
+        {
+          "name": "map object krthaz04: Material #29 / unified 8 parts",
+          "copies": 7,
+          "triangles": 2765
+        }
+      ]
+    },
+    {
+      "batch": 27,
+      "triangles": 14500,
+      "bounds": [
+        [
+          -739.7720947265625,
+          0.6699995398521423,
+          499.47076416015625
+        ],
+        [
+          1054.8980712890625,
+          22.804901123046875,
+          1279.1358642578125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 10,
+          "triangles": 2500
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 6,
+          "triangles": 1500
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 5,
+          "triangles": 1250
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 16,
+          "triangles": 4000
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 6,
+          "triangles": 1500
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 8,
+          "triangles": 2000
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 5,
+          "triangles": 1250
+        },
+        {
+          "name": "map object krthaz10: ajto / unified 6 parts",
+          "copies": 2,
+          "triangles": 500
+        }
+      ]
+    },
+    {
+      "batch": 28,
+      "triangles": 13392,
+      "bounds": [
+        [
+          -815.0634155273438,
+          0.669999897480011,
+          542.6011352539062
+        ],
+        [
+          1036.906982421875,
+          23.253976821899414,
+          1281.1068115234375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz13: Material #7 / unified 5 parts",
+          "copies": 10,
+          "triangles": 2790
+        },
+        {
+          "name": "map object krthaz13: Material #7 / unified 5 parts",
+          "copies": 12,
+          "triangles": 3348
+        },
+        {
+          "name": "map object krthaz13: Material #7 / unified 5 parts",
+          "copies": 15,
+          "triangles": 4185
+        },
+        {
+          "name": "map object krthaz13: Material #7 / unified 5 parts",
+          "copies": 11,
+          "triangles": 3069
+        }
+      ]
+    },
+    {
+      "batch": 29,
+      "triangles": 38473,
+      "bounds": [
+        [
+          -782.947021484375,
+          0.6698810458183289,
+          521.9480590820312
+        ],
+        [
+          1061.052001953125,
+          26.387998580932617,
+          1250.626708984375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 14,
+          "triangles": 6818
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 11,
+          "triangles": 5357
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 8,
+          "triangles": 3896
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 10,
+          "triangles": 4870
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 9,
+          "triangles": 4383
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 10,
+          "triangles": 4870
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 14,
+          "triangles": 6818
+        },
+        {
+          "name": "map object krthaz18: Material #5 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1461
+        }
+      ]
+    },
+    {
+      "batch": 30,
+      "triangles": 16252,
+      "bounds": [
+        [
+          -807.2742919921875,
+          0.6700073480606079,
+          542.9595336914062
+        ],
+        [
+          1042.0164794921875,
+          26.272302627563477,
+          1273.301513671875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 5,
+          "triangles": 2390
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 9,
+          "triangles": 4302
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 7,
+          "triangles": 3346
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 5,
+          "triangles": 2390
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 2,
+          "triangles": 956
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 3,
+          "triangles": 1434
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 2,
+          "triangles": 956
+        },
+        {
+          "name": "map object krthaz19: Material #8 / unified 7 parts",
+          "copies": 1,
+          "triangles": 478
+        }
+      ]
+    },
+    {
+      "batch": 31,
+      "triangles": 24780,
+      "bounds": [
+        [
+          -726.4592895507812,
+          0.665996789932251,
+          527.4803466796875
+        ],
+        [
+          1065.5020751953125,
+          23.68034553527832,
+          1222.6875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 5,
+          "triangles": 2100
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 12,
+          "triangles": 5040
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 12,
+          "triangles": 5040
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 7,
+          "triangles": 2940
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 7,
+          "triangles": 2940
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 8,
+          "triangles": 3360
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 5,
+          "triangles": 2100
+        },
+        {
+          "name": "map object krthaz20: Material #4 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1260
+        }
+      ]
+    },
+    {
+      "batch": 32,
+      "triangles": 6800,
+      "bounds": [
+        [
+          -730.15380859375,
+          1.9190006256103516,
+          379.85211181640625
+        ],
+        [
+          1035.52783203125,
+          24.14566421508789,
+          1099.96435546875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz05: garazsajto / unified 7 parts",
+          "copies": 4,
+          "triangles": 1600
+        },
+        {
+          "name": "map object krthaz05: garazsajto / unified 7 parts",
+          "copies": 2,
+          "triangles": 800
+        },
+        {
+          "name": "map object krthaz05: garazsajto / unified 7 parts",
+          "copies": 2,
+          "triangles": 800
+        },
+        {
+          "name": "map object krthaz05: garazsajto / unified 7 parts",
+          "copies": 3,
+          "triangles": 1200
+        },
+        {
+          "name": "map object krthaz05: garazsajto / unified 7 parts",
+          "copies": 5,
+          "triangles": 2000
+        },
+        {
+          "name": "map object krthaz05: garazsajto / unified 7 parts",
+          "copies": 1,
+          "triangles": 400
+        }
+      ]
+    },
+    {
+      "batch": 33,
+      "triangles": 6061,
+      "bounds": [
+        [
+          -868.948974609375,
+          1.2959998846054077,
+          390.5719909667969
+        ],
+        [
+          1016.7080078125,
+          22.357898712158203,
+          1324.2159423828125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz06: ablak / unified 6 parts",
+          "copies": 2,
+          "triangles": 638
+        },
+        {
+          "name": "map object krthaz06: ablak / unified 6 parts",
+          "copies": 5,
+          "triangles": 1595
+        },
+        {
+          "name": "map object krthaz06: ablak / unified 6 parts",
+          "copies": 6,
+          "triangles": 1914
+        },
+        {
+          "name": "map object krthaz06: ablak / unified 6 parts",
+          "copies": 6,
+          "triangles": 1914
+        }
+      ]
+    },
+    {
+      "batch": 34,
+      "triangles": 11418,
+      "bounds": [
+        [
+          -937.2533569335938,
+          1.1699997186660767,
+          424.7027893066406
+        ],
+        [
+          1031.2989501953125,
+          23.69512939453125,
+          1342.6712646484375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz08: fal3 / unified 8 parts",
+          "copies": 7,
+          "triangles": 3633
+        },
+        {
+          "name": "map object krthaz08: fal3 / unified 8 parts",
+          "copies": 8,
+          "triangles": 4152
+        },
+        {
+          "name": "map object krthaz08: fal3 / unified 8 parts",
+          "copies": 2,
+          "triangles": 1038
+        },
+        {
+          "name": "map object krthaz08: fal3 / unified 8 parts",
+          "copies": 5,
+          "triangles": 2595
+        }
+      ]
+    },
+    {
+      "batch": 35,
+      "triangles": 11620,
+      "bounds": [
+        [
+          -974.13232421875,
+          1.1309006214141846,
+          466.5182800292969
+        ],
+        [
+          967.604248046875,
+          22.775541305541992,
+          1345.5037841796875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 6,
+          "triangles": 1992
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 3,
+          "triangles": 996
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 6,
+          "triangles": 1992
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 5,
+          "triangles": 1660
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 4,
+          "triangles": 1328
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 2,
+          "triangles": 664
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 5,
+          "triangles": 1660
+        },
+        {
+          "name": "map object krthaz14: Material #5 / unified 4 parts",
+          "copies": 4,
+          "triangles": 1328
+        }
+      ]
+    },
+    {
+      "batch": 36,
+      "triangles": 6120,
+      "bounds": [
+        [
+          -959.4228515625,
+          1.2930461168289185,
+          427.94366455078125
+        ],
+        [
+          838.4522705078125,
+          21.82952308654785,
+          1330.6318359375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 4,
+          "triangles": 1360
+        },
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 3,
+          "triangles": 1020
+        },
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 1,
+          "triangles": 340
+        },
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 1,
+          "triangles": 340
+        },
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 3,
+          "triangles": 1020
+        },
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 1,
+          "triangles": 340
+        },
+        {
+          "name": "map object krthaz15: Material #7 / unified 5 parts",
+          "copies": 5,
+          "triangles": 1700
+        }
+      ]
+    },
+    {
+      "batch": 37,
+      "triangles": 8809,
+      "bounds": [
+        [
+          -956.767578125,
+          1.157880425453186,
+          423.9183044433594
+        ],
+        [
+          951.019287109375,
+          22.074010848999023,
+          1346.4310302734375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 4,
+          "triangles": 1532
+        },
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 6,
+          "triangles": 2298
+        },
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 6,
+          "triangles": 2298
+        },
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 1,
+          "triangles": 383
+        },
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1149
+        },
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 1,
+          "triangles": 383
+        },
+        {
+          "name": "map object krthaz16: Material #28 / unified 6 parts",
+          "copies": 2,
+          "triangles": 766
+        }
+      ]
+    },
+    {
+      "batch": 38,
+      "triangles": 17589,
+      "bounds": [
+        [
+          -698.8887939453125,
+          0.6700003743171692,
+          506.1441955566406
+        ],
+        [
+          1063.0699462890625,
+          24.731346130371094,
+          1288.0145263671875
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 6,
+          "triangles": 3198
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 7,
+          "triangles": 3731
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1599
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1599
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1599
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 4,
+          "triangles": 2132
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 6,
+          "triangles": 3198
+        },
+        {
+          "name": "map object krthaz09: ajto1 / unified 6 parts",
+          "copies": 1,
+          "triangles": 533
+        }
+      ]
+    },
+    {
+      "batch": 39,
+      "triangles": 10176,
+      "bounds": [
+        [
+          -753.8052368164062,
+          0.49484166502952576,
+          532.0796508789062
+        ],
+        [
+          1059.4517822265625,
+          21.31558609008789,
+          1267.2066650390625
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 1,
+          "triangles": 318
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 1,
+          "triangles": 318
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 2,
+          "triangles": 636
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 3,
+          "triangles": 954
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 4,
+          "triangles": 1272
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 5,
+          "triangles": 1590
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 1,
+          "triangles": 318
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 2,
+          "triangles": 636
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 2,
+          "triangles": 636
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 1,
+          "triangles": 318
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 2,
+          "triangles": 636
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 1,
+          "triangles": 318
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 4,
+          "triangles": 1272
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 2,
+          "triangles": 636
+        },
+        {
+          "name": "map object krthaz11: Material #3 / unified 5 parts",
+          "copies": 1,
+          "triangles": 318
+        }
+      ]
+    },
+    {
+      "batch": 40,
+      "triangles": 5151,
+      "bounds": [
+        [
+          -906.6868286132812,
+          1.5479981899261475,
+          405.5414733886719
+        ],
+        [
+          816.771484375,
+          20.469526290893555,
+          1269.93212890625
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz01: ajto2 / unified 7 parts",
+          "copies": 4,
+          "triangles": 1212
+        },
+        {
+          "name": "map object krthaz01: ajto2 / unified 7 parts",
+          "copies": 2,
+          "triangles": 606
+        },
+        {
+          "name": "map object krthaz01: ajto2 / unified 7 parts",
+          "copies": 6,
+          "triangles": 1818
+        },
+        {
+          "name": "map object krthaz01: ajto2 / unified 7 parts",
+          "copies": 2,
+          "triangles": 606
+        },
+        {
+          "name": "map object krthaz01: ajto2 / unified 7 parts",
+          "copies": 3,
+          "triangles": 909
+        }
+      ]
+    },
+    {
+      "batch": 41,
+      "triangles": 12600,
+      "bounds": [
+        [
+          -981.047607421875,
+          0.15992163121700287,
+          367.6428527832031
+        ],
+        [
+          994.3170166015625,
+          21.141000747680664,
+          1361.021728515625
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz07: ajto2 / unified 6 parts",
+          "copies": 4,
+          "triangles": 2100
+        },
+        {
+          "name": "map object krthaz07: ajto2 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1575
+        },
+        {
+          "name": "map object krthaz07: ajto2 / unified 6 parts",
+          "copies": 10,
+          "triangles": 5250
+        },
+        {
+          "name": "map object krthaz07: ajto2 / unified 6 parts",
+          "copies": 4,
+          "triangles": 2100
+        },
+        {
+          "name": "map object krthaz07: ajto2 / unified 6 parts",
+          "copies": 3,
+          "triangles": 1575
+        }
+      ]
+    },
+    {
+      "batch": 42,
+      "triangles": 992,
+      "bounds": [
+        [
+          -38.71104049682617,
+          1.120879888534546,
+          692.2849731445312
+        ],
+        [
+          502.4287109375,
+          23.138154983520508,
+          1234.396484375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz17: Material #26 / unified 5 parts",
+          "copies": 2,
+          "triangles": 992
+        }
+      ]
+    },
+    {
+      "batch": 43,
+      "triangles": 1595,
+      "bounds": [
+        [
+          74.86914825439453,
+          1.2826812267303467,
+          716.6782836914062
+        ],
+        [
+          1038.5601806640625,
+          22.28083610534668,
+          1190.8057861328125
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz02: ajto / unified 5 parts",
+          "copies": 3,
+          "triangles": 957
+        },
+        {
+          "name": "map object krthaz02: ajto / unified 5 parts",
+          "copies": 1,
+          "triangles": 319
+        },
+        {
+          "name": "map object krthaz02: ajto / unified 5 parts",
+          "copies": 1,
+          "triangles": 319
+        }
+      ]
+    },
+    {
+      "batch": 44,
+      "triangles": 4251,
+      "bounds": [
+        [
+          -829.3450927734375,
+          1.0919767618179321,
+          451.7425231933594
+        ],
+        [
+          830.8775024414062,
+          18.795541763305664,
+          1143.0706787109375
+        ]
+      ],
+      "sources": [
+        {
+          "name": "map object krthaz12: Material #3 / unified 5 parts",
+          "copies": 7,
+          "triangles": 2289
+        },
+        {
+          "name": "map object krthaz12: Material #3 / unified 5 parts",
+          "copies": 4,
+          "triangles": 1308
+        },
+        {
+          "name": "map object krthaz12: Material #3 / unified 5 parts",
+          "copies": 2,
+          "triangles": 654
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

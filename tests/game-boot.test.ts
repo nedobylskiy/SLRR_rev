@@ -89,6 +89,7 @@ test('GroundRef loads its own road graph and returns an independent vector usabl
         int registerTraffic(GroundRef map, GameRef car, Vector3 pos) {
           int id=map.addTrafficCar(car,pos); return map.notifyTrafficCar(id,1);
         }
+        void unregisterTraffic(GroundRef map, int id) { map.remTrafficCar(id); }
       }`],
     ['system/scripts/util/resource/src/GroundRef.java', `package java.util.resource;
       class GroundRef extends GameRef {
@@ -97,6 +98,7 @@ test('GroundRef loads its own road graph and returns an independent vector usabl
         native int addTrafficN(GameRef type, int count, float a, float b, float c);
         native int addTrafficCar(GameRef car, Vector3 pos);
         native int notifyTrafficCar(int id, int enabled);
+        native void remTrafficCar(int id);
       }`],
     ['system/scripts/lang/src/Vector3.java', `package java.lang; class Vector3 {
       float x; float y; float z;
@@ -128,8 +130,14 @@ test('GroundRef loads its own road graph and returns an independent vector usabl
     const position=await jvm.invokeAsync(receiver,'trafficSpawn',[ground,start]);
     assert.deepEqual(['x','y','z'].map(axis=>jvm.get(position,axis).value),[24,-32,44]);
     assert.deepEqual(['x','y','z'].map(axis=>jvm.get(start,axis).value),[10,-17,20],'traffic placement must not mutate the saved race start');
-    assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,ground,position])).value,0,'city traffic mock accepts placement followed by notification without allocating a traffic ID');
-    assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,ground,jv('Vector3',null)])).value,0,'the original optional null traffic position is accepted');
+    const car=jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()});
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[jv('GameRef',ground.value),result.gameTypes.remountSavedResource('cars/traffic/Taxi.rpk',6),jv('String',null),jv('String','bot')]);
+    result.gameTypes.getResource(car)!.resourcePack='cars/traffic/taxi.rpk';
+    assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,car,position])).value,1);
+    assert.equal((await jvm.invokeAsync(receiver,'registerTraffic',[ground,car,jv('Vector3',null)])).value,1,'repeat registration keeps the same identity');
+    const registration=result.traffic.models(ground)!.find(model=>model.registrationId)!;
+    for(const id of [0,registration.registrationId!])assert.equal((await jvm.invokeAsync(receiver,'unregisterTraffic',[ground,jv('int',id)])).type,'void');
+    assert.equal(result.traffic.models(ground)?.length,1,'individual Bot cleanup must not clear the streamed model catalog');
     for (const type of ['int','float']) {
       const found=await jvm.natives.invokeAsync('java.util.resource.GroundRef','getNearestCross',ground,[start,jv(type,100)]);
       assert.deepEqual(['x','y','z'].map(axis=>jvm.get(found!,axis).value),[12,-16,22],'radius is not a cutoff; returned vector is not shared with prior Java mul');

@@ -8,6 +8,7 @@ import {RoadTrafficCar,trafficRoadSpeedGroups} from '../src/engine/road-traffic'
 import {Bot} from '../src/engine/bot';
 import {TrafficControl} from '../src/engine/traffic-control';
 import type {RoadNetwork,RoadPoint,RoadSegment,RoadOther} from '../src/formats/trc';
+import {DistantRivals} from '../src/engine/distant-rivals';
 
 const segment=(start:RoadPoint,end:RoadPoint):RoadSegment=>{const tangent=end.map((n,i)=>n-start[i]) as RoadPoint;return {start,end,startTangent:tangent,endTangent:tangent,length:Math.hypot(...tangent),raw:new Uint32Array(14),flag:0};};
 function graph():RoadNetwork{
@@ -20,6 +21,25 @@ function car(){
  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1,-.8,-2.5),new Vector3(1,1.2,2.5)),1400,wheels,{height:()=>0,normal:()=>new Vector3(0,1,0)});
  vehicle.place(route.position,route.direction,1.107);const lod=new TrafficVehicleLod(vehicle,route,1.107),bot=new Bot(route,lod,()=>.5);return {route,vehicle,lod,bot};
 }
+
+test('distant rivals update every five seconds within the local speed radius and stay on lanes',()=>{
+ for(const rural of [false,true]){
+  const network=graph();network.nodes[0].group=rural?0:1;
+  const index=new TrafficSpawnIndex(network),planner=new DistantRivals(index,()=>.99),anchor=index.nearest(new Vector3(250,0,0))!;
+  const pose={position:{...anchor.position},yaw:0,velocity:{x:0,y:0,z:0}},focus=new Vector3(-1000,0,0);
+  planner.update(1,pose,false,focus,50,0);const before=new Vector3(pose.position.x,pose.position.y,pose.position.z);
+  assert.equal(planner.update(1,pose,false,focus,50,4999),false);assert.equal(before.distanceTo(new Vector3(pose.position.x,pose.position.y,pose.position.z)),0);
+  assert.equal(planner.update(1,pose,false,focus,50,5000),true);
+  const after=new Vector3(pose.position.x,pose.position.y,pose.position.z),speed=Math.hypot(...Object.values(pose.velocity));
+  assert.ok(before.distanceTo(after)>0);assert.ok(before.distanceTo(after)<=speed*5+1e-6);
+  assert.ok(speed*3.6>=(rural?60:15)&&speed*3.6<=(rural?100:35));
+  if(rural)assert.ok(before.distanceTo(after)>35/3.6*5,'rural estimates cover a larger radius');
+  assert.ok(index.nearest(after)!.position.distanceTo(after)<1e-6);
+  const snapshot={...pose.position};assert.equal(planner.update(1,pose,false,focus,50,5001),false);assert.deepEqual(pose.position,snapshot);
+  assert.equal(planner.update(1,pose,false,after,50,10000),false,'nearby rivals must not teleport');assert.deepEqual(pose.position,snapshot);
+  assert.equal(planner.update(1,pose,true,focus,50,15000),false,'streamed physics owns visible cars');assert.deepEqual(pose.position,snapshot);
+ }
+});
 
 test('spawn speed is rural with a yellow crossing at either end of the road',()=>{
  const network=graph();

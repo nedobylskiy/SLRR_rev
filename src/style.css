@@ -584,3 +584,13 @@ button:disabled{opacity:.45;cursor:default}
  .physics-scene .detail { min-height: 70px; max-height: 90px; padding: 10px 18px; }
 
 #viewport[data-game-cursor] * { cursor: inherit !important; }
+
+/* Ctrl+Alt+U only hides host diagnostics; original game UI remains interactive. */
+body.debug-ui-hidden :is(header, footer, main > aside, .toolbar, .detail,
+  .java-console, #inspector, .scene-help, .hood-controls, .hood-telemetry, .crash-hud,
+  .map-debug-panel, .vehicle-debug-panel, .route-benchmark-panel, .music-panel,
+  .tire-tuning-panel, .engine-tuning-panel,
+  .viewport-expand-button, .viewport-window-button, .viewport-hide-game-ui) {
+  display: none !important;
+}
+body.debug-ui-hidden main { grid-template-columns: minmax(0, 1fr); height: 100vh; min-height: 0; }

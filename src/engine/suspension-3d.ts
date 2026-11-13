@@ -205,6 +205,57 @@ export class Suspension3D {
       this.body.addForce(new Vector3(0, -force, 0), b);
     }
   }
+  /** Re-sample after chassis integration: a pre-step ray cannot position the
+   * rendered wheel on a curb entered during that tick. At full compression the
+   * bump stop also constrains the chassis, rather than leaving a tyre underground. */
+  resolveGroundContacts() {
+    const contacts: {wheel:Suspension3D['wheels'][number];down:Vector3;hardOffset:Vector3;stopOffset:Vector3;height:number;normal:Vector3;x:number;z:number}[]=[];
+    const frame=this.body.matrix();
+    for(const [index,wheel] of this.wheels.entries()){
+      const support=this.mechanics?.support(index)??1;
+      if(wheel.part.parent!==this.root||wheel.part.condition<=0||wheel.mountCondition<=0||support<=0)continue;
+      const failure=Math.max(0,1-Math.min(wheel.mountCondition,support)/.1);
+      const alignment=wheel.damage.clone().multiply(new Matrix4().makeRotationZ((index%2?-1:1)*failure*.4));
+      if(wheel.originalTyre){const [yaw,pitch,roll]=wheel.originalTyre.orientation;alignment.multiply(new Matrix4().makeRotationFromEuler(new Euler(pitch,yaw,roll,'YXZ')));}
+      const down=new Vector3(0,-1,0).transformDirection(alignment).applyQuaternion(this.body.orientation);
+      if(down.y>=-.05)continue;
+      const hard=wheel.hardpoint.clone().applyMatrix4(frame);
+      const center=hard.clone().addScaledVector(down,wheel.length);
+      const hit=this.terrain.sample?this.terrainQuery('bump_stop_sample',()=>this.terrain.sample!(center.x,center.z,hard.y)):undefined;
+      const height=this.terrain.sample?(hit?.height??-1000):this.terrain.height(center.x,center.z,hard.y);
+      if(height<=-999)continue;
+      // Keep the existing overlapping-deck guard for large, unreachable jumps.
+      // Ordinary road/curb steps must use the real surface, never a lowered copy.
+      if(wheel.supportHeight!==undefined&&height>wheel.supportHeight+Math.max(.3,wheel.radius))continue;
+      const normal=hit?.normal??this.terrain.normal(center.x,center.z,hard.y);
+      if(normal.y<=.05)continue;
+      const hardOffset=hard.sub(this.body.position),stopOffset=hardOffset.clone().addScaledVector(down,wheel.rest-wheel.bump);
+      stopOffset.y-=wheel.radius;
+      contacts.push({wheel,down,hardOffset,stopOffset,height,normal,x:center.x,z:center.z});
+    }
+    // Contacts change translation/momentum, not orientation, during this solve.
+    const point=new Vector3();
+    for(let iteration=0;iteration<4;iteration++)for(const c of contacts){
+      point.copy(this.body.position).add(c.stopOffset);
+      const height=c.height-(c.normal.x*(point.x-c.x)+c.normal.z*(point.z-c.z))/c.normal.y;
+      const depth=(height-point.y)*c.normal.y;
+      if(depth>.001)this.body.contact(point,c.normal,depth,0,0);
+    }
+    for(const c of contacts){
+      const hard=point.copy(this.body.position).add(c.hardOffset);
+      // Intersect the current suspension axis with the sampled support plane.
+      const denominator=-c.down.dot(c.normal);
+      if(denominator<=.05)continue;
+      const length=((hard.x-c.x)*c.normal.x+(hard.y-c.wheel.radius-c.height)*c.normal.y+(hard.z-c.z)*c.normal.z)/denominator;
+      c.wheel.length=Math.max(c.wheel.rest-c.wheel.bump,Math.min(c.wheel.rest+c.wheel.droop,length));
+      c.wheel.contact=length<c.wheel.rest+c.wheel.droop;
+      if(c.wheel.contact){
+        c.wheel.contactNormal.copy(c.normal);
+        c.wheel.contactPoint.copy(hard).addScaledVector(c.down,length);c.wheel.contactPoint.y-=c.wheel.radius-.012;
+      }
+      c.wheel.supportHeight=c.height;c.wheel.supportX=hard.x;c.wheel.supportZ=hard.z;
+    }
+  }
   sync() {
     for (const [index, w] of this.wheels.entries()) {
       if (w.part.parent !== this.root) continue;

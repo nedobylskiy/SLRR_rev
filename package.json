@@ -26,6 +26,8 @@
     "audit:java-math": "tsx tools/audit-java-math.ts",
     "verify:map-objects": "tsx tools/verify-map-objects.ts",
     "verify:game": "tsx tools/verify-game.ts",
+    "verify:traffic-java": "tsx tools/verify-traffic-java.ts",
+    "verify:minimap": "tsx tools/verify-minimap.ts",
     "verify:skeleton": "tsx tools/verify-skeleton.ts",
     "verify:ragdoll": "tsx tools/verify-ragdoll.ts",
     "verify:pedestrians": "tsx tools/verify-pedestrians.ts",

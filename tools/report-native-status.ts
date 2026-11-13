@@ -41,11 +41,12 @@ const notes = new Map<string, {status: Status; note: string}>();
 const annotate = (owner: string, methods: string[], status: Status, note: string) => {
   for (const method of methods) notes.set(owner + '#' + method, {status,note});
 };
+annotate('java.game.Vehicle',['getHorn'],'implemented','Reads the player controller’s original AXIS_HORN mapping and script sethorn state. Career scripts may consume the request with sethorn 0; playback uses original sound:0x0015.');
 annotate('java.lang.GarbageCollector',['<init>','push','flush'],'mocked','No-op host adapter; no original collector lifecycle. JavaScript manages memory.');
 annotate('java.util.resource.ResourceRef',['precache','cache','unload'],'mocked','Logs the call; no original resource-cache operation or explicit unloading.');
 annotate('java.util.resource.GroundRef',['getNearestCross'],'implemented','Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed.');
 annotate('java.util.resource.GroundRef',['delTraffic','addTrafficN'],'implemented','Registers/clears per-ground Java model resources and density weights consumed by the host traffic stream (user cap 0–50). Remaining three parameters are preserved but not assigned unverified semantics. addTrafficN returns a host catalogue registration ID; original native ID parity is not claimed.');
-annotate('java.util.resource.GroundRef',['addTrafficCar','notifyTrafficCar'],'mocked','Individual Java Bot registration/notification is not bridged to the host traffic population. Logs and returns 0; creates no individual traffic entity or notification subscription.');
+annotate('java.util.resource.GroundRef',['addTrafficCar','notifyTrafficCar','remTrafficCar'],'implemented','Registers existing Java Bot cars with stable per-ground traffic IDs. Visible stream instances emit car_add/car_rem to the bound Track, expose GII_CAR_TRAFFICPTR and sync live poses/velocities. Individual removal preserves the Java-owned car; pursuit AI commands are separate work. Host registration IDs are not original native pointers.');
 annotate('java.util.resource.Animation',['<init>','finalize','setSpeed','setFade','play','loopPlay','pause','seek','getPos'],'implemented','Per-RenderRef skeleton/AnimationMixer bridge loads original matrixdata clips, preserves Java placement and controls playback/lifecycle. Host position is seconds; fade is approximated as fade-in duration. Exact original native timing/blending semantics remain unverified.');
 annotate('java.util.resource.GroundRef',['setPedestrianDensityN','addPedestrianType'],'mocked','Accepts/logs the call; no pedestrian simulation.');
 annotate('java.util.resource.GroundRef',['setWater','addWaterLimit'],'mocked','Returns void; no water-plane rendering or water bounds.');
@@ -55,7 +56,7 @@ annotate('java.lang.System',['gc','runFinalization','compileAll'],'mocked','Retu
 annotate('java.game.Frontend',['init'],'mocked','Logs and returns void. Original frontend initialization is not reproduced by this adapter.');
 annotate('java.game.LoadingScreen',['show'],'mocked','Conditional no-op only when original LoadingScreen assets are absent. With assets, the Java loading-screen implementation runs.');
 annotate('java.render.GfxEngine',['flush','forceRendering','changeVideoMode'],'mocked','Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change.');
-annotate('java.game.Navigator',['updateNavigator'],'mocked','Returns void; the native navigator viewport update is deferred.');
+annotate('java.game.Navigator',['updateNavigator'],'implemented','Java-owned minimap tile/marker/viewport adapter with north-up and heading-up modes; host map bounds and projected symbol clamp. Exact native transform parity remains approximate.');
 annotate('java.sound.Sound',['init'],'mocked','Logs and returns void; browser audio initialization belongs to host services.');
 annotate('java.sound.Sound',['enableDebugDump'],'mocked','Returns 0; no original sound debug dump.');
 annotate('java.io.Input',['enablePointingDevice'],'mocked','Logs and returns void; browser pointer events are managed separately.');

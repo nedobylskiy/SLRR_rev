@@ -3,7 +3,8 @@ import {Color,InstancedMesh,Matrix4,MeshStandardMaterial,Vector3,type Group,type
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import type {StreamPlacement} from './map-object-stream';
 export interface FacadeSource {mesh:InstancedMesh;placements:StreamPlacement[]}
-interface Pending {material:MeshStandardMaterial;source:InstancedMesh;geometries:BufferGeometry[];vertices:number}
+export interface FacadeContribution {name:string;copies:number;triangles:number}
+interface Pending {contributions:Map<InstancedMesh,FacadeContribution>;material:MeshStandardMaterial;source:InstancedMesh;geometries:BufferGeometry[];vertices:number}
 /** One-time expansion by material across model/instance boundaries. No runtime instance compaction. */
 export class GlobalFacadeBatches {
   readonly meshes:InstancedMesh[]=[];
@@ -21,7 +22,8 @@ export class GlobalFacadeBatches {
       mesh.name=`Global facades / material ${entry.material.uuid.slice(0,8)} / batch ${this.meshes.length}`;
       mesh.matrixAutoUpdate=false;mesh.castShadow=entry.source.castShadow;mesh.receiveShadow=entry.source.receiveShadow;
       mesh.layers.mask=entry.source.layers.mask;mesh.renderOrder=entry.source.renderOrder;
-      mesh.userData={staticMapCaster:entry.source.userData.staticMapCaster,globalFacadeBatch:true,mapOcclusionRole:'structure'};
+      mesh.userData.facadeContributions=[...entry.contributions.values()].map(source=>({...source}));entry.contributions.clear();
+      Object.assign(mesh.userData,{staticMapCaster:entry.source.userData.staticMapCaster,globalFacadeBatch:true,mapOcclusionRole:'structure'});
       setMapPlacementIds(mesh,allocateMapPlacementIds(1));
       mesh.visible=false;mesh.computeBoundingBox();mesh.computeBoundingSphere();this.meshes.push(mesh);
       this.triangles+=(geometry.index?.count??geometry.getAttribute('position').count)/3;
@@ -36,13 +38,15 @@ export class GlobalFacadeBatches {
         const key=JSON.stringify([material.userData.slrrBuildingTexture.uuid,material.customProgramCacheKey(),material.side,material.shadowSide,
           material.roughness,material.metalness,material.depthTest,material.depthWrite,material.blending,material.polygonOffset,material.polygonOffsetFactor,material.polygonOffsetUnits,
           mesh.layers.mask,mesh.renderOrder,mesh.castShadow,mesh.receiveShadow,mesh.userData.staticMapCaster,Object.keys(mesh.geometry.attributes).sort(),!!mesh.geometry.index]);
-        let entry=pending.get(key);if(!entry){entry={material,source:mesh,geometries:[],vertices:0};pending.set(key,entry);}
+        let entry=pending.get(key);if(!entry){entry={material,source:mesh,geometries:[],vertices:0,contributions:new Map()};pending.set(key,entry);}
         const palette=placements.some(p=>p.paintColor!==undefined);
         for(const placement of placements){
           if(entry.vertices+vertices>vertexLimit)flush(entry);
           const geometry=mesh.geometry.clone();geometry.applyMatrix4(placement.matrix);
           if(palette){color.setHex(placement.paintColor??0xffffff);const tint=geometry.getAttribute('slrrBuildingPaintTint');
             for(let i=0;i<tint.count;i++)tint.setXYZ(i,color.r,color.g,color.b);}
+          const contribution=entry.contributions.get(mesh)??{name:mesh.name,copies:0,triangles:0};
+          contribution.copies++;contribution.triangles+=(geometry.index?.count??geometry.getAttribute('position').count)/3;entry.contributions.set(mesh,contribution);
           entry.geometries.push(geometry);entry.vertices+=vertices;totalVertices+=vertices;this.sourceCopies++;
         }
         this.sources.add(mesh);
