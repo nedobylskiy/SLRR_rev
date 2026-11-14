@@ -19,6 +19,7 @@ export class GameObject extends ResourceObject {
   /** Normalized car steering command, used by parked display vehicles. */
   steeringInput?: number;
   hornInput = false;
+  hornIndex = 0;
   hornCommandRevision = 0;
   poseRevision = 0;
   position = zeroVector();

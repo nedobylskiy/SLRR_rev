@@ -3,6 +3,8 @@ import { VehicleHornNative } from './vehicle-horn-native';
 import {NavigatorNative} from './navigator-native';
 import { SlrrJvm, jv, type JavaObject, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
+import { tufaClassName } from '../formats/tufa-class-name';
+import { resourceScriptFile } from './resource-script-file';
 import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { GroundRoadNative } from './ground-road-native';
@@ -99,6 +101,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dynamicSources = new Map<string, { path: string; source: string }>();
   const carScripts = new Map<string, string>();
   const javaSourcesByName = new Map<string, string[]>();
+  const javaClassesByName = new Map<string, string[]>();
   const frontendPack = assets.byPath.has('frontend.rpk') ? await assets.pack('frontend.rpk') : null;
   const frontendTextureIds = new Set(frontendPack?.entries.filter(entry => entry.type === 7).map(entry => entry.typeId));
   const partsPack = assets.byPath.has('parts.rpk') ? await assets.pack('parts.rpk') : null;
@@ -123,6 +126,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const matches = javaSourcesByName.get(name) ?? [];
       matches.push(asset.path);
       javaSourcesByName.set(name, matches);
+    }
+    if (path.endsWith('.class')) {
+      const name = path.split('/').at(-1)!;
+      const matches = javaClassesByName.get(name) ?? [];
+      matches.push(asset.path);
+      javaClassesByName.set(name,matches);
     }
     const match = /^cars\/.+\/scripts\/src\/([a-z_$][\w$]*)\.java$/i.exec(path);
     if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
@@ -190,14 +199,32 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
         sources.set(candidatePath, source);
         return { path: candidate, source };
       }
-      if (!assets.byPath.has(path.toLowerCase())) return null;
-      const classes = parseTufa(await assets.read(path));
-      const cls = classes.find(entry => entry.name === className);
-      if (!cls) throw new Error(`TUFA class missing in ${path}: ${className}`);
-      const result = decompileClass(cls);
-      if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${path}: ${result.diagnostics.join('; ')}`);
-      sources.set(path.toLowerCase(), result.source);
-      return { path, source: result.source };
+      const candidates = new Set([path,...javaClassesByName.get(`${simpleName.toLowerCase()}.class`) ?? []]);
+      for (const candidate of candidates) {
+        if (!assets.byPath.has(candidate.toLowerCase())) continue;
+        const normalized = normalizePath(candidate);
+        if (normalized.startsWith(systemRoot)
+          && `java.${normalized.slice(systemRoot.length,-6).replaceAll('/','.')}` !== className.toLowerCase()) continue;
+        let classes: ReturnType<typeof parseTufa>;
+        try {
+          const bytes = await assets.read(candidate);
+          if (tufaClassName(bytes) !== className) continue;
+          classes = parseTufa(bytes);
+        }
+        catch (error) { throw new Error(`Cannot decompile ${candidate}: ${error instanceof Error ? error.message : String(error)}`,{cause:error}); }
+        if (!classes.some(entry => entry.name === className)) continue;
+        // One TUFA file can contain helper classes without matching .class filenames.
+        // Publish them before the JVM resolves constructor/type hints in the main class.
+        for (const entry of classes) {
+          const result = decompileClass(entry);
+          if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${candidate} (${entry.name}): ${result.diagnostics.join('; ')}`);
+          dynamicSources.set(entry.name, {path:candidate,source:result.source});
+        }
+        const result = dynamicSources.get(className)!;
+        sources.set(candidate.toLowerCase(), result.source);
+        return result;
+      }
+      return null;
     },
     readSource: async path => {
       const source = repairDecompiledSource(path, new TextDecoder().decode(await assets.read(path)));
@@ -248,16 +275,24 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
   const readResourceScript = async (script: string, pack: string | null) => {
-      const compiled = normalizePath(script);
-      const sourcePath = compiled.endsWith('.class')
-        ? compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java')
-        : javaSourcesByName.get(`${compiled.split('.').at(-1)}.java`)?.[0] ?? compiled;
-      const source = assets.byPath.get(normalizePath(sourcePath));
-      if (!source) throw new Error(`Resource Java source missing: ${sourcePath}`);
-      let content = new TextDecoder().decode(await assets.read(source.path));
+      const source = await resourceScriptFile(assets,script,javaSourcesByName,javaClassesByName);
+      const bytes = await assets.read(source.path);
+      let simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.(java|class)$/i, '');
+      let content = '';
+      if (/\.class$/i.test(source.path)) {
+        const classes = parseTufa(bytes);
+        const main = classes.find(entry => entry.name.split('.').at(-1)!.toLowerCase() === simpleName.toLowerCase());
+        if (!main) throw new Error(`Resource TUFA class missing: ${source.path}`);
+        simpleName = main.name.split('.').at(-1)!;
+        for (const entry of classes) {
+          const result = decompileClass(entry);
+          if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${source.path}: ${result.diagnostics.join('; ')}`);
+          if (entry === main) content = result.source;
+          else dynamicSources.set(entry.name,{path:source.path,source:result.source});
+        }
+      } else content = new TextDecoder().decode(bytes);
       const packageName = /\bpackage\s+([\w.]+)\s*;/.exec(content)?.[1];
       if (!packageName) throw new Error(`Resource Java package missing: ${source.path}`);
-      let simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.java$/i, '');
       let className = `${packageName}.${simpleName}`;
       if (dynamicSources.has(className) && normalizePath(dynamicSources.get(className)!.path) !== normalizePath(source.path)) {
         // Resource packs may declare the same Java class name (for example, every map has track_data).
@@ -432,9 +467,13 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const hornSound = jv('SfxRef', { className: 'java.util.resource.SfxRef', fields: new Map<string, JavaValue>() });
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', hornSound, [gameTypes.remountSavedResource('sound.rpk', 0x15)]);
   const horns = new VehicleHornNative(jvm, gameTypes, controllers, {
-    start: () => Number(jvm.natives.invoke('java.util.resource.SfxRef', 'nplay',
+    start: settings => {
+      const resource = settings?.resource ?? {pack:'sound.rpk',id:0x15};
+      jvm.natives.invoke('java.util.resource.ResourceRef','set',hornSound,[gameTypes.remountSavedResource(resource.pack,resource.id)]);
+      return Number(jvm.natives.invoke('java.util.resource.SfxRef', 'nplay',
       hornSound, [jv('Vector3', null),
-        jv('float', 20), jv('float', 1), jv('float', 1), jv('int', 1), jv('int', 0)])!.value),
+        jv('float', 20), jv('float', settings?.pitch ?? 1), jv('float', 1), jv('int', 1), jv('int', 0)])!.value);
+    },
     stop: handle => { jvm.natives.invoke('java.util.resource.SfxRef', 'stop', jv('SfxRef', null), [jv('int', handle)]); },
   });
   osdButtons.setCursorEvents((code, physics) => input.cursorEvent(code, {

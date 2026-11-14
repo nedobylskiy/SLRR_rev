@@ -36,6 +36,15 @@ test('RenderRef.create makes a typed visual child and setMatrix moves that insta
   assert.deepEqual(node.orientation, { y: 0.2, p: 0.3, r: 0.4 });
   assert.equal(resources.getResource(type)?.parent, null);
   assert.deepEqual(changes, ['Rectangle:0', 'Rectangle:1']);
+  const sibling = ref('java.util.resource.RenderRef');
+  jvm.natives.invoke('java.util.resource.ResourceRef','newNative',sibling,[]);
+  jvm.natives.invoke('java.util.resource.RenderRef','create',sibling,[jv('ResourceRef',osd.value),type,jv('String','sibling')]);
+  const revision = node.visualRevision;
+  jvm.natives.invoke('java.util.resource.RenderRef','setColor',instance,[jv('int',-65536)]);
+  assert.equal(node.color,0xffff0000);
+  assert.equal(resources.getRender(sibling)?.color,null);
+  assert.ok(node.visualRevision > revision);
+  assert.equal(changes.at(-1),'Rectangle:1');
 });
 
 test('RenderRef.setType changes the instance type without moving it', () => {

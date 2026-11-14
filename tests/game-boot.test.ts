@@ -8,6 +8,47 @@ import { SoundJavaBridge } from '../src/audio/sound-java';
 import type { MusicEngine } from '../src/audio/music-engine';
 import { compileSource } from 'slrr-jvm-compiler';
 
+test('game boots from Init.class without installed Java sources',async()=>{
+  const compiled=compileSource(`package java.game;
+    class Init extends GameType { public Init(int id) { CompiledGame helper = new CompiledGame(); helper.run(); } }
+    class CompiledGame { public CompiledGame() { } public void run() { reachedCompiledGame(); } }
+  `);
+  assert.equal(compiled.ok,true,compiled.diagnostics.join('\n'));
+  const path='sl/scripts/game/Init.class';
+  const assets=new Assets([{path,size:compiled.bytes.length}],async()=>compiled.bytes);
+  const result=await bootGame(assets,()=>{});
+  try { assert.match(result.error?.message??'',/reachedCompiledGame/); }
+  finally { result.dispose(); }
+});
+
+test('class-only system containers expose sibling helper constructors', async()=>{
+  const compiled = compileSource(`package java.render;
+    class LoadingBundle {
+      public LoadingBundle() { }
+      public int run() { FlashText text = new FlashText("test"); return text.length(); }
+    }
+    class FlashText {
+      String text;
+      public FlashText(String value) { text = value; }
+      public int length() { return text.length(); }
+    }`);
+  assert.equal(compiled.ok,true,compiled.diagnostics.join('\n'));
+  const source=`package java.game; import java.render.*;
+    class Init extends GameType { Init(int id) {
+      LoadingBundle bundle = new LoadingBundle();
+      if (bundle.run() != 4) wrongHelper();
+      reachedHelper();
+    } }`;
+  const files=new Map<string,Uint8Array>([
+    ['system/scripts/render/LoadingBundle.class',compiled.bytes],
+    ['sl/scripts/game/src/Init.java',new TextEncoder().encode(source)],
+  ]);
+  const assets=new Assets([...files].map(([path,bytes])=>({path,size:bytes.length})),async path=>files.get(path)!);
+  const result=await bootGame(assets,()=>{});
+  try { assert.match(result.error?.message??'',/reachedHelper/); }
+  finally { result.dispose(); }
+});
+
 test('avatar RID arithmetic retains the namespace of a class-only installation', async () => {
   const source = `package java.game; class Init extends GameType {
     static final int base = frontend:0x00dar;

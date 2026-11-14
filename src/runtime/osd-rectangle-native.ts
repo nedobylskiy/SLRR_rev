@@ -62,7 +62,9 @@ export class OsdRectangleNative {
     }
     // The normalized overload divides Z by 0.001 before RenderRef.setMatrix;
     // the ordinary overload retains its metre-scale Z value.
-    const depth = osdDepth(viewport.priority, Math.round(render.position.z * (mode === 'normalized' ? 1 : 1000)));
+    // Legacy Gadget puts the backlight half a layer behind its icon. Rounding
+    // -0.49999997 to zero erased that separation, so the newer DOM node covered it.
+    const depth = osdDepth(viewport.priority, Math.floor(render.position.z * (mode === 'normalized' ? 1 : 1000)));
     if (![projected.x, projected.y, projected.width, projected.height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
     if (!view) {

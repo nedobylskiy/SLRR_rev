@@ -21,6 +21,14 @@ export class RenderRefNative {
       settings: RenderFlareSettings) => Promise<void> | void) {
     const owner = 'java.util.resource.RenderRef';
     const voidValue = () => jv('void', undefined);
+    jvm.natives.register(owner, 'setColor', ['int'], ({ receiver, args }) => {
+      const render = this.resources.getRender(receiver);
+      if (!render) throw new Error('RenderRef.setColor has no render instance');
+      render.color = Number(args[0].value) >>> 0;
+      render.markVisualChanged();
+      this.resources.notifyRenderChanged(render);
+      return voidValue();
+    });
     jvm.natives.register(owner, 'create', ['ResourceRef', 'RenderRef', 'String'], ({ receiver, args }) => {
       this.resources.createRender(receiver, args[0], args[1],
         args[2].value == null ? null : String(args[2].value));

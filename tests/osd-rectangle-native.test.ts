@@ -43,6 +43,16 @@ test('Java Rectangle resources become positioned OSD images and obey Group visib
   assert.ok(bounds.every((value, index) => Math.abs(value - [0.2, 0.4, 1.2, 0.3, 2][index]) < 0.001));
   assert.deepEqual(texture, { pack: 'frontend.rpk', id: 0xc00d });
   assert.equal(visible, true);
+  render.position.z = 0;
+  rectangles.sync(render);
+  const iconDepth = bounds[4];
+  const highlight = new RenderObject(6, 'java.util.resource.RenderRef', template, 'Rectangle');
+  highlight.setParent(group);
+  highlight.position = {...render.position, z: render.position.z - Math.fround(.0005)};
+  rectangles.sync(highlight);
+  assert.ok(bounds[4] < iconDepth, 'half-layer backlight stays behind the icon despite float rounding');
+  rectangles.remove(highlight);
+  removed = false;
   // A copied mesh is not an image, even when it carries a resource pack.
   template.resourceReplacementPacks.set(0xd9, 'frontend');
   template.resourceReplacements.delete(0xaf);

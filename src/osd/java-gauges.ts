@@ -1,5 +1,7 @@
 import type { PartConfig } from '../formats/cfg';
 import type { OsdLayer, OsdResource } from './osd-layer';
+import type { Assets } from '../assets';
+import { StockGauges } from './stock-gauges';
 
 type GaugeDirective = { resource: OsdResource; args: string[] };
 
@@ -21,8 +23,9 @@ export class JavaGauges {
   private engineCondition = 1;
   private transmissionCondition = 1;
   private damageMask?: ImageData;
+  private stock?: StockGauges;
 
-  constructor(osd: OsdLayer, pack: string, config: PartConfig) {
+  constructor(osd: OsdLayer, pack: string, config: PartConfig, assets?: Assets) {
     const directives = new Map<string, GaugeDirective>();
     for (const item of config.unknown) {
       const match = /^0x([0-9a-f]+)r?$/i.exec(item.args[0] ?? '');
@@ -31,6 +34,10 @@ export class JavaGauges {
     }
     this.pinSpeed = directives.get('osd_spdpin')?.args ?? [];
     this.pinRpm = directives.get('osd_rpmpin')?.args ?? [];
+    if (!directives.has('osd_gauge') && assets) {
+      this.stock = new StockGauges(osd, assets);
+      return;
+    }
     this.root.className = 'java-gauges';
     this.root.setAttribute('role', 'img');
     this.root.setAttribute('aria-label', 'Vehicle instruments');
@@ -109,6 +116,7 @@ export class JavaGauges {
     const now = performance.now();
     if (this.lastUpdate) this.travelledKm += Math.max(0, speedKmh) * Math.min(100, now - this.lastUpdate) / 3_600_000;
     this.lastUpdate = now;
+    if (this.stock) { this.stock.update(speedKmh,rpm,gear,this.travelledKm,damageCondition); return; }
     const angle = (args: string[], value: number, fallbackRate: number, fallbackBase: number) => {
       const base = Number(args[4]), rate = Number(args[5]);
       return `${-(Number.isFinite(base) ? base : fallbackBase) - (Number.isFinite(rate) ? rate : fallbackRate) * value}rad`;
@@ -154,5 +162,5 @@ export class JavaGauges {
     context.putImageData(image, 0, 0);
   }
 
-  dispose() { this.disposed = true; this.root.remove(); }
+  dispose() { this.disposed = true; this.stock?.dispose(); this.root.remove(); this.damageIcon.remove(); }
 }

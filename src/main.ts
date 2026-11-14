@@ -228,7 +228,7 @@ async function runGameBoot() {
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
         showMapDebugControls(map);
         if (built && selected.driving) {
-          gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
+          gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config, assets) : null;
           const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);

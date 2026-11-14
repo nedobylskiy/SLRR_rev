@@ -91,7 +91,8 @@ export class Assets {
         const replacement = this.resourceOverride(resolved.packPath, sourceId, overrides);
         const texture = await this.resource(replacement?.pack ?? resolved.packPath, replacement?.id ?? sourceId);
         const file = entryProperties(texture.entry).find(p => p.key === 'sourcefile')?.value;
-        if (file) textures.push(file);
+        // Empty native texture resources still occupy an authored material slot.
+        textures.push(file ?? '');
       } catch { textures.push(''); } // Preserve material indices when one texture is missing.
     }
     if (source && /\.sc[xy]$/i.test(source)) {

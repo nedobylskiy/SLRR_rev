@@ -523,7 +523,8 @@ export class GameTypeNative {
               const words = args[2].value.trim().split(/\s+/);
               const value = Number(words[1]);
               if (words.length !== 2 || !Number.isFinite(value)) throw new Error(`Invalid horn command: ${args[2].value}`);
-              node.hornInput = value !== 0; node.hornCommandRevision++;
+              node.hornIndex = Math.trunc(value) & 3;
+              node.hornInput = node.hornIndex !== 0; node.hornCommandRevision++;
             }
             if (verb === 'setsteer') {
               const words = args[2].value.trim().split(/\s+/);

@@ -5,6 +5,18 @@ import { EngineWorld, type PartDefinition } from '../src/engine/world';
 import { MechanicalSystem } from '../src/engine/mechanical-system';
 import { OriginalStock, originalNumber, selectStockBranches, type MechanicalProfile } from '../src/engine/original-stock';
 import { parsePartConfig } from '../src/formats/cfg';
+import { compileSource } from 'slrr-jvm-compiler';
+
+test('class-only installations supply suspension tuning instead of missing hardware', async () => {
+  const compiled=compileSource('package java.game.parts; public class stock_spring extends Spring { public stock_spring() { force=72000.0; } }');
+  assert.equal(compiled.ok,true,compiled.diagnostics.join('\n'));
+  const path='parts/scripts/stock_spring.class';
+  const assets=new Assets([{path,size:compiled.bytes.length}],async()=>compiled.bytes);
+  const definition:PartDefinition={key:{pack:'parts.rpk',id:1},alias:'spring',cfgPath:'spring.cfg',script:path,config:parsePartConfig('')};
+  const profile=await new OriginalStock(assets).profile(definition);
+  assert.equal(profile?.kind,'spring');
+  assert.equal(profile?.values.force,72000);
+});
 
 test('original numeric units and conditional stock selection stay bounded and literal', () => {
   assert.equal(originalNumber('kgfPmm2NPm(7.3)'), 71613);

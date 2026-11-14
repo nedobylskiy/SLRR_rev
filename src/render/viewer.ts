@@ -32,6 +32,7 @@ import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
+import { applyRenderColor } from './render-color';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
@@ -48,7 +49,7 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel, ScxMesh } from '../formats/scx';
 import type { Assets } from '../assets';
-import { scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
+import { scxAlphaTestReference, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { PartFactory, poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
 import { loadPartCollision } from '../engine/part-collision';
@@ -62,7 +63,8 @@ import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
 import {RoutePlayback,RouteCheckpoints,routeBodyMatrix,routeSourceSummary,type RouteBenchmark,type RouteCamera,type RoutePose,type RouteMode} from '../engine/route-benchmark';
 import type {DriveTelemetry} from '../engine/drive-telemetry';
-import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, isStockMapCollisionShell, mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, groundRoomRenderIds, isStockMapCollisionShell, mapRenderIds } from '../engine/map';
+import { parsePackedGround, type PackedGround } from '../formats/ground';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
@@ -870,7 +872,7 @@ export class Viewer {
     const overrideKey = overrides ? [...overrides.resourceReplacements]
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
-    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}` : '';
+    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}|color:${node.color}` : '';
     if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
     this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
     modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
@@ -925,7 +927,9 @@ export class Viewer {
     const template = await templatePromise;
     if (generation !== this.generation || this.javaRenderRequests.get(node.id) !== request
       || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
-    modelGroup.add(template.clone(true));
+    const instance = template.clone(true);
+    applyRenderColor(instance, node.color);
+    modelGroup.add(instance);
   }
   private releaseJavaDriver(id:number){
     const binding=this.javaDrivers.get(id);this.javaDrivers.delete(id);binding?.driver?.dispose();
@@ -1409,6 +1413,23 @@ export class Viewer {
     }
   }
   /** Build an isolated inventory mesh tree; never publish its objects/lights into the world. */
+  async createPreviewRender(node: RenderObject, assets: Assets): Promise<THREE.Group> {
+    if (!node.renderResource) throw new Error('Preview render has no resource');
+    const model = await assets.modelForResource(node.renderResource.pack, node.renderResource.id);
+    const parsed = await parseScxAsync(await assets.read(model.path));
+    const root = new THREE.Group(), mesh = new THREE.Group(); root.add(mesh);
+    try {
+      await this.append(parsed, assets, model.textures, mesh, this.generation);
+      mesh.scale.set(.01 * node.meshScale.x, .01 * node.meshScale.y, .01 * node.meshScale.z);
+      applyRenderColor(mesh, node.color, false);
+      mesh.position.set(node.position.x,node.position.y,node.position.z);
+      mesh.rotation.set(node.orientation.p,node.orientation.y,node.orientation.r,'YXZ');
+      root.add(new THREE.HemisphereLight(0xffffff,0x777777,2));
+      const light = new THREE.DirectionalLight(0xffffff,2); light.position.set(2,4,3);root.add(light);
+      return root;
+    } catch (error) { this.disposeGroup(root); throw error; }
+  }
+
   async createPreviewWorld(world: EngineWorld, assets: Assets, unlitPreview = true): Promise<THREE.Group> {
     const root = new THREE.Group(), generation = this.generation;
     try {
@@ -1588,12 +1609,23 @@ export class Viewer {
     this.mapPackPath=packPath;
     this.resetRoadDebug();this.javaTrafficBridge=options?.trafficBridge;this.javaTrafficTypes=options?.trafficTypes;this.mapRoadSource={assets,pack:packPath,groundId:options?.groundId};
     const pack = await assets.pack(packPath), warnings: string[] = [];
-    const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
+    const groundEntries=pack.entries.filter(entry=>entry.type===1);
+    const groundEntry = options?.groundId === undefined ? (groundEntries.length===1?groundEntries[0]:undefined) : pack.entries.find(entry => entry.typeId === options.groundId);
     const ground = groundEntry && groundRenderDefinition(groundEntry);
+    let packedGround: PackedGround | undefined;
     let room: typeof ground;
     if (ground) {
       const gameType = await assets.resource(packPath, ground.gameType);
       const render = await assets.resource(packPath, ground.renderId);
+      const tableResource=entryProperties(render.entry).some(property=>property.key==='mesh')
+        ? await assets.modelForResource(packPath,ground.renderId) : undefined;
+      if (tableResource && /\.scy$/i.test(tableResource.path) && groundEntry) {
+        const materials=await parseScxAsync(await assets.read(tableResource.path));
+        if(materials.meshes.every(mesh=>!mesh.indices.length)){
+          const compiled=parsePackedGround(await assets.read(packPath),groundEntry,materials);
+          if(compiled.model.meshes.length)packedGround=compiled;
+        }
+      }
       // TestTrack also names a direct ground mesh, but its child renders form
       // the rest of the map. Only leaf meshes use the isolated room path.
       if (entryProperties(gameType.entry).some(property => property.key === 'native' && property.value === 'ground')
@@ -1604,20 +1636,39 @@ export class Viewer {
         if (groundRenderIsRoom(pack, ground.renderId, model)) room = ground;
       }
     }
-    const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
+    const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack, ground, packedGround }];
     // A map can declare a sibling map package as a continuation (for example City → City2).
-    // Load it only when both its RDB and static map render resources are present.
+    // Continuations can keep geometry/placements in their RPK or in external SCX/RDB files.
     for (const dependency of room ? [] : pack.dependencies) {
       const path = dependency.path.replaceAll('\\', '/').toLowerCase();
       if (!path.startsWith('maps/') || !path.endsWith('.rpk') || mapSources.some(source => source.path === path)) continue;
-      if (!assets.byPath.has(path.replace(/\.rpk$/i, '.rdb'))) continue;
       try {
         const linkedPack = await assets.pack(path);
-        if (mapRenderIds(linkedPack).length) mapSources.push({ path, pack: linkedPack });
+        const entries=linkedPack.entries.filter(entry=>entry.type===1);
+        const linkedEntry=entries.length===1?entries[0]:undefined;
+        const linkedGround=linkedEntry&&groundRenderDefinition(linkedEntry);
+        let linkedPacked:PackedGround|undefined;
+        if(linkedGround&&linkedEntry){
+          const render=await assets.resource(path,linkedGround.renderId);
+          const resource=entryProperties(render.entry).some(property=>property.key==='mesh')
+            ? await assets.modelForResource(path,linkedGround.renderId) : undefined;
+          if(resource&&/\.scy$/i.test(resource.path)){
+            const materials=await parseScxAsync(await assets.read(resource.path));
+            if(materials.meshes.every(mesh=>!mesh.indices.length)){
+              const compiled=parsePackedGround(await assets.read(path),linkedEntry,materials);
+              if(compiled.model.meshes.length)linkedPacked=compiled;
+            }
+          }
+        }
+        // Original City2 keeps placements and geometry inside its RPK. An RDB
+        // is required only for the external-mesh variant of a continuation.
+        if(linkedPacked||assets.byPath.has(path.replace(/\.rpk$/i,'.rdb'))&&mapRenderIds(linkedPack).length)
+          mapSources.push({path,pack:linkedPack,ground:linkedGround,packedGround:linkedPacked});
       } catch (error) { warnings.push(`Map dependency ${path}: ${String(error)}`); }
     }
-    const ids = room ? [{ source: mapSources[0], id: room.renderId }]
-      : mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
+    const ids = room ? groundRoomRenderIds(pack,room.renderId).map(id=>({source:mapSources[0],id}))
+      : mapSources.flatMap(source => source.packedGround&&source.ground
+        ? [{source,id:source.ground.renderId}] : mapRenderIds(source.pack).map(id => ({ source, id })));
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
     this.mapAmbience?.dispose();this.ambientAudio=new AmbientAudio(assets,()=>this.ambientEffectsVolume?.()??1);this.mapAmbience=new MapAmbience(this.ambientAudio);this.ambientAudio.activate();
@@ -1650,6 +1701,7 @@ export class Viewer {
     this.mapStream = stream;
     this.updateFarPlane();
     this.nextStreamUpdate=-Infinity;
+    for(const source of mapSources)if(source.packedGround?.collision.meshes.length)collision.add(source.packedGround.collision);
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
       try {
@@ -1663,10 +1715,11 @@ export class Viewer {
             point.fromArray(mesh.normals, i).transformDirection(transform).toArray(mesh.normals, i);
           return parsed;
         };
-        const parsed = placeGround(await parseScxAsync(await assets.read(resource.path)));
+        const compiled=source.packedGround;
+        const parsed = compiled?.model ?? placeGround(await parseScxAsync(await assets.read(resource.path)));
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
-        collision.add(parsed);
+        if(!compiled?.collision.meshes.length)collision.add(parsed);
         const collisionOnly=isStockMapCollisionShell(source.path,resource.path,source.pack.entries.find(entry=>entry.typeId===id)?.alias??'',parsed);
         if(collisionOnly)this.collisionOnlyMapMeshes++;
         const bounds = new THREE.Box3();
@@ -1679,7 +1732,8 @@ export class Viewer {
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
             if (!wanted()) return [];
             const template = new THREE.Group();
-            const model = placeGround(await parseScxAsync(await assets.read(resource.path)));
+            const model = compiled ? {...compiled.model,meshes:compiled.model.meshes.map(mesh=>({...mesh,positions:mesh.positions.slice(),normals:mesh.normals.slice()}))}
+              : placeGround(await parseScxAsync(await assets.read(resource.path)));
             if (!wanted()) return [];
             warnings.push(...await this.append(model, assets, resource.textures, template, generation, true, wanted));
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
@@ -1697,8 +1751,9 @@ export class Viewer {
     const globalFacades=this.globalFacadeBatching;this.mapGlobalFacadeBatching=globalFacades;
     const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; placements: StreamPlacement[] }>();
     for (const source of room ? [] : mapSources) try {
-      const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
-      const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
+      const placements = source.packedGround ? source.packedGround.placements
+        : mapObjectPlacements(new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb'))),source.pack);
+      const byType = new Map<number, typeof placements>();
       for (const placement of placements) {
         const list = byType.get(placement.typeId) ?? [];
         if (!list.length) byType.set(placement.typeId, list);
@@ -2478,7 +2533,7 @@ export class Viewer {
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
           const alphaEnabled = !part.paintMask && scxDiffuseUsesAlpha(model.version, part.materialFlags);
-          if (alphaEnabled && alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
+          if (alphaEnabled && alpha === 'cutout') { material.alphaTest = scxAlphaTestReference(model.version,part.materialFlags,part.alphaReference); material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
           // Stock map textures such as cross.dds and falak*.dds carry an unused
           // or reflection alpha channel. Keep fully opaque map materials solid;
           // foliage cutouts above and explicit material opacity still apply.
@@ -2499,7 +2554,7 @@ export class Viewer {
           if (!file) {
             geometry.setAttribute('uv', new THREE.BufferAttribute(layerUv, 2));
             material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
-            if (alpha === 'cutout') material.alphaTest = 0.5;
+            if (alpha === 'cutout') material.alphaTest = scxAlphaTestReference(model.version,part.materialFlags,part.alphaReference);
             else if (alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
           } else if (alpha !== 'opaque') {
             const layerGeometry = geometry.clone();

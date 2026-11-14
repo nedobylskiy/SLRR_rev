@@ -8,6 +8,8 @@ export class RenderObject extends ResourceObject {
   orientation: OrientationState = { y: 0, p: 0, r: 0 };
   renderResource: { pack: string; id: number } | null = null;
   animation:RenderAnimationState|null=null;
+  /** Optional ARGB modulation set by Java RenderRef.setColor. */
+  color: number | null = null;
 
   constructor(id: number, className: string, public renderType: ResourceObject | null,
     alias: string) {

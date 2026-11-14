@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseConstants, parseTufa, parseTrees } from '../src/formats/tufa';
-import { parseScx, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../src/formats/scx';
+import { parseScx, scxAlphaTestReference, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../src/formats/scx';
 import { parseRpk, parseProperties, parseRdb } from '../src/formats/rpk';
 import { normalizePath } from '../src/assets';
 import {parsePartConfig} from '../src/formats/cfg';
@@ -86,6 +86,24 @@ test('SCX v4 diffuse vertex colors preserve RGB without confusing specular or UV
   const mesh = parseScx(Buffer.concat([Buffer.from('INVO'), u32(4, chunks.length), ...directory, ...chunks])).meshes[0];
   assert.deepEqual(Array.from(mesh.colors!), [0x12, 0x34, 0x56]);
   assert.deepEqual(Array.from(mesh.uv), [0.25, 0.75]);
+});
+
+test('native alpha reference survives SCX4 material sections and preserves low-alpha foliage', () => {
+  const fixture=(reference:number)=>{
+    const chunks=[u32(0,28,0,0xa2000000,1,0x05000000,reference),
+      u32(4,16,0,1),u32(5,12,0),u32(4,16,0,1),u32(5,12,0)];
+    let offset=12+chunks.length*8;
+    const directory=chunks.map((part,i)=>{const row=u32([0,4,5,4,5][i],offset);offset+=part.length;return row;});
+    return Buffer.concat([Buffer.from('INVO'),u32(4,chunks.length),...directory,...chunks]);
+  };
+  const model=parseScx(fixture(32));
+  assert.deepEqual(model.meshes.map(mesh=>mesh.alphaReference),[32,32]);
+  assert.equal(scxAlphaTestReference(4,0xa2000000),56/255);
+  assert.equal(scxAlphaTestReference(3,1),56/255);
+  assert.equal(scxAlphaTestReference(4,0xa2000000,32),32/255);
+  assert.equal(scxAlphaTestReference(4,0),.5);
+  assert.ok(80/255>=scxAlphaTestReference(4,0xa2000000),'thin filtered leaves pass the native threshold');
+  assert.throws(()=>parseScx(fixture(256)),/alpha reference/);
 });
 test('SCX v3 alphaOpacity flag keeps RGB road base opaque while allowing cutout fences', () => {
   assert.equal(scxUsesVertexPaintMask(3, 0x100), true);
