@@ -7,6 +7,7 @@ import {DDSLoader} from 'three/addons/loaders/DDSLoader.js';
 import {TGALoader} from 'three/addons/loaders/TGALoader.js';
 import {TextureLoader} from 'three';
 import {ptxTexture} from './ptx-texture';
+import type {FrameProfiler} from './frame-profiler';
 /** Projected symbol clamp preserves its direction instead of independently clamping X/Y. */
 export function clampNavigatorMarker(x:number,y:number){const scale=Math.min(1,.9/Math.max(Math.abs(x),1e-12),.85/Math.max(Math.abs(y),1e-12));return {x:x*scale,y:y*scale};}
 /** A tiny unlit pass in the Java OSD stage; never touches the world streamer, lights or Hi-Z. */
@@ -16,9 +17,9 @@ export class NavigatorView {
  private templates=new Map<string,Promise<Group>>();private textures=new Map<string,Promise<Texture>>();
  private instances=new Map<number,{key:string;group?:Group}>();private disposed=false;private pending=0;private tasks:(()=>Promise<void>)[]=[];
  private route?:Line;private routeKey='';private raf=0;private last=0;private current?:object;
- constructor(private stage:HTMLElement,private assets:Assets,private source:()=>NavigatorFrame[],private report:(message:string)=>void,private resolveRid:(id:number)=>{pack:string;id:number}|undefined=()=>undefined){
+ constructor(private stage:HTMLElement,private assets:Assets,private source:()=>NavigatorFrame[],private report:(message:string)=>void,private resolveRid:(id:number)=>{pack:string;id:number}|undefined=()=>undefined,private profiler?:Pick<FrameProfiler,'measure'>){
   this.canvas.className='navigator-canvas';this.canvas.setAttribute('aria-label','Java minimap');this.canvas.style.cssText='position:absolute;pointer-events:none;z-index:1;display:none;';stage.append(this.canvas);this.canvas.hidden=true;
-  const tick=(now:number)=>{if(this.disposed)return;this.raf=requestAnimationFrame(tick);if(now-this.last<33)return;this.last=now;try{this.draw();}catch(error){this.report(`Minimap: ${String(error)}`);this.source=()=>[];this.canvas.hidden=true;}};this.raf=requestAnimationFrame(tick);
+  const tick=(now:number)=>{if(this.disposed)return;this.raf=requestAnimationFrame(tick);if(now-this.last<33)return;this.last=now;try{if(this.profiler)this.profiler.measure('Minimap CPU',()=>this.draw());else this.draw();}catch(error){this.report(`Minimap: ${String(error)}`);this.source=()=>[];this.canvas.hidden=true;}};this.raf=requestAnimationFrame(tick);
  }
  private enqueue(work:()=>Promise<void>){this.tasks.push(work);this.pump();}
  private pump(){while(this.pending<3&&this.tasks.length&&!this.disposed){this.pending++;void this.tasks.shift()!().catch(error=>{if(!this.disposed)this.report(`Minimap resource: ${String(error)}`);}).finally(()=>{this.pending--;this.pump();});}}

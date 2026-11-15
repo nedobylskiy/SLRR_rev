@@ -142,6 +142,8 @@ export class MapCollision {
     let nearest: { point: Vector3; normal: Vector3; depth: number; bounds: Box3 } | undefined;
     const closest = new Vector3(), sliceA = new Vector3(), sliceB = new Vector3();
     for (const wall of list ?? []) {
+      const b=wall.bounds;
+      if(point.x<b.min.x-radius||point.x>b.max.x+radius||point.z<b.min.z-radius||point.z>b.max.z+radius)continue;
       if (point.y < wall.minY - verticalPadding || point.y > wall.maxY + verticalPadding) continue;
       if (verticalPadding < radius) {
         // Slice at the chassis height, not the triangle-wide height range: a
@@ -178,6 +180,8 @@ export class MapCollision {
     }
     for (const box of boxes ?? []) {
       if(box.interact)continue;
+      const b=box.bounds;
+      if(point.x<b.min.x-radius||point.x>b.max.x+radius||point.z<b.min.z-radius||point.z>b.max.z+radius)continue;
       if (point.y < box.bounds.min.y - verticalPadding || point.y > box.bounds.max.y + verticalPadding) continue;
       const local = point.clone().applyMatrix4(box.inverse);
       closest.copy(local).clamp(box.half.clone().negate(), box.half);
@@ -191,7 +195,8 @@ export class MapCollision {
         closest.setComponent(axis, normal.getComponent(axis) * box.half.getComponent(axis)); depth = radius + margins[axis];
       }
       normal.transformDirection(box.matrix);
-      const hit = { point: closest.applyMatrix4(box.matrix), normal, depth, bounds: box.bounds };
+      // The next candidate reuses `closest`; a retained contact must own its point.
+      const hit = { point: closest.clone().applyMatrix4(box.matrix), normal, depth, bounds: box.bounds };
       if (!nearest || hit.depth > nearest.depth) nearest = hit;
     }
     return nearest;

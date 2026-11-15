@@ -2,21 +2,13 @@ import {Vector3} from 'three';
 import {pedestrianFloor,type PedestrianWalk} from '../formats/pedestrian';
 import {pedestrianRun} from './pedestrian-run';
 import {WALKING_CLEARANCE} from './pedestrian-transition';
+import {PedestrianBoundary} from './pedestrian-boundary';
 
-interface Edge {points:Vector3[];target:number;gate:boolean}
-interface Area {row:PedestrianWalk;edges:Edge[]}
+interface Edge {points:Vector3[];target:number;gate:boolean;boundary:PedestrianBoundary}
+interface Area {row:PedestrianWalk;edges:Edge[];runs:Edge[]}
 export interface PedestrianThreat {position:Vector3;velocity:Vector3}
 const cross=(x:number,z:number,ex:number,ez:number)=>x*ez-z*ex;
 const flat=(a:Vector3,b:Vector3)=>Math.hypot(a.x-b.x,a.z-b.z);
-function nearest(edge:Edge,p:Vector3){
-  let distance=Infinity,x=0,z=0,nx=0,nz=0,interior=false;
-  for(let i=1;i<edge.points.length;i++){
-    const a=edge.points[i-1],b=edge.points[i],dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<1e-8)continue;
-    const raw=((p.x-a.x)*dx+(p.z-a.z)*dz)/(length*length),t=Math.max(0,Math.min(1,raw)),qx=a.x+dx*t,qz=a.z+dz*t,d=Math.hypot(p.x-qx,p.z-qz);
-    if(d<distance){distance=d;x=qx;z=qz;nx=-dz/length;nz=dx/length;interior=raw>=0&&raw<=1;}
-  }
-  return {distance,x,z,nx,nz,interior};
-}
 
 /** Shared immutable world-space boundaries. Agents retain headings instead of
  * following a centre line; gates change ownership to the adjoining authored row. */
@@ -29,9 +21,9 @@ export class PedestrianAreas {
         if(r.kind===23)points=pedestrianRun(r);
         else if(r.quad){const q=r.quad;points=[new Vector3(q[0]+row.origin[0],0,q[1]+row.origin[1]),new Vector3(q[2]+row.origin[0],0,q[3]+row.origin[1])];for(const p of points)p.y=pedestrianFloor(row,p.x,p.z);}
         else continue;
-        if(points.length>1)edges.push({points,target:r.id??-1,gate:r.id!==undefined&&r.id!==-1});
+        if(points.length>1)edges.push({points,target:r.id??-1,gate:r.id!==undefined&&r.id!==-1,boundary:new PedestrianBoundary(points)});
       }
-      this.areas.set(row.id,{row,edges});
+      this.areas.set(row.id,{row,edges,runs:edges.filter(e=>e.points.length>2)});
     }
   }
   contains(id:number,p:Vector3){
@@ -43,11 +35,9 @@ export class PedestrianAreas {
   }
   floor(id:number,p:Vector3){const area=this.areas.get(id);if(!area)return p.y;
     // Corridor run samples carry their own elevation; junctions use the plane header.
-    const runs=area.edges.filter(e=>e.points.length>2);
-    if(runs.length){let y=0,weight=0;for(const edge of runs){let best=Infinity,height=p.y;for(let i=1;i<edge.points.length;i++){
-      const a=edge.points[i-1],b=edge.points[i],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.z-a.z)*dz)/Math.max(1e-9,dx*dx+dz*dz))),d=Math.hypot(p.x-a.x-dx*t,p.z-a.z-dz*t);
-      if(d<best){best=d;height=a.y+(b.y-a.y)*t;}
-    }const w=1/Math.max(.05,best);y+=height*w;weight+=w;}return y/weight;}
+    if(area.runs.length){let y=0,weight=0;for(const edge of area.runs){
+      const n=edge.boundary.nearest(p,true),w=1/Math.max(.05,n.distance);y+=n.y*w;weight+=w;
+    }return y/weight;}
     return pedestrianFloor(area.row,p.x,p.z);
   }
   constrain(walker:AreaWalker,before:Vector3){
@@ -63,7 +53,7 @@ export class PedestrianAreas {
             if(u>=-1e-5&&u<=1.00001){const target=this.areas.get(edge.target);if(!target){walker.ok=false;return;}walker.zone={id:edge.target};area=target;moved=true;break;}
           }continue;
         }
-        const n=nearest(edge,walker.position),side=(walker.position.x-n.x)*n.nx+(walker.position.z-n.z)*n.nz;
+        const n=edge.boundary.nearest(walker.position),side=(walker.position.x-n.x)*n.nx+(walker.position.z-n.z)*n.nz;
         if(n.interior&&side<WALKING_CLEARANCE&&n.distance<3){walker.position.x+=n.nx*(WALKING_CLEARANCE-side);walker.position.z+=n.nz*(WALKING_CLEARANCE-side);}
       }
       if(!moved)break;
@@ -77,7 +67,7 @@ export class PedestrianAreas {
   step(walker:AreaWalker,dt:number,cars:readonly PedestrianThreat[],others:readonly AreaWalker[]){
     const area=this.areas.get(walker.zone.id);if(!area){walker.ok=false;return;}
     const p=walker.position,influences:{weight:number;x:number;z:number;edge:boolean}[]=[];
-    for(const edge of area.edges){if(edge.gate)continue;const n=nearest(edge,p),weight=Math.max(0,1.875/(Math.max(0,n.distance-1)+.75)-.5);
+    for(const edge of area.edges){if(edge.gate)continue;const n=edge.boundary.nearest(p),weight=Math.max(0,1.875/(Math.max(0,n.distance-1)+.75)-.5);
       if(weight>0)influences.push({weight,x:n.nx,z:n.nz,edge:true});
     }
     for(const other of others){if(other===walker||!other.ok||Math.abs(other.position.y-p.y)>3)continue;const d=flat(p,other.position);if(d<4&&d>1e-4)influences.push({weight:Math.max(0,52.5/(d+6)-5.25),x:(p.x-other.position.x)/d,z:(p.z-other.position.z)/d,edge:false});}

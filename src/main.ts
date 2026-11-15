@@ -115,7 +115,7 @@ async function runGameBoot() {
     flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined);
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
-  const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);});
+  const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler);
   disposeMinimap=()=>minimap.dispose();
   disposeGameBoot = () => {disposeMinimap?.();disposeMinimap=undefined;activeNavigator=undefined;activeBoot=undefined;result.dispose();};
   viewer?.setJavaSceneCamera(() => javaSceneCamera(result),
@@ -251,13 +251,13 @@ async function runGameBoot() {
             const javaVehicle = result.gameTypes.get(car);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { physicsBinding?.sync(); return javaControls.sample(); },
+              { ...javaControls, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync()); return javaControls.sample(); },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
-                  result.gameTypes.updateTriggerContacts(car);
+                  viewer!.profiler.measure('Java triggers CPU',()=>result.gameTypes.updateTriggerContacts(car));
                 } });
             const driverRender=result.gameTypes.getResource(result.jvm.get(player,'render'));
             if(driverRender instanceof RenderObject){
@@ -644,6 +644,9 @@ globalFacadesCheck.onchange=()=>{
   applyGlobalFacadesPreference();unifiedBuildingsStatus.textContent='Saved · re-enter map / reload page / Run benchmark to apply';
 };
 const staticBatchLabel=textElement('label','Merge static map geometry'),staticBatchCheck=document.createElement('input');
+const stableTransformsLabel=textElement('label','Cache unchanged scene transforms'),stableTransformsCheck=document.createElement('input');
+stableTransformsCheck.type='checkbox';stableTransformsCheck.checked=true;stableTransformsLabel.prepend(stableTransformsCheck);mapDebugOptions.append(stableTransformsLabel);
+stableTransformsCheck.onchange=()=>viewer?.setStableTransformsEnabled(stableTransformsCheck.checked);
 staticBatchCheck.type='checkbox';staticBatchLabel.prepend(staticBatchCheck);mapDebugOptions.append(staticBatchLabel);
 staticBatchLabel.title='Experimental: combine compatible opaque parts by material and 128 m cell within each streamed model. Original geometry stays cached for comparison.';
 staticBatchCheck.onchange=()=>viewer?.setStaticBatchingEnabled(staticBatchCheck.checked);
@@ -760,7 +763,7 @@ mapDebugOptions.append(pedestrianDebugStatus);
 const pedestrianCrowdLabel=textElement('label','Walking pedestrians'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
 pedestrianCrowdCheck.type='checkbox';pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
 for(const [title,min,max,step,initial,set] of [
-  ['Pedestrians',0,50,1,6,(n:number)=>viewer?.setPedestrianCount(n)],
+  ['Pedestrians',0,50,1,25,(n:number)=>viewer?.setPedestrianCount(n)],
   ['Pedestrian spawn radius (m)',50,300,25,100,(n:number)=>viewer?.setPedestrianRadius(n)],
 ] as const){
   const label=textElement('label',''),value=textElement('span',`${title}: ${initial}`),slider=document.createElement('input');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step=String(step);slider.value=String(initial);slider.setAttribute('aria-label',title);
@@ -769,8 +772,8 @@ for(const [title,min,max,step,initial,set] of [
 const inspectPedestriansButton=textElement('button','Inspect pedestrians');inspectPedestriansButton.onclick=()=>viewer?.inspectPedestrians();mapDebugOptions.append(inspectPedestriansButton);
 pedestrianCrowdCheck.onchange=()=>{const pending=viewer?.showWalkingPedestrians(pedestrianCrowdCheck.checked);pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';void pending?.then(()=>{pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';});};
 
-const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 2'),trafficCountSlider=document.createElement('input');
-trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='2';trafficCountSlider.setAttribute('aria-label','Traffic cars');
+const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 25'),trafficCountSlider=document.createElement('input');
+trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='25';trafficCountSlider.setAttribute('aria-label','Traffic cars');
 trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
 trafficCountSlider.oninput=()=>{const count=Number(trafficCountSlider.value);trafficCountValue.textContent=`Traffic cars: ${count}`;void viewer?.setTrafficCount(count);};
 const trafficRadiusLabel=textElement('label',''),trafficRadiusValue=textElement('span','Traffic physics radius: 30 m'),trafficRadiusSlider=document.createElement('input');

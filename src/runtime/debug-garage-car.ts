@@ -23,7 +23,10 @@ export async function replaceGarageCarTree(result: BootResult, assets: Assets) {
       throw new Error('Garage or current vehicle changed during assembly');
     jvm.set(player,'car',vehicle); assigned = true;
     await jvm.invokeAsync(garage,'lockCar');
-    await jvm.invokeAsync(garage,'refreshCarClassString');
+    // The original 2.2.1 garage has no car-class label; later versions add it.
+    const garageClass=await jvm.loadClass('java.game.Garage');
+    if(garageClass?.methods.some(method=>method.name==='refreshCarClassString'))
+      await jvm.invokeAsync(garage,'refreshCarClassString');
   } catch (error) {
     try {
       if (assigned) { jvm.set(player,'car',previous); await jvm.invokeAsync(garage,'lockCar'); }

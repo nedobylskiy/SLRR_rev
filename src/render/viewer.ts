@@ -1,4 +1,5 @@
 import {AmbientAudio} from '../audio/ambient-audio';
+import {cacheUnchangedTransform} from './stable-transform';
 import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
 import {MapProps} from '../engine/map-props';
 import {partGeometryBounds} from './part-geometry-bounds';
@@ -310,6 +311,7 @@ export class Viewer {
     `Map ambience: emitters ${this.mapAmbience?.stats.emitters??0} · nearby ${this.mapAmbience?.stats.nearby??0} · voices ${this.mapAmbience?.stats.voices??0} · pending ${this.mapAmbience?.stats.pending??0}`,
     ...(this.ambientAudio?[this.ambientAudio.diagnosticLine()]:[]),
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
+    `Java scene: render nodes ${this.javaRenderNodes.size} · lights ${this.javaRenderLights.size} · characters ${this.javaCharacters.size} · driver bindings ${this.javaDrivers.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Suspension bone animation: ${this.suspensionBonesEnabled?'on':'off'} · bound parts ${this.suspensionSkins.size}`,
     `Static environment: ${this.environmentPath??'none'}`,
@@ -319,6 +321,7 @@ export class Viewer {
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Map render preparation: shared materials ${this.sharedMapMaterials?'on':'off'} · early main-pass culling ${this.earlyMapCulling?'on':'off'}`,
+    `Scene transform cache: ${this.stableTransforms?'on':'off'} (unchanged containers; dynamic children still update)`,
     `Experimental hub geometry: ${this.experimentalHubGeometry?'on':'off'} (pose only; supported independent arm/hub 0/-1; unsupported corners retain legacy pose)`,
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
@@ -340,6 +343,8 @@ export class Viewer {
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
   private controls: OrbitControls;
   private model = new THREE.Group();
+  private stableTransforms=true;
+  setStableTransformsEnabled(enabled:boolean){this.stableTransforms=enabled;}
   private javaRenderRoot = new THREE.Group();
   private javaRenderNodes = new Map<number, THREE.Group>();
   private javaRenderModels = new Map<number, THREE.Group>();
@@ -434,7 +439,7 @@ export class Viewer {
   pedestrianCrowdStatus='Walking pedestrians off';
   private pedestrianCrowd?:PedestrianCrowd;
   private pedestrianCrowdRevision=0;
-  private pedestrianCount=6;private pedestrianRadius=100;
+  private pedestrianCount=25;private pedestrianRadius=100;
   private pedestrianSpawnFrustum=new THREE.Frustum();private pedestrianSpawnProjection=new THREE.Matrix4();private pedestrianSpawnSphere=new THREE.Sphere(new THREE.Vector3(),1.5);
   private pedestrianOffscreen=(point:THREE.Vector3)=>{this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);};
   private updatePedestrianSpawnView(){this.camera.updateMatrixWorld();this.pedestrianSpawnFrustum.setFromProjectionMatrix(this.pedestrianSpawnProjection.multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));}
@@ -450,7 +455,7 @@ export class Viewer {
   private trafficCars:TrafficTestCar[]=[];
   private get trafficTest(){return this.trafficCars.find(car=>car.active);}
   private get trafficFollower(){return this.trafficCars.filter(car=>car.active)[1];}
-  private trafficCount=2;
+  private trafficCount=25;
   private trafficPhysicsRadius=30;
   private trafficSpawnRadius=100;
   private trafficSpawnSphereRadius=4;
@@ -529,7 +534,7 @@ export class Viewer {
       if(this.trafficControl&&driver.control!==this.trafficControl){driver.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,this.trafficControl.network,this.trafficControl);}
       const current=this.playerTrafficDriver!;
       if(!this.trafficTestEnabled)current.control.advance(dt);
-      return current.sample(dt,this.trafficCars.filter(car=>car.active).map(car=>car.vehicle.body));
+      return this.profiler.measure('Player traffic driver CPU',()=>current.sample(dt,this.trafficCars.filter(car=>car.active).map(car=>car.vehicle.body)));
     };
   }
   trafficTestStatus = 'Traffic test off';
@@ -572,11 +577,12 @@ export class Viewer {
   private sunFlareTexture?: THREE.Texture;
   private sunFlareRevision = 0;
   private observer: ResizeObserver;
+  private viewportSize={width:1,height:1};
   getViewportSize(): { width: number; height: number } {
-    return { width: this.container.clientWidth || this.renderer.domElement.clientWidth || 1,
-      height: this.container.clientHeight || this.renderer.domElement.clientHeight || 1 };
+    return {...this.viewportSize};
   }
   constructor(private container: HTMLElement) {
+    for(const root of [this.scene,this.model,this.javaRenderRoot])cacheUnchangedTransform(root,()=>this.stableTransforms);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.profiler = new FrameProfiler(this.renderer);
     this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
@@ -608,6 +614,7 @@ export class Viewer {
     this.scene.add(this.javaRenderRoot);
     this.observer = new ResizeObserver(() => {
       const { clientWidth: w, clientHeight: h } = container;
+      this.viewportSize={width:Math.max(1,w),height:Math.max(1,h)};
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
@@ -619,10 +626,10 @@ export class Viewer {
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.beginFrame());
       this.suspensionPlayground?.update(now);
       this.characterPreview?.update(now);
-      for(const actor of this.javaCharacters.values()){
+      this.profiler.measure('Java characters CPU',()=>{for(const actor of this.javaCharacters.values()){
         actor.character.update(now,false);
         if(actor.ready&&actor.node.animation)actor.node.animation.position=actor.character.playbackTime;
-      }
+      }});
       if(this.characterPreview&&(this.characterPreview.isRagdoll||this.characterFollowingRagdoll)){
         const center=new THREE.Box3().setFromObject(this.characterPreview.root).getCenter(new THREE.Vector3());
         const delta=center.sub(this.controls.target);
@@ -639,15 +646,17 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
-      this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000);this.previousPropFrame=now;
-      this.driverIk?.update();
+      this.profiler.measure('Map props CPU',()=>this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000));this.previousPropFrame=now;
+      this.profiler.measure('Driver IK CPU',()=>{this.driverIk?.update();
       for(const binding of this.javaDrivers.values())if(binding.driver){
         binding.driver.root.visible=this.driverCameraChassis!==binding.chassis&&(this.javaRenderNodes.get(binding.node.id)?.visible??false);
         binding.driver.update();
-      }
-      this.updateTrafficTest(now);
+      }});
+      this.profiler.measure('Traffic CPU',()=>this.updateTrafficTest(now));
+      this.profiler.measure('Pedestrians CPU',()=>{
       if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
       if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1);}
+      });
       // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
@@ -1688,6 +1697,7 @@ export class Viewer {
     this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
     this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
+    cacheUnchangedTransform(this.staticMapRoot,()=>this.stableTransforms);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
     stream.frameBudgetMs=2;
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
@@ -2181,7 +2191,7 @@ export class Viewer {
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
       let input = this.playerTrafficDriver?.input ?? (java ? java.sample() : keyboardDrivingInput(keys));
-      if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if (crash) { if (!paused) backlogTicks = this.profiler.measure('Player physics advance CPU',()=>crash!.advance(seconds * timeScale, input)).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
       if(this.playerTrafficDriver)input=this.playerTrafficDriver.input;
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
