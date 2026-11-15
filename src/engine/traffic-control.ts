@@ -10,9 +10,12 @@ export const TRAFFIC_GREEN_SECONDS=10;
 export const TRAFFIC_YELLOW_SECONDS=3;
 const PHASE_SECONDS=TRAFFIC_GREEN_SECONDS+TRAFFIC_YELLOW_SECONDS;
 export interface SignalBinding { fixture:TrafficFixture; crossing:number; branch:number }
+export interface TrafficControlState {rules:[number,TrafficRule][];cycles:[number,CrossingCycle][];time:number}
 
 /** One shared intersection state, consumed by lamps and all drivers. Timings are shared gameplay settings. */
 export class TrafficControl {
+  snapshot():TrafficControlState{return {rules:[...this.rules],cycles:[...this.cycles],time:this.time};}
+  restore(state:TrafficControlState){this.rules.clear();for(const [id,rule] of state.rules)this.rules.set(id,rule);this.cycles=new Map(state.cycles);this.time=state.time;}
   time=0;
   readonly rules=new Map<number,TrafficRule>();
   readonly signals:SignalBinding[]=[];

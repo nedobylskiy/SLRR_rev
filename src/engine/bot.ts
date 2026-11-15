@@ -33,6 +33,7 @@ export class FullVehicleBotAdapter implements BotVehicle {
 
 /** Steering/behavior only. Changing modes never replaces a body or resets its damage/momentum. */
 export class Bot {
+  impactRevision=0;
   mode:BotMode='cruise';
   rpm=850;
   readonly clock=new FixedClock(60,15);
@@ -66,7 +67,7 @@ export class Bot {
   trafficStatus='';
   constructor(readonly route:RoadTrafficCar,readonly vehicle:BotVehicle,private random=Math.random,public cruiseSpeed=15/3.6,readonly traffic?:TrafficControl){this.lastPosition.copy(vehicle.body.position);this.speedCrossings=route.crossingsPassed;this.cruiseCommand=cruiseSpeed;}
   hit(impulse:Vector3,point:Vector3,closing:number,otherBounds?:Box3){
-    this.vehicle.impact(impulse,point,closing,otherBounds);this.enterImpact();this.collisionVersion=this.vehicle.collisionVersion;
+    this.impactRevision++;this.vehicle.impact(impulse,point,closing,otherBounds);this.enterImpact();this.vehicle.setMode?.(this.mode);this.input={throttle:0,steer:0,brake:true,brakeAxis:.8};this.collisionVersion=this.vehicle.collisionVersion;
   }
   private enterImpact(){this.mode='impact';this.stoppedFor=this.blockedFor=this.idleFor=0;this.recoveryBound=false;this.holdingBrake=false;this.startDelay=undefined;}
   private forwardSpeed(){this.forward.set(0,0,-1).applyQuaternion(this.vehicle.body.orientation);return this.vehicle.body.velocity.dot(this.forward);}
@@ -240,5 +241,12 @@ export class Bot {
   /** Control-only integration: the owner's normal physics clock advances the full vehicle exactly once. */
   command(dt:number,peers:readonly RigidBody3D[]=[]):DrivingInput {
     this.input=this.controls(dt,peers);return this.input;
+  }
+  /** Background driver tick; rigid bodies and immediate player contacts remain owned by the main physics clock. */
+  plan(dt:number,peers:readonly RigidBody3D[]=[]){
+    if(this.vehicle.collisionVersion!==this.collisionVersion){this.collisionVersion=this.vehicle.collisionVersion;if(this.mode==='cruise'||this.mode==='ram')this.enterImpact();}
+    this.command(dt,peers);
+    const speed=Math.abs(this.forwardSpeed()),gear=Math.max(1,Math.min(5,Math.floor(speed/6)+1));
+    this.rpm+=(850+speed*290/gear+Math.abs(this.input.throttle)*500-this.rpm)*(1-Math.exp(-dt*5));
   }
 }

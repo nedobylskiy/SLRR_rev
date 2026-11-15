@@ -83,6 +83,7 @@ import {PedestrianCrowd} from './pedestrian-crowd';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
+import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,safeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel,type JavaTrafficBridge,type TrafficStreamHandle} from '../engine/traffic-models';
@@ -447,7 +448,7 @@ export class Viewer {
   private updatePedestrianSpawnView(){this.camera.updateMatrixWorld();this.pedestrianSpawnFrustum.setFromProjectionMatrix(this.pedestrianSpawnProjection.multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));}
   setPedestrianCount(count:number){if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');this.pedestrianCount=count;this.pedestrianCrowd?.configure(count,this.pedestrianRadius);}
   setPedestrianRadius(radius:number){if(!Number.isFinite(radius)||radius<50||radius>300)throw Error('Pedestrian radius must be 50–300 m');this.pedestrianRadius=radius;this.pedestrianCrowd?.configure(this.pedestrianCount,radius);}
-  pedestrianInfo(){const crowd=this.pedestrianCrowd;return crowd?`Pedestrians ${crowd.count}/${this.pedestrianCount} · ragdolls ${crowd.ragdollCount} · cached models ${crowd.cachedCount} · spawn ${this.pedestrianRadius} m · unload ${this.pedestrianRadius+50} m${crowd.lastError?' · '+crowd.lastError:''}`:this.pedestrianCrowdStatus;}
+  pedestrianInfo(){const crowd=this.pedestrianCrowd;return crowd?`Pedestrians ${crowd.count}/${this.pedestrianCount} · ragdolls ${crowd.ragdollCount} · cached models ${crowd.cachedCount} · spawn ${this.pedestrianRadius} m · unload ${this.pedestrianRadius+50} m · movement ${crowd.movementMode}${crowd.lastError?' · '+crowd.lastError:''}`:this.pedestrianCrowdStatus;}
 
   private mapPedestrianDebug?:MapPedestrianDebug;
   private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
@@ -502,6 +503,8 @@ export class Viewer {
   private trafficClock=new FixedClock(60,15);
   private mapTrafficFixtures:TrafficFixture[]=[];
   private trafficControl?:TrafficControl;
+  private trafficAgents?:AgentWorkerClient;
+  private trafficAgentIds=new WeakMap<Bot,number>();private nextTrafficAgentId=0;private trafficAgentTime=0;
   private trafficSignals?:Awaited<ReturnType<typeof createTrafficSignals>>;
   private trafficSignalError?:string;
   private trafficTemplates=new Map<Assets,Map<string,Promise<TrafficTemplate>>>();
@@ -1107,6 +1110,7 @@ export class Viewer {
   }
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   private stopTrafficTest() {
+    this.trafficAgents?.dispose();this.trafficAgents=undefined;this.trafficAgentTime=0;
     this.trafficTestRevision++;
     for(const test of this.trafficCars)this.disposeTrafficCar(test);
     this.trafficCars=[];this.trafficSpawns=undefined;this.trafficPrevious=undefined;this.trafficClock=new FixedClock(60,15);
@@ -1168,6 +1172,7 @@ export class Viewer {
       if(!roads){this.trafficTestStatus='No road graph for traffic test';return;}
       this.trafficSpawns??=new TrafficSpawnIndex(roads.network);
       const control=this.trafficControl??new TrafficControl(roads.network,this.mapTrafficFixtures);
+      this.trafficAgents??=new AgentWorkerClient({kind:'traffic-init',network:roads.network,control:control.snapshot()});
       const models=this.javaTrafficTypes??DEFAULT_TRAFFIC_MODELS;
       for(const test of [...this.trafficCars])if(this.javaTrafficBridge&&(!this.javaTrafficBridge.available(test.model)||test.model.registrationId&&!test.active&&!this.rivalInRange(test.model))){this.disposeTrafficCar(test);this.trafficCars.splice(this.trafficCars.indexOf(test),1);}
       if(this.javaTrafficBridge){
@@ -1219,7 +1224,7 @@ export class Viewer {
     const cars=this.trafficCars.filter(car=>car.active),physical=cars.filter(car=>car.lod.physical).length;
     return `Traffic ${cars.length}/${this.trafficCount} · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · spawn ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
       cars.map((test,i)=>`${test.model.pack.split('/').at(-1)?.replace(/\.rpk$/i,'')} ${i+1} · ${test.lod.physical?'physics':'puppet'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${test.car.phase} · ${test.bot.trafficStatus||'free'}`).join('\n')+
-      `\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
+      `\nDriver calculations: ${this.trafficAgents?.available?`worker · 30 Hz · last CPU ${this.trafficAgents.workMs.toFixed(2)} ms · round trip ${this.trafficAgents.roundTripMs.toFixed(1)} ms`:`main thread${this.trafficAgents?.error?' · '+this.trafficAgents.error:''}`}\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
   }
   private recycleTrafficCar(test:TrafficTestCar,spawn:TrafficSpawn){
     const network=this.trafficSpawns!.network,route=new RoadTrafficCar(network,spawn.position,Math.random,spawn.road);
@@ -1262,14 +1267,25 @@ export class Viewer {
       }
     }
     const cars=this.trafficCars.filter(car=>car.active);
+    this.trafficAgents?.ready(now);
+    const planned=this.trafficAgents?.take();
+    if(planned?.kind==='traffic')for(const result of planned.agents){
+      const test=cars.find(car=>this.trafficAgentIds.get(car.bot)===result.id);
+      // A collision/recycle after dispatch invalidates the old control, never the current physical body.
+      if(!test||test.bot.impactRevision!==result.revision||test.vehicle.collisionVersion!==result.collision)continue;
+      test.car.restore(result.cursor);Object.assign(test.bot,{input:result.input,mode:result.mode,rpm:result.rpm,cruiseSpeed:result.speed,desiredSpeed:result.desired,trafficStatus:result.status});test.lod.setMode(result.mode);
+    }
     this.trafficAudio?.setHidden(document.hidden);
     if(document.hidden){this.trafficPrevious=undefined;return;}
     const time=this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:12*3600);
     const peer=this.trafficPeer;
     const bodies=cars.map(car=>car.vehicle.body);if(peer)bodies.push(peer.body);
+    const backgroundDrivers=this.trafficAgents?.available,staleDrivers=backgroundDrivers&&this.trafficAgents!.stale;
     if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
       this.trafficControl?.advance(this.trafficClock.dt);
-      for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);test.bot.advance(this.trafficClock.dt,bodies);}
+      for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);
+        if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
+      }
       for(const [i,test] of cars.entries()){
         if(peer&&test.lod.physical){
           const hit=vehiclePairContact(peer.body,test.vehicle.body);
@@ -1289,6 +1305,13 @@ export class Viewer {
       }
     });
     this.trafficPrevious=now;
+    if(cars.length&&this.trafficAgents?.ready(now)){
+      const time=this.trafficControl.time,dt=Math.min(.1,Math.max(0,time-this.trafficAgentTime));
+      if(this.trafficAgents.request({kind:'traffic',dt,time,peer:peer?agentBody(peer.body):undefined,agents:cars.map(test=>{
+        let id=this.trafficAgentIds.get(test.bot);if(id===undefined){id=++this.nextTrafficAgentId;this.trafficAgentIds.set(test.bot,id);}
+        return {id,revision:test.bot.impactRevision,body:agentBody(test.vehicle.body),cursor:test.car.snapshot(),collision:test.vehicle.collisionVersion,physical:test.lod.physical,wheelbase:test.vehicle.wheelbase,maxSteer:test.vehicle.maxSteerAngle,speed:test.bot.cruiseSpeed,mode:test.bot.mode};
+      })},now))this.trafficAgentTime=time;
+    }
     this.trafficSignals?.update();
     for(const test of cars){
       const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);

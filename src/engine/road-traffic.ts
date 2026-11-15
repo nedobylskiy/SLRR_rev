@@ -4,6 +4,7 @@ import { sampleRoadSegment, type RoadNetwork, type RoadOther, type RoadSegment }
 const JOIN_TOLERANCE = .03;
 const distance = (a: readonly number[], b: readonly number[]) => Math.hypot(...a.map((v, i) => v - b[i]));
 export interface TrafficTurn { crossing: number; outgoing: number; branch: number; segment: RoadSegment }
+export interface TrafficCursor {road:number;at:number;pending?:TrafficTurn;crossing?:TrafficTurn;previous?:TrafficTurn;lane?:{road:number;start:number;length:number};crossings:number;travelled:number;stopped:boolean;group?:0|1}
 
 /** Geometry joins are checked only among the explicit links of the same TRC crossing. */
 export function trafficConnections(network: RoadNetwork): Map<number, TrafficTurn[]> {
@@ -81,6 +82,16 @@ function crossingCurve(segment:RoadSegment){let curve=turns.get(segment);if(!cur
 
 /** Per-car navigation cursor over a shared road graph; no physics or signal policy. */
 export class RoadTrafficCar {
+  snapshot():TrafficCursor{return {road:this.roadId,at:this.at,pending:this.pending,crossing:this.crossingTurn,previous:this.previousTurn,
+    lane:this.laneChange?{road:[...this.curves].find(([,curve])=>curve===this.laneChange!.source)![0],start:this.laneChange.start,length:this.laneChange.length}:undefined,
+    crossings:this.crossingsPassed,travelled:this.travelled,stopped:this.stopped,group:this.lastCrossingGroup};}
+  restore(state:TrafficCursor){
+    this.roadId=state.road;this.at=state.at;this.pending=state.pending;this.crossingTurn=state.crossing;this.previousTurn=state.previous;
+    this.curve=state.crossing?crossingCurve(state.crossing.segment):this.curves.get(state.road)!;
+    this.laneChange=state.lane?{source:this.curves.get(state.lane.road)!,start:state.lane.start,length:state.lane.length}:undefined;
+    this.crossingsPassed=state.crossings;this.travelled=state.travelled;this.stopped=state.stopped;this.lastCrossingGroup=state.group;
+    if(this.laneChange)this.sampleLaneChange(this.at,this.position,this.direction);else this.curve.sample(this.at,this.position,this.direction);
+  }
   readonly speed = 15 / 3.6;
   readonly position = new Vector3();
   readonly direction = new Vector3();
