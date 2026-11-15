@@ -19,7 +19,8 @@ export class NavigatorView {
  private route?:Line;private routeKey='';private raf=0;private last=0;private current?:object;
  constructor(private stage:HTMLElement,private assets:Assets,private source:()=>NavigatorFrame[],private report:(message:string)=>void,private resolveRid:(id:number)=>{pack:string;id:number}|undefined=()=>undefined,private profiler?:Pick<FrameProfiler,'measure'>){
   this.canvas.className='navigator-canvas';this.canvas.setAttribute('aria-label','Java minimap');this.canvas.style.cssText='position:absolute;pointer-events:none;z-index:1;display:none;';stage.append(this.canvas);this.canvas.hidden=true;
-  const tick=(now:number)=>{if(this.disposed)return;this.raf=requestAnimationFrame(tick);if(now-this.last<33)return;this.last=now;try{if(this.profiler)this.profiler.measure('Minimap CPU',()=>this.draw());else this.draw();}catch(error){this.report(`Minimap: ${String(error)}`);this.source=()=>[];this.canvas.hidden=true;}};this.raf=requestAnimationFrame(tick);
+  // Keep the previous canvas image between updates; tiles, markers and camera refresh together at 10 Hz.
+  const tick=(now:number)=>{if(this.disposed)return;this.raf=requestAnimationFrame(tick);if(now-this.last<100)return;this.last=now;try{if(this.profiler)this.profiler.measure('Minimap CPU',()=>this.draw());else this.draw();}catch(error){this.report(`Minimap: ${String(error)}`);this.source=()=>[];this.canvas.hidden=true;}};this.raf=requestAnimationFrame(tick);
  }
  private enqueue(work:()=>Promise<void>){this.tasks.push(work);this.pump();}
  private pump(){while(this.pending<3&&this.tasks.length&&!this.disposed){this.pending++;void this.tasks.shift()!().catch(error=>{if(!this.disposed)this.report(`Minimap resource: ${String(error)}`);}).finally(()=>{this.pending--;this.pump();});}}
