@@ -2,7 +2,10 @@ import type {JavaStockSelection} from './world';
 export interface TrafficModel {pack:string;id:number;weight:number;parameters?:readonly number[];registrationId?:number;javaTypeId?:number}
 export interface TrafficPose {position:{x:number;y:number;z:number};yaw:number;velocity:{x:number;y:number;z:number}}
 export interface TrafficStreamHandle {id:number;sync(pose:TrafficPose):void;remove():void;active():boolean}
+export interface TrafficHalts {revision:number;roads:readonly number[];crossings:readonly number[]}
 export interface JavaTrafficBridge {
+ paint?(model:TrafficModel):import('./world').ResourceKey|undefined;
+ halts?():TrafficHalts;
  location(model:TrafficModel):TrafficPose|undefined;
  spawn(model:TrafficModel,pose:TrafficPose):TrafficStreamHandle|undefined;
  available(model:TrafficModel):boolean;

@@ -18,9 +18,20 @@ export class RenderRefNative {
     private readonly setTextMatrix?: (receiver: JavaValue, position: Vector3State) => boolean,
     private readonly setSceneLight?: (settings: RenderLightSettings) => void,
     private readonly setSceneFlare?: (texture: ResourceObject, light: ResourceObject,
-      settings: RenderFlareSettings) => Promise<void> | void) {
+      settings: RenderFlareSettings) => Promise<void> | void,
+    private readonly routeForPlot?:()=>readonly (readonly [number,number,number])[]|undefined) {
     const owner = 'java.util.resource.RenderRef';
     const voidValue = () => jv('void', undefined);
+    jvm.natives.register(owner,'plotRoute',['ResourceRef','ResourceRef','int','float','Vector3'],({receiver,args})=>{
+      const points=this.routeForPlot?.(),scale=this.vector(jvm,args[4]),width=Number(args[3].value);
+      if(!points||points.length<2||args[0].value==null||![scale.x,scale.y,scale.z,width].every(Number.isFinite)||width<=0)return jv('int',0);
+      let render=this.resources.getRender(receiver);
+      if(!render)render=this.resources.createRender(receiver,args[0],args[1],'navigator_route');
+      if(!render)return jv('int',0);
+      render.setParent(this.resources.getResource(args[0])??null);
+      render.route={points:points.map(p=>[p[0]*scale.x,p[1]*scale.y+.002,p[2]*scale.z]),color:Number(args[2].value)>>>0,width:width*Math.max(Math.abs(scale.x),Math.abs(scale.z))};
+      render.markVisualChanged();this.resources.notifyRenderChanged(render);return jv('int',1);
+    });
     jvm.natives.register(owner, 'setColor', ['int'], ({ receiver, args }) => {
       const render = this.resources.getRender(receiver);
       if (!render) throw new Error('RenderRef.setColor has no render instance');

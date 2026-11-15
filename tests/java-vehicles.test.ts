@@ -10,6 +10,60 @@ import { EngineWorld, type PartFactory } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
 import { javaStockSelection } from '../src/runtime/java-scene';
 import { createWheelRefState } from '../src/runtime/wheel-ref-native';
+import type {JavaRaceControl} from '../src/engine/race-driver';
+import {Vector3} from 'three';
+
+test('a Bot-owned race car is prepared before scene readiness without duplicating player or streamed traffic',async()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'GameLogic.java',source:'package java.game; class GameLogic { static Object actualState; static Object player; }'})});
+  await jvm.loadClass('java.game.GameLogic');await jvm.globalAsync('java.game.GameLogic');
+  const types=new GameTypeNative(jvm,()=>{}),ref=(name:string,fields:Record<string,JavaValue>={})=>jv(name,{className:name,fields:new Map(Object.entries(fields))});
+  const map=ref('GroundRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',map,[]);
+  const cars=[1,2,3].map(id=>{
+    const car=ref('java.game.Vehicle'),chassis=ref('Chassis');
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[jv('GameRef',map.value),jv('int',0),jv('String',null),jv('String',null)]);
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',chassis,[jv('GameRef',car.value),jv('int',id),jv('String',null),jv('String',null)]);
+    types.getResource(chassis)!.resourcePack='cars/test.rpk';(car.value as JavaObject).fields.set('chassis',chassis);
+    for(const name of ['E','FL','FR','RL','RR','F','Rr','L','R','T'])(chassis.value as JavaObject).fields.set(`parts_list_${name}`,jv('int[]',[]));
+    for(const name of ['suspensions','shocks','springs','brakes','sways','wheels','others','tyres'])(chassis.value as JavaObject).fields.set(`parts_list_RGear_${name}`,jv('int[]',[]));
+    return {car,chassis};
+  });
+  const brain=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',brain,[]);
+  const driver=types.createRender(ref('RenderRef'),map,null,'botfigura')!;
+  const command=async(text:string)=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',text)]);
+  await command(`renderinstance ${driver.resourceId}`);await command('AI_suspend');
+  const state=ref('City',{raceBot:ref('Bot',{car:cars[1].car,brain})});
+  jvm.set(jv('class','java.game.GameLogic'),'actualState',state);
+  jvm.set(jv('class','java.game.GameLogic'),'player',ref('Player',{car:cars[0].car}));
+  const reference=types.reference.bind(types);types.reference=node=>cars.find(c=>types.get(c.car)===node)?.chassis??reference(node);
+  const result={jvm,gameTypes:types,resolveResourceIdentity:()=>undefined,
+    parts:{visualRevision:()=>0,installedTree:()=>[],slotOverrides:()=>new Map(),engineDyno:()=>undefined},
+    chassis:{wheelState:()=>undefined,updateState:()=>undefined,coolingSettings:()=>[10,50,.01]}} as unknown as BootResult;
+  const shown:EngineWorld[]=[];let finish!:()=>void,ready=false,seated=false,released=false,control:JavaRaceControl|undefined;
+  const renderer=new JavaSceneVehicles(result,{} as Assets,{
+    showWorld:async world=>{shown.push(world);await new Promise<void>(resolve=>{finish=resolve;});return [];},
+    removeWorld:()=>{},syncWorldVisuals:()=>{},
+    bindJavaDriver:async(node,root)=>{assert.equal(node,driver);assert.equal(root.world,shown[0]);seated=true;},
+    bindJavaRaceCar:async(root,commands)=>{assert.equal(seated,true,'seat the original Java driver before releasing scene readiness');control=commands;return {dispose(){released=true;}};}
+  },message=>assert.fail(message),{syncJavaAssembly:async()=>assert.fail('unchanged race car must reuse its assembly'),stock:async key=>{
+    assert.equal(key.id,2,'select Bot.car rather than building another player/traffic car');
+    const world=new EngineWorld(),root=world.create({key,alias:'racer',cfgPath:'test.cfg',config:parsePartConfig('category 2')});return {world,root,warnings:[]};
+  }} as Pick<PartFactory,'stock'|'syncJavaAssembly'>);
+  const excluded=(car:JavaValue)=>cars.filter((_,i)=>i!==1).some(c=>types.get(c.car)===types.get(car));
+  const work=renderer.prepare(map,undefined,excluded).then(()=>{ready=true;});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ready,false,'race readiness waits for the opponent mesh');assert.equal(shown.length,1);
+  finish();await work;assert.equal(ready,true);
+  assert.equal(seated,true);assert.equal(control!.command(),'AI_suspend');assert.equal(control!.active(),true);
+  assert.ok(control!.placement!());assert.equal(control!.placement!(),undefined);
+  await command('AI_race 100,0,200 123');assert.equal(control!.command(),'AI_race 100,0,200 123');
+  control!.motion(new Vector3(12,3,45),.7,new Vector3(1,0,2));assert.deepEqual(types.get(cars[1].car)!.position,{x:12,y:3,z:45});
+  assert.equal(control!.placement!(),undefined,'physics publication must not teleport itself every frame');
+  types.get(cars[1].car)!.setMatrix({x:300,y:4,z:500},{y:1,p:0,r:0});
+  assert.deepEqual(control!.placement!()!.position.toArray(),[300,4,500],'late Java start-line placement reaches the physics');
+  assert.equal(control!.placement!(),undefined);
+  renderer.update(map,undefined,excluded);assert.equal(shown.length,1,'unchanged opponent is reused');
+  (state.value as JavaObject).fields.set('raceBot',jv('Bot',null));renderer.update(map,undefined,excluded);
+  assert.equal(shown[0].disposed,true,'remove the opponent when Java releases the Bot');assert.equal(released,true);assert.equal(control!.active(),false);renderer.dispose();types.dispose();
+});
 
 test('scene vehicles use each Java chassis, follow poses and release removed or pending models', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'GameLogic.java',
@@ -175,6 +229,7 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.ok(built.every(model => model.world.disposed));
   renderer.dispose(); assert.equal(removed.length, 2);
 });
+
 
 
 

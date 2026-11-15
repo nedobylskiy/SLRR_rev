@@ -83,10 +83,10 @@ export class TrafficSpawnIndex {
   }
 }
 
-export function chooseSafeTrafficSpawn(index:TrafficSpawnIndex,center:Vector3,radius:number,streamRadius:number,occupied:readonly TrafficOccupant[],forward:Vector3,playerSpeed:number,bodyRadius:number,offscreen:(spawn:TrafficSpawn)=>boolean,random=Math.random){
+export function chooseSafeTrafficSpawn(index:TrafficSpawnIndex,center:Vector3,radius:number,streamRadius:number,occupied:readonly TrafficOccupant[],forward:Vector3,playerSpeed:number,bodyRadius:number,offscreen:(spawn:TrafficSpawn)=>boolean,random=Math.random,accept?:(spawn:TrafficSpawn)=>boolean){
   radius=Math.min(radius,streamRadius);
   const choose=(range:number,blindOnly:boolean)=>index.choose(center,range,occupied,random,20,true,offscreen,bodyRadius,
-    spawn=>(!blindOnly||offscreen(spawn))&&safeTrafficSpawn(spawn,center,forward,playerSpeed,!offscreen(spawn),occupied,bodyRadius));
+    spawn=>(!accept||accept(spawn))&&(!blindOnly||offscreen(spawn))&&safeTrafficSpawn(spawn,center,forward,playerSpeed,!offscreen(spawn),occupied,bodyRadius));
   // Population is a cap: never relax safety just to fill every slot. Expansion is offscreen only.
   return choose(radius,true)??choose(Math.min(streamRadius,Math.max(radius*2,radius+100)),true)??choose(radius,false);
 }

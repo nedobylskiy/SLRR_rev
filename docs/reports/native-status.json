@@ -4,14 +4,14 @@
   "classFiles": 3047,
   "classes": 3118,
   "counts": {
-    "implemented": 354,
+    "implemented": 365,
     "mocked": 24,
-    "missing": 110
+    "missing": 100
   },
   "declaredCounts": {
-    "implemented": 291,
+    "implemented": 301,
     "mocked": 17,
-    "missing": 110
+    "missing": 100
   },
   "errors": [],
   "entries": [
@@ -23,7 +23,7 @@
       "status": "mocked",
       "note": "Logs and returns void. Original frontend initialization is not reproduced by this adapter.",
       "handler": "java.game.Frontend#init()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.game.GameLogic",
@@ -39,7 +39,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.game.GameLogic#kismajomCheck(String[])",
-      "source": "src/runtime/input-native.ts:64"
+      "source": "src/runtime/input-native.ts:71"
     },
     {
       "owner": "java.game.LoadingScreen",
@@ -52,7 +52,7 @@
       "status": "mocked",
       "note": "Conditional no-op only when original LoadingScreen assets are absent. With assets, the Java loading-screen implementation runs.",
       "handler": "java.game.LoadingScreen#show(ResourceRef,int)",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.game.Navigator",
@@ -535,8 +535,10 @@
       "declarations": [
         "parts/scripts/bodypart/Chassis.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Host implementation registered; original-engine semantic parity is not implied.",
+      "handler": "java.game.parts.bodypart.Chassis#setHornSFX(ResourceRef,float,int)",
+      "source": "src/runtime/vehicle-horn-native.ts:27"
     },
     {
       "owner": "java.game.parts.bodypart.Chassis",
@@ -1875,7 +1877,7 @@
       "status": "implemented",
       "note": "Reads the player controller’s original AXIS_HORN mapping and script sethorn state. Career scripts may consume the request with sethorn 0; playback uses original sound:0x0015.",
       "handler": "java.game.Vehicle#getHorn()",
-      "source": "src/runtime/vehicle-horn-native.ts:23"
+      "source": "src/runtime/vehicle-horn-native.ts:26"
     },
     {
       "owner": "java.game.Vehicle",
@@ -1889,7 +1891,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.game.Vehicle#getSpeedSquare()",
-      "source": "src/runtime/game-boot.ts:434"
+      "source": "src/runtime/game-boot.ts:484"
     },
     {
       "owner": "java.game.Vehicle",
@@ -2334,7 +2336,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.io.Input#checkHotkeys(GameRef,Osd)",
-      "source": "src/runtime/input-native.ts:98"
+      "source": "src/runtime/input-native.ts:105"
     },
     {
       "owner": "java.io.Input",
@@ -2355,7 +2357,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.io.Input#createHotkey(int,int,Hotkey,GameRef,Osd,int)",
-      "source": "src/runtime/input-native.ts:84"
+      "source": "src/runtime/input-native.ts:91"
     },
     {
       "owner": "java.io.Input",
@@ -2371,7 +2373,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.io.Input#deleteHotkey(Hotkey)",
-      "source": "src/runtime/input-native.ts:89"
+      "source": "src/runtime/input-native.ts:96"
     },
     {
       "owner": "java.io.Input",
@@ -2381,7 +2383,7 @@
       "status": "mocked",
       "note": "Logs and returns void; browser pointer events are managed separately.",
       "handler": "java.io.Input#enablePointingDevice()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.io.Input",
@@ -2395,7 +2397,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.io.Input#flushHotkeys()",
-      "source": "src/runtime/input-native.ts:94"
+      "source": "src/runtime/input-native.ts:101"
     },
     {
       "owner": "java.io.Input",
@@ -2412,7 +2414,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.io.Input#getAxis(int,int)",
-      "source": "src/runtime/input-native.ts:51"
+      "source": "src/runtime/input-native.ts:58"
     },
     {
       "owner": "java.io.Input",
@@ -2428,7 +2430,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes SysKeyboard/SysMouse; other device indices return null.",
       "handler": "java.io.Input#getDeviceName(int)",
-      "source": "src/runtime/game-boot.ts:515"
+      "source": "src/runtime/game-boot.ts:566"
     },
     {
       "owner": "java.io.Input",
@@ -2441,7 +2443,7 @@
       "status": "implemented",
       "note": "Partial browser adapter: stores Controller.controlFile; does not initialize original OS device drivers.",
       "handler": "java.io.Input#initControllers(Init,String)",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.io.Input",
@@ -2455,7 +2457,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.io.Input#lastKey()",
-      "source": "src/runtime/input-native.ts:53"
+      "source": "src/runtime/input-native.ts:60"
     },
     {
       "owner": "java.io.Input",
@@ -2506,8 +2508,10 @@
       "declarations": [
         "system/scripts/io/MouseCursor.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Returns the latest browser pick position as a new Vector3 or writes the supplied vector. Interactive Navigator maps unproject the displayed camera into smallmap coordinates and dispatch cursor notifications to the Java click object; Java owns destination selection.",
+      "handler": "java.io.MouseCursor#getPickedPos()",
+      "source": "src/runtime/input-native.ts:52"
     },
     {
       "owner": "java.io.MouseCursor",
@@ -2520,8 +2524,10 @@
       "declarations": [
         "system/scripts/io/MouseCursor.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Returns the latest browser pick position as a new Vector3 or writes the supplied vector. Interactive Navigator maps unproject the displayed camera into smallmap coordinates and dispatch cursor notifications to the Java click object; Java owns destination selection.",
+      "handler": "java.io.MouseCursor#getPickedPos(Vector3)",
+      "source": "src/runtime/input-native.ts:52"
     },
     {
       "owner": "java.io.MouseCursor",
@@ -2533,9 +2539,9 @@
         "system/scripts/io/MouseCursor.class"
       ],
       "status": "implemented",
-      "note": "Host implementation registered; original-engine semantic parity is not implied.",
-      "handler": "java.util.resource.GameRef#getPos()",
-      "source": "src/runtime/game-type-native.ts:491"
+      "note": "Returns the browser pointer position normalized to the game viewport (-1..1, Y down), independently of world picking and camera-control state. Supports fresh vectors and the output-vector overload; original Java OSD positions and clamps tooltips.",
+      "handler": "java.io.MouseCursor#getPos()",
+      "source": "src/runtime/input-native.ts:52"
     },
     {
       "owner": "java.io.MouseCursor",
@@ -2549,9 +2555,9 @@
         "system/scripts/io/MouseCursor.class"
       ],
       "status": "implemented",
-      "note": "Host implementation registered; original-engine semantic parity is not implied.",
-      "handler": "java.util.resource.GameRef#getPos(Vector3)",
-      "source": "src/runtime/game-type-native.ts:494"
+      "note": "Returns the browser pointer position normalized to the game viewport (-1..1, Y down), independently of world picking and camera-control state. Supports fresh vectors and the output-vector overload; original Java OSD positions and clamps tooltips.",
+      "handler": "java.io.MouseCursor#getPos(Vector3)",
+      "source": "src/runtime/input-native.ts:52"
     },
     {
       "owner": "java.lang.Debug",
@@ -2567,7 +2573,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.Debug#errorEX(String)",
-      "source": "src/runtime/system-native.ts:81"
+      "source": "src/runtime/system-native.ts:82"
     },
     {
       "owner": "java.lang.Debug",
@@ -2583,7 +2589,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.Debug#giveWarning(String)",
-      "source": "src/runtime/system-native.ts:77"
+      "source": "src/runtime/system-native.ts:78"
     },
     {
       "owner": "java.lang.Debug",
@@ -2600,7 +2606,7 @@
       "status": "implemented",
       "note": "Writes a host log event, not an original filesystem debug file.",
       "handler": "java.lang.Debug#writeFile(String,String)",
-      "source": "src/runtime/system-native.ts:73"
+      "source": "src/runtime/system-native.ts:74"
     },
     {
       "owner": "java.lang.Float",
@@ -2843,7 +2849,7 @@
       "status": "mocked",
       "note": "No-op host adapter; no original collector lifecycle. JavaScript manages memory.",
       "handler": "java.lang.GarbageCollector#<init>()",
-      "source": "src/runtime/game-boot.ts:443"
+      "source": "src/runtime/game-boot.ts:493"
     },
     {
       "owner": "java.lang.GarbageCollector",
@@ -2853,7 +2859,7 @@
       "status": "mocked",
       "note": "No-op host adapter; no original collector lifecycle. JavaScript manages memory.",
       "handler": "java.lang.GarbageCollector#flush()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.lang.GarbageCollector",
@@ -2865,7 +2871,7 @@
       "status": "mocked",
       "note": "No-op host adapter; no original collector lifecycle. JavaScript manages memory.",
       "handler": "java.lang.GarbageCollector#push(Object)",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.lang.Integer",
@@ -3599,7 +3605,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.Object#toString()",
-      "source": "src/runtime/game-boot.ts:210"
+      "source": "src/runtime/game-boot.ts:248"
     },
     {
       "owner": "java.lang.Object",
@@ -3778,7 +3784,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#arraycopy(Object,int,Object,int,int)",
-      "source": "src/runtime/game-boot.ts:377"
+      "source": "src/runtime/game-boot.ts:423"
     },
     {
       "owner": "java.lang.System",
@@ -3792,7 +3798,7 @@
       "status": "implemented",
       "note": "Compatibility constant 940, not the host engine version.",
       "handler": "java.lang.System#buildNumber()",
-      "source": "src/runtime/system-native.ts:42"
+      "source": "src/runtime/system-native.ts:43"
     },
     {
       "owner": "java.lang.System",
@@ -3808,7 +3814,7 @@
       "status": "mocked",
       "note": "Returns 0; does not force collection/finalization or compile the original scripts.",
       "handler": "java.lang.System#compileAll(String)",
-      "source": "src/runtime/system-native.ts:66"
+      "source": "src/runtime/system-native.ts:67"
     },
     {
       "owner": "java.lang.System",
@@ -3822,7 +3828,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#currentTime()",
-      "source": "src/runtime/system-native.ts:24"
+      "source": "src/runtime/system-native.ts:25"
     },
     {
       "owner": "java.lang.System",
@@ -3862,7 +3868,7 @@
       "status": "mocked",
       "note": "Returns 0; does not force collection/finalization or compile the original scripts.",
       "handler": "java.lang.System#gc()",
-      "source": "src/runtime/system-native.ts:65"
+      "source": "src/runtime/system-native.ts:66"
     },
     {
       "owner": "java.lang.System",
@@ -3876,7 +3882,7 @@
       "status": "mocked",
       "note": "Logs and returns void; does not apply the full original system/graphics/FFB configuration.",
       "handler": "java.lang.System#getConfigOptions()",
-      "source": "src/runtime/system-native.ts:38"
+      "source": "src/runtime/system-native.ts:39"
     },
     {
       "owner": "java.lang.System",
@@ -3904,7 +3910,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#isLoading()",
-      "source": "src/runtime/system-native.ts:63"
+      "source": "src/runtime/system-native.ts:64"
     },
     {
       "owner": "java.lang.System",
@@ -3918,7 +3924,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#isLoadingReset()",
-      "source": "src/runtime/system-native.ts:59"
+      "source": "src/runtime/system-native.ts:60"
     },
     {
       "owner": "java.lang.System",
@@ -3934,7 +3940,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#log(String)",
-      "source": "src/runtime/system-native.ts:67"
+      "source": "src/runtime/system-native.ts:68"
     },
     {
       "owner": "java.lang.System",
@@ -3948,7 +3954,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#memUsage()",
-      "source": "src/runtime/system-native.ts:44"
+      "source": "src/runtime/system-native.ts:45"
     },
     {
       "owner": "java.lang.System",
@@ -4000,7 +4006,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#openLib(String)",
-      "source": "src/runtime/game-boot.ts:368"
+      "source": "src/runtime/game-boot.ts:414"
     },
     {
       "owner": "java.lang.System",
@@ -4014,7 +4020,7 @@
       "status": "mocked",
       "note": "Returns 0; does not force collection/finalization or compile the original scripts.",
       "handler": "java.lang.System#runFinalization()",
-      "source": "src/runtime/system-native.ts:65"
+      "source": "src/runtime/system-native.ts:66"
     },
     {
       "owner": "java.lang.System",
@@ -4030,7 +4036,7 @@
       "status": "implemented",
       "note": "Stores the priority; no original engine loader scheduling.",
       "handler": "java.lang.System#setLdPriority(int)",
-      "source": "src/runtime/system-native.ts:55"
+      "source": "src/runtime/system-native.ts:56"
     },
     {
       "owner": "java.lang.System",
@@ -4046,7 +4052,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#setMeasure(float)",
-      "source": "src/runtime/system-native.ts:30"
+      "source": "src/runtime/system-native.ts:31"
     },
     {
       "owner": "java.lang.System",
@@ -4060,7 +4066,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#simTime()",
-      "source": "src/runtime/system-native.ts:25"
+      "source": "src/runtime/system-native.ts:26"
     },
     {
       "owner": "java.lang.System",
@@ -4076,7 +4082,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#syncGameTime(float)",
-      "source": "src/runtime/system-native.ts:26"
+      "source": "src/runtime/system-native.ts:27"
     },
     {
       "owner": "java.lang.System",
@@ -4092,7 +4098,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.lang.System#timeWarp(float)",
-      "source": "src/runtime/system-native.ts:48"
+      "source": "src/runtime/system-native.ts:49"
     },
     {
       "owner": "java.lang.Thread",
@@ -4500,7 +4506,7 @@
       "status": "mocked",
       "note": "Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change.",
       "handler": "java.render.GfxEngine#changeVideoMode(int,int,int)",
-      "source": "src/runtime/game-boot.ts:481"
+      "source": "src/runtime/game-boot.ts:532"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4514,7 +4520,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#closeVideo()",
-      "source": "src/runtime/game-boot.ts:499"
+      "source": "src/runtime/game-boot.ts:550"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4528,7 +4534,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes one current viewport-sized mode, not OS display enumeration.",
       "handler": "java.render.GfxEngine#currDisplayMode()",
-      "source": "src/runtime/game-boot.ts:479"
+      "source": "src/runtime/game-boot.ts:530"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4544,7 +4550,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes one current viewport-sized mode, not OS display enumeration.",
       "handler": "java.render.GfxEngine#displayModeName(int)",
-      "source": "src/runtime/game-boot.ts:480"
+      "source": "src/runtime/game-boot.ts:531"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4558,7 +4564,7 @@
       "status": "mocked",
       "note": "Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change.",
       "handler": "java.render.GfxEngine#flush()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4572,7 +4578,7 @@
       "status": "mocked",
       "note": "Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change.",
       "handler": "java.render.GfxEngine#forceRendering()",
-      "source": "src/runtime/game-boot.ts:470"
+      "source": "src/runtime/game-boot.ts:521"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4586,7 +4592,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#isPlayingVideo()",
-      "source": "src/runtime/game-boot.ts:500"
+      "source": "src/runtime/game-boot.ts:551"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4600,7 +4606,7 @@
       "status": "implemented",
       "note": "Browser adapter exposes one current viewport-sized mode, not OS display enumeration.",
       "handler": "java.render.GfxEngine#numDisplayModes()",
-      "source": "src/runtime/game-boot.ts:478"
+      "source": "src/runtime/game-boot.ts:529"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4619,7 +4625,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#openVideo(String,int,int,int)",
-      "source": "src/runtime/game-boot.ts:497"
+      "source": "src/runtime/game-boot.ts:548"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4637,7 +4643,7 @@
       "status": "implemented",
       "note": "Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect.",
       "handler": "java.render.GfxEngine#openVideo(String,int,int)",
-      "source": "src/runtime/game-boot.ts:497"
+      "source": "src/runtime/game-boot.ts:548"
     },
     {
       "owner": "java.render.GfxEngine",
@@ -4679,7 +4685,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.render.GfxEngine#setGlobalEnvmap(ResourceRef)",
-      "source": "src/runtime/game-boot.ts:482"
+      "source": "src/runtime/game-boot.ts:533"
     },
     {
       "owner": "java.render.Text",
@@ -5032,7 +5038,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#changeMusicSet(int)",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5048,7 +5054,7 @@
       "status": "mocked",
       "note": "Returns 0; no original sound debug dump.",
       "handler": "java.sound.Sound#enableDebugDump(ResourceRef)",
-      "source": "src/runtime/game-boot.ts:511"
+      "source": "src/runtime/game-boot.ts:562"
     },
     {
       "owner": "java.sound.Sound",
@@ -5062,7 +5068,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#firstTrack()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5088,7 +5094,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#getNowPlaying()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5102,7 +5108,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#getTotalTracks()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5118,7 +5124,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#getVolume(int)",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5128,7 +5134,7 @@
       "status": "mocked",
       "note": "Logs and returns void; browser audio initialization belongs to host services.",
       "handler": "java.sound.Sound#init()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.sound.Sound",
@@ -5142,7 +5148,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#nextTrack()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5158,7 +5164,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#playTrack(int)",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5174,7 +5180,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#playTrack(String)",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5188,7 +5194,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#prevTrack()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5202,7 +5208,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#randomTrack()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5233,7 +5239,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#setVolume(int,float)",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.sound.Sound",
@@ -5247,7 +5253,7 @@
       "status": "implemented",
       "note": "Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback.",
       "handler": "java.sound.Sound#stopMusic()",
-      "source": "src/runtime/game-boot.ts:509"
+      "source": "src/runtime/game-boot.ts:560"
     },
     {
       "owner": "java.util.Replay",
@@ -5724,7 +5730,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.GameRef#setActiveCollision()",
-      "source": "src/runtime/game-type-native.ts:546"
+      "source": "src/runtime/game-type-native.ts:556"
     },
     {
       "owner": "java.util.resource.GameRef",
@@ -5848,7 +5854,7 @@
       "status": "mocked",
       "note": "Accepts/logs the call; no pedestrian simulation.",
       "handler": "java.util.resource.GroundRef#addPedestrianType(GameRef)",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -5937,7 +5943,7 @@
       "status": "mocked",
       "note": "Returns void; no water-plane rendering or water bounds.",
       "handler": "java.util.resource.GroundRef#addWaterLimit(Vector3,Vector3)",
-      "source": "src/runtime/game-boot.ts:462"
+      "source": "src/runtime/game-boot.ts:513"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -5962,8 +5968,10 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity.",
+      "handler": "java.util.resource.GroundRef#clearHalts()",
+      "source": "src/runtime/ground-road-native.ts:40"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6035,7 +6043,7 @@
       "status": "implemented",
       "note": "Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed.",
       "handler": "java.util.resource.GroundRef#getNearestCross(Vector3,float)",
-      "source": "src/runtime/ground-road-native.ts:8"
+      "source": "src/runtime/ground-road-native.ts:41"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6048,7 +6056,7 @@
       "status": "implemented",
       "note": "Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed.",
       "handler": "java.util.resource.GroundRef#getNearestCross(Vector3,int)",
-      "source": "src/runtime/ground-road-native.ts:8"
+      "source": "src/runtime/ground-road-native.ts:41"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6092,8 +6100,10 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Receiver-specific cached TRC routing using street endpoints, lane-link travel directions and shortest sampled distance in metres. Shared two-way centrelines support both legal directions, including partial endpoint roads. Returns -1/null when unavailable. Start direction is a fresh normalized forward vector. Host routing approximation; original route-solver parity is not claimed.",
+      "handler": "java.util.resource.GroundRef#getRouteLength(Vector3,Vector3)",
+      "source": "src/runtime/ground-road-native.ts:26"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6121,8 +6131,10 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Receiver-specific cached TRC routing using street endpoints, lane-link travel directions and shortest sampled distance in metres. Shared two-way centrelines support both legal directions, including partial endpoint roads. Returns -1/null when unavailable. Start direction is a fresh normalized forward vector. Host routing approximation; original route-solver parity is not claimed.",
+      "handler": "java.util.resource.GroundRef#getStartDirection(Vector3,Vector3)",
+      "source": "src/runtime/ground-road-native.ts:26"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6151,8 +6163,23 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity.",
+      "handler": "java.util.resource.GroundRef#haltTrafficCross(Vector3,float)",
+      "source": "src/runtime/ground-road-native.ts:35"
+    },
+    {
+      "owner": "java.util.resource.GroundRef",
+      "method": "haltTrafficCross",
+      "parameters": [
+        "Vector3",
+        "int"
+      ],
+      "declarations": [],
+      "status": "implemented",
+      "note": "Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity.",
+      "handler": "java.util.resource.GroundRef#haltTrafficCross(Vector3,int)",
+      "source": "src/runtime/ground-road-native.ts:35"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6166,8 +6193,10 @@
       "declarations": [
         "system/scripts/util/resource/GroundRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity.",
+      "handler": "java.util.resource.GroundRef#haltTrafficPath(Vector3,Vector3)",
+      "source": "src/runtime/ground-road-native.ts:26"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6262,7 +6291,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.GroundRef#setFog(int,float,float)",
-      "source": "src/runtime/game-boot.ts:330"
+      "source": "src/runtime/game-boot.ts:376"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6278,7 +6307,7 @@
       "status": "mocked",
       "note": "Accepts/logs the call; no pedestrian simulation.",
       "handler": "java.util.resource.GroundRef#setPedestrianDensityN(float)",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.util.resource.GroundRef",
@@ -6342,7 +6371,7 @@
       "status": "mocked",
       "note": "Returns void; no water-plane rendering or water bounds.",
       "handler": "java.util.resource.GroundRef#setWater(Vector3,Vector3,float,float)",
-      "source": "src/runtime/game-boot.ts:461"
+      "source": "src/runtime/game-boot.ts:512"
     },
     {
       "owner": "java.util.resource.ParticleSystem",
@@ -6686,7 +6715,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.RenderRef#create(ResourceRef,RenderRef,String)",
-      "source": "src/runtime/render-ref-native.ts:24"
+      "source": "src/runtime/render-ref-native.ts:43"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6726,7 +6755,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.RenderRef#getTypeID()",
-      "source": "src/runtime/render-ref-native.ts:39"
+      "source": "src/runtime/render-ref-native.ts:58"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6745,7 +6774,7 @@
       "status": "mocked",
       "note": "lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible.",
       "handler": "java.util.resource.RenderRef#lineAdd(Vector3,Vector3,int,float)",
-      "source": "src/runtime/render-ref-native.ts:81"
+      "source": "src/runtime/render-ref-native.ts:100"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6762,7 +6791,7 @@
       "status": "mocked",
       "note": "lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible.",
       "handler": "java.util.resource.RenderRef#lineCreate(ResourceRef,ResourceRef)",
-      "source": "src/runtime/render-ref-native.ts:72"
+      "source": "src/runtime/render-ref-native.ts:91"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6779,8 +6808,10 @@
       "declarations": [
         "system/scripts/util/resource/RenderRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Snapshots the last successful ground route query into a Java-owned navigator render resource. Applies XYZ scale, ARGB color and width; the minimap draws an unlit ribbon and honors replacement/destruction. No original route-texture shader parity is claimed.",
+      "handler": "java.util.resource.RenderRef#plotRoute(ResourceRef,ResourceRef,int,float,Vector3)",
+      "source": "src/runtime/render-ref-native.ts:25"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6793,8 +6824,10 @@
       "declarations": [
         "system/scripts/util/resource/RenderRef.class"
       ],
-      "status": "missing",
-      "note": "No matching registration in the browser Java host."
+      "status": "implemented",
+      "note": "Host implementation registered; original-engine semantic parity is not implied.",
+      "handler": "java.util.resource.RenderRef#setColor(int)",
+      "source": "src/runtime/render-ref-native.ts:35"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6815,7 +6848,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.RenderRef#setFlare(ResourceRef,int,float,float,int,int)",
-      "source": "src/runtime/render-ref-native.ts:60"
+      "source": "src/runtime/render-ref-native.ts:79"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6833,7 +6866,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.RenderRef#setLight(int,int,int)",
-      "source": "src/runtime/render-ref-native.ts:51"
+      "source": "src/runtime/render-ref-native.ts:70"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6867,7 +6900,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.RenderRef#setMatrix(Vector3,Ypr)",
-      "source": "src/runtime/render-ref-native.ts:29"
+      "source": "src/runtime/render-ref-native.ts:48"
     },
     {
       "owner": "java.util.resource.RenderRef",
@@ -6883,7 +6916,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.RenderRef#setType(ResourceRef)",
-      "source": "src/runtime/render-ref-native.ts:41"
+      "source": "src/runtime/render-ref-native.ts:60"
     },
     {
       "owner": "java.util.resource.ResourceRef",
@@ -6897,7 +6930,7 @@
       "status": "mocked",
       "note": "Logs the call; no original resource-cache operation or explicit unloading.",
       "handler": "java.util.resource.ResourceRef#cache()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.util.resource.ResourceRef",
@@ -7093,7 +7126,7 @@
       "status": "implemented",
       "note": "Host implementation registered; original-engine semantic parity is not implied.",
       "handler": "java.util.resource.ResourceRef#makeTexture(ResourceRef,String)",
-      "source": "src/runtime/game-boot.ts:321"
+      "source": "src/runtime/game-boot.ts:367"
     },
     {
       "owner": "java.util.resource.ResourceRef",
@@ -7121,7 +7154,7 @@
       "status": "mocked",
       "note": "Logs the call; no original resource-cache operation or explicit unloading.",
       "handler": "java.util.resource.ResourceRef#precache()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.util.resource.ResourceRef",
@@ -7199,7 +7232,7 @@
       "status": "mocked",
       "note": "Logs the call; no original resource-cache operation or explicit unloading.",
       "handler": "java.util.resource.ResourceRef#unload()",
-      "source": "src/runtime/game-boot.ts:201"
+      "source": "src/runtime/game-boot.ts:239"
     },
     {
       "owner": "java.util.resource.SfxRef",

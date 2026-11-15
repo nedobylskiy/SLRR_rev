@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream, isMapTreeAlias } from '../src/render/map-object-stream';
 
+test('initial scene waits for nearby models and placements without loading distant props',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4);
+  let finish!:(parts:Mesh[])=>void,farLoaded=false,ready=false;
+  stream.add(Array.from({length:12},(_,i)=>({matrix:new Matrix4().makeTranslation(i,0,0),position:new Vector3(i,0,0)})),()=>new Promise(resolve=>{finish=resolve;}));
+  stream.add([{matrix:new Matrix4().makeTranslation(1000,0,0),position:new Vector3(1000,0,0)}],async()=>{farLoaded=true;return [];});
+  const loading=stream.prepareNear(new Vector3()).then(()=>{ready=true;});await Promise.resolve();
+  assert.equal(ready,false);finish([new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);await loading;
+  assert.equal(farLoaded,false);assert.equal((parent.children[0] as InstancedMesh).count,12);
+  stream.dispose();
+});
+
 test('required ground batches equal materials automatically, including distant sections, without prop options',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,200);
   let releases=0;

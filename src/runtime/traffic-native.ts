@@ -1,6 +1,6 @@
 import {jv,type SlrrJvm,type JavaValue,type ResourceIdentity} from 'slrr-jvm';
 import {normalizeResourcePackPath} from '../assets';
-import type {TrafficModel,TrafficPose,TrafficStreamHandle,JavaTrafficBridge} from '../engine/traffic-models';
+import type {TrafficModel,TrafficPose,TrafficStreamHandle,JavaTrafficBridge,TrafficHalts} from '../engine/traffic-models';
 import type {GameTypeNative} from './game-type-native';
 import type {JavaStockSelection} from '../engine/world';
 import {Vector3} from 'three';
@@ -15,7 +15,7 @@ export class TrafficNative {
   private registrations=new Map<number,Registration>();private byCar=new WeakMap<object,Registration>();private nextId=1;
   private distant=new WeakMap<object,{next:number;planner?:DistantRivals;pending?:Promise<void>}>();
   private bridges=new WeakMap<object,{state:JavaValue;bridge:JavaTrafficBridge}>();
-  constructor(private jvm:SlrrJvm,private ground:(receiver:JavaValue)=>object|undefined,private resolve:(value:JavaValue)=>ResourceIdentity|undefined,private gameTypes?:GameTypeNative,private networkFor?:(map:JavaValue)=>Promise<RoadNetwork|undefined>){
+  constructor(private jvm:SlrrJvm,private ground:(receiver:JavaValue)=>object|undefined,private resolve:(value:JavaValue)=>ResourceIdentity|undefined,private gameTypes?:GameTypeNative,private networkFor?:(map:JavaValue)=>Promise<RoadNetwork|undefined>,private haltsFor?:(map:JavaValue)=>TrafficHalts){
     for(const countType of ['int','float'])jvm.natives.register('java.util.resource.GroundRef','addTrafficN',['GameRef',countType,'float','float','float'],({receiver,args})=>{
       const ground=this.ground(receiver),key=this.resolve(args[0]),weight=Number(args[1].value);
       if(!ground||!key||!Number.isFinite(weight)||weight<0)return jv('int',0);
@@ -65,10 +65,17 @@ export class TrafficNative {
     if(!entry.individual){const node=this.gameTypes?.getResource(entry.car);if(node?.resourceType)this.jvm.natives.invoke('java.util.resource.ResourceRef','destroy',entry.car,[]);}
   }
   registeredCar(id:number):JavaValue|undefined {return this.registrations.get(id)?.car;}
+  ownsCar(car:JavaValue):boolean {
+    const node=this.gameTypes?.getResource(car);return !!node&&!!this.byCar.get(node)?.valid;
+  }
   bridge(map:JavaValue,state:JavaValue,selection:(car:JavaValue,pack:string)=>Promise<JavaStockSelection|undefined>):JavaTrafficBridge {
     const ground=this.ground(map);if(!ground||!this.gameTypes)throw Error('Traffic bridge requires a live Java ground');
     const old=this.bridges.get(ground);if(old&&old.state.value===state.value)return old.bridge;
     const bridge:JavaTrafficBridge={
+      paint:model=>{const car=model.registrationId&&this.registrations.get(model.registrationId)?.car;if(!car)return;
+        const command=this.gameTypes!.lastCommand(car,'texture'),id=command&&Number(command.trim().split(/\s+/)[1]);
+        if(id&&Number.isSafeInteger(id))return this.resolve(jv('int',id));},
+      halts:()=>this.haltsFor?.(map)??{revision:0,roads:[],crossings:[]},
       location:model=>{const entry=model.registrationId?this.registrations.get(model.registrationId):undefined,node=entry&&this.gameTypes!.get(entry.car);return entry?.valid&&!entry.unplaced&&node?{position:{...node.position},yaw:node.orientation.y,velocity:{...node.velocity}}:undefined;},
       available:model=>this.ground(map)===ground&&(model.registrationId?!!this.registrations.get(model.registrationId)?.valid:!!this.catalogs.get(ground)?.some(m=>!m.registrationId&&m.pack===model.pack&&m.id===model.id)),
       selection:async model=>{const entry=model.registrationId?this.registrations.get(model.registrationId):undefined;

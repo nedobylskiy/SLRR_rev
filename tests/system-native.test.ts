@@ -42,6 +42,14 @@ test('System clocks use seconds and simulation time follows time warp', async ()
   assert.equal(jvm.invoke(system, 'buildNumber').value, 940);
 });
 
+test('scene loading freezes simulation time without changing the Java time warp',()=>{
+  let now=0;const jvm=new SlrrJvm({resolveImport:()=>null}),native=new SystemNative(jvm,()=>{},()=>now);
+  const call=(name:string,args:ReturnType<typeof jv>[]=[])=>(jvm.natives.invoke('java.lang.System',name,jv('class','java.lang.System'),args))!;
+  now=1000;native.setSceneLoading(true);assert.equal(call('simTime').value,1);assert.equal(native.timeScale,0);
+  call('timeWarp',[jv('float',2)]);now=11000;assert.equal(call('simTime').value,1);
+  native.setSceneLoading(false);assert.equal(native.timeScale,2);now=12000;assert.equal(call('simTime').value,3);
+});
+
 test('native System and Debug messages reach the game console', async () => {
   const sources = new Map([
     ['java.lang.System', `package java.lang; class System { static native void log(String message); }`],
@@ -82,4 +90,15 @@ test('System.memUsage reports host memory in the kilobytes expected by Java scri
   assert.equal(read(), 900 * 1024);
   bytes = 0;
   assert.equal(read(), 0);
+});
+
+test('Java loading reset cannot dismiss pending host assets, and dialog pause cannot hold the loader open',()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null}),native=new SystemNative(jvm,()=>{});
+  const receiver=jv('class','java.lang.System');let assetsPending=true;
+  native.setLoadingReader(()=>assetsPending);native.beginLoading();
+  jvm.natives.invoke('java.lang.System','isLoadingReset',receiver,[]);
+  assert.equal(jvm.natives.invoke('java.lang.System','isLoading',receiver,[])!.value,1);
+  native.setSceneLoading(true);assetsPending=false;
+  assert.equal(jvm.natives.invoke('java.lang.System','isLoading',receiver,[])!.value,0,'Java must be able to hide its dialog while gameplay is still paused');
+  assert.equal(native.timeScale,0);native.setSceneLoading(false);assert.equal(native.timeScale,1);
 });

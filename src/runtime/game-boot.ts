@@ -388,7 +388,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const localId=(resolveResourceIdentity(ground.typeId)?.id??ground.typeId)&0xffff;
     return (await loadMapRoads(assets,ground.resourcePack,localId))?.network;
   };
-  new GroundRoadNative(jvm,groundRoadNetwork);
+  const groundRoads=new GroundRoadNative(jvm,groundRoadNetwork,receiver=>receiver.value==null?undefined:gameTypes.getResource(receiver));
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
@@ -458,7 +458,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
         const detail = reason instanceof Error ? reason.message || reason.name : String(reason);
         throw new Error(`RenderRef.setFlare ${phase}: ${detail || 'unknown error'}`, { cause: reason });
       }
-    });
+    },()=>groundRoads.routeForPlot());
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   const navigator=new NavigatorNative(jvm,gameTypes,viewports,cameras);
   const animations=new AnimationNative(jvm,gameTypes);
@@ -501,9 +501,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   // Capture the original Java map population and let the host stream its selected models.
   const traffic=new TrafficNative(jvm,receiver=>receiver.value==null?undefined:gameTypes.getResource(receiver),value=>{
     if(value.value==null)return;
+    if(typeof value.value==='number')return resolveResourceIdentity(value.value);
     const node=gameTypes.getResource(value);if(!node)return;
     return instanceResourceIdentity(node,resolveResourceIdentity);
-  },gameTypes,groundRoadNetwork);
+  },gameTypes,groundRoadNetwork,receiver=>groundRoads.trafficHalts(receiver));
   native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
   // MOCK: Pedestrian simulation is not hosted yet; accept registrations so city setup can continue.
   native('java.util.resource.GroundRef', 'addPedestrianType', ['GameRef']);

@@ -34,6 +34,8 @@ const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> =
 
 /** Physical input samples and hotkey registrations; Java handlers receive the events. */
 export class InputNative {
+  private pickedPosition=[0,0,0];
+  private cursorPosition=[0,0,0];
   private readonly axes = new Map<string, number>();
   private readonly pressedKeys: number[] = [];
   private readonly cheatRing = new Uint8Array(16);
@@ -47,6 +49,11 @@ export class InputNative {
   constructor(private readonly jvm: SlrrJvm, private readonly controllers: ControllerNative,
     private readonly events: GameTypeNative) {
     const owner = 'java.io.Input';
+    for(const method of ['getPos','getPickedPos'])for(const parameters of [[],['Vector3']])jvm.natives.register('java.io.MouseCursor',method,parameters,({args})=>{
+      const target=args[0]??jv('Vector3',{className:'java.lang.Vector3',fields:new Map(['x','y','z'].map(axis=>[axis,jv('float',0)]))});
+      const position=method==='getPos'?this.cursorPosition:this.pickedPosition;
+      for(const [i,axis]of ['x','y','z'].entries())jvm.set(target,axis,jv('float',Math.fround(position[i])));return target;
+    });
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'getAxis', ['int', 'int'], ({ args }) =>
       jv('float', this.physicalAxis(Number(args[0].value), Number(args[1].value))));
@@ -102,21 +109,25 @@ export class InputNative {
   }
 
   physicalAxis(device: number, axis: number): number { return this.axes.get(`${device}:${axis}`) ?? 0; }
+  /** Java OSD uses [-1,1] screen coordinates, with Y increasing toward the bottom. */
+  setCursorPosition(x:number,y:number){if(Number.isFinite(x)&&Number.isFinite(y))this.cursorPosition=[Math.max(-1,Math.min(1,x)),Math.max(-1,Math.min(1,y)),0];}
 
   mouseCursor(): JavaValue | undefined {
     try { return this.jvm.get(jv('class', 'java.io.Input'), 'cursor'); } catch { return undefined; }
   }
 
   /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
-  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[] }): void {
+  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[] },targetNotifications=false): void {
+    if(hit?.world.length===3&&hit.world.every(Number.isFinite))this.pickedPosition=[...hit.world];
     const cursor = this.mouseCursor();
     if (!cursor?.value) return;
     const native = this.jvm.get(cursor, 'cursor');
     if (!this.events.getResource(native)) return;
     const node = hit && this.events.getByResourceId(hit.id);
     const suffix = hit ? code === 15 ? `${hit.id} ${hit.physicsId ?? 0}` : code === 16 ? `${hit.id}` : `${hit.id} ${hit.local.join(' ')} ${hit.world.join(' ')}` : '';
-    this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,
-      jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`));
+    const payload=jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`);
+    this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,payload);
+    if(targetNotifications&&node){const target=this.events.reference(node);this.events.queueStringEvent(target,target,65536,payload);}
     this.events.dispatchQueuedEventsCooperative();
   }
 
@@ -180,8 +191,13 @@ export class InputNative {
     this.axes.set(`0:${axis}`, direct || aliased ? 1 : 0);
   }
 
-  attachBrowserKeyboard(target: Window): () => void {
+  clearPhysicalInput():void {
+    this.pressedCodes.clear();this.cameraAliases.clear();this.axes.clear();this.pressedKeys.length=0;
+    for(const item of this.hotkeys){item.armed=false;item.down=false;}
+  }
+  attachBrowserKeyboard(target: Window,enabled:()=>boolean=()=>true): () => void {
     const down = (event: KeyboardEvent) => {
+      if(!enabled())return;
       const element = document.activeElement as HTMLElement | null;
       if (element?.matches('input, textarea, select, [contenteditable="true"]') || event.isComposing) return;
       const character = event.ctrlKey || event.metaKey || event.altKey ? 0

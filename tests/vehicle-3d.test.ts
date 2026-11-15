@@ -3,6 +3,7 @@ import type { ScxModel } from '../src/formats/scx';
 import { validateVehicleDamage } from '../src/engine/vehicle-damage';
 import {keyboardDrivingInput} from '../src/engine/driving-demo';
 import {PlayerTrafficDriver} from '../src/engine/player-traffic-driver';
+import {RaceDriver,raceVehicleInput} from '../src/engine/race-driver';
 import {TrafficControl} from '../src/engine/traffic-control';
 import type {RoadNetwork,RoadPoint,RoadSegment} from '../src/formats/trc';
 import test from 'node:test';
@@ -16,6 +17,17 @@ import { parsePartConfig } from '../src/formats/cfg';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 
 const neutral = { throttle: 0, steer: 0, brake: false };
+test('a race command accelerates the opponent through normal vehicle physics after the start signal',()=>{
+  const {demo,world}=setup(false);demo.disableObstacle();demo.settleSpawn();
+  const driver=new RaceDriver((start,finish)=>({points:[start,finish],length:200,direction:[0,0,-1],roads:[1]}));let command='AI_BeginRace 0.5';
+  demo.controlInput=dt=>raceVehicleInput(driver,demo,command,dt);
+  for(let i=0;i<60;i++)demo.advance(1/60,neutral);
+  const before=demo.body.position.clone();command='AI_race 0,0,-200 42';
+  for(let i=0;i<300;i++)demo.advance(1/60,neutral);
+  assert.ok(demo.body.position.z<before.z-5,`opponent must leave the line: ${demo.body.position.z}`);
+  assert.ok(demo.body.velocity.length()>1);assert.equal(driver.status,'racing');
+  demo.controlInput=undefined;world.dispose();
+});
 test('player traffic driver follows the graph with a full car through its normal solver',()=>{
   const {demo,world}=setup(false);demo.disableObstacle();
   const segment=(start:RoadPoint,end:RoadPoint):RoadSegment=>{const tangent=end.map((n,i)=>n-start[i]) as RoadPoint;return {start,end,startTangent:tangent,endTangent:tangent,length:Math.hypot(...tangent),raw:new Uint32Array(14),flag:0};};

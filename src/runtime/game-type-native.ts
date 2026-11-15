@@ -19,6 +19,7 @@ interface PendingScriptEvent {
   arguments: JavaValue[];
   method?: string;
 }
+interface ScriptTimer {handle?:ReturnType<typeof setTimeout>;cancelled:boolean}
 
 interface Notification {
   handler: JavaValue;
@@ -45,8 +46,9 @@ export class GameTypeNative {
   private readonly savedResourcePackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly notifications = new Map<JavaObject, Notification[]>();
-  private readonly triggerContacts = new Map<ResourceObject, boolean>();
-  private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
+  private readonly triggerContacts = new Map<ResourceObject, WeakMap<GameObject, boolean>>();
+  private readonly timers = new Map<JavaObject, Set<ScriptTimer>>();
+  private executionBlocked?:()=>boolean;
   private readonly callbacks = new Map<JavaObject, Set<number>>();
   private animatingCallbacks = false;
   private dispatchingEvents = false;
@@ -337,8 +339,15 @@ export class GameTypeNative {
       if (!Number.isFinite(delay) || delay < 0) throw new Error(`Invalid Java timer delay: ${delay}`);
       const object = this.object(receiver), timers = this.timers.get(object) ?? new Set();
       this.timers.set(object, timers);
-      const handle = setTimeout(() => {
-        timers.delete(handle);
+      const timer:ScriptTimer={cancelled:false};
+      let remaining=delay*1000,last=performance.now(),paused=this.executionBlocked?.()??false;
+      const tick=()=>{
+        if(timer.cancelled)return;
+        const now=performance.now(),blocked=this.executionBlocked?.()??false;
+        if(!paused&&!blocked)remaining-=Math.max(0,now-last);
+        last=now;paused=blocked;
+        if(blocked||remaining>0){schedule();return;}
+        timers.delete(timer);
         if (!this.get(receiver)) return;
         try {
           this.queueIntEvent(receiver, jv('GameRef', null), EVENT_TIME, Number(args[1].value));
@@ -347,8 +356,9 @@ export class GameTypeNative {
           this.report({ level: 'error', message: `Java timer: ${error instanceof Error ? error.message : String(error)}` });
         }
         if (!timers.size) this.timers.delete(object);
-      }, delay * 1000);
-      timers.add(handle);
+      };
+      const schedule=()=>{timer.handle=setTimeout(tick,this.executionBlocked?Math.max(1,Math.min(50,paused?50:remaining)):Math.max(0,remaining));};
+      timers.add(timer);schedule();
       return voidValue();
     });
     jvm.natives.register(gameType, 'removeAllTimers', [], ({ receiver }) => {
@@ -513,7 +523,8 @@ export class GameTypeNative {
         const node = this.getResource(receiver);
         if (node) {
           const commands = this.lastCommands.get(node) ?? new Map<string, string>();
-          commands.set(args[2].value.trim().split(/\s+/, 1)[0], args[2].value);
+          const commandName=args[2].value.trim().split(/\s+/, 1)[0];
+          commands.delete(commandName);commands.set(commandName,args[2].value);
           this.lastCommands.set(node, commands);
           if (node instanceof GameObject) {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
@@ -681,11 +692,13 @@ export class GameTypeNative {
     return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
   }
   /** Native animate hooks include OSDs, not just GameLogic.actualState. */
+  setExecutionBlocked(reader:(()=>boolean)|undefined):void {this.executionBlocked=reader;}
   async animateCallbacks(onError: (error: Error) => void): Promise<void> {
-    if (this.animatingCallbacks) return;
+    if (this.animatingCallbacks || this.executionBlocked?.()) return;
     this.animatingCallbacks = true;
     try {
       for (const object of [...this.callbacks.keys()]) {
+        if(this.executionBlocked?.())break;
         if (!this.callbacks.get(object)?.has(28)) continue;
         try { await this.jvm.invokeAsync(jv(object.className, object), 'animate'); }
         catch (reason) {
@@ -700,6 +713,11 @@ export class GameTypeNative {
   lastCommand(receiver: JavaValue, name: string): string | undefined {
     const node = receiver.value == null ? null : this.getResource(receiver);
     return node ? this.lastCommands.get(node)?.get(name) : undefined;
+  }
+  latestCommand(receiver:JavaValue,names:readonly string[]):string|undefined {
+    const node=receiver.value==null?undefined:this.getResource(receiver);let latest:string|undefined;
+    if(node)for(const [name,text]of this.lastCommands.get(node)??[])if(names.includes(name))latest=text;
+    return latest;
   }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
 
@@ -727,9 +745,11 @@ export class GameTypeNative {
         inside = extents.length === 3 && extents.every(Number.isFinite)
           && Math.abs(dx) <= extents[0] && Math.abs(dy) <= extents[1] && Math.abs(dz) <= extents[2];
       }
-      const previous = this.triggerContacts.get(trigger) ?? false;
+      let contacts=this.triggerContacts.get(trigger);
+      if(!contacts){contacts=new WeakMap();this.triggerContacts.set(trigger,contacts);}
+      const previous = contacts.get(car) ?? false;
       if (inside === previous) continue;
-      this.triggerContacts.set(trigger, inside);
+      contacts.set(car, inside);
       const handle = this.handles.get(trigger);
       if (handle) this.queueStringEvent(handle, vehicle, inside ? 32 : 64, jv('String', String(car.resourceId)));
     }
@@ -835,7 +855,7 @@ export class GameTypeNative {
 
   private cancelTimers(object: JavaObject): void {
     const timers = this.timers.get(object);
-    for (const handle of timers ?? []) clearTimeout(handle);
+    for (const timer of timers ?? []) {timer.cancelled=true;if(timer.handle!==undefined)clearTimeout(timer.handle);}
     this.timers.delete(object);
   }
 

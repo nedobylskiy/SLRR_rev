@@ -51,7 +51,12 @@ export class JavaMouse {
     const cursor = this.cursor();
     return !!cursor?.value && !!this.result.jvm.get(cursor, 'controlledcam').value;
   }
+  private trackPosition(event:MouseEvent){
+    const rect=this.viewport.getBoundingClientRect?.();if(!rect?.width||!rect.height)return;
+    this.result.input.setCursorPosition?.((event.clientX-rect.left)/rect.width*2-1,(event.clientY-rect.top)/rect.height*2-1);
+  }
   private down = (event: PointerEvent) => {
+    this.trackPosition(event);
     if (event.button === 0 && this.controlled()) {
       this.suppressClick = false;
       const physics = this.result.osdButtons?.physicsAt(event.clientX, event.clientY);
@@ -73,6 +78,7 @@ export class JavaMouse {
     this.result.input.cursorEvent(3, this.rightOrigin.hit);
   };
   private move = (event: PointerEvent) => {
+    this.trackPosition(event);
     const pressed = this.pressed;
     if (pressed && pressed.pointer === event.pointerId) {
       if (!pressed.dragged && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= 5) {
@@ -101,6 +107,7 @@ export class JavaMouse {
     input.setPhysicalAxis(1, 1, Math.max(-1, Math.min(1, input.physicalAxis(1, 1) + dy * 0.01)));
   };
   private up = (event: PointerEvent) => {
+    this.trackPosition(event);
     if (event.button === 0 && this.pressed && event.pointerId === this.pressed.pointer) {
       const pressed = this.pressed; this.pressed = undefined;
       if (pressed.dragged) {

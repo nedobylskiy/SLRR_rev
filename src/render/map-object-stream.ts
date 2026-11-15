@@ -135,6 +135,21 @@ export class MapObjectStream {
       for(;;){const type=queue.shift();if(!type||this.disposed)return;await (type.loadPromise??this.load(type));}
     }));
   }
+  /** Initial scene barrier; later movement keeps using the normal frame budget. */
+  async prepareNear(focus:Vector3){
+    const nearby=this.types.filter(type=>!type.globalCompiled&&type.placements.some(p=>distanceTo(p,focus)<=this.distance));
+    for(const type of nearby){this.scanType(type,focus);this.scanQueue.delete(type);}
+    this.ordered=this.types.filter(type=>!type.globalCompiled).sort((a,b)=>a.priority-b.priority);
+    const queue=nearby.filter(type=>!type.meshes&&!type.failed&&(type.preload||type.pending.length));
+    await Promise.all(Array.from({length:4},async()=>{
+      for(;;){const type=queue.shift();if(!type||this.disposed)return;await(type.loadPromise??this.load(type));}
+    }));
+    while(!this.disposed){
+      this.update(focus);
+      if(!nearby.some(type=>type.meshes&&!type.globalCompiled&&!this.useCached(type)&&type.pending.length))break;
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+  }
   private globalFacades?:GlobalFacadeBatches;
   compileGlobalFacades(){
     if(this.disposed||this.globalFacades)return;

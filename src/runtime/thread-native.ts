@@ -6,7 +6,7 @@ interface ThreadState {
   priority: number;
   daemon: boolean;
   startTimer?: ReturnType<typeof setTimeout>;
-  pending?: { resolve: (value: JavaValue) => void; reject: (error: Error) => void };
+  pending?: { resolve: (value: JavaValue) => void; reject: (error: Error) => void; cancel?():void };
 }
 
 /** Cooperative Java threads share one JVM heap and yield at wait/sleep native calls. */
@@ -41,9 +41,10 @@ export class ThreadNative {
     jvm.natives.register(owner, 'stop', [], ({ receiver }) => {
       const state = this.state(receiver);
       state.stopped = true;
+      state.alive = false;
       if (state.startTimer) clearTimeout(state.startTimer);
       state.startTimer = undefined;
-      state.pending?.reject(new Error('Java thread stopped'));
+      state.pending?.cancel?.();state.pending?.reject(new Error('Java thread stopped'));
       state.pending = undefined;
       this.live.delete(state);
       return nil();
@@ -70,11 +71,17 @@ export class ThreadNative {
       state.pending = undefined;
       return nil();
     });
-    jvm.natives.registerAsync(owner, 'sleep', ['float'], ({ args, continuation }) => new Promise<JavaValue>((resolve, reject) => {
+    jvm.natives.registerAsync(owner, 'sleep', ['float'], ({ receiver,args, continuation }) => new Promise<JavaValue>((resolve, reject) => {
       continuation?.yield();
-      const pending = { timer: setTimeout(() => { this.sleeps.delete(pending); resolve(nil()); },
+      // Original RaceSetup calls scrollerThread.sleep(20). Associate that wait
+      // with its live handle so stop() cancels it instead of resuming run().
+      const state=receiver.value&&typeof receiver.value==='object'?this.states.get(receiver.value):undefined;
+      if(state?.stopped){reject(new Error('Java thread stopped'));return;}
+      const wait={resolve,reject,cancel:()=>{clearTimeout(pending.timer);this.sleeps.delete(pending);}};
+      const pending = { timer: setTimeout(() => { this.sleeps.delete(pending);if(state?.pending===wait)state.pending=undefined;resolve(nil()); },
         Math.max(0, Number(args[0].value))), reject };
       this.sleeps.add(pending);
+      if(state)state.pending=wait;
     }));
     const objectOwner = 'java.lang.Object';
     jvm.natives.registerAsync(objectOwner, 'wait', [], ({ receiver, continuation }) => new Promise<JavaValue>((resolve, reject) => {
@@ -99,9 +106,10 @@ export class ThreadNative {
   dispose(): void {
     for (const state of this.live) {
       state.stopped = true;
+      state.alive = false;
       if (state.startTimer) clearTimeout(state.startTimer);
       state.startTimer = undefined;
-      state.pending?.reject(new Error('Java thread stopped'));
+      state.pending?.cancel?.();state.pending?.reject(new Error('Java thread stopped'));
       state.pending = undefined;
     }
     this.live.clear();

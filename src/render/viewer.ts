@@ -3,7 +3,9 @@ import {cacheUnchangedTransform} from './stable-transform';
 import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
 import {MapProps} from '../engine/map-props';
 import {partGeometryBounds} from './part-geometry-bounds';
-import {trafficWheelIndex} from '../engine/traffic-running-gear';
+import {trafficWheelIndex,trafficWheelFrame} from '../engine/traffic-running-gear';
+import {RivalPanelView} from './rival-panel-view';
+import type {RivalPanelDefinition} from '../engine/rival-panels';
 import {VehicleSuspensionSkin} from './vehicle-suspension-skin';
 import {SuspensionRoadTest} from '../engine/suspension-road-test';
 import {linkedSuspensionAnchors} from '../engine/linked-suspension';
@@ -85,6 +87,8 @@ import { RoadTrafficCar } from '../engine/road-traffic';
 import { Bot } from '../engine/bot';
 import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
+import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
+import {roadRoutes} from '../engine/road-route';
 import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,safeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel,type JavaTrafficBridge,type TrafficStreamHandle} from '../engine/traffic-models';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
@@ -107,8 +111,8 @@ import { FixedClock } from '../runtime/fixed-clock';
 import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
 import {createTrafficSignals} from './traffic-signals';
 
-type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]};
-type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
+type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[];panels:RivalPanelDefinition[]};
+type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView|RivalPanelView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -359,6 +363,7 @@ export class Viewer {
   private driverIk?:DriverIk;private driverCutawayVisibility=new Map<THREE.Group,boolean>();
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
+  private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;dispose():void}>();
   private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
   private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
@@ -483,13 +488,18 @@ export class Viewer {
     if(model?.registrationId&&this.javaTrafficBridge){
       const pose=this.javaTrafficBridge.location(model);if(!pose||!this.rivalInRange(model))return;
       const spawn=this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
-      return spawn&&safeTrafficSpawn(spawn,center,forward,speed,!offscreen(spawn),occupied,bodyRadius)?spawn:undefined;
+      return spawn&&!this.trafficControl?.roadHalted(spawn.road)&&safeTrafficSpawn(spawn,center,forward,speed,!offscreen(spawn),occupied,bodyRadius)?spawn:undefined;
     }
-    return this.trafficSpawns&&chooseSafeTrafficSpawn(this.trafficSpawns,center,radius,this.mapStreamRange,occupied,forward,speed,bodyRadius,offscreen);
+    return this.trafficSpawns&&chooseSafeTrafficSpawn(this.trafficSpawns,center,radius,this.mapStreamRange,occupied,forward,speed,bodyRadius,offscreen,Math.random,spawn=>!this.trafficControl?.roadHalted(spawn.road));
   }
   private trafficSpawns?:TrafficSpawnIndex;
   private trafficRefillAt=0;
   get trafficAmount(){return this.trafficCount;}
+  async prepareJavaScene(){
+    const generation=this.generation,focus=this.trafficFocus().clone();
+    await this.mapStream?.prepareNear(focus);
+    if(generation===this.generation&&this.trafficTestEnabled)await this.restartTrafficTest(true);
+  }
   get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
   setTrafficPhysicsRadius(radius:number){if(!Number.isFinite(radius)||radius<5||radius>200)throw Error("Traffic physics radius must be 5–200 m");this.trafficPhysicsRadius=radius;}
   async setTrafficCount(count:number){
@@ -655,6 +665,7 @@ export class Viewer {
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      this.profiler.measure('Race opponents CPU',()=>{for(const racer of this.javaRaces.values())racer.update(now);});
       this.profiler.measure('Map props CPU',()=>this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000));this.previousPropFrame=now;
       this.profiler.measure('Driver IK CPU',()=>{this.driverIk?.update();
       for(const binding of this.javaDrivers.values())if(binding.driver){
@@ -751,6 +762,7 @@ export class Viewer {
   clear() {
     this.suspensionPlayground?.dispose();this.suspensionPlayground=undefined;
     this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;
+    for(const racer of this.javaRaces.values())racer.dispose();this.javaRaces.clear();
     for(const id of this.javaDrivers.keys())this.releaseJavaDriver(id);
     for(const actor of this.javaCharacters.values())actor.character.dispose();this.javaCharacters.clear();
     for(const texture of this.javaCharacterTextures.values())void texture.then(t=>t.dispose()).catch(()=>{});this.javaCharacterTextures.clear();
@@ -829,7 +841,7 @@ export class Viewer {
     const unit=this.javaCharacters.has(node.id)?1:.01;
     modelGroup.scale.set(unit * node.meshScale.x, unit * node.meshScale.y, unit * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
-    const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
+    const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker' || node.alias === 'navigator_route';
     const unboundVehicleDriver = node.nativeVehicleDriver && !bindVehicleDriver && !this.javaDrivers.has(node.id);
     if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node) || unboundVehicleDriver) {
       group.visible = false;
@@ -1129,15 +1141,18 @@ export class Viewer {
       const selection=await this.javaTrafficBridge?.selection(key);
       const built=await new PartFactory(assets).stock({pack:key.pack,id:key.id},{javaSelection:selection});let group:THREE.Group|undefined;
       try{
+        const paint=this.javaTrafficBridge?.paint?.(key)??selection?.rootTexture;
+        if(paint)for(const part of built.world.parts.values())if(part.definition.config.texture!==undefined&&!part.paintTexture)part.paintTexture=paint;
         group=await this.createPreviewWorld(built.world,assets,false);
         const bounds=new THREE.Box3().setFromObject(group),wheels=built.root.definition.config.wheels.map((wheel,i)=>({...wheel,radius:built.world.wheelRefs[i]?.radius??wheel.radius}));
         for(let i=0;i<wheels.length;i++){
           const wheel=wheels[i];if(!wheel.render){
-            const mount=new THREE.Group(),rotor=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.matrixAutoUpdate=false;mount.matrix.makeTranslation(...wheel.position);mount.add(rotor);group.add(mount);
+            const frame=trafficWheelFrame(built.root,i),inverse=frame.clone().invert();wheel.position=new THREE.Vector3().setFromMatrixPosition(frame).toArray();
+            const mount=new THREE.Group(),rotor=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.userData.spinSign=new THREE.Vector3(1,0,0).transformDirection(frame).x<0?-1:1;mount.matrixAutoUpdate=false;mount.matrix.copy(frame);mount.add(rotor);group.add(mount);
             for(const part of built.world.parts.values()){
               if(trafficWheelIndex(part,built.root)!==i)continue;
               const mesh=group.getObjectByName(`Preview part ${part.id}`);
-              if(mesh){mesh.removeFromParent();mesh.matrix.premultiply(new THREE.Matrix4().makeTranslation(-wheel.position[0],-wheel.position[1],-wheel.position[2]));rotor.add(mesh);}
+              if(mesh){mesh.removeFromParent();mesh.matrix.premultiply(inverse);rotor.add(mesh);}
             }
             continue;
           }
@@ -1148,8 +1163,20 @@ export class Viewer {
           if(warnings.length)throw Error(warnings.join('\n'));
         }
         if(generation!==this.generation)throw Error('Traffic template load superseded');
+        const panels:RivalPanelDefinition[]=[];
+        if(key.registrationId){group.updateMatrixWorld(true);const inverse=group.matrixWorld.clone().invert();
+          for(const part of built.world.parts.values()){
+            const root=part===built.root,file=part.definition.cfgPath.split('/').at(-1)??'';
+            if(!root&&!/hood|trunk|door|quarterpanel|bumper|sideskirt/i.test(file))continue;
+            const meshGroup=group.getObjectByName(`Preview part ${part.id}`);if(!meshGroup)continue;
+            const samples:number[]=[],point=new THREE.Vector3();meshGroup.traverse(object=>{if(!(object instanceof THREE.Mesh))return;const positions=object.geometry.getAttribute('position'),frame=inverse.clone().multiply(object.matrixWorld);for(let j=0;j<positions.count;j++){point.fromBufferAttribute(positions,j).applyMatrix4(frame);samples.push(point.x,point.y,point.z);}});
+            if(samples.length<9)continue;
+            const slot=part.definition.config.slots.find(s=>s.id===part.ownSlot),mount=new THREE.Vector3(...(slot?.position??[0,0,0])).applyMatrix4(part.matrix());
+            panels.push({id:meshGroup.name,samples,mass:Math.max(.1,part.definition.config.bodies.reduce((s,b)=>s+b.mass,0)),mount:mount.toArray(),root,hood:/hood/i.test(file)});
+          }
+        }
         const lamps=await trafficLampDefinitions(built.world,assets);
-        const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps};group=undefined;return result;
+        const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps,panels};group=undefined;return result;
       }finally{built.world.dispose();if(group)this.disposeGroup(group);}
     })();
     cache.set(identity,pending);pending.catch(()=>{if(cache!.get(identity)===pending)cache!.delete(identity);});return pending;
@@ -1172,6 +1199,7 @@ export class Viewer {
       if(!roads){this.trafficTestStatus='No road graph for traffic test';return;}
       this.trafficSpawns??=new TrafficSpawnIndex(roads.network);
       const control=this.trafficControl??new TrafficControl(roads.network,this.mapTrafficFixtures);
+      control.setHalts(this.javaTrafficBridge?.halts?.()??{revision:0,roads:[],crossings:[]});
       this.trafficAgents??=new AgentWorkerClient({kind:'traffic-init',network:roads.network,control:control.snapshot()});
       const models=this.javaTrafficTypes??DEFAULT_TRAFFIC_MODELS;
       for(const test of [...this.trafficCars])if(this.javaTrafficBridge&&(!this.javaTrafficBridge.available(test.model)||test.model.registrationId&&!test.active&&!this.rivalInRange(test.model))){this.disposeTrafficCar(test);this.trafficCars.splice(this.trafficCars.indexOf(test),1);}
@@ -1200,7 +1228,8 @@ export class Viewer {
         const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
         vehicle.place(route.position,route.direction,template.height);
         const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
-        const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
+        const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=template.panels.length?new RivalPanelView(group,template.panels):new TrafficDamageView(group,vehicle.crush);
+        if(damage instanceof RivalPanelView)vehicle.panelImpact=(impulse,point,closing)=>damage.physics.hit(impulse,point,closing,vehicle.body.mass);
         const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
         group.name=`Traffic ${model.pack.split('/').at(-1)} ${index+1}`;group.visible=false;
         staged.push({model,active:false,lod,car:route,bot,vehicle,damage,lamps,group,wheels});
@@ -1228,7 +1257,7 @@ export class Viewer {
   }
   private recycleTrafficCar(test:TrafficTestCar,spawn:TrafficSpawn){
     const network=this.trafficSpawns!.network,route=new RoadTrafficCar(network,spawn.position,Math.random,spawn.road);
-    test.damage.reset();test.vehicle.crush.offsets.fill(0);test.vehicle.crush.version=0;test.vehicle.collisionVersion=0;
+    if(!test.model.registrationId)test.damage.reset();test.vehicle.crush.offsets.fill(0);test.vehicle.crush.version=0;test.vehicle.collisionVersion=0;
     test.vehicle.place(route.position,route.direction,test.lod.height);test.vehicle.setMode('cruise');
     test.car=route;test.lod.route=route;test.lod.physical=false;test.lod.setMode('cruise');
     test.lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
@@ -1251,10 +1280,12 @@ export class Viewer {
   }
   private updateTrafficTest(now:number) {
     if(!this.trafficControl||!this.trafficTestEnabled)return;
+    if((this.scriptTimeScale?.()??1)<=0){this.trafficPrevious=undefined;return;}
+    this.trafficControl.setHalts(this.javaTrafficBridge?.halts?.()??{revision:0,roads:[],crossings:[]});
     const center=this.trafficFocus();
     for(const [i,test] of this.trafficCars.entries()){
       const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
-      if(i>=this.trafficCount||distance>this.mapStreamRange+20||test.car.stopped&&distance>this.trafficPhysicsRadius+10||test.java&&!test.java.active()){test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;}
+      if(i>=this.trafficCount||this.trafficControl.roadHalted(test.car.roadId)||distance>this.mapStreamRange+20||test.car.stopped&&distance>this.trafficPhysicsRadius+10||test.java&&!test.java.active()){test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;}
       else test.group.visible=test.active&&distance<=this.mapStreamRange;
       test.voice?.setActive(test.active&&test.group.visible);
     }
@@ -1272,7 +1303,7 @@ export class Viewer {
     if(planned?.kind==='traffic')for(const result of planned.agents){
       const test=cars.find(car=>this.trafficAgentIds.get(car.bot)===result.id);
       // A collision/recycle after dispatch invalidates the old control, never the current physical body.
-      if(!test||test.bot.impactRevision!==result.revision||test.vehicle.collisionVersion!==result.collision)continue;
+      if(!test||test.bot.impactRevision!==result.revision||test.vehicle.collisionVersion!==result.collision||result.haltsRevision!==this.trafficControl.halts.revision)continue;
       test.car.restore(result.cursor);Object.assign(test.bot,{input:result.input,mode:result.mode,rpm:result.rpm,cruiseSpeed:result.speed,desiredSpeed:result.desired,trafficStatus:result.status});test.lod.setMode(result.mode);
     }
     this.trafficAudio?.setHidden(document.hidden);
@@ -1287,6 +1318,9 @@ export class Viewer {
         if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
       }
       for(const [i,test] of cars.entries()){
+        for(const {car:racer} of this.javaRaces.values()){
+          raceTrafficContact(racer,{body:test.vehicle.body,hit:(impulse,point,closing)=>test.bot.hit(impulse,point,closing)});
+        }
         if(peer&&test.lod.physical){
           const hit=vehiclePairContact(peer.body,test.vehicle.body);
           if(hit){
@@ -1304,23 +1338,27 @@ export class Viewer {
         }
       }
     });
+    const panelDt=this.trafficPrevious===undefined?0:Math.min(.05,Math.max(0,(now-this.trafficPrevious)/1000));
     this.trafficPrevious=now;
     if(cars.length&&this.trafficAgents?.ready(now)){
       const time=this.trafficControl.time,dt=Math.min(.1,Math.max(0,time-this.trafficAgentTime));
-      if(this.trafficAgents.request({kind:'traffic',dt,time,peer:peer?agentBody(peer.body):undefined,agents:cars.map(test=>{
+      if(this.trafficAgents.request({kind:'traffic',dt,time,halts:this.trafficControl.halts,peer:peer?agentBody(peer.body):undefined,agents:cars.map(test=>{
         let id=this.trafficAgentIds.get(test.bot);if(id===undefined){id=++this.nextTrafficAgentId;this.trafficAgentIds.set(test.bot,id);}
         return {id,revision:test.bot.impactRevision,body:agentBody(test.vehicle.body),cursor:test.car.snapshot(),collision:test.vehicle.collisionVersion,physical:test.lod.physical,wheelbase:test.vehicle.wheelbase,maxSteer:test.vehicle.maxSteerAngle,speed:test.bot.cruiseSpeed,mode:test.bot.mode};
       })},now))this.trafficAgentTime=time;
     }
     this.trafficSignals?.update();
+    let rivalPanelCpu=0;
     for(const test of cars){
       const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
       test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time),test.vehicle.wheels[0]?.steer??0,test.vehicle.body.velocity.dot(forward),now/1000);
       test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
-      test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
+      test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin*(test.wheels[i].mount.userData.spinSign??1),wheel.steer,0,'YXZ');});
       test.java?.sync({position:test.vehicle.body.position,yaw:Math.atan2(-forward.x,-forward.z),velocity:test.vehicle.body.velocity});
-      test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
+      if(test.damage instanceof RivalPanelView){const started=performance.now();test.damage.update(panelDt,now);rivalPanelCpu+=performance.now()-started;}else test.damage.update();
+      test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
     }
+    this.profiler.record('Rival panels CPU',rivalPanelCpu);
   }
   private resetRoadDebug() {
     this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
@@ -1445,6 +1483,7 @@ export class Viewer {
     return character;
   }
   removeWorld(world: EngineWorld): void {
+    for(const [root,racer]of this.javaRaces)if(root.world===world)racer.dispose();
     for(const [id,binding] of this.javaDrivers)if(binding.chassis.world===world)this.releaseJavaDriver(id);
     if(this.driverIk?.chassis.world===world){this.setDriverCutaway(false);this.driverIk.dispose();this.driverIk=undefined;}
     for (const [part, group] of this.proxies) if (part.world === world) {
@@ -2011,7 +2050,7 @@ export class Viewer {
     return {dispose:stop,wheel:(index:number)=>{selected=Math.max(0,Math.min(3,index));focus(true);},pause:(value:boolean)=>{test.paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},body:(value:boolean)=>{showBody=value;visibility();},bones:(value:boolean)=>{showBones=value;updateSkins();},speed:(kmh:number)=>{test.speed=THREE.MathUtils.clamp(kmh,0,40)/3.6;},bumps:(cm:number)=>{test.terrain.amplitude=THREE.MathUtils.clamp(cm,0,15)/100;rebuildRoad();},reset:()=>{test.reset();last=undefined;this.syncWorld();updateSkins();focus(true);},info:()=>`${['FL','FR','RL','RR'][selected]} · ${(test.speed*3.6).toFixed(0)} km/h · 120 Hz · travel ${test.suspension.wheels.map(w=>`${(w.length*100).toFixed(1)} cm${w.contact?'':' (air)'}`).join(' / ')} · ${skins.length} original skinned suspension parts`};
   }
   /** Same CFG/SCX physics construction used by the two-car stand. */
-  private pairVehicle(root:EnginePart) {
+  private pairVehicle(root:EnginePart,terrain?:MapTerrain,collision?:MapCollision) {
     const positions=(part:EnginePart)=>{
       const group=this.proxies.get(part);if(!group)throw new Error(`No render proxy for ${part.definition.alias}`);
       const transform=modelMatrix(new THREE.Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose));
@@ -2023,7 +2062,7 @@ export class Viewer {
     for(const part of root.world.parts.values()){const group=this.proxies.get(part);if(group)restoreReferenceGeometry(group);}
     const hood=[...root.world.parts.values()].find(p=>p.parent===root&&(/(?:^|[\\/])hood(?:\.cfg|[_-])/i.test(p.definition.cfgPath)||/(?:^|[_-])hood(?:$|[_-])/i.test(p.definition.alias)))??root;
     const bounds=new THREE.Box3();for(const samples of positions(root))for(let i=0;i<samples.length;i+=3)bounds.expandByPoint(new THREE.Vector3().fromArray(samples,i));
-    const car=new Vehicle3D(root,hood,positions(hood).flat(),bounds,undefined,undefined,DRIVING_PHYSICS_HZ);
+    const car=new Vehicle3D(root,hood,positions(hood).flat(),bounds,terrain,collision,DRIVING_PHYSICS_HZ);
     const triangles:number[]=[],inverseRoot=root.matrix().invert();
     for(const part of root.world.parts.values()){
       if(part===hood&&hood!==root||!part.definition.model)continue;
@@ -2042,6 +2081,44 @@ export class Viewer {
     }
     car.setBodyTriangles(triangles);
     return {car,positions};
+  }
+  /** An additional Java-controlled racer, without replacing the player's session/camera. */
+  async bindJavaRaceCar(root:EnginePart,control:JavaRaceControl){
+    const source=this.mapRoadSource,generation=this.generation;
+    if(!source?.terrain||!source.collision)throw Error('Race opponent requires a loaded map and collision');
+    const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
+    if(!roads)throw Error('Race opponent requires a road graph');
+    if(generation!==this.generation||root.world.disposed)return {dispose(){}};
+    this.javaRaces.get(root)?.dispose();
+    const {car,positions}=this.pairVehicle(root,source.terrain,source.collision);
+    const position=new THREE.Vector3().setFromMatrixPosition(root.matrix()),yaw=new THREE.Euler().setFromRotationMatrix(root.matrix(),'YXZ').y;
+    car.disableObstacle();car.placeAt(position,yaw);car.settleSpawn();
+    if(root.savedVehicleDamage)car.restoreDamage(root.savedVehicleDamage);
+    const routes=roadRoutes(roads.network);
+    const driver=new RaceDriver((start,finish)=>routes.query(start,finish),car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6);
+    let input:DrivingInput={throttle:0,steer:0,brake:true};
+    car.controlInput=dt=>input=raceVehicleInput(driver,car,control.command(),dt);
+    const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part))}));
+    let last:number|undefined,disposed=false;
+    const racer={car,update:(now:number)=>{
+      if(disposed)return;if(root.world.disposed||!control.active()){racer.dispose();return;}
+      if(document.hidden||(this.scriptTimeScale?.()??1)<=0){last=undefined;return;}
+      const placement=control.placement?.();
+      if(placement){car.placeAt(placement.position,placement.yaw);car.settleSpawn();car.body.velocity.copy(placement.velocity);last=undefined;}
+      const dt=(last===undefined?0:Math.min(.05,Math.max(0,(now-last)/1000)))*(this.scriptTimeScale?.()??1);last=now;
+      car.advance(dt,{throttle:0,steer:0,brake:false});
+      const others=[...(this.trafficPeer?[this.trafficPeer]:[]),...[...this.javaRaces.values()].filter(r=>r!==racer).map(r=>r.car)];
+      for(const other of others){const hit=vehiclePairContact(car.body,other.body);if(!hit)continue;
+        if(hit.impulse.lengthSq()>1){car.vehicleContact(hit.impulse,hit.point,other.body.bounds.clone().applyMatrix4(other.body.matrix()),hit.closing);other.vehicleContact(hit.impulse.clone().negate(),hit.point,car.body.bounds.clone().applyMatrix4(car.body.matrix()),hit.closing);}
+        const total=1/car.body.mass+1/other.body.mass,depth=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+        car.body.position.addScaledVector(hit.normal,depth/car.body.mass/total);other.body.position.addScaledVector(hit.normal,-depth/other.body.mass/total);
+      }
+      root.world.lightMask=drivingLightMask(root.world.lightMask,!!input.brake,car.suspension.mechanics?.gear===-1,!!car.suspension.mechanics?.running,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:43200));
+      root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);
+      for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);
+      control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
+    },dispose:()=>{if(disposed)return;disposed=true;this.javaRaces.delete(root);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
+    this.javaRaces.set(root,racer);return racer;
   }
   vehiclePair(roots:[EnginePart,EnginePart],scenario:VehiclePairScenario,telemetry:(text:string)=>void) {
     this.stopDriving?.();
@@ -2077,7 +2154,7 @@ export class Viewer {
     return Object.assign(stop,{reset:()=>{pair.reset();last=undefined;lastText=-Infinity;},pause:(value:boolean)=>{paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},
       wireframe:(value:boolean)=>views.forEach(({view})=>view.wireframe(value)),chassisCrumple:(value:number)=>built.forEach(({car})=>car.setChassisCrumple(value)),pair});
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; blocked?():boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -2219,7 +2296,7 @@ export class Viewer {
       // State changes happen between scene polls. Never read Track-only fields
       // or advance its old physics once Java has returned to a menu.
       if (java?.active && !java.active()) { stop(); return; }
-      if (document.hidden) { last = undefined; return; }
+      if (document.hidden || java?.blocked?.()) { last = undefined; return; }
       // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
       const firstFrame = last === undefined;
       const elapsed = last === undefined ? 0 : Math.max(0, (now - last) / 1000);

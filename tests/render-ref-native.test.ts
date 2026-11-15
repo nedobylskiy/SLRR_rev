@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import {navigatorRouteRibbon} from '../src/render/navigator-view';
 import { jv, SlrrJvm, type JavaValue } from 'slrr-jvm';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { RenderRefNative } from '../src/runtime/render-ref-native';
@@ -135,4 +136,21 @@ test('mock SkidMark line is a releasable resource without a visual instance', ()
     [vector(1, 2, 3), vector(0, 1, 0), jv('int', 0xffffffff), jv('float', 1)]);
   jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy', line, []);
   assert.equal(resources.getResource(line), undefined);
+});
+
+test('plotRoute creates a replaceable navigator ribbon from the last queried route and releases it normally',()=>{
+ const jvm=new SlrrJvm({resolveImport:()=>null}),resources=new GameTypeNative(jvm,()=>{});
+ let points:[number,number,number][]|undefined;
+ new RenderRefNative(jvm,resources,undefined,undefined,undefined,()=>points);
+ const parent=ref('java.util.resource.Dummy'),type=ref('java.util.resource.RenderRef'),line=ref('java.util.resource.RenderRef');
+ jvm.natives.invoke('java.lang.GameType','createNativeInstance',parent,[]);
+ for(const item of [type,line])jvm.natives.invoke('java.util.resource.ResourceRef','newNative',item,[]);
+ const plot=()=>jvm.natives.invoke('java.util.resource.RenderRef','plotRoute',line,[jv('ResourceRef',parent.value),jv('ResourceRef',type.value),jv('int',-65536),jv('float',10),vector(.01,0,.01)]);
+ assert.equal(plot()?.value,0);assert.equal(resources.getRender(line),undefined);
+ points=[[100,20,200],[110,30,200],[110,40,220]];assert.equal(plot()?.value,1);
+ const node=resources.getRender(line)!;assert.equal(node.parent,resources.getResource(parent));assert.equal(node.alias,'navigator_route');assert.deepEqual(node.route?.points,[[1,.002,2],[1.1,.002,2],[1.1,.002,2.2]]);assert.equal(node.route?.color,0xffff0000);assert.equal(node.route?.width,.1);
+ points[0][0]=999;assert.equal(node.route?.points[0][0],1,'render data is an independent snapshot');
+ const geometry=navigatorRouteRibbon(node.route!.points,node.route!.width);geometry.computeBoundingBox();assert.ok(geometry.getAttribute('position').count===12);assert.ok(geometry.boundingBox!.max.z-geometry.boundingBox!.min.z>=.2);geometry.dispose();
+ points=[[0,0,0],[200,0,0]];assert.equal(plot()?.value,1);assert.equal(resources.getRender(line),node);assert.equal(node.route?.points.length,2);
+ jvm.natives.invoke('java.util.resource.ResourceRef','destroy',line,[]);assert.equal(resources.getResource(line),undefined);assert.equal(node.resourceType,0);resources.dispose();
 });

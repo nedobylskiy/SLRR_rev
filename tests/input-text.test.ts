@@ -5,6 +5,15 @@ import { InputNative } from '../src/runtime/input-native';
 import { ControllerNative } from '../src/runtime/controller-native';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 
+test('MouseCursor screen position follows browser movement without camera control and does not alias tooltip adjustments',()=>{
+ const jvm=new SlrrJvm({resolveImport:()=>null}),events=new GameTypeNative(jvm,()=>{}),input=new InputNative(jvm,new ControllerNative(jvm,()=>0),events);
+ const cursor=jv('MouseCursor',{className:'java.io.MouseCursor',fields:new Map()}),read=()=>jvm.natives.invoke('java.io.MouseCursor','getPos',cursor,[])!;
+ input.setCursorPosition(.8,.9);const first=read();assert.ok(Math.abs(Number(jvm.get(first,'x').value)-.8)<1e-6);assert.ok(Math.abs(Number(jvm.get(first,'y').value)-.9)<1e-6);
+ jvm.set(first,'x',jv('float',99));assert.ok(Math.abs(Number(jvm.get(read(),'x').value)-.8)<1e-6,'Java tooltip offsets must not move the stored mouse position');
+ input.setCursorPosition(-.4,.2);jvm.natives.invoke('java.io.MouseCursor','getPos',cursor,[first]);assert.ok(Math.abs(Number(jvm.get(first,'x').value)+.4)<1e-6);
+ input.setCursorPosition(3,-5);assert.equal(jvm.get(read(),'x').value,1);assert.equal(jvm.get(read(),'y').value,-1);events.dispose();
+});
+
 test('cheat check uses flushed key history, encoded Java codes and consumes matches', () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const events = new GameTypeNative(jvm, () => {});

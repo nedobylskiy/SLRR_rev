@@ -10,6 +10,7 @@ export class RenderObject extends ResourceObject {
   animation:RenderAnimationState|null=null;
   /** Optional ARGB modulation set by Java RenderRef.setColor. */
   color: number | null = null;
+  route?: {points:[number,number,number][];color:number;width:number};
   /** A corpse/renderinstance command delegates this figure to a vehicle renderer. */
   nativeVehicleDriver = false;
 

@@ -128,10 +128,18 @@ test('vehicle motion enters and leaves a Java-created spherical trigger once per
   assert.equal(jvm.get(listener, 'calls').value, 1);
   assert.equal(jvm.get(listener, 'last').value, 32);
   assert.equal(jvm.get(listener, 'text').value, String(node.resourceId));
+  const rival=jv('GameRef',{className:'demo.Vehicle',fields:new Map()});
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',rival,[]);
+  gameTypes.get(rival)!.position={x:2,y:0,z:0};
+  gameTypes.updateTriggerContacts(rival);
+  gameTypes.updateTriggerContacts(car);
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(jvm.get(listener,'calls').value,2,'each car enters independently even while the other occupies the finish');
+  assert.equal(jvm.get(listener,'text').value,String(gameTypes.get(rival)!.resourceId),'Java receives the winning rival car ID');
   node.position.x = 10;
   gameTypes.updateTriggerContacts(car);
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(jvm.get(listener, 'calls').value, 2);
+  assert.equal(jvm.get(listener, 'calls').value, 3);
   assert.equal(jvm.get(listener, 'last').value, 64);
   gameTypes.dispose();
 });
@@ -271,6 +279,28 @@ test('GameType timers deliver EVENT_TIME and can be cancelled', async () => {
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(jvm.get(handler, 'calls').value, 1);
   gameTypes.dispose();
+});
+
+test('scene loading preserves timer delay, including zero-delay callbacks, and cancellation',async context=>{
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'demo.java',source})});
+  const native=new GameTypeNative(jvm,()=>{});
+  await jvm.loadClass('demo.Handler');const handler=jvm.construct('demo.Handler',[]);
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',handler,[]);
+  jvm.natives.invoke('java.lang.GameType','setEventMask',handler,[jv('int',EVENT_TIME)]);
+  let blocked=true,now=0;
+  context.mock.timers.enable({apis:['setTimeout']});context.mock.method(performance,'now',()=>now);
+  native.setExecutionBlocked(()=>blocked);
+  const advance=(ms:number)=>{for(let i=0;i<ms;i++){now++;context.mock.timers.tick(1);}};
+  const add=(seconds:number,id:number)=>jvm.natives.invoke('java.lang.GameType','addTimer',handler,[jv('float',seconds),jv('int',id)]);
+  add(0,42);advance(5000);assert.equal(jvm.get(handler,'calls').value,0);
+  blocked=false;advance(50);await new Promise(resolve=>setImmediate(resolve));assert.equal(jvm.get(handler,'last').value,42);
+  add(.3,99);advance(100);blocked=true;advance(5000);
+  assert.equal(jvm.get(handler,'calls').value,1,'loading must not execute a race tick');
+  blocked=false;advance(50);advance(149);assert.equal(jvm.get(handler,'calls').value,1,'remaining countdown must survive loading');
+  advance(101);await new Promise(resolve=>setImmediate(resolve));assert.equal(jvm.get(handler,'last').value,99);
+  blocked=true;add(0,101);jvm.natives.invoke('java.lang.GameType','removeAllTimers',handler,[]);
+  blocked=false;advance(500);assert.equal(jvm.get(handler,'calls').value,2);
+  native.dispose();
 });
 
 test('a timer can open an asynchronous dialog while later timer events keep flowing', async () => {

@@ -42,6 +42,14 @@ test('worker receives the exact signal cycle selected by the main world',()=>{
   const graph=network(),control=new TrafficControl(graph,[{kind:'signal',position:new Vector3(100,0,0)}],()=>0),copy=new TrafficControl(graph,[]);
   copy.restore(structuredClone(control.snapshot()));for(const time of [0,9.9,10,12.9,13,26]){control.time=copy.time=time;assert.equal(copy.state(1,102),control.state(1,102));assert.deepEqual(copy.rule(2),control.rule(2));}
 });
+
+test('worker honors race halts on green and tags replies with the applied mask revision',()=>{
+  const graph=network(),sim=new AgentSimulation(()=>0),control=new TrafficControl(graph,[{kind:'signal',position:new Vector3(100,0,0)}],()=>0),agent=traffic(graph,98);
+  agent.body.velocity=[0,0,0];sim.update({kind:'traffic-init',network:graph,control:control.snapshot()});
+  const run=(revision:number,crossings:number[])=>{const reply=sim.update(structuredClone({kind:'traffic',dt:1/30,time:0,halts:{revision,roads:[],crossings},agents:[agent]}));assert.equal(reply?.kind,'traffic');return reply!.kind==='traffic'?reply!.agents[0]:assert.fail();};
+  const held=run(1,[1]);assert.equal(held.desired,0);assert.ok(held.input.brake);assert.equal(held.haltsRevision,1);assert.match(held.status,/race traffic halt/);
+  let released=false;for(let i=0;i<90;i++){const result=run(2,[]);assert.equal(result.haltsRevision,2);released ||= result.input.throttle>0;}assert.ok(released);
+});
 test('30 Hz worker steering drives a 60 Hz physical car through a connected crossing without teleporting',()=>{
   const graph=network(),sim=new AgentSimulation(()=>.5),control=new TrafficControl(graph,[]),route=new RoadTrafficCar(graph,new Vector3(10,0,0),()=>.5);
   sim.update({kind:'traffic-init',network:graph,control:control.snapshot()});

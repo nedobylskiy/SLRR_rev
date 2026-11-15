@@ -13,12 +13,15 @@ test('null native rival positions are placed on roads before streaming and motio
  const segment:RoadSegment={start:[500,0,0],end:[0,0,0],startTangent:[-500,0,0],endTangent:[-500,0,0],length:500,flag:0,raw:new Uint32Array(14)};
  const graph:RoadNetwork={version:1,bytes:0,paths:[],others:[{id:2,refs:[102,0],raw:new Uint32Array(12),extraRefs:[],tail:new Uint32Array(3),flag:0,segments:[segment]}],nodes:[{id:1,group:1,position:[500,0,0],raw:new Uint32Array(4),links:[{target:2,flag:1},{target:3,flag:0}],lanes:[{header:new Uint8Array(12),segment:{...segment,start:[502,0,0],end:[500,0,0],startTangent:[-2,0,0],endTangent:[-2,0,0],length:2}}]}]};
  graph.others.push({...graph.others[0],id:3,segments:[{...segment,start:[1000,0,0],end:[502,0,0]}]});
- const traffic=new TrafficNative(jvm,ref=>types.getResource(ref),()=>({pack:'rival.rpk',id:6}),types,async()=>graph);
+ const traffic=new TrafficNative(jvm,ref=>types.getResource(ref),value=>value.type==='int'?{pack:'cars.rpk',id:Number(value.value)}:{pack:'rival.rpk',id:6},types,async()=>graph);
  try{
   jvm.natives.invoke('java.util.resource.GroundRef','addTrafficCar',map,[rival,jv('Vector3',null)]);
   let selections=0;
   const catalogue=traffic.models(map)!,model=catalogue[0],bridge=traffic.bridge(map,listener,async()=>{selections++;throw Error('dummycar has no Java Part fields');});
   assert.equal(await bridge.selection(model),undefined);assert.equal(selections,0);
+  assert.equal(bridge.paint?.(model),undefined);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',rival,[jv('ResourceRef',null),jv('int',16),jv('String','texture 42 1')]);
+  assert.deepEqual(bridge.paint?.(model),{pack:'cars.rpk',id:42},'the original Java dummycar texture command reaches the rendering bridge');
   assert.equal(bridge.location(model),undefined,'service coordinates must not enter the visible population');
   const focus={x:0,y:0,z:0};await traffic.advanceDistant(map,focus,50,0);
   const first=bridge.location(model)!;assert.ok(first);assert.ok(first.position.x>50);assert.equal(first.position.y,0);

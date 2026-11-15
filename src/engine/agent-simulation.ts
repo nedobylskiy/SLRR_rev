@@ -21,6 +21,7 @@ export class AgentSimulation {
     if(request.kind==='pedestrian-init'){this.index=new PedestrianSpawnIndex(request.rows);this.walkers.clear();return;}
     if(request.kind==='traffic'){
       const control=this.control;if(!control)throw Error('Traffic worker not initialized');control.time=request.time;
+      if(request.halts)control.setHalts(request.halts);
       const ids=new Set(request.agents.map(a=>a.id));for(const id of this.drivers.keys())if(!ids.has(id))this.drivers.delete(id);
       for(const state of request.agents){
         let entry=this.drivers.get(state.id);
@@ -34,7 +35,7 @@ export class AgentSimulation {
       }
       const peers=[...this.drivers.values()].map(e=>e.proxy.body);if(request.peer)peers.push(body(request.peer));
       const agents=request.agents.map(state=>{const {bot}=this.drivers.get(state.id)!;bot.plan(Math.min(.1,request.dt),peers);
-        return {id:state.id,revision:state.revision,collision:state.collision,cursor:bot.route.snapshot(),input:bot.input,mode:bot.mode,rpm:bot.rpm,speed:bot.cruiseSpeed,desired:bot.desiredSpeed,status:bot.trafficStatus};});
+        return {id:state.id,revision:state.revision,collision:state.collision,haltsRevision:control.halts.revision,cursor:bot.route.snapshot(),input:bot.input,mode:bot.mode,rpm:bot.rpm,speed:bot.cruiseSpeed,desired:bot.desiredSpeed,status:bot.trafficStatus};});
       return {kind:'traffic',agents};
     }
     const index=this.index;if(!index)throw Error('Pedestrian worker not initialized');

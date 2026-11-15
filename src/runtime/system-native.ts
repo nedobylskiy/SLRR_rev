@@ -8,9 +8,14 @@ export class SystemNative {
   private gameTimeSeconds = 0;
   private lastSample: number;
   private warp = 1;
-  get timeScale(){return this.warp;}
+  get timeScale(){return this.sceneLoading?0:this.warp;}
+  private sceneLoading=false;
+  setSceneLoading(loading:boolean):void {this.sampleSimulation();this.sceneLoading=loading;}
   private loadPriority = 0;
   private loading = false;
+  private loadingReader?:()=>boolean;
+  /** Pending host assets extend the original Java LoadingScreen wait. */
+  setLoadingReader(reader:(()=>boolean)|undefined):void {this.loadingReader=reader;}
   private distanceMeasure = 1000;
 
   constructor(jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
@@ -61,7 +66,7 @@ export class SystemNative {
       this.loading = false;
       return jv('void', undefined);
     });
-    jvm.natives.register(owner, 'isLoading', [], () => jv('int', Number(this.loading)));
+    jvm.natives.register(owner, 'isLoading', [], () => jv('int', Number(this.loading || (this.loadingReader?.()??false))));
     for (const name of ['gc', 'runFinalization'])
       jvm.natives.register(owner, name, [], () => jv('int', 0));
     jvm.natives.register(owner, 'compileAll', ['String'], () => jv('int', 0));
@@ -87,7 +92,7 @@ export class SystemNative {
 
   private sampleSimulation(): number {
     const now = this.now();
-    this.simulationSeconds += Math.max(0, now - this.lastSample) / 1000 * this.warp;
+    if(!this.sceneLoading)this.simulationSeconds += Math.max(0, now - this.lastSample) / 1000 * this.warp;
     this.lastSample = now;
     return this.simulationSeconds;
   }
