@@ -77,7 +77,15 @@ export class OsdRectangleNative {
     return true;
   }
 
-  syncVisibility(): void { for (const view of this.views.values()) this.sync(view.render); }
+  syncVisibility(): void {
+    for (const view of this.views.values()) {
+      // Garage/catalog windows retain their Java rectangles after being hidden.
+      // Do not resolve resources, scan rectangle vectors or lay out those pages
+      // on every loading-screen tick. Recompute when their group opens again.
+      if (this.isVisible(view)) this.sync(view.render);
+      else view.element.hide();
+    }
+  }
 
   remove(render: RenderObject): void {
     const view = this.views.get(render);
@@ -90,10 +98,14 @@ export class OsdRectangleNative {
   }
 
   private syncView(view: RectangleView): void {
-    const osd = this.object(view.group.fields.get('osd'));
-    if (Number(view.group.fields.get('active')?.value ?? 0) && osd?.fields.get('cam')?.value != null)
+    if (this.isVisible(view))
       view.element.show();
     else view.element.hide();
+  }
+
+  private isVisible(view: RectangleView): boolean {
+    if (!Number(view.group.fields.get('active')?.value ?? 0)) return false;
+    return this.object(view.group.fields.get('osd'))?.fields.get('cam')?.value != null;
   }
 
   private positionMode(render: RenderObject, osd: JavaObject): 'normal' | 'normalized' | 'style' {

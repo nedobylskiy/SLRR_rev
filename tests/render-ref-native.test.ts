@@ -11,6 +11,26 @@ const vector = (x: number, y: number, z: number) => jv('Vector3', { className: '
 const ypr = (y: number, p: number, r: number) => jv('Ypr', { className: 'java.lang.Ypr',
   fields: new Map([['y', jv('float', y)], ['p', jv('float', p)], ['r', jv('float', r)]]) });
 
+test('vehicle driver commands identify separate render instances rather than their shared model',async()=>{
+ const jvm=new SlrrJvm({resolveImport:()=>null}),changes:RenderObject[]=[];
+ const resources=new GameTypeNative(jvm,()=>{},node=>changes.push(node));new RenderRefNative(jvm,resources);
+ const car=ref('java.util.resource.GameRef'),type=ref('java.util.resource.RenderRef');
+ jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[]);
+ jvm.natives.invoke('java.util.resource.ResourceRef','newNative',type,[]);
+ jvm.natives.invoke('java.util.resource.ResourceRef','set',type,[jv('int',0xd7)]);
+ const figures=[ref('java.util.resource.RenderRef'),ref('java.util.resource.RenderRef')];
+ for(const figure of figures){jvm.natives.invoke('java.util.resource.ResourceRef','newNative',figure,[]);jvm.natives.invoke('java.util.resource.RenderRef','create',figure,[jv('ResourceRef',car.value),type,jv('String','botfigura-corpse')]);}
+ const nodes=figures.map(f=>resources.getRender(f)!);
+ assert.notEqual(nodes[0].resourceId,nodes[1].resourceId);
+ assert.ok(nodes.every(n=>n.typeId===0xd7));
+ for(const [verb,index] of [['corpse 0',0],['renderinstance',1]] as const){
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',car,[jv('ResourceRef',null),jv('int',16),jv('String',`${verb} ${nodes[index].resourceId}`)]);
+  assert.equal(nodes[index].nativeVehicleDriver,true);assert.equal(changes.at(-1),nodes[index]);
+  if(index===0)assert.equal(nodes[1].nativeVehicleDriver,false);
+ }
+ resources.dispose();
+});
+
 test('RenderRef.create makes a typed visual child and setMatrix moves that instance', () => {
   const jvm = new SlrrJvm({ resolveImport: () => null });
   const changes: string[] = [];

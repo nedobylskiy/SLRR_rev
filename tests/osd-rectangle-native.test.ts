@@ -26,9 +26,10 @@ test('Java Rectangle resources become positioned OSD images and obey Group visib
   const render = new RenderObject(4, 'java.util.resource.RenderRef', template, 'Rectangle');
   render.setParent(group);
   render.position = { x: 1.469 * 16 / 9 * 0.2, y: -1.469 * 0.4, z: 0.002 };
+  let lookups = 0;
   const resources = {
     reference: () => jv('Group', groupObject),
-    getByResourceId: (id: number) => id === mesh.resourceId ? mesh : undefined,
+    getByResourceId: (id: number) => { lookups++; return id === mesh.resourceId ? mesh : undefined; },
   } as unknown as GameTypeNative;
   let bounds: number[] = [], texture: unknown, visible = false, removed = false;
   const layer = { createRectangle(x: number, y: number, w: number, h: number, depth: number, image: unknown) {
@@ -63,8 +64,15 @@ test('Java Rectangle resources become positioned OSD images and obey Group visib
   assert.equal(texture, undefined);
   template.resourceReplacements.set(0xaf, 0xc00d);
   groupObject.fields.set('active', jv('int', 0));
+  const beforeHidden = lookups;
+  render.position.x = 1.469 * 16 / 9 * 0.35;
   rectangles.syncVisibility();
   assert.equal(visible, false);
+  assert.equal(lookups, beforeHidden, 'hidden pages do not repeat native resource scans');
+  groupObject.fields.set('active', jv('int', 1));
+  rectangles.syncVisibility();
+  assert.equal(visible, true);
+  assert.ok(Math.abs(bounds[0] - 0.35) < 0.001, 'reopened pages get their current layout');
   rectangles.remove(render);
   assert.equal(removed, true);
 });

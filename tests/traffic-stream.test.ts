@@ -41,6 +41,18 @@ test('distant rivals update every five seconds within the local speed radius and
  }
 });
 
+test('unplaced Java rivals enter independent lanes even when their service position is beside the player',()=>{
+ const index=new TrafficSpawnIndex(graph()),planner=new DistantRivals(index,()=>.99);
+ const pose={position:{x:0,y:-10000,z:0},yaw:0,velocity:{x:0,y:0,z:0}},focus=new Vector3();
+ assert.equal(planner.update(1,pose,false,focus,50,0,true),true);
+ const placed=new Vector3(pose.position.x,pose.position.y,pose.position.z);
+ assert.ok(placed.distanceTo(focus)>50);assert.equal(placed.y,0);
+ assert.ok(index.nearest(placed)!.position.distanceTo(placed)<1e-6);
+ assert.equal(planner.update(1,pose,false,focus,50,4999),false);
+ assert.equal(planner.update(1,pose,false,focus,50,5000),true);
+ assert.ok(placed.distanceTo(new Vector3(pose.position.x,pose.position.y,pose.position.z))>0);
+});
+
 test('spawn speed is rural with a yellow crossing at either end of the road',()=>{
  const network=graph();
  network.others.push({id:9,refs:[109,0],raw:new Uint32Array(12),extraRefs:[],tail:new Uint32Array(3),flag:0,segments:[segment([-2,0,0],[-100,0,0])]});

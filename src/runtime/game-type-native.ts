@@ -517,6 +517,15 @@ export class GameTypeNative {
           this.lastCommands.set(node, commands);
           if (node instanceof GameObject) {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
+            if (verb === 'corpse' || verb === 'renderinstance') {
+              const words = args[2].value.trim().split(/\s+/);
+              const id = Number(words[verb === 'corpse' ? 2 : 1]);
+              const driver = Number.isInteger(id) && id > 0 ? this.getByResourceId(id) : undefined;
+              if (driver instanceof RenderObject && !driver.nativeVehicleDriver) {
+                driver.nativeVehicleDriver = true;
+                this.notifyRenderChanged(driver);
+              }
+            }
             if (verb === 'render') node.cameraRendering = true;
             if (verb === 'hide') node.cameraRendering = false;
             if (verb === 'sethorn') {
@@ -616,6 +625,9 @@ export class GameTypeNative {
     const typeNode = type?.value == null ? null : this.requireResource(type);
     const node = new RenderObject(resource.id, object.className, typeNode,
       alias || '_renderinst');
+    // id() identifies this instance, not the shared RPK model. In particular,
+    // corpse/renderinstance must distinguish several drivers using one model.
+    node.resourceId = this.nextGameResourceId++;
     node.renderResource = typeNode ? this.resolveRenderResource(typeNode) : null;
     resource.setParent(null);
     node.setParent(parentNode);

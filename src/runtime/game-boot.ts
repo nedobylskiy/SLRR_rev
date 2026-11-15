@@ -90,7 +90,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   setMapFog?: (settings: MapFogSettings) => void,
   setSceneLight?: (settings: RenderLightSettings) => void,
   setGlobalEnvmap?: (source: EnvironmentMapSource | null) => Promise<void> | void,
-  setSceneFlare?: (source: RenderFlareSource) => Promise<void> | void): Promise<BootResult> {
+  setSceneFlare?: (source: RenderFlareSource) => Promise<void> | void,
+  measureOsdSync: (work: () => void) => void = work => work()): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -614,12 +615,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.loadClass('java.game.Init');
     if (realLoadingScreen) {
       system.beginLoading();
-      renderTicker = setInterval(() => {
+      renderTicker = setInterval(() => measureOsdSync(() => {
         osdButtons.sync();
         osdText.syncVisibility();
         osdRectangles?.syncVisibility();
         jvm.natives.invoke('java.lang.Object', 'notifyAll', renderSignal, []);
-      }, 50);
+      }), 50);
       void jvm.invokeAsync(loadingScreen, 'run').catch(reason => {
         if (!disposed) report({ level: 'error', message: `LoadingScreen.run: ${reason instanceof Error ? reason.message : String(reason)}` });
       });

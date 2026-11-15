@@ -506,10 +506,14 @@ export class Viewer {
   private trafficSignalError?:string;
   private trafficTemplates=new Map<Assets,Map<string,Promise<TrafficTemplate>>>();
   private javaTrafficTypes?:readonly TrafficModel[];
+  private javaTrafficEligible?:readonly TrafficModel[];
   private javaTrafficBridge?:JavaTrafficBridge;
   private trafficModelErrors=new Map<string,string>();
   setJavaTrafficTypes(types:readonly TrafficModel[]|undefined){
-    if(this.javaTrafficTypes===types)return;this.javaTrafficTypes=types;
+    const changed=this.javaTrafficTypes!==types;this.javaTrafficTypes=types;
+    const eligible=types?.filter(model=>!model.registrationId||this.rivalInRange(model));
+    const previous=this.javaTrafficEligible;this.javaTrafficEligible=eligible;
+    if(!changed&&(eligible===previous||eligible&&previous&&eligible.length===previous.length&&eligible.every((model,i)=>model===previous[i])))return;
     if(this.trafficTestEnabled&&this.mapRoadSource)void this.restartTrafficTest(true);
   }
   private trafficAudio?:TrafficAudio;
@@ -788,7 +792,7 @@ export class Viewer {
     });
     this.model.clear();
   }
-  async upsertJavaRenderObject(node: RenderObject, assets: Assets): Promise<void> {
+  async upsertJavaRenderObject(node: RenderObject, assets: Assets, bindVehicleDriver = false): Promise<void> {
     const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
     if (node.resourceType !== 3) {
@@ -823,8 +827,12 @@ export class Viewer {
     modelGroup.scale.set(unit * node.meshScale.x, unit * node.meshScale.y, unit * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
     const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
-    if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node)) {
+    const unboundVehicleDriver = node.nativeVehicleDriver && !bindVehicleDriver && !this.javaDrivers.has(node.id);
+    if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node) || unboundVehicleDriver) {
       group.visible = false;
+      if (unboundVehicleDriver) {
+        this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
+      }
       modelGroup.clear();
       this.javaRenderTypes.delete(node.id);
       this.javaRenderRequests.set(node.id, (this.javaRenderRequests.get(node.id) ?? 0) + 1);
@@ -948,7 +956,7 @@ export class Viewer {
   async bindJavaDriver(node:RenderObject,chassis:EnginePart,assets:Assets){
     // Load the existing Java render first; an in-flight model replacement must not
     // leave a binding referring to the character it just disposed.
-    await this.upsertJavaRenderObject(node,assets);
+    await this.upsertJavaRenderObject(node,assets,true);
     if(chassis.world.disposed||node.resourceType!==3)return;
     this.releaseJavaDriver(node.id);
     const binding:{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}={node,chassis};
@@ -1294,7 +1302,7 @@ export class Viewer {
   private resetRoadDebug() {
     this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
     this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
-    this.stopTrafficTest();this.javaTrafficBridge=undefined;this.javaTrafficTypes=undefined;
+    this.stopTrafficTest();this.javaTrafficBridge=undefined;this.javaTrafficTypes=undefined;this.javaTrafficEligible=undefined;
     this.mapTrafficFixtures=[];
     this.mapRoadRevision++; this.mapRoadDebug?.dispose(); this.mapRoadDebug=undefined;
     this.mapRoadSource=undefined;this.mapRoadPending=undefined;this.mapRoadLayers.clear();this.roadDebugStatus='Road graph off';

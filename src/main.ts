@@ -112,7 +112,8 @@ async function runGameBoot() {
     settings => { if (source === assets && run === sequence) viewer?.setMapFog(settings); },
     settings => { if (source === assets && run === sequence) viewer?.setSceneLight(settings); },
     texture => source === assets && run === sequence ? viewer?.setGlobalEnvmap(texture) : undefined,
-    flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined);
+    flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined,
+    work => viewer ? viewer.profiler.measure('Java OSD sync CPU', work) : work());
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
   activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
   const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler);

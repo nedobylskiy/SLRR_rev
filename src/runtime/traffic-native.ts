@@ -7,7 +7,7 @@ import {Vector3} from 'three';
 import type {RoadNetwork} from '../formats/trc';
 import {TrafficSpawnIndex} from '../engine/traffic-stream';
 import {DistantRivals,DISTANT_RIVAL_INTERVAL} from '../engine/distant-rivals';
-interface Registration {id:number;ground:object;map:JavaValue;car:JavaValue;model:TrafficModel;individual:boolean;visible:boolean;notify:boolean;valid:boolean;state?:JavaValue;}
+interface Registration {id:number;ground:object;map:JavaValue;car:JavaValue;model:TrafficModel;individual:boolean;visible:boolean;notify:boolean;valid:boolean;unplaced?:boolean;state?:JavaValue;}
 
 /** Per-ground original Java traffic declarations. Population/physics is hosted by the stream renderer. */
 export class TrafficNative {
@@ -33,7 +33,7 @@ export class TrafficNative {
         const existing=[...this.registrations.values()].find(r=>r.valid&&r.ground===ground&&this.gameTypes!.getResource(r.car)===node);if(existing)return jv('int',existing.id);
         if(args[1].value!=null){const coords=['x','y','z'].map(axis=>Number(this.jvm.get(args[1],axis).value));if(coords.every(Number.isFinite))Object.assign(node.position,{x:coords[0],y:coords[1],z:coords[2]});}
         const id=this.nextId++,model:TrafficModel={pack:normalizeResourcePackPath(identity.pack),id:identity.id&0xffff,weight:1,registrationId:id,javaTypeId:node.typeId};
-        const record:Registration={id,ground,map:receiver,car:this.gameTypes!.reference(node),model,individual:true,visible:false,notify:false,valid:true};this.registrations.set(id,record);this.byCar.set(node,record);
+        const record:Registration={id,ground,map:receiver,car:this.gameTypes!.reference(node),model,individual:true,visible:false,notify:false,valid:true,unplaced:args[1].value==null};this.registrations.set(id,record);this.byCar.set(node,record);
         this.catalogs.set(ground,[...(this.catalogs.get(ground)??[]),model]);return jv('int',id);
       });
       jvm.natives.register('java.util.resource.GroundRef','notifyTrafficCar',['int','int'],({receiver,args})=>{
@@ -69,9 +69,13 @@ export class TrafficNative {
     const ground=this.ground(map);if(!ground||!this.gameTypes)throw Error('Traffic bridge requires a live Java ground');
     const old=this.bridges.get(ground);if(old&&old.state.value===state.value)return old.bridge;
     const bridge:JavaTrafficBridge={
-      location:model=>{const entry=model.registrationId?this.registrations.get(model.registrationId):undefined,node=entry&&this.gameTypes!.get(entry.car);return entry?.valid&&node?{position:{...node.position},yaw:node.orientation.y,velocity:{...node.velocity}}:undefined;},
+      location:model=>{const entry=model.registrationId?this.registrations.get(model.registrationId):undefined,node=entry&&this.gameTypes!.get(entry.car);return entry?.valid&&!entry.unplaced&&node?{position:{...node.position},yaw:node.orientation.y,velocity:{...node.velocity}}:undefined;},
       available:model=>this.ground(map)===ground&&(model.registrationId?!!this.registrations.get(model.registrationId)?.valid:!!this.catalogs.get(ground)?.some(m=>!m.registrationId&&m.pack===model.pack&&m.id===model.id)),
-      selection:async model=>{const entry=model.registrationId?this.registrations.get(model.registrationId):undefined;return entry?.valid?selection(entry.car,model.pack):undefined;},
+      selection:async model=>{const entry=model.registrationId?this.registrations.get(model.registrationId):undefined;
+        // Original 2.2.1 registers unscripted dummycar GameRefs. They have a
+        // chassis resource, but no Part fields/installed Java assembly yet.
+        // Build that resource's stock template instead of reading missing fields.
+        return entry?.valid&&this.jvm.isInstance(entry.car,'java.game.parts.Part')?selection(entry.car,model.pack):undefined;},
       spawn:(model,pose)=>{
         if(!bridge.available(model))return;
         let entry=model.registrationId?this.registrations.get(model.registrationId):undefined;
@@ -84,7 +88,7 @@ export class TrafficNative {
         if(entry.visible)return;
         const record=entry;record.state=state;
         const sync=(pose:TrafficPose)=>{const node=this.gameTypes!.get(record.car);if(!record.valid||!node)return;Object.assign(node.position,pose.position);node.orientation.y=pose.yaw;Object.assign(node.velocity,pose.velocity);};
-        sync(pose);record.visible=true;if(record.notify||!record.individual)this.event(record,'car_add');
+        sync(pose);record.unplaced=false;record.visible=true;if(record.notify||!record.individual)this.event(record,'car_add');
         return {id:record.id,sync,remove:()=>this.remove(record,false),active:()=>record.valid&&!!this.gameTypes!.get(record.car)};
       },
     };
@@ -98,13 +102,11 @@ export class TrafficNative {
     const pending=(async()=>{
       if(!current.planner){const graph=await this.networkFor!(map);if(!graph)return;current.planner=new DistantRivals(new TrafficSpawnIndex(graph));}
       if(this.ground(map)!==ground)return;
-      let registered=false;
       for(const entry of this.registrations.values())if(entry.valid&&entry.individual&&entry.ground===ground){
-        registered=true;const node=this.gameTypes!.get(entry.car);if(!node)continue;
+        const node=this.gameTypes!.get(entry.car);if(!node)continue;
         const pose:TrafficPose={position:{...node.position},yaw:node.orientation.y,velocity:{...node.velocity}};
-        if(current.planner.update(entry.id,pose,entry.visible,center,near,now)){Object.assign(node.position,pose.position);node.orientation.y=pose.yaw;Object.assign(node.velocity,pose.velocity);}
+        if(current.planner.update(entry.id,pose,entry.visible,center,near,now,entry.unplaced)){Object.assign(node.position,pose.position);node.orientation.y=pose.yaw;Object.assign(node.velocity,pose.velocity);entry.unplaced=false;}
       }
-      if(registered)this.catalogs.set(ground,[...(this.catalogs.get(ground)??[])]);
     })();current.pending=pending;try{await pending;}finally{if(current.pending===pending)current.pending=undefined;}
   }
   models(receiver:JavaValue):readonly TrafficModel[]|undefined {const ground=this.ground(receiver);return ground?this.catalogs.get(ground):undefined;}

@@ -36,6 +36,13 @@ const CELL=100;
 /** Immutable lane samples indexed once per map, not rebuilt as the player moves. */
 export class TrafficSpawnIndex {
   private cells=new Map<string,TrafficSpawn[]>();
+  /** Initial native traffic placement has no preferred position on the map. */
+  any(accept:(sample:TrafficSpawn)=>boolean,random=Math.random):TrafficSpawn|undefined {
+    let selected:TrafficSpawn|undefined,count=0;
+    for(const cell of this.cells.values())for(const sample of cell)
+      if(accept(sample)&&random()<1/++count)selected=sample;
+    return selected;
+  }
   constructor(readonly network:RoadNetwork){
     const connected=trafficConnections(network),groups=trafficRoadSpeedGroups(network);
     for(const road of network.others){
