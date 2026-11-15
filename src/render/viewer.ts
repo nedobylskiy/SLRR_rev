@@ -46,6 +46,7 @@ import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehi
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
+import {assetReadBatch} from './asset-read-batch';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel, ScxMesh } from '../formats/scx';
@@ -321,6 +322,7 @@ export class Viewer {
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Map render preparation: shared materials ${this.sharedMapMaterials?'on':'off'} · early main-pass culling ${this.earlyMapCulling?'on':'off'}`,
+    'Ground material batching: on (required surface sections share resident geometry batches)',
     `Scene transform cache: ${this.stableTransforms?'on':'off'} (unchanged containers; dynamic children still update)`,
     `Experimental hub geometry: ${this.experimentalHubGeometry?'on':'off'} (pose only; supported independent arm/hub 0/-1; unsupported corners retain legacy pose)`,
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
@@ -1738,6 +1740,9 @@ export class Viewer {
           bounds.expandByPoint(vertex.fromArray(mesh.positions, i).multiplyScalar(0.01));
         if (!collisionOnly && !bounds.isEmpty()) {
           const center = bounds.getCenter(new THREE.Vector3());
+          // Ground is required before showMap resolves and driving starts.
+          // A compiled city pack commits all its sections together; leaving it
+          // in the background prop queue allowed driving on invisible roads.
           stream.add([{ matrix: new THREE.Matrix4(), position: center,
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
             if (!wanted()) return [];
@@ -1749,7 +1754,7 @@ export class Viewer {
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
             for (const part of parts){part.geometry.scale(0.01, 0.01, 0.01);part.userData.mapOcclusionRole='terrain';}
             return parts;
-          });
+          },false,true);
         }
         triangles += parsed.meshes.reduce((sum, mesh) => sum + mesh.indices.length / 3, 0);
         loaded++;
@@ -2501,6 +2506,7 @@ export class Viewer {
     if (!model.meshes.length) return warnings;
     const mapTextures = this.mapTextures;
     const vehicleTextures = this.vehicleTextures;
+    const read=mapSurface?assetReadBatch(assets):(path:string)=>assets.read(path);
     const loadTexture = (bytes: Uint8Array, path: string) => mapSurface
       ? mapTextures.acquire(normalizePath(path), () => this.texture(bytes, path))
       : vehicleTextures.acquire(assets, path, () => this.texture(bytes, path));
@@ -2530,7 +2536,7 @@ export class Viewer {
         { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
       if (file) {
         try {
-          const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
+          const selected = await stockContainerTexture(part, file, await read(file), assets);
           const texture = await loadTexture(selected.bytes, selected.path);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           if (part.textureMap) {
@@ -2554,7 +2560,7 @@ export class Viewer {
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
       if (layerFile) {
         try {
-          const bytes = await assets.read(layerFile), texture = await loadTexture(bytes, layerFile);
+          const bytes = await read(layerFile), texture = await loadTexture(bytes, layerFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -2592,7 +2598,7 @@ export class Viewer {
         try {
           const uv = garageBake?.uv??bakedLightmapUvs(part);
           if (!uv) throw new Error(`UV channel ${part.lightmapMap?.channel ?? 1} missing`);
-          const texture = await loadTexture(await assets.read(bakedFile), bakedFile);
+          const texture = await loadTexture(await read(bakedFile), bakedFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           configureBakedLightmap(material, geometry, uv, texture, this.bakedLightmaps);
           // A transparent second diffuse pass belongs to the same surface.

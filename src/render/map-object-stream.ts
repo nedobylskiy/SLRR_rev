@@ -364,13 +364,15 @@ export class MapObjectStream {
       const partStart=profile.start();profile.add("parts_selected_count");
       let selected=visible;
       let extra=auxiliary;
-      if(this.tightFrustum&&cull&&!this.inspectResident&&!this.geometryCutoff){
+      const terrain=mesh.userData.mapOcclusionRole==='terrain';
+      if((this.tightFrustum&&cull||terrain)&&!this.inspectResident&&!this.geometryCutoff){
         if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
         const cache=type.chunkBounds.get(mesh)??new Map<number,Box3>();type.chunkBounds.set(mesh,cache);
         selected=visible.filter(index=>{
           let box=cache.get(index);
           if(!box){box=mesh.geometry.boundingBox!.clone().applyMatrix4(type.placements[index].matrix);cache.set(index,box);}
-          return this.frustum.intersectsBox(box);
+          const distance=Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z));
+          return (!terrain||distance<=this.distance)&&(!cull||this.frustum.intersectsBox(box));
         });
       }
       if(this.geometryCutoff&&!this.inspectResident){
@@ -476,7 +478,17 @@ export class MapObjectStream {
         return;
       }
       if (!parts.length) { this.dirty = true; return; }
-      if(this.materialSharing)this.materials.acquire(parts);
+      const ground=parts.every(part=>part.userData.mapOcclusionRole==='terrain');
+      if(this.materialSharing||ground)this.materials.acquire(parts);
+      if(ground){
+        // Compiled ground sections repeat the same materials hundreds of times.
+        // This is the normal loading path, independent of experimental prop
+        // batching. Buffers remain resident; the renderer submits one compatible
+        // material batch instead of one draw for every original section.
+        const original=parts;parts=mergeStaticMapParts(original,Infinity);
+        const retained=new Set(parts.map(part=>part.geometry));
+        for(const geometry of new Set(original.map(part=>part.geometry)))if(!retained.has(geometry))geometry.dispose();
+      }
       type.localBounds = new Sphere().makeEmpty();
       type.meshes = parts.map(part => {
         if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere();

@@ -1,7 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream, isMapTreeAlias } from '../src/render/map-object-stream';
+
+test('required ground batches equal materials automatically, including distant sections, without prop options',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,200);
+  let releases=0;
+  stream.add([{matrix:new Matrix4(),position:new Vector3(),bounds:{minX:-2000,maxX:2000,minZ:-10,maxZ:10}}],async()=>
+    Array.from({length:200},(_,i)=>{
+      const geometry=new BoxGeometry();geometry.translate(i*10,0,0);geometry.addEventListener('dispose',()=>releases++);
+      // BoxGeometry groups are not needed with this single opaque material.
+      geometry.clearGroups();
+      const mesh=new Mesh(geometry,new MeshStandardMaterial());
+      mesh.userData.mapOcclusionRole='terrain';return mesh;
+    }),false,true);
+  await stream.preparePinnedModels();stream.update(new Vector3());
+  assert.equal(parent.children.length,1,'200 equal sections become one resident material batch');
+  assert.equal(stream.visible,1);assert.equal(releases,200,'replaced section buffers are released');
+  const mesh=parent.children[0] as InstancedMesh;
+  assert.equal(mesh.geometry.index!.count,200*36,'all original triangles are retained');
+  assert.equal(mesh.userData.mapOcclusionRole,'terrain');stream.dispose();
+});
+
+test('ground sections outside the radius are rejected individually even when their parent covers the camera',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  stream.add([{matrix:new Matrix4(),position:new Vector3(),bounds:{minX:-1000,maxX:1000,minZ:-10,maxZ:10}}],async()=>
+    [0,500].map((x,i)=>{
+      const geometry=new BoxGeometry();geometry.clearGroups();geometry.translate(x,0,0);
+      const mesh=new Mesh(geometry,new MeshStandardMaterial({color:i?0xff0000:0xffffff}));
+      mesh.userData.mapOcclusionRole='terrain';return mesh;
+    }),false,true);
+  await stream.preparePinnedModels();stream.update(new Vector3());
+  assert.equal(parent.children.filter(m=>m.visible).length,1);
+  stream.setRange(600);stream.update(new Vector3());assert.equal(parent.children.filter(m=>m.visible).length,2);
+  stream.dispose();
+});
 
 test('moved props update instance buffers and culling without rebuilding cached static cells',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,100);
@@ -416,6 +449,21 @@ test('street furniture categories toggle independently, including late loads and
   stream.setCategoryHidden('bins',false);stream.setCategoryHidden('small-props',true);stream.update(new Vector3(),camera);
   assert.equal(count('bins'),1);assert.equal(count('small-props'),0);assert.equal(count('building'),1);
   assert.equal(stream.active,4);stream.dispose();
+});
+
+test('required road preparation waits for delayed geometry even while the camera moves away',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  let finish!:(parts:Mesh[])=>void,wanted!:()=>boolean,ready=false;
+  stream.add([{position:new Vector3(),matrix:new Matrix4()}],async keep=>{
+    wanted=keep;return new Promise<Mesh[]>(resolve=>{finish=resolve;});
+  },false,true);
+  const preparation=stream.preparePinnedModels().then(()=>{ready=true;});
+  stream.update(new Vector3(1000,0,0));await Promise.resolve();
+  assert.equal(ready,false,'map readiness must wait for the required road');
+  assert.equal(wanted(),true,'moving the camera cannot cancel required ground geometry');
+  finish([new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);await preparation;
+  stream.update(new Vector3());assert.equal(ready,true);assert.equal(stream.visible,1);
+  stream.dispose();
 });
 
 test('pinned prepared models load before playback and retain resources outside the streaming radius',async context=>{
