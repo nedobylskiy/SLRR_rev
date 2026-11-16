@@ -20,11 +20,15 @@ type BuiltVehicle = Awaited<ReturnType<PartFactory['stock']>>;
 export class JavaSceneVehicles {
   private readonly models = new Map<GameObject, BuiltVehicle>();
   private readonly assemblies = new WeakMap<BuiltVehicle, string>();
-  private readonly failed = new WeakSet<GameObject>();
+  private failed = new WeakSet<GameObject>();
+  private scene:ReturnType<BootResult['gameTypes']['getResource']>|null=undefined;
+  private sceneRevision:number|undefined;
+  private epoch=0;
   private wanted = new Set<GameObject>();
   private loading = false;
   private work?:Promise<void>;
   private brains=new Map<GameObject,JavaValue>();
+  private boundBrains=new WeakMap<BuiltVehicle,ReturnType<BootResult['gameTypes']['getResource']>>();
   private racers=new Map<BuiltVehicle,{dispose():void}>();
   private excluded?:(ref:JavaValue)=>boolean;
   private disposed = false;
@@ -34,7 +38,7 @@ export class JavaSceneVehicles {
     inputs: string; geometry: string; steering: number | undefined; pose: GameObject; revision: number; filters: string; terrain: boolean;
   }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
-    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'|'bindJavaDriver'|'bindJavaRaceCar'>>,
+    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'|'bindJavaDriver'|'bindJavaRaceCar'|'vehicleSceneRevision'>>,
     private readonly report: (message: string) => void,
     private readonly factory: Pick<PartFactory, 'stock' | 'syncJavaAssembly'> = new PartFactory(assets)) {}
 
@@ -52,6 +56,13 @@ export class JavaSceneVehicles {
     this.terrain = terrain;
     const { gameTypes, jvm } = this.result;
     const root = map && gameTypes.getResource(map);
+    // Java may reuse its City, Bot and car handles for another quick race, while
+    // the viewer has already removed all of their render/physics bindings.
+    if(root!==this.scene||this.sceneRevision!==this.viewer.vehicleSceneRevision){
+      this.scene=root;this.sceneRevision=this.viewer.vehicleSceneRevision;this.epoch++;
+      for(const built of this.models.values())this.release(built);
+      this.models.clear();this.failed=new WeakSet();
+    }
     const vehicles = new Map<GameObject, JavaValue>();
     this.brains.clear();
     let priority: number | undefined;
@@ -78,7 +89,16 @@ export class JavaSceneVehicles {
           // Race opponents belong to a Bot retained by the active City/Track,
           // rather than directly to a Vehicle field on that section.
           const nested=value.value as JavaObject|null;
-          if(nested?.fields instanceof Map){const car=nested.fields.get('car'),brain=nested.fields.get('brain');if(car){consider(car);const node=gameTypes.get(car);if(node&&brain?.value!=null)this.brains.set(node,brain);}}
+          if(nested?.fields instanceof Map){
+            const car=nested.fields.get('car'),brain=nested.fields.get('brain');
+            // An allocated Bot can legitimately have no car (e.g. demoBot or a
+            // rival released after the last race). It must not abort discovery
+            // of the live raceBot which occurs later in the section's fields.
+            if(car?.value!=null&&typeof car.value==='object'&&'fields' in car.value){
+              consider(car);const node=gameTypes.get(car);
+              if(node&&brain?.value!=null)this.brains.set(node,brain);
+            }
+          }
         }
       }
       for (const name of ['cam', 'camera']) {
@@ -92,7 +112,8 @@ export class JavaSceneVehicles {
     this.wanted = new Set(vehicles.keys());
     const changed: [GameObject, JavaValue][] = [];
     for (const [node, built] of this.models) {
-      if (!this.wanted.has(node)) { this.release(built); this.models.delete(node); }
+      const brain=this.brains.get(node),brainNode=brain?gameTypes.getResource(brain):undefined;
+      if (!this.wanted.has(node)||built.world.disposed||this.boundBrains.get(built)!==brainNode) { this.release(built); this.models.delete(node);this.failed.delete(node); }
       else {
         const ref = vehicles.get(node)!;
         if (this.assemblies.get(built) !== this.signature(ref)) changed.push([node, ref]);
@@ -114,12 +135,13 @@ export class JavaSceneVehicles {
   }
 
   private async refresh(node: GameObject, ref: JavaValue, built: BuiltVehicle): Promise<void> {
+    const epoch=this.epoch;
     try {
       const signature = this.signature(ref);
       const selection = await javaStockSelection(this.result, this.assets, built.root.definition.key.pack, ref);
-      if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      if (this.disposed || epoch!==this.epoch || !this.wanted.has(node) || built.world.disposed) return;
       await this.factory.syncJavaAssembly(built.root, selection);
-      if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      if (this.disposed || epoch!==this.epoch || !this.wanted.has(node) || built.world.disposed) return;
       this.settled.delete(built);
       this.synced.delete(built);
       this.sync(node, built, ref);
@@ -128,7 +150,7 @@ export class JavaSceneVehicles {
       if (built.world.disposed) this.viewer.removeWorld(built.world);
       else this.assemblies.set(built, signature);
     } catch (error) {
-      if (!this.disposed && this.wanted.has(node)) {
+      if (!this.disposed && epoch===this.epoch && this.wanted.has(node)) {
         this.assemblies.set(built, this.signature(ref));
         this.report(`Java vehicle update ${node.alias}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -241,6 +263,7 @@ export class JavaSceneVehicles {
   }
 
   private async load(node: GameObject, ref: JavaValue): Promise<void> {
+    const epoch=this.epoch,current=()=>!this.disposed&&epoch===this.epoch&&this.wanted.has(node);
     let built: BuiltVehicle | undefined;
     try {
       const chassis = this.result.jvm.get(ref, 'chassis');
@@ -254,22 +277,24 @@ export class JavaSceneVehicles {
       const signature = this.signature(ref);
       built = await this.factory.stock(key, { mechanical: true, javaSelection: selection });
       this.assemblies.set(built, signature);
-      if (this.disposed || !this.wanted.has(node)) { built.world.dispose(); return; }
+      if (!current()) { built.world.dispose(); return; }
       this.sync(node, built, ref);
       await this.viewer.showWorld(built.world, this.assets, true, true);
-      if (this.disposed || !this.wanted.has(node)) { this.release(built); return; }
+      if (!current()) { this.release(built); return; }
       const brain=this.brains.get(node);
       if(brain){
+        const brainNode=this.result.gameTypes.getResource(brain);
+        this.boundBrains.set(built,brainNode);
         const renderCommand=this.result.gameTypes.lastCommand(brain,'renderinstance');
         const driverId=renderCommand&&Number(renderCommand.trim().split(/\s+/)[1]);
         const driver=driverId?this.result.gameTypes.getByResourceId(driverId):undefined;
         if(driver instanceof RenderObject)await this.viewer.bindJavaDriver?.(driver,built.root,this.assets);
-        if(this.disposed||!this.wanted.has(node)){this.release(built);return;}
+        if(!current()){this.release(built);return;}
         const chassis=this.result.gameTypes.get(this.result.jvm.get(ref,'chassis'));
         let publishedRevision=-1;
         const racer=await this.viewer.bindJavaRaceCar?.(built.root,{
           command:()=>this.result.gameTypes.latestCommand(brain,RACE_COMMANDS),
-          active:()=>!this.disposed&&this.wanted.has(node)&&!!this.result.gameTypes.get(brain),
+          active:()=>current()&&!!brainNode&&this.result.gameTypes.getResource(brain)===brainNode,
           placement:()=>{
             const pose=chassis&&chassis.poseRevision>node.poseRevision?chassis:node;
             if(pose.poseRevision<=publishedRevision)return;
@@ -283,12 +308,12 @@ export class JavaSceneVehicles {
           }
         });
         if(racer)this.racers.set(built,racer);
-        if(this.disposed||!this.wanted.has(node)){this.release(built);return;}
+        if(!current()){this.release(built);return;}
       }
       this.models.set(node, built);
     } catch (error) {
       if (built) this.release(built);
-      if (!this.disposed && this.wanted.has(node)) {
+      if (current()) {
         this.failed.add(node);
         this.report(`Java vehicle ${node.alias}: ${error instanceof Error ? error.message : String(error)}`);
       }

@@ -88,6 +88,7 @@ import { Bot } from '../engine/bot';
 import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
+import {roadImpactScenario} from '../engine/road-impact-scenario';
 import {roadRoutes} from '../engine/road-route';
 import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,safeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel,type JavaTrafficBridge,type TrafficStreamHandle} from '../engine/traffic-models';
@@ -364,6 +365,7 @@ export class Viewer {
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
   private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;dispose():void}>();
+  get vehicleSceneRevision(){return this.generation;}
   private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
   private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
@@ -459,6 +461,7 @@ export class Viewer {
   private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
   private mapPedestrianPending?:Promise<void>;
   private trafficTestEnabled = false;
+  get trafficTestActive(){return this.trafficTestEnabled;}
   private trafficTestRevision = 0;
   private trafficCars:TrafficTestCar[]=[];
   private get trafficTest(){return this.trafficCars.find(car=>car.active);}
@@ -2095,7 +2098,7 @@ export class Viewer {
     car.disableObstacle();car.placeAt(position,yaw);car.settleSpawn();
     if(root.savedVehicleDamage)car.restoreDamage(root.savedVehicleDamage);
     const routes=roadRoutes(roads.network);
-    const driver=new RaceDriver((start,finish)=>routes.query(start,finish),car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6);
+    const driver=new RaceDriver(control.route??((start,finish)=>routes.query(start,finish)),car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6);
     let input:DrivingInput={throttle:0,steer:0,brake:true};
     car.controlInput=dt=>input=raceVehicleInput(driver,car,control.command(),dt);
     const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part))}));
@@ -2105,11 +2108,15 @@ export class Viewer {
       if(document.hidden||(this.scriptTimeScale?.()??1)<=0){last=undefined;return;}
       const placement=control.placement?.();
       if(placement){car.placeAt(placement.position,placement.yaw);car.settleSpawn();car.body.velocity.copy(placement.velocity);last=undefined;}
-      const dt=(last===undefined?0:Math.min(.05,Math.max(0,(now-last)/1000)))*(this.scriptTimeScale?.()??1);last=now;
+      // Foreground frame time belongs to the fixed clock. Clamping it makes
+      // opponents slower than the player as soon as rendering drops below 20 Hz.
+      const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
       car.advance(dt,{throttle:0,steer:0,brake:false});
+      for(const key of ['suspension','contacts','panels','panelSolve','panelSurface','other'] as const)
+        this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
       const others=[...(this.trafficPeer?[this.trafficPeer]:[]),...[...this.javaRaces.values()].filter(r=>r!==racer).map(r=>r.car)];
       for(const other of others){const hit=vehiclePairContact(car.body,other.body);if(!hit)continue;
-        if(hit.impulse.lengthSq()>1){car.vehicleContact(hit.impulse,hit.point,other.body.bounds.clone().applyMatrix4(other.body.matrix()),hit.closing);other.vehicleContact(hit.impulse.clone().negate(),hit.point,car.body.bounds.clone().applyMatrix4(car.body.matrix()),hit.closing);}
+        if(hit.impulse.lengthSq()>1){control.impact?.(hit.closing);car.vehicleContact(hit.impulse,hit.point,other.body.bounds.clone().applyMatrix4(other.body.matrix()),hit.closing);other.vehicleContact(hit.impulse.clone().negate(),hit.point,car.body.bounds.clone().applyMatrix4(car.body.matrix()),hit.closing);}
         const total=1/car.body.mass+1/other.body.mass,depth=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
         car.body.position.addScaledVector(hit.normal,depth/car.body.mass/total);other.body.position.addScaledVector(hit.normal,-depth/other.body.mass/total);
       }
@@ -2119,6 +2126,67 @@ export class Viewer {
       control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
     },dispose:()=>{if(disposed)return;disposed=true;this.javaRaces.delete(root);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
     this.javaRaces.set(root,racer);return racer;
+  }
+  async cityImpactPlayground(roots:[EnginePart,EnginePart],assets:Assets,telemetry:(text:string)=>void){
+    const source=this.mapRoadSource;
+    if(!source?.terrain||!source.collision)throw Error('Load the city before starting the impact playground');
+    const roads=await loadMapRoads(assets,source.pack,source.groundId);
+    if(!roads)throw Error('City road graph is missing');
+    const scenario=roadImpactScenario(roads.network),yaw=(v:THREE.Vector3)=>Math.atan2(-v.x,-v.z);
+    const supported=(p:THREE.Vector3)=>new THREE.Vector3(p.x,source.terrain!.height(p.x,p.z,p.y+2)+.8,p.z);
+    const start=supported(scenario.start),target=supported(scenario.target);
+    let live=true,run=0,capturing=false,started=performance.now(),captureStart=0,captureSimulationStart=0,lastHud=-Infinity;
+    let firstContact:{seconds:number;simulationSeconds:number;closingKmh:number}|undefined;
+    const marker=new THREE.Mesh(new THREE.ConeGeometry(.7,2,12),new THREE.MeshBasicMaterial({color:0xffae35}));
+    marker.position.copy(target).add(new THREE.Vector3(0,3,0));marker.rotation.z=Math.PI;this.model.add(marker);
+    const playerSession=this.drive(roots[0],()=>{},true,{terrain:source.terrain,collision:source.collision,position:target,yaw:yaw(scenario.targetDirection)},assets);
+    const player=playerSession.vehicle!;
+    if(!player){playerSession();marker.removeFromParent();marker.geometry.dispose();marker.material.dispose();throw Error('Player physics could not be created');}
+    player.controlInput=()=>({throttle:0,steer:0,brake:true,brakeAxis:1,clutch:true});
+    roots[1].local.makeRotationY(yaw(scenario.direction)).setPosition(start);
+    const cleanupPlayer=()=>{live=false;playerSession();marker.removeFromParent();marker.geometry.dispose();marker.material.dispose();};
+    const binding=await this.bindJavaRaceCar(roots[1],{
+      active:()=>live,command:()=>`AI_race ${scenario.goal.x},${scenario.goal.y},${scenario.goal.z} ${run}`,
+      route:()=>scenario.route,
+      impact:closing=>{firstContact??={seconds:(performance.now()-started)/1000,simulationSeconds:player.simulationTime,closingKmh:closing*3.6};},
+      motion:()=>updateHud()
+    }).catch(error=>{cleanupPlayer();throw error;});
+    if(!('car' in binding)||!binding.car){binding.dispose();cleanupPlayer();throw Error('Race physics binding became stale');}
+    const opponent=binding.car;
+    const stopCapture=()=>{if(!capturing)return;capturing=false;player.telemetry.stop('playground');opponent.telemetry.stop('playground');};
+    const reset=()=>{
+      stopCapture();run++;firstContact=undefined;started=performance.now();lastHud=-Infinity;
+      player.placeAt(target,yaw(scenario.targetDirection));player.settleSpawn();
+      opponent.placeAt(start,yaw(scenario.direction));opponent.settleSpawn();
+      this.controls.target.copy(player.body.position);this.camera.position.copy(player.body.position).add(new THREE.Vector3(12,7,12));this.controls.update();
+    };
+    const record=()=>{
+      reset();captureStart=performance.now();captureSimulationStart=player.simulationTime;capturing=true;
+      for(const [role,car]of [['player',player],['opponent',opponent]] as const)
+        car.telemetry.start({playground:'city_ai_impact',role,road:scenario.road,approach_metres:scenario.approachMetres,spawn:JSON.stringify(scenario.start.toArray()),target:JSON.stringify(scenario.target.toArray())});
+    };
+    function updateHud(){
+      const now=performance.now(),captured=player.simulationTime-captureSimulationStart;
+      // Slow rendering must not end the recording before the collision happens.
+      if(capturing&&(captured>=20||now-captureStart>=60000))stopCapture();
+      if(now-lastHud<200)return;lastHud=now;
+      const timing=(car:Vehicle3D)=>Object.entries(car.timings).filter(([key])=>['suspension','contacts','panels','other'].includes(key)).map(([key,value])=>`${key} ${value.toFixed(2)}`).join(' · ');
+      telemetry([
+        `City AI impact · road #${scenario.road} · ${scenario.approachMetres} m approach · 120 Hz`,
+        `Spawn ${scenario.start.toArray().map(v=>v.toFixed(1)).join(', ')} · nearest suitable lane to (0, 0, 0)`,
+        `Opponent ${(opponent.body.velocity.length()*3.6).toFixed(1)} km/h · player ${(player.body.velocity.length()*3.6).toFixed(1)} km/h`,
+        `Opponent engine ${opponent.suspension.mechanics?.running?'on':'off'} · RPM ${opponent.suspension.mechanics?.rpm.toFixed(0)} · gear ${opponent.suspension.mechanics?.gear} · distance ${opponent.body.position.distanceTo(target).toFixed(1)} m`,
+        `Player CPU ms: ${timing(player)} · debt ${(player.simulationPendingSeconds*1000).toFixed(1)} ms`,
+        `Opponent CPU ms: ${timing(opponent)} · debt ${(opponent.simulationPendingSeconds*1000).toFixed(1)} ms`,
+        firstContact?`First impact ${firstContact.simulationSeconds.toFixed(2)} s simulated / ${firstContact.seconds.toFixed(2)} s real · closing ${firstContact.closingKmh.toFixed(1)} km/h`:'Approaching the stationary player car',
+        capturing?`Recording ${Math.min(20,captured).toFixed(1)} / 20 s simulated · ${((now-captureStart)/1000).toFixed(1)} s real (60 s limit)`:'Capture stopped · Start 20 s capture resets both cars',
+      ].join('\n'));
+    }
+    reset();
+    return {reset,record,stopCapture,player,opponent,
+      report:()=>{stopCapture();return JSON.stringify({scenario:'city_ai_impact',road:scenario.road,start:scenario.start.toArray(),target:scenario.target.toArray(),approachMetres:scenario.approachMetres,aiGoal:scenario.goal.toArray(),firstContact,player:player.telemetry.text(),opponent:opponent.telemetry.text()},null,2);},
+      dispose:()=>{if(!live)return;live=false;stopCapture();binding.dispose();player.controlInput=undefined;playerSession();marker.removeFromParent();marker.geometry.dispose();marker.material.dispose();}
+    };
   }
   vehiclePair(roots:[EnginePart,EnginePart],scenario:VehiclePairScenario,telemetry:(text:string)=>void) {
     this.stopDriving?.();

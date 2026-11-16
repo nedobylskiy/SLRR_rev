@@ -31,18 +31,19 @@ test('a Bot-owned race car is prepared before scene readiness without duplicatin
   const driver=types.createRender(ref('RenderRef'),map,null,'botfigura')!;
   const command=async(text:string)=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',text)]);
   await command(`renderinstance ${driver.resourceId}`);await command('AI_suspend');
-  const state=ref('City',{raceBot:ref('Bot',{car:cars[1].car,brain})});
+  const state=ref('City',{unusedBot:ref('Bot',{car:jv('Vehicle',null)}),raceBot:ref('Bot',{car:cars[1].car,brain})});
   jvm.set(jv('class','java.game.GameLogic'),'actualState',state);
   jvm.set(jv('class','java.game.GameLogic'),'player',ref('Player',{car:cars[0].car}));
   const reference=types.reference.bind(types);types.reference=node=>cars.find(c=>types.get(c.car)===node)?.chassis??reference(node);
   const result={jvm,gameTypes:types,resolveResourceIdentity:()=>undefined,
     parts:{visualRevision:()=>0,installedTree:()=>[],slotOverrides:()=>new Map(),engineDyno:()=>undefined},
     chassis:{wheelState:()=>undefined,updateState:()=>undefined,coolingSettings:()=>[10,50,.01]}} as unknown as BootResult;
-  const shown:EngineWorld[]=[];let finish!:()=>void,ready=false,seated=false,released=false,control:JavaRaceControl|undefined;
+  const shown:EngineWorld[]=[];let finish!:()=>void,ready=false,seated=false,released=false,sceneRevision=0,control:JavaRaceControl|undefined;
   const renderer=new JavaSceneVehicles(result,{} as Assets,{
     showWorld:async world=>{shown.push(world);await new Promise<void>(resolve=>{finish=resolve;});return [];},
     removeWorld:()=>{},syncWorldVisuals:()=>{},
-    bindJavaDriver:async(node,root)=>{assert.equal(node,driver);assert.equal(root.world,shown[0]);seated=true;},
+    get vehicleSceneRevision(){return sceneRevision;},
+    bindJavaDriver:async(node,root)=>{assert.equal(node,driver);assert.equal(root.world,shown.at(-1));seated=true;},
     bindJavaRaceCar:async(root,commands)=>{assert.equal(seated,true,'seat the original Java driver before releasing scene readiness');control=commands;return {dispose(){released=true;}};}
   },message=>assert.fail(message),{syncJavaAssembly:async()=>assert.fail('unchanged race car must reuse its assembly'),stock:async key=>{
     assert.equal(key.id,2,'select Bot.car rather than building another player/traffic car');
@@ -61,8 +62,20 @@ test('a Bot-owned race car is prepared before scene readiness without duplicatin
   assert.deepEqual(control!.placement!()!.position.toArray(),[300,4,500],'late Java start-line placement reaches the physics');
   assert.equal(control!.placement!(),undefined);
   renderer.update(map,undefined,excluded);assert.equal(shown.length,1,'unchanged opponent is reused');
+  const oldControl=control!;sceneRevision++;
+  const restart=renderer.prepare(map,undefined,excluded);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(shown.length,2,'second quick race recreates a model removed by viewer.clear even with the same Java car');
+  assert.equal(shown[0].disposed,true);assert.equal(oldControl.active(),false,'old physics cannot publish into the new race');
+  finish();await restart;
+  assert.notEqual(control,oldControl);assert.equal(control!.active(),true);assert.equal(shown[1].disposed,false);
+  const replacement=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',replacement,[]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',replacement,[jv('ResourceRef',null),jv('int',16),jv('String',`renderinstance ${driver.resourceId}`)]);
+  ((state.value as JavaObject).fields.get('raceBot')!.value as JavaObject).fields.set('brain',replacement);
+  const rebind=renderer.prepare(map,undefined,excluded);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(shown.length,3,'a replacement Java brain on the same car also replaces its physics binding');
+  finish();await rebind;assert.equal(shown[1].disposed,true);assert.equal(control!.active(),true);
   (state.value as JavaObject).fields.set('raceBot',jv('Bot',null));renderer.update(map,undefined,excluded);
-  assert.equal(shown[0].disposed,true,'remove the opponent when Java releases the Bot');assert.equal(released,true);assert.equal(control!.active(),false);renderer.dispose();types.dispose();
+  assert.equal(shown[2].disposed,true,'remove the opponent when Java releases the Bot');assert.equal(released,true);assert.equal(control!.active(),false);renderer.dispose();types.dispose();
 });
 
 test('scene vehicles use each Java chassis, follow poses and release removed or pending models', async () => {
@@ -229,7 +242,3 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.ok(built.every(model => model.world.disposed));
   renderer.dispose(); assert.equal(removed.length, 2);
 });
-
-
-
-

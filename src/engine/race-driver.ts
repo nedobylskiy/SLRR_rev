@@ -21,6 +21,8 @@ export interface JavaRaceControl {
   active():boolean;
   /** A new Java placement, excluding poses published by the physics itself. */
   placement?():{position:Vector3;yaw:number;velocity:Vector3}|undefined;
+  route?:(start:RoadPoint,finish:RoadPoint)=>RoadRoute|undefined;
+  impact?:(closing:number)=>void;
   motion(position:Vector3,yaw:number,velocity:Vector3):void;
 }
 export function raceVehicleInput(driver:RaceDriver,car:Vehicle3D,command:string|undefined,dt:number):DrivingInput {

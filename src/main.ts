@@ -438,6 +438,8 @@ document.addEventListener('keydown', event => {
 const driveButton = textElement('button', 'Test drive') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Hood impact test'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
+const cityImpactButton=textElement('button','City AI impact playground');cityImpactButton.className='hood-button';crashButton.after(cityImpactButton);
+cityImpactButton.onclick=()=>void openCityImpactPlayground();
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const pairControls = textElement('div', '', 'hood-controls'); pairControls.hidden = true; el('scene-help').before(pairControls);
 const playgroundButton=textElement('button','Character playground');playgroundButton.className='hood-button';crashButton.after(playgroundButton);
@@ -1419,6 +1421,58 @@ async function openMainMenu() {
     status('Main menu');
   } catch (error) { if (request === sequence) { status('MainMenu.java execution error', true); el('details').textContent = String(error); } }
 }
+async function openCityImpactPlayground(){
+  if(!assets||!viewer)return;
+  const source=assets;let other:Awaited<ReturnType<PartFactory['stock']>>|undefined;
+  const boot=activeBoot,nativeCars:ReturnType<typeof jv>[]=[];
+  const releaseNative=()=>{for(const car of nativeCars.splice(0))void boot?.jvm.invokeAsync(car,'destroy').catch(error=>appendJavaEvent({level:'error',message:`Playground vehicle cleanup: ${String(error)}`}));};
+  let lab:Awaited<ReturnType<Viewer['cityImpactPlayground']>>|undefined;
+  const opening=openWorld('cars/racers/Baiern.rpk',6),request=sequence;
+  await opening;if(request!==sequence||!engineRoot||!viewer)return;
+  const previousTraffic=viewer.trafficTestActive;
+  try{
+    status('Loading city impact playground…');
+    await viewer.setTrafficTestEnabled(false);
+    if(!boot)throw Error('Wait for Java initialization before opening the city impact playground');
+    const build=async()=>{
+      const parent=boot.jvm.get(jv('class','java.game.GameLogic'),'player');
+      const id=boot.gameTypes.remountSavedResource('cars/racers/Baiern.rpk',6);
+      const car=await boot.jvm.constructAsync('java.game.Vehicle',[parent,id,jv('int',0),jv('float',1),jv('float',1),jv('float',1),jv('float',1)]);
+      nativeCars.push(car);
+      const selection=await javaStockSelection(boot,source,'cars/racers/Baiern.rpk',car);
+      return new PartFactory(source).stock({pack:'cars/racers/Baiern.rpk',id:6},{mechanical:true,javaSelection:selection});
+    };
+    // Execute addStockParts: the CFG-only recipe is incomplete in class-only 2.2.1 installations.
+    const first=await build();
+    if(request!==sequence){first.world.dispose();releaseNative();return;}
+    if(engineWorld){viewer.removeWorld(engineWorld);engineWorld.dispose();}
+    engineWorld=first.world;engineRoot=first.root;await viewer.showWorld(first.world,source,true);
+    other=await build();
+    if(request!==sequence){other.world.dispose();return;}
+    await viewer.showWorld(other.world,source,true);
+    await viewer.showMap('maps/city.rpk',source,undefined,true);
+    if(request!==sequence){viewer.removeWorld(other.world);other.world.dispose();return;}
+    await viewer.prepareJavaScene();
+    lab=await viewer.cityImpactPlayground([engineRoot,other.root],source,text=>{driveHud.textContent=text;});
+    if(request!==sequence){lab.dispose();viewer.removeWorld(other.world);other.world.dispose();return;}
+    const session=lab,second=other;
+    disposeDriving=()=>{session.dispose();viewer?.removeWorld(second.world);second.world.dispose();releaseNative();void viewer?.setTrafficTestEnabled(previousTraffic);};
+    pairControls.replaceChildren();
+    for(const [label,action]of [
+      ['Restart approach',()=>session.reset()],
+      ['Start 20 s capture',()=>session.record()],
+      ['Stop capture',()=>session.stopCapture()],
+      ['Download impact report',()=>downloadText(session.report(),`slrr-city-impact-${Date.now()}.json`)],
+    ] as const){const button=textElement('button',label);button.onclick=action;pairControls.append(button);}
+    pairControls.hidden=false;driveHud.hidden=false;driveHud.classList.add('crash-hud');
+    el('viewport').parentElement?.classList.add('physics-scene');driveButton.textContent='End drive';
+    el('format').textContent='PHYSICS / CITY AI IMPACT';el('filename').textContent='Baiern ×2 · real city road collisions';
+    el('details').textContent='Two complete cars on the nearest lane to (0, 0, 0) with a 60 m approach before a junction. The rival uses the race AI steering and normal 120 Hz vehicle physics; its lane route is fixed for repeatable impacts. The orange marker is the impact point occupied by the braked player car; the AI finish is 200 m beyond it, so it keeps accelerating into the collision. Random traffic is disabled. Capture resets both cars and records 20 simulated seconds (60 real seconds maximum), including separate player/opponent timings and simulation debt.';
+    el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Restart restores both cars';
+    status('City AI impact playground ready');
+  }catch(error){lab?.dispose();if(other){viewer?.removeWorld(other.world);other.world.dispose();}releaseNative();void viewer?.setTrafficTestEnabled(previousTraffic);if(request===sequence){status('City impact playground failed',true);el('details').textContent=String(error);}}
+}
+
 async function openVehiclePairTest(scenario:'offset'|'side'|'rear-chain') {
   if(!assets||!viewer)return;
   const source=assets;let request=sequence;
