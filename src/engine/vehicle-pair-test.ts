@@ -75,8 +75,8 @@ export class VehiclePairTest {
         const boundsB=this.b.body.bounds.clone().applyMatrix4(this.b.body.matrix());
         if(hit.impulse.lengthSq()>1){
           if(chain)this.rearImpact??={time:this.time,speed:this.b.velocity().length()};
-          this.a.vehicleContact(hit.impulse,hit.point,boundsB,hit.closing);
-          this.b.vehicleContact(hit.impulse.clone().negate(),hit.point,boundsA,hit.closing);
+          this.a.vehicleContact(hit.impulse,hit.point,boundsB,hit.closing,this.b);
+          this.b.vehicleContact(hit.impulse.clone().negate(),hit.point,boundsA,hit.closing,this.a);
           this.contacts++;this.firstImpact??={time:this.time,closing:hit.closing};
         }
         // Separate once per shared tick, mass-weighted, without a restitution kick.

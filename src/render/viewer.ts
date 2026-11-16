@@ -2116,7 +2116,7 @@ export class Viewer {
         this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
       const others=[...(this.trafficPeer?[this.trafficPeer]:[]),...[...this.javaRaces.values()].filter(r=>r!==racer).map(r=>r.car)];
       for(const other of others){const hit=vehiclePairContact(car.body,other.body);if(!hit)continue;
-        if(hit.impulse.lengthSq()>1){control.impact?.(hit.closing);car.vehicleContact(hit.impulse,hit.point,other.body.bounds.clone().applyMatrix4(other.body.matrix()),hit.closing);other.vehicleContact(hit.impulse.clone().negate(),hit.point,car.body.bounds.clone().applyMatrix4(car.body.matrix()),hit.closing);}
+        if(hit.impulse.lengthSq()>1){control.impact?.(hit.closing);car.vehicleContact(hit.impulse,hit.point,other.body.bounds.clone().applyMatrix4(other.body.matrix()),hit.closing,other);other.vehicleContact(hit.impulse.clone().negate(),hit.point,car.body.bounds.clone().applyMatrix4(car.body.matrix()),hit.closing,car);}
         const total=1/car.body.mass+1/other.body.mass,depth=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
         car.body.position.addScaledVector(hit.normal,depth/car.body.mass/total);other.body.position.addScaledVector(hit.normal,-depth/other.body.mass/total);
       }

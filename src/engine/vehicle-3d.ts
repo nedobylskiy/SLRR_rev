@@ -103,6 +103,7 @@ export class Vehicle3D extends CarCrashDemo {
   private lastOmega = new Vector3();
   private surfaceDirty = false;
   private pendingShock = false;
+  private readonly contactPeers = new Map<Vehicle3D,number>();
   private readonly freeContactBuffers = new WeakMap<Float64Array, { points: Vector3[]; current: Float64Array; previous: Float64Array }>();
   private readonly freeContactPoint = new Vector3();
   private pendingReleaseVelocity = new Map<EnginePart, Vector3>();
@@ -256,6 +257,14 @@ export class Vehicle3D extends CarCrashDemo {
     if (panel !== this.panel) panel.colliders.push(this.obstacle);
     if (!root && panel !== this.panel) panel.surfaces.push({ project: (p, previous, i) => !part.parent ? this.rigidSurface?.project(p, previous, i) : undefined });
     if (!root) panel.surfaces.push({ project: (p, _previous, i) => this.guardContact(soft, p, i) });
+    panel.surfaces.push({project:(p,previous,i)=>{
+      for(const [peer,expires]of this.contactPeers){
+        if(this.simulationTime>expires||peer.root.world.disposed)continue;
+        const hit=peer.bodySurface?.project(p,previous,i);
+        if(hit)return {...hit,impulse:(j:Triple,point:Triple)=>peer.applyLocalizedImpulse(new Vector3(...j).negate(),new Vector3(...point))};
+      }
+      return undefined;
+    }});
   }
   register(part: EnginePart, samples: number[], triangles: number[]) {
     const file = part.definition.cfgPath.split('/').at(-1) ?? '';
@@ -332,8 +341,19 @@ export class Vehicle3D extends CarCrashDemo {
     else super.applyImpulse(j, point);
   }
   /** Contact impulse from another moving vehicle, shared with the impact damage model. */
-  vehicleContact(impulse:Vector3, point:Vector3, otherBounds:Box3, closingSpeed:number) {
-    this.applyImpulse(impulse,point);
+  private applyLocalizedImpulse(impulse:Vector3,point:Vector3){
+    const velocity=this.body.velocity.clone(),omega=this.body.omega;
+    this.body.impulse(impulse,point);
+    // damageImpact distributes this collision to the chassis and nearby panels.
+    // Do not count the same rigid velocity jump as a second, whole-car shock on
+    // the next tick. Suspension/ground loads and unrelated impulses still wake
+    // panels through the normal acceleration test.
+    this.lastVelocity.add(this.body.velocity.clone().sub(velocity));
+    this.lastOmega.add(this.body.omega.sub(omega));
+  }
+  vehicleContact(impulse:Vector3, point:Vector3, otherBounds:Box3, closingSpeed:number,other?:Vehicle3D) {
+    if(other&&other!==this)this.contactPeers.set(other,this.simulationTime+.25);
+    this.applyLocalizedImpulse(impulse,point);
     const frame=this.body.matrix();
     this.damageImpact(impulse,point,otherBounds,frame,frame);
     this.impactSpeed=Math.max(this.impactSpeed,closingSpeed);
@@ -357,6 +377,7 @@ export class Vehicle3D extends CarCrashDemo {
     for (const s of this.originalTree) s.part.condition = 1;
     this.body.setMass(vehicleAssemblyMass(this.root.world.parts.values())); this.body.setFrame(this.root.matrix()); this.body.velocity.z = -speed; this.suspension.reset(); this.terrain.ramp = false;
     this.lastVelocity.copy(this.body.velocity); this.lastOmega.copy(this.body.omega); this.surfaceDirty = this.pendingShock = false; this.pendingReleaseVelocity.clear();
+    this.contactPeers.clear();
     this.surfaceTick = -Infinity;
     this.obstacle.min.splice(0, 3, ...this.originalObstacle.min); this.obstacle.max.splice(0, 3, ...this.originalObstacle.max);
     for (const s of this.soft.values()) { s.guard = undefined; s.panel.setAnchorFrame(s.part.matrix().elements); s.panel.reset(); s.activity.reset(s.part.matrix()); for (let i = 0; i < s.panel.velocities.length; i += 3) this.body.pointVelocity(new Vector3().fromArray(s.panel.positions, i)).toArray(s.panel.velocities, i); }
@@ -623,6 +644,9 @@ export class Vehicle3D extends CarCrashDemo {
       const shock = this.pendingShock || this.body.velocity.distanceTo(this.lastVelocity) / dt > 25 || omega.distanceTo(this.lastOmega) / dt > 10 || omega.lengthSq() * 3 > 25;
       this.pendingShock = false;
       const ordered = [...this.soft.values()].sort((a, b) => Number(b.root) - Number(a.root) || Number(!!b.part.parent) - Number(!!a.part.parent) || Number(a.part === this.hood) - Number(b.part === this.hood));
+      for(const [peer,expires]of this.contactPeers){
+        if(this.simulationTime>expires||peer.root.world.disposed){this.contactPeers.delete(peer);continue;}
+      }
       const movingCarrier = this.body.velocity.lengthSq() > 0.0001 || omega.lengthSq() > 0.0001;
       const sweptCarrier = movingCarrier ? this.body.bounds.clone().applyMatrix4(previous).union(this.body.bounds.clone().applyMatrix4(this.root.matrix())).expandByScalar(0.3) : undefined;
       let freeSurfaceUpdated = false;
@@ -676,7 +700,7 @@ export class Vehicle3D extends CarCrashDemo {
         this.timings.panelSleep += performance.now() - sleepStart;
       }
       this.timings.panels += performance.now() - sectionStart; sectionStart = performance.now();
-      if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= this.physicsFrequency/COLLISION_GEOMETRY_HZ && [...this.rigid.values()].some(r => !r.part.parent)) {
+      if (!freeSurfaceUpdated && this.surfaceDirty && tick - this.surfaceTick >= this.physicsFrequency/COLLISION_GEOMETRY_HZ && (this.contactPeers.size > 0 || [...this.rigid.values()].some(r => !r.part.parent))) {
         this.updateSurface(); this.surfaceDirty = false;
       }
       for (const r of this.rigid.values()) {

@@ -495,6 +495,51 @@ test('installed panels stay rigid at rest, wake for an impulse and retain their 
   demo.reset(); assert.ok(!demo.soft.get(hood)!.activity.deforming); assert.equal(demo.panel.plasticBeams, 0); world.dispose();
 });
 
+test('a localized vehicle impact wakes the struck panel without waking remote intact panels',()=>{
+  const {demo,world,hood,door}=setup();demo.disableObstacle();demo.placeAt(new Vector3(0,5,0),0);
+  const struck=demo.soft.get(door)!,remote=demo.soft.get(hood)!;
+  const point=new Vector3();
+  for(let i=0;i<struck.panel.positions.length;i+=3)point.add(new Vector3().fromArray(struck.panel.positions,i));
+  point.multiplyScalar(3/struck.panel.positions.length);
+  point.z=Math.max(...Array.from(struck.panel.positions).filter((_,i)=>i%3===2));
+  const bounds=new Box3(point.clone().addScalar(-.15),point.clone().addScalar(.15));
+  demo.vehicleContact(point.clone().sub(demo.body.position).normalize().multiplyScalar(3000),point,bounds,15);
+  assert.ok(struck.activity.forced,'the contact must deliver a real local panel impulse');
+  demo.advance(demo.physicsDt,neutral);
+  assert.ok(struck.activity.deforming,'struck geometry enters XPBD');
+  assert.equal(remote.activity.deforming,false,'rigid impact motion must not wake the remote hood');
+  assert.ok(demo.timings.activePanels<demo.soft.size);
+  world.dispose();
+});
+
+test('a contacting panel hits the other vehicle triangle surface and returns a reaction impulse',()=>{
+  const a=setup(),b=setup();
+  for(const car of [a,b]){car.demo.disableObstacle();car.demo.placeAt(new Vector3(0,5,0),0);}
+  b.demo.setBodyTriangles([-2,0,-2,2,0,-2,0,0,2]);
+  b.demo.bodySurface!.setFrames(b.demo.body.matrix(),b.demo.body.matrix());
+  const point=new Vector3(0,5,0);
+  a.demo.vehicleContact(new Vector3(),point,new Box3(point.clone().addScalar(-1),point.clone().addScalar(1)),0,b.demo);
+  const panel=a.demo.soft.get(a.door)!.panel;
+  const surfaceY=new Vector3().setFromMatrixPosition(b.demo.body.matrix()).y;
+  const current=new Float64Array([0,surfaceY-.1,0]),previous=new Float64Array([0,surfaceY+.1,0]);
+  const hit=panel.surfaces.at(-1)!.project(current,previous,0);
+  assert.ok(hit,'the node must hit actual peer triangles');
+  assert.ok(current[1]>surfaceY,'swept contact must stop the node outside the peer surface');
+  const before=b.demo.body.velocity.clone();
+  hit.impulse!([0,10,0],hit.point);
+  assert.ok(b.demo.body.velocity.y<before.y,'peer receives the equal opposite reaction');
+  a.demo.reset();
+  assert.equal(panel.surfaces.at(-1)!.project(new Float64Array([0,4.9,0]),previous,0),undefined,'reset removes old contact peers');
+  a.world.dispose();b.world.dispose();
+});
+
+test('an external inertial shock still wakes panels independently of localized vehicle contacts',()=>{
+  const {demo,world}=setup();demo.disableObstacle();demo.settleSpawn();
+  demo.applyImpulse(new Vector3(0,demo.body.mass*3,0),demo.body.position);
+  demo.advance(demo.physicsDt,neutral);
+  assert.ok([...demo.soft.values()].some(s=>s.activity.deforming));world.dispose();
+});
+
 test('a released panel becomes a rigid free body in flight and wakes again on landing', () => {
   const { world, demo, hood } = setup();
   world.detach(hood); demo.panel.mounts.forEach(m => { m.broken = true; });
