@@ -14,7 +14,7 @@ import { slotMatrix } from './slot-frames';
 import { FixedClock } from '../runtime/fixed-clock';
 import { DriveTelemetry } from './drive-telemetry';
 import type { MapCollision } from './map-collision';
-import {PanelCollisionSkin} from './panel-collision-skin';
+import {PanelCollisionSkin,RigidCollisionSkin} from './panel-collision-skin';
 
 interface ReleaseGuard { axis: 0 | 1 | 2; sign: number; minimum: Float64Array; frame: Matrix4; inverse: Matrix4; normal: Vector3 }
 export interface SoftBodyPart { part: EnginePart; panel: DeformablePanel; activity: PanelActivity; center: Vector3; inverseBasis: Matrix4; root: boolean; guard?: ReleaseGuard; mountVersion?: number }
@@ -24,7 +24,7 @@ export interface PanelWork {
   solve_ms:number; constraints_ms:number; contacts_ms:number; ground_ms:number; surfaces_ms:number; sleep_ms:number; loose_ms:number;
   geometry_ms:number; geometry_triangles:number; max_internal_speed:number; wakes:Record<string,number>; sleep:Record<string,number>;
 }
-interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[]; skin?:PanelCollisionSkin; cache?:{start:number;count:number;connected:boolean;shape:number;local?:Matrix4} }
+interface Geometry { part: EnginePart; triangles: number[]; bindings?: PanelBinding[]; skin?:PanelCollisionSkin; rigidSkin?:RigidCollisionSkin; cache?:{start:number;count:number;connected:boolean;shape:number;local?:Matrix4} }
 export const vehiclePartMass = (p: EnginePart) => {
   const type = p.parent?.definition.config.slots.find(s => s.id === p.parentSlot)?.type;
   const minimum = type !== undefined && type >= 101 && type <= 104 ? 14 : p.definition.mechanics ? ({ suspension: 12, spring: 3, shock: 3, brake: 8, sway: 4, engine: 4 }[p.definition.mechanics.kind]) : 0.1;
@@ -309,7 +309,7 @@ export class Vehicle3D extends CarCrashDemo {
     const soft = this.soft.get(part);
     if (!part.definition.mechanics && !isWheel) {
       const skin=soft?new PanelCollisionSkin(soft.panel,triangles):undefined;
-      this.geometry.push({part,triangles,skin,bindings:skin?.bindings});
+      this.geometry.push({part,triangles,skin,rigidSkin:!soft&&triangles.length?new RigidCollisionSkin(triangles):undefined,bindings:skin?.bindings});
     }
   }
   override setBodyTriangles(triangles: ArrayLike<number>) { super.setBodyTriangles(triangles, true); this.triangleSource = Array.from(triangles); this.rigidSurface = this.bodySurface;this.invalidateSurfaceCache(); this.configureStructure(); }
@@ -321,7 +321,7 @@ export class Vehicle3D extends CarCrashDemo {
   }
   private updateSurface() {
     if (!this.geometry.length) return;
-    const started=performance.now(),triangles=this.surfaceCoordinates,point=new Vector3(),relative=new Matrix4(),ranges:SurfaceRange[]=[];
+    const started=performance.now(),triangles=this.surfaceCoordinates,relative=new Matrix4(),ranges:SurfaceRange[]=[];
     let count=0;for(const g of this.geometry)if(g.part!==this.hood&&!g.part.definition.mechanics)count+=g.triangles.length;
     if(!count)return;
     triangles.length=count;let start=0,inverse:Matrix4|undefined;
@@ -337,10 +337,7 @@ export class Vehicle3D extends CarCrashDemo {
         else if(g.skin){
           inverse??=this.root.matrix().invert();
           this.timings.surfaceVertices+=g.skin.write(this.soft.get(g.part)!.panel,inverse,triangles,start);
-        }else for(let i=0;i<length;i+=3){
-          point.fromArray(g.triangles,i).applyMatrix4(local!);
-          triangles[start+i]=point.x;triangles[start+i+1]=point.y;triangles[start+i+2]=point.z;
-        }
+        }else this.timings.surfaceVertices+=g.rigidSkin!.write(local!,triangles,start);
         ranges.push({start,count:length});this.timings.surfaceParts++;
         if(work){work.geometry_ms+=performance.now()-geometryStart;work.geometry_triangles+=length/9;}
       }

@@ -206,3 +206,9 @@ compared with the last generated frame. This filters matrix roundoff without
 changing node/beam state or plasticity. Comparison remains against the cached
 frame, so accumulated motion eventually invalidates it; shape-version changes,
 detachment and restoration invalidate independently of transform tolerance.
+
+Rigid collision sections also index exactly shared source positions. Each unique
+vertex is transformed once, then expanded back into the original triangle order
+for BVH refitting. No triangles are removed or approximated. Source coordinates
+and index buffers are cached once per part; near-but-distinct vertices remain
+distinct. The collision vertex-work counter includes these rigid transforms.
