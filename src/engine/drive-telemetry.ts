@@ -1,11 +1,11 @@
 import {XPBD_ITERATIONS,COLLISION_GEOMETRY_HZ,MOUNT_RELEASE_DELAY_S,REFERENCE_PHYSICS_HZ} from './physics-timing';
 import type { DrivingInput } from './driving-demo';
-import type { Vehicle3D } from './vehicle-3d';
+import type { Vehicle3D, PanelWork } from './vehicle-3d';
 import { ackermannSteerAngle } from './suspension-3d';
 import type {RouteBenchmark,RoutePose,RouteView,RouteVehicle} from './route-benchmark';
 
 type Fields = Record<string, string | number>;
-interface Session { metadata: Fields; engine: Fields; curves: Fields[]; samples: Fields[]; frames:Fields[]; ended: boolean }
+interface Session { metadata: Fields; engine: Fields; curves: Fields[]; samples: Fields[]; frames:Fields[]; panelFrames:{seq:number;sim_s:number;panels:PanelWork[]}[]; ended: boolean }
 
 /** Opt-in 10-Hz physics capture plus per-render-frame CPU profiling. */
 export class DriveTelemetry {
@@ -48,6 +48,7 @@ export class DriveTelemetry {
     for(const state of v.soft.values()){if(state.panel.backend==='wasm')wasm++;else ts++;if(!state.root&&!state.part.parent){loose++;if(state.activity.resting)sleeping++;}}
     Object.assign(row,{sleeping_debris:sleeping,loose_panels:loose,wasm_panels:wasm,ts_panels:ts});
     this.session.frames.push(row);
+    if(fresh&&v.panelWork.size)this.session.panelFrames.push({seq:Number(row.seq),sim_s:this.elapsed,panels:[...v.panelWork.values()]});
     if(this.session.frames.length>=this.maxFrames)this.stop('frame_limit');
   }
   recordRenderFrame(now:number,info:{calls:number;triangles:number;width:number;height:number},hidden=false){
@@ -98,7 +99,7 @@ export class DriveTelemetry {
       experimental_hub_geometry: Number(v.root.world.experimentalHubGeometry),
       ...Object.fromEntries(Array.from({ length: 8 }, (_,i) => [`ratio_${i}`,v.root.world.javaPowertrain?.state?.ratios[i] ?? values[`ratio[${i}]`] ?? 0])), ...context },
       engine: { ...names('engine',m.block?.definition.alias ?? 'unknown'), wear: m.block?.condition ?? 0, displacement_m3: m.displacement },
-      curves: Array.from({ length: Math.floor(m.redlineRpm/500)+1 }, (_,i) => ({ rpm: i*500, torque_nm: m.estimateFlywheelTorqueAt(i*500) })), samples: [],frames:[] };
+      curves: Array.from({ length: Math.floor(m.redlineRpm/500)+1 }, (_,i) => ({ rpm: i*500, torque_nm: m.estimateFlywheelTorqueAt(i*500) })), samples: [],frames:[],panelFrames:[] };
     this.route=undefined;
     if(this.viewSource){
       const world=v.root.world,powertrain=world.javaPowertrain;
@@ -167,6 +168,7 @@ export class DriveTelemetry {
     this.session.samples.forEach((row,i) => packet('sample',i,row));
     // Separate prefix keeps archived SLRR_PHYSICS v2 parsers compatible.
     for(const row of this.session.frames)lines.push('SLRR_FRAME|v=1|'+JSON.stringify(row));
+    for(const row of this.session.panelFrames)lines.push('SLRR_PANELS|v=1|'+JSON.stringify(row));
     if (this.session.ended) lines.push('SLRR_PHYSICS|v=2|run=1|seq=0|kind=end|key=status|value=end');
     return lines.join('\n')+'\n';
   }

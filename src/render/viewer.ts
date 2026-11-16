@@ -2112,6 +2112,8 @@ export class Viewer {
       // opponents slower than the player as soon as rendering drops below 20 Hz.
       const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
       car.advance(dt,{throttle:0,steer:0,brake:false});
+      // Rival recordings need their own frame/detail rows, not just 10-Hz engine samples.
+      car.telemetry.recordPerformanceFrame(now,{},document.hidden);
       for(const key of ['suspension','contacts','panels','panelSolve','panelSurface','other'] as const)
         this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
       const others=[...(this.trafficPeer?[this.trafficPeer]:[]),...[...this.javaRaces.values()].filter(r=>r!==racer).map(r=>r.car)];

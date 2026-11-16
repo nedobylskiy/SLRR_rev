@@ -11,7 +11,7 @@ function fixture() {
   const mechanics = { idleRpm: 850, redlineRpm: 6500, manual: true, rpm: 3000, gear: 2, shifting: false,
     temperature: 35, running: true, starting: false, power: 1, boost: 0.4, displacement: 0.0018,
     block: { condition: 0.95, definition: { alias: 'test engine' } }, estimateFlywheelTorqueAt: () => 150 };
-  const vehicle = { physicsDt: 1/240, root: { definition: { alias: 'test car', config: {}, key: { pack: 'cars/test.rpk', id: 6 } },
+  const vehicle = { panelWork:new Map(),physicsDt: 1/240, root: { definition: { alias: 'test car', config: {}, key: { pack: 'cars/test.rpk', id: 6 } },
     world: { experimentalHubGeometry: false } }, body: { mass: 1200, position: new Vector3(1,2,3),
       velocity: new Vector3(2,0,-10), omega: new Vector3(0,0.5,0), orientation: new Quaternion() },
     suspension: { mechanics, steer: 0.2, tireModel: { model: 'sl2' }, wheels: Array.from({length:4}, () => ({

@@ -4,6 +4,22 @@ import { Box3, Matrix4, Vector3 } from 'three';
 import { DeformablePanel } from '../src/engine/deformable-panel';
 import { PanelActivity } from '../src/engine/panel-activity';
 
+test('isolated small vibration spikes do not keep an otherwise quiet installed panel awake forever',()=>{
+  const panel=new DeformablePanel([-1,1,-1,1,1,-1,-1,1,1,1,1,1],{mass:10,mount:[0,1,0]});
+  const activity=new PanelActivity(panel),frame=new Matrix4();activity.reset(frame);activity.wake();
+  const velocities=(amplitude:number)=>{panel.velocities.fill(0);for(let i=0;i<panel.velocities.length;i+=3)panel.velocities[i]=(i/3%2?1:-1)*amplitude;};
+  for(let i=0;i<60;i++){velocities(.01);activity.settle(1/120,frame,true);}
+  for(let i=0;i<60&&activity.deforming;i++){velocities(i%10===9?.1:.01);activity.settle(1/120,frame,true);}
+  assert.equal(activity.deforming,false,'quiet time survives brief small vibrations');
+  activity.wake();
+  for(let i=0;i<120;i++){velocities(.1);activity.settle(1/120,frame,true);}
+  assert.equal(activity.deforming,true,'continuous internal motion still requires solving');
+  velocities(.01);for(let i=0;i<12;i++)activity.settle(1/120,frame,true);
+  velocities(1);activity.settle(1/120,frame,true);
+  velocities(.01);for(let i=0;i<12;i++)activity.settle(1/120,frame,true);
+  assert.equal(activity.deforming,true,'large motion clears the accumulated quiet credit');
+});
+
 test('sleeping panel broad phase skips clear ground without hiding obstacles or terrain contacts', () => {
   const panel = new DeformablePanel([-1, 1, -1, 1, 1, -1, -1, 1, 1, 1, 1, 1], { mass: 10, mount: [0, 1, 0] });
   const activity = new PanelActivity(panel), frame = new Matrix4(); activity.reset(frame);
