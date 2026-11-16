@@ -53,6 +53,9 @@ export const DEFAULT_CHASSIS_CRUMPLE = 0.6;
 const PANEL_MOUNT_STRENGTH_SCALE = 1.1;
 const boundsOf = (samples: ArrayLike<number>) => { const box = new Box3(); for (let i = 0; i < samples.length; i += 3) box.expandByPoint(new Vector3().fromArray(samples, i)); return box; };
 const centerOf = (p: ArrayLike<number>) => { const out = new Vector3(); for (let i = 0; i < p.length; i += 3) out.add(new Vector3().fromArray(p, i)); return out.multiplyScalar(3 / p.length); };
+// Attachment frames are reconstructed through matrix products/inverses. Ignore
+// roundoff only; compare to the last generated frame so real motion accumulates.
+const sameCollisionFrame=(a:Matrix4|undefined,b:Matrix4)=>!!a&&a.elements.every((value,i)=>Math.abs(value-b.elements[i])<=1e-10);
 function basis(panel: DeformablePanel) {
   const p = panel.positions, point = (x: number, z: number) => new Vector3().fromArray(p, (z * panel.nx + x) * 3);
   const x = point(panel.nx - 1, 0).sub(point(0, 0)).normalize(), z = point(0, panel.nz - 1).sub(point(0, 0)).normalize(), y = new Vector3().crossVectors(z, x).normalize(); z.crossVectors(x, y).normalize(); return new Matrix4().makeBasis(x, y, z);
@@ -327,7 +330,7 @@ export class Vehicle3D extends CarCrashDemo {
       const length=g.triangles.length,connected=this.connected(g.part),shape=g.bindings?this.soft.get(g.part)!.panel.shapeVersion:-1;
       const local=connected?this.relativeFrame(g.part,relative):undefined,cached=g.cache;
       const changed=!cached||cached.start!==start||cached.count!==length||cached.connected!==connected
-        ||connected&&(cached.shape!==shape||!cached.local?.equals(local!));
+        ||connected&&(cached.shape!==shape||!sameCollisionFrame(cached.local,local!));
       if(changed&&length){
         const state=this.soft.get(g.part),work=state?this.panelWorkFor(state):undefined,geometryStart=work?performance.now():0;
         if(!connected)triangles.fill(0,start,start+length);

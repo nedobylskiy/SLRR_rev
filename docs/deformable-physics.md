@@ -200,3 +200,9 @@ threshold. Brief small internal vibrations consume two quiet ticks instead of
 clearing all quiet credit. Mount overload or internal speed at least 0.3 m/s
 clears the credit; a new explicit wake also resets it. Persistent vibration still
 prevents sleep.
+
+Collision-surface attachment transforms use a 1e-10 element tolerance when
+compared with the last generated frame. This filters matrix roundoff without
+changing node/beam state or plasticity. Comparison remains against the cached
+frame, so accumulated motion eventually invalidates it; shape-version changes,
+detachment and restoration invalidate independently of transform tolerance.

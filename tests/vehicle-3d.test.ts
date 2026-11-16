@@ -718,6 +718,10 @@ test('collision skin cache survives rigid motion and updates only changed part r
   let rootCalls=0,doorCalls=0;chassis.skin=(...args)=>{rootCalls++;skinRoot(...args);};side.skin=(...args)=>{doorCalls++;skinDoor(...args);};
   const update=()=>{(demo as unknown as {updateSurface():void}).updateSurface();};
   update();assert.equal(rootCalls,3);assert.equal(doorCalls,3);update();assert.equal(rootCalls,3);assert.equal(doorCalls,3);
+  const initialRefits=demo.timings.surfaceRefits;
+  for(let i=0;i<20;i++){door.local.elements[12]+=1e-12;update();}
+  assert.equal(doorCalls,3,'numerical noise in attachment transforms must not regenerate collision triangles');
+  assert.equal(demo.timings.surfaceRefits,initialRefits,'attachment roundoff must not refit the BVH');
   root.local.makeRotationY(.7).setPosition(20,2,-30);demo.body.setFrame(root.matrix());demo.syncRecordedPose();update();
   assert.equal(rootCalls,3,'whole-car translation/rotation must not skin cached local geometry');assert.equal(doorCalls,3);
   const geometry=(demo as unknown as {geometry:{part:typeof root;bindings:any[]}[];surfaceCoordinates:number[]});
