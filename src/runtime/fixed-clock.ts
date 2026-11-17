@@ -5,6 +5,11 @@ export class FixedClock {
   readonly dt: number;
   get pendingSeconds(){return this.accumulator;}
   get requestedSeconds(){return this.tick*this.dt+this.accumulator;}
+  /** Adopt a completed worker snapshot without advancing the simulation. */
+  restore(tick:number,pendingSeconds=0){
+    if(!Number.isInteger(tick)||tick<0||!Number.isFinite(pendingSeconds)||pendingSeconds<0)throw Error('Invalid fixed clock snapshot');
+    this.tick=tick;this.accumulator=pendingSeconds;
+  }
   constructor(readonly frequency = 60, readonly maxSteps = 8) {
     if (!Number.isFinite(frequency) || frequency <= 0 || !Number.isInteger(maxSteps) || maxSteps < 1) throw new Error('Invalid fixed clock parameters');
     this.dt = 1 / frequency;

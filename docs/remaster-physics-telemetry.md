@@ -1,5 +1,32 @@
 # Recording remaster driving telemetry
 
+## Per-part panel diagnostics
+
+While recording, `SLRR_PANELS|v=1|` JSON rows accompany `SLRR_FRAME` rows.
+`seq` links the detail row to that vehicle's frame; `sim_s` is its simulation time.
+City AI impact reports include independent frame/detail streams in both `player`
+and `opponent`. No extra checkbox is required.
+
+Each part reports its runtime ID, CFG path, node/beam counts, active and rigid
+step counts, solver time, constraints, contacts, ground queries, surface queries,
+sleep checks and loose-body contact time. Contact subcategories are contained in
+the overall contact time; do not add them again. `geometry_ms` measures preparing
+that part's changed collision triangles; the shared BVH refit remains in the
+vehicle-level `body_collision_geometry_ms` measurement.
+
+`wakes` counts state transitions by the first triggering condition: local impulse,
+failed attachment, external impulse, linear/angular acceleration, centrifugal
+load, ground or obstacle. Detached parts remain rigid and never wake XPBD. It does not
+count every tick that an already-active panel remains active. `sleep` counts
+active ticks blocked by the minimum activity duration, internal motion, mount
+load or the quiet window, plus successful sleep transitions.
+`max_internal_speed` is sampled by the existing sleep evaluation after the
+minimum activity duration; it is not an additional per-tick motion calculation.
+
+Detailed counters/timers are disabled outside recording. JSON formatting happens
+on export, not in the physics loop. The solver thresholds and iteration count
+are unchanged by these diagnostics.
+
 In the Java garage, **Graphics / map debug → Replace car: Einvagen 110 GTK**
 replaces the active car tree with a complete stock GTK for testing. It calls the
 installed Java Vehicle constructor and garage placement, without calling car-lot,

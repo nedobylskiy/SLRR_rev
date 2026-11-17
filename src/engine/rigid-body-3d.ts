@@ -28,22 +28,29 @@ export class RigidBody3D {
     this.force.set(0, 0, 0); this.torque.set(0, 0, 0);
     if (![...this.position.toArray(), ...this.velocity.toArray(), ...this.orientation.toArray()].every(Number.isFinite)) throw new Error('Non-finite rigid state');
   }
-  contact(point: Vector3, normal: Vector3, depth: number, restitution = 0.18, friction = 0.6, correctPosition = true) {
-    const r = point.clone().sub(this.position), v = this.pointVelocity(point), vn = v.dot(normal);
+  contact(point: Vector3, normal: Vector3, depth: number, restitution = 0.18, friction = 0.6, correctPosition = true, surfaceBody?:RigidBody3D) {
+    const r = point.clone().sub(this.position), v = this.pointVelocity(point);
+    if(surfaceBody)v.sub(surfaceBody.pointVelocity(point));
+    const vn=v.dot(normal),reaction=surfaceBody?new Vector3():undefined;
     if (correctPosition) this.position.addScaledVector(normal, Math.max(0, depth - 0.001) * 0.6);
     let magnitude = 0;
     if (vn < 0) {
-      const cross = new Vector3().crossVectors(r, normal), denominator = 1 / this.mass + normal.dot(new Vector3().crossVectors(this.inverseWorld(cross), r));
+      const cross = new Vector3().crossVectors(r, normal), denominator = 1 / this.mass + normal.dot(new Vector3().crossVectors(this.inverseWorld(cross), r))+(surfaceBody?.contactInverseMass(point,normal)??0);
       magnitude = -(1 + (vn < -0.8 ? restitution : 0)) * vn / denominator;
       this.impulse(normal.clone().multiplyScalar(magnitude), point);
       const tangent = v.addScaledVector(normal, -vn), speed = tangent.length();
       if (speed > 1e-8) {
         tangent.multiplyScalar(1 / speed); const rt = new Vector3().crossVectors(r, tangent);
-        const jt = Math.min(friction * magnitude, speed / (1 / this.mass + tangent.dot(new Vector3().crossVectors(this.inverseWorld(rt), r))));
+        const jt = Math.min(friction * magnitude, speed / (1 / this.mass + tangent.dot(new Vector3().crossVectors(this.inverseWorld(rt), r))+(surfaceBody?.contactInverseMass(point,tangent)??0)));
         this.impulse(tangent.multiplyScalar(-jt), point);
+        reaction?.copy(tangent);
       }
     }
-    return normal.clone().multiplyScalar(magnitude);
+    return (reaction??new Vector3()).addScaledVector(normal,magnitude);
+  }
+  private contactInverseMass(point:Vector3,axis:Vector3) {
+    const arm=point.clone().sub(this.position),cross=new Vector3().crossVectors(arm,axis);
+    return 1/this.mass+axis.dot(new Vector3().crossVectors(this.inverseWorld(cross),arm));
   }
   corners() {
     const result: Vector3[] = [], m = this.matrix();

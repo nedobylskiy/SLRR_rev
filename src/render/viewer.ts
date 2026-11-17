@@ -1,3 +1,4 @@
+import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {AmbientAudio} from '../audio/ambient-audio';
 import {cacheUnchangedTransform} from './stable-transform';
 import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
@@ -56,7 +57,7 @@ import type { Assets } from '../assets';
 import { scxAlphaTestReference, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { PartFactory, poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
-import { loadPartCollision } from '../engine/part-collision';
+import { loadPartCollision, partContactTriangles } from '../engine/part-collision';
 import { DrivingDemo, keyboardDrivingInput } from '../engine/driving-demo';
 import type { DrivingInput } from '../engine/driving-demo';
 import { HoodLab } from './hood-lab';
@@ -184,7 +185,7 @@ export class Viewer {
     this.suspensionDebug = structuredClone(settings);
     this.suspensionDebugActive = Object.values(settings).some((values: number[]) => values.some(value => value !== 0));
     for (const [part, group] of this.proxies) {
-      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      if(!group.userData.panelViewOwnsTransform)group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       syncLinkedRenders(part, group, this.suspensionDebug);
     }
@@ -364,6 +365,7 @@ export class Viewer {
   private driverIk?:DriverIk;private driverCutawayVisibility=new Map<THREE.Group,boolean>();
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
+  private readonly vehiclePhysics=new VehiclePhysicsClient();
   private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;dispose():void}>();
   get vehicleSceneRevision(){return this.generation;}
   private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
@@ -667,8 +669,12 @@ export class Viewer {
       }
       this.previousFrame = document.hidden ? undefined : now;
       this.graphicsDiagnostics.beginFrame();
+      this.vehiclePhysics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       this.profiler.measure('Race opponents CPU',()=>{for(const racer of this.javaRaces.values())racer.update(now);});
+      this.profiler.measure('Physics frame finalize CPU',()=>this.vehiclePhysics.flush());
+      this.profiler.record('Shared vehicle physics CPU',this.vehiclePhysics.workMs);
+
       this.profiler.measure('Map props CPU',()=>this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000));this.previousPropFrame=now;
       this.profiler.measure('Driver IK CPU',()=>{this.driverIk?.update();
       for(const binding of this.javaDrivers.values())if(binding.driver){
@@ -1589,7 +1595,7 @@ export class Viewer {
         this.proxies.delete(part); this.collisionMeshes.delete(part);
         continue;
       }
-      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      if(!group.userData.panelViewOwnsTransform)group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       group.visible = !group.userData.partLoading && this.partVisible(part);
       applyCfgRenderChannels(group, world.lightMask);
@@ -1983,6 +1989,7 @@ export class Viewer {
       applyCfgRenderChannels(group, part.world.lightMask);
       syncLinkedRenders(part, group, this.suspensionDebug);
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
+      if(group.userData.panelViewOwnsTransform)continue;
       group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       this.suspensionSkins.get(part)?.update();
@@ -2073,12 +2080,7 @@ export class Viewer {
       if(type===11)continue;
       if(type!==undefined&&type>=101&&type<=104){car.register(part,positions(part).flat(),[]);continue;}
       if(type!==undefined&&type>104&&type<200)continue;
-      const own=modelMatrix(new THREE.Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose)),faces:number[]=[];
-      for(const mesh of this.proxies.get(part)?.children??[])if(mesh instanceof THREE.Mesh){
-        const samples=mesh.geometry.getAttribute('position'),indices=mesh.geometry.getIndex();
-        if(indices)for(let i=0;i<indices.count;i++)faces.push(...new THREE.Vector3().fromBufferAttribute(samples,indices.getX(i)).applyMatrix4(own).toArray());
-      }
-      const physical=this.collisionMeshes.get(part)??[],collision=physical.length?physical:faces;
+      const physical=this.collisionMeshes.get(part)??[],collision=partContactTriangles(part.definition,physical,positions(part).flat());
       car.register(part,positions(part).flat(),collision);
       if(!part.definition.mechanics){const frame=inverseRoot.clone().multiply(part.matrix());for(let i=0;i<collision.length;i+=3)triangles.push(...new THREE.Vector3().fromArray(collision,i).applyMatrix4(frame).toArray());}
     }
@@ -2111,21 +2113,17 @@ export class Viewer {
       // Foreground frame time belongs to the fixed clock. Clamping it makes
       // opponents slower than the player as soon as rendering drops below 20 Hz.
       const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
-      car.advance(dt,{throttle:0,steer:0,brake:false});
+      this.vehiclePhysics.submit(car,dt,{throttle:0,steer:0,brake:false});
+      // Rival recordings need their own frame/detail rows, not just 10-Hz engine samples.
+      car.telemetry.recordPerformanceFrame(now,{},document.hidden);
       for(const key of ['suspension','contacts','panels','panelSolve','panelSurface','other'] as const)
         this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
-      const others=[...(this.trafficPeer?[this.trafficPeer]:[]),...[...this.javaRaces.values()].filter(r=>r!==racer).map(r=>r.car)];
-      for(const other of others){const hit=vehiclePairContact(car.body,other.body);if(!hit)continue;
-        if(hit.impulse.lengthSq()>1){control.impact?.(hit.closing);car.vehicleContact(hit.impulse,hit.point,other.body.bounds.clone().applyMatrix4(other.body.matrix()),hit.closing);other.vehicleContact(hit.impulse.clone().negate(),hit.point,car.body.bounds.clone().applyMatrix4(car.body.matrix()),hit.closing);}
-        const total=1/car.body.mass+1/other.body.mass,depth=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
-        car.body.position.addScaledVector(hit.normal,depth/car.body.mass/total);other.body.position.addScaledVector(hit.normal,-depth/other.body.mass/total);
-      }
       root.world.lightMask=drivingLightMask(root.world.lightMask,!!input.brake,car.suspension.mechanics?.gear===-1,!!car.suspension.mechanics?.running,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:43200));
       root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);
       for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);
       control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
-    },dispose:()=>{if(disposed)return;disposed=true;this.javaRaces.delete(root);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
-    this.javaRaces.set(root,racer);return racer;
+    },dispose:()=>{if(disposed)return;disposed=true;this.javaRaces.delete(root);this.vehiclePhysics.forget(car);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
+    this.vehiclePhysics.register(car,control.impact);this.javaRaces.set(root,racer);return racer;
   }
   async cityImpactPlayground(roots:[EnginePart,EnginePart],assets:Assets,telemetry:(text:string)=>void){
     const source=this.mapRoadSource;
@@ -2191,6 +2189,7 @@ export class Viewer {
   vehiclePair(roots:[EnginePart,EnginePart],scenario:VehiclePairScenario,telemetry:(text:string)=>void) {
     this.stopDriving?.();
     const built=roots.map(root=>this.pairVehicle(root)),pair=new VehiclePairTest(built[0].car,built[1].car,scenario);
+    this.vehiclePhysics.register(built[0].car,(speed,time)=>pair.observePhysics(time??built[0].car.simulationTime,speed));this.vehiclePhysics.register(built[1].car);
     const barrier=scenario==='rear-chain'?new THREE.Mesh(new THREE.BoxGeometry(...pair.barrier.getSize(new THREE.Vector3()).toArray()),new THREE.MeshStandardMaterial({color:0xe7a44d,roughness:.8})):undefined;
     if(barrier){barrier.position.copy(pair.barrier.getCenter(new THREE.Vector3()));this.model.add(barrier);}
     const views:{view:PanelView;part:EnginePart;car:Vehicle3D}[]=[],soft=new Set<EnginePart>();
@@ -2203,7 +2202,7 @@ export class Viewer {
     let last:number|undefined,paused=false,slow=false,stopped=false,lastText=-Infinity;
     this.frame=now=>{
       const dt=last===undefined||document.hidden?0:Math.max(0,(now-last)/1000);last=document.hidden?undefined:now;
-      if(!paused)pair.advance(dt*(slow?.25:1));
+      if(!paused)for(const {car}of built)this.vehiclePhysics.submit(car,dt*(slow?.25:1),{throttle:0,steer:0,brake:false});pair.observePhysics(built[0].car.simulationTime);
       this.syncWorld(soft);
       for(const {view,part,car} of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);
       if(now-lastText>150){
@@ -2217,7 +2216,7 @@ export class Viewer {
         ].join('\n'));
       }
     };
-    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;for(const {view} of views)view.dispose();if(barrier){barrier.removeFromParent();barrier.geometry.dispose();(barrier.material as THREE.Material).dispose();}this.driveGrid.visible=false;};
+    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;for(const {car}of built){this.vehiclePhysics.forget(car);car.dispose();}for(const {view} of views)view.dispose();if(barrier){barrier.removeFromParent();barrier.geometry.dispose();(barrier.material as THREE.Material).dispose();}this.driveGrid.visible=false;};
     this.stopDriving=stop;
     return Object.assign(stop,{reset:()=>{pair.reset();last=undefined;lastText=-Infinity;},pause:(value:boolean)=>{paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},
       wireframe:(value:boolean)=>views.forEach(({view})=>view.wireframe(value)),chassisCrumple:(value:number)=>built.forEach(({car})=>car.setChassisCrumple(value)),pair});
@@ -2264,12 +2263,7 @@ export class Viewer {
         if (type === 11) continue;
         if (type !== undefined && type >= 101 && type <= 104) { (crash as Vehicle3D).register(part, localPositions(part).flat(), []); continue; }
         if (type !== undefined && type > 104 && type < 200) continue;
-        const ownTransform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)), ownTriangles: number[] = [];
-        for (const mesh of this.proxies.get(part)?.children ?? []) if (mesh instanceof THREE.Mesh) {
-          const positions = mesh.geometry.getAttribute('position'), indices = mesh.geometry.getIndex();
-          if (indices) for (let i = 0; i < indices.count; i++) { const p = new THREE.Vector3().fromBufferAttribute(positions, indices.getX(i)); ownTriangles.push(...p.applyMatrix4(ownTransform).toArray()); }
-        }
-        const physical = this.collisionMeshes.get(part) ?? [], collision = physical.length ? physical : ownTriangles;
+        const physical = this.collisionMeshes.get(part) ?? [], collision = partContactTriangles(part.definition,physical,localPositions(part).flat());
         (crash as Vehicle3D).register(part, localPositions(part).flat(), collision);
         if (!part.definition.mechanics) {
           const physicalFrame = inverseRoot.clone().multiply(part.matrix());
@@ -2287,6 +2281,7 @@ export class Viewer {
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); if (!track) this.model.add(obstacle);
     }
+    if(crash instanceof Vehicle3D)this.vehiclePhysics.register(crash);
     this.trafficPeer=crash instanceof Vehicle3D?crash:undefined;
     const demo = crash?.driving ?? new DrivingDemo(root);
     this.renderRecorder=crash instanceof Vehicle3D?crash.telemetry:undefined;
@@ -2372,7 +2367,7 @@ export class Viewer {
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
       let input = this.playerTrafficDriver?.input ?? (java ? java.sample() : keyboardDrivingInput(keys));
-      if (crash) { if (!paused) backlogTicks = this.profiler.measure('Player physics advance CPU',()=>crash!.advance(seconds * timeScale, input)).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if (crash) { if (!paused) backlogTicks = this.profiler.measure('Player physics advance CPU',()=>crash instanceof Vehicle3D?this.vehiclePhysics.submit(crash,seconds*timeScale,input):crash!.advance(seconds*timeScale,input)).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
       if(this.playerTrafficDriver)input=this.playerTrafficDriver.input;
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
@@ -2382,7 +2377,7 @@ export class Viewer {
         if(crash.telemetry.status.recording)for(const [key,title] of [['panelConstraints','XPBD constraints CPU'],['panelContacts','Panel contacts CPU'],['panelUpload','WASM input upload CPU'],['panelIntegration','Panel integration + finalize CPU'],['looseContacts','Loose body contacts CPU']] as const)this.profiler.record(title,crash.timings[key]);
         const backends = new Set([...crash.soft.values()].map(part => part.panel.backend === 'wasm' ? 'C++/WASM' : 'TypeScript'));
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
-        this.physicsWork = `Physics rate: ${crash.physicsFrequency} Hz · step ${(crash.physicsDt*1000).toFixed(3)} ms · XPBD iterations ${XPBD_ITERATIONS}\nPhysics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
+        this.physicsWork = `Physics rate: ${crash.physicsFrequency} Hz · step ${(crash.physicsDt*1000).toFixed(3)} ms · ${crash.panelSolver==='ror'?'RoR beams / max 0.5 ms':'XPBD iterations '+XPBD_ITERATIONS}\nPhysics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · active panel steps ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nPhysics execution: ${this.vehiclePhysics.backend} · shared world ${this.vehiclePhysics.workMs.toFixed(1)} ms\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
       const timeOfDay = java?.timeOfDay?.() ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
       root.world.lightMask = drivingLightMask(root.world.lightMask, input.brake,
@@ -2492,7 +2487,7 @@ export class Viewer {
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
       root.world.lightMask &= ~7;
-      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
+      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); if(crash instanceof Vehicle3D)this.vehiclePhysics.forget(crash);crash?.dispose();
       chassisBounds.removeFromParent();chassisBounds.geometry.dispose();chassisBounds.material.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
@@ -2503,7 +2498,7 @@ export class Viewer {
       else this.fit();
     };
     this.stopDriving = stop; focus();
-    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(crash.physicsDt, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
+    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; this.vehiclePhysics.submit(crash,crash.physicsDt, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
     // In body-shell mode retain only mechanical parts and assemblies mounted in wheel slots.
     const bodyPartVisibility = new Map([...this.proxies].map(([part, proxy]) => [part, proxy.visible] as const));
     const skeletonParts = new Set<EnginePart>();
@@ -2572,7 +2567,7 @@ export class Viewer {
       if(!preserveObserver&&!this.inspectionManualOverride){this.inspection.setEnabled(!!view.observer,focus);if(view.observer)set(this.inspection.camera,view.observer);this.inspection.replay=true;}
       this.controls.enabled=false;focus.fromArray(view.focus);this.mapStreamFocus=focus;
     };
-    applyPose(first);session.pause(true);this.physicsWork=mode==='render'?'Physics paused (render route)':'';car.replayInput=time=>playback.input(time);
+    this.vehiclePhysics.forget(car);applyPose(first);session.pause(true);this.physicsWork=mode==='render'?'Physics paused (render route)':'';car.replayInput=time=>playback.input(time);
     let checkpoints=new RouteCheckpoints();
     if(mode==='physics')car.beforeReplayTick=time=>checkpoints.apply(time,car.body.position,playback,
       pose=>this.profiler.measure('Replay checkpoint CPU',()=>applyPose(pose)));
@@ -2590,7 +2585,7 @@ export class Viewer {
         intervals.length=draws.length=triangles.length=occlusionDraws.length=occlusionTriangles.length=windowEvents.length=0;
         driftSquared=maxDrift=driftSamples=maxPending=0;checkpoints=new RouteCheckpoints();
         if(mode!=='render'){car.reset();route.vehicle.parts.forEach((saved,i)=>{originalParts[i].condition=saved.condition;});car.body.center.fromArray(route.vehicle.bodyCenter);car.body.setMass(route.vehicle.mass);}
-        applyPose(first);session.pause(true);liveFrame(now);applyView(0);reset=true;
+        this.vehiclePhysics.forget(car);applyPose(first);session.pause(true);liveFrame(now);applyView(0);reset=true;
         updateStatus(`Loop ${lap} · ${mode} · 0.0 / ${playback.duration.toFixed(1)} s`);return;
       }
       const elapsed=last===undefined?0:Math.max(0,(now-last)/1000);last=now;

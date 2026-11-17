@@ -2,7 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Matrix4,Vector3} from 'three';
 import {DeformablePanel} from '../src/engine/deformable-panel';
-import {PanelCollisionSkin} from '../src/engine/panel-collision-skin';
+import {PanelCollisionSkin,RigidCollisionSkin} from '../src/engine/panel-collision-skin';
+
+test('rigid collision indexing preserves all triangle corners under successive attachment transforms',()=>{
+  const source=[0,0,0,1,0,0,1,1,0,0,0,0,1,1,0,0,1,0,0,0,1e-9,1,0,0,0,1,0];
+  const skin=new RigidCollisionSkin(source),original=[...source],out=[123,456,789];
+  assert.equal(skin.vertexCount,5,'only exactly equal positions are shared');
+  for(const frame of [new Matrix4(),new Matrix4().makeRotationY(.7).setPosition(23,-5,17),new Matrix4().makeScale(.5,2,-1)]){
+    assert.equal(skin.write(frame,out,3),5);
+    for(let i=0;i<source.length;i+=3){
+      const expected=new Vector3().fromArray(source,i).applyMatrix4(frame);
+      assert.ok(expected.distanceTo(new Vector3().fromArray(out,3+i))<1e-12);
+    }
+    assert.deepEqual(out.slice(0,3),[123,456,789]);assert.equal(out.length,source.length+3);
+  }
+  assert.deepEqual(source,original,'source geometry remains immutable');
+});
 
 test('indexed collision skin matches per-corner skinning after deformation and rotated body transforms',()=>{
   const source=[-1,1,-1,1,1,-1,1,1,1,-1,1,-1,1,1,1,-1,1,1];

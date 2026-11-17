@@ -11,7 +11,7 @@ function fixture() {
   const mechanics = { idleRpm: 850, redlineRpm: 6500, manual: true, rpm: 3000, gear: 2, shifting: false,
     temperature: 35, running: true, starting: false, power: 1, boost: 0.4, displacement: 0.0018,
     block: { condition: 0.95, definition: { alias: 'test engine' } }, estimateFlywheelTorqueAt: () => 150 };
-  const vehicle = { physicsDt: 1/240, root: { definition: { alias: 'test car', config: {}, key: { pack: 'cars/test.rpk', id: 6 } },
+  const vehicle = { panelWork:new Map(),physicsDt: 1/240, root: { definition: { alias: 'test car', config: {}, key: { pack: 'cars/test.rpk', id: 6 } },
     world: { experimentalHubGeometry: false } }, body: { mass: 1200, position: new Vector3(1,2,3),
       velocity: new Vector3(2,0,-10), omega: new Vector3(0,0.5,0), orientation: new Quaternion() },
     suspension: { mechanics, steer: 0.2, tireModel: { model: 'sl2' }, wheels: Array.from({length:4}, () => ({
@@ -19,6 +19,14 @@ function fixture() {
   return { recorder: new DriveTelemetry(vehicle as unknown as Vehicle3D), vehicle };
 }
 const input = { throttle: 0.75, throttleMode: 'pedal' as const, steer: -0.2, brake: false };
+
+test('worker telemetry preserves substep samples and drains each sample once',()=>{
+  const worker=fixture(),main=fixture();worker.recorder.start();main.recorder.start();
+  for(let i=0;i<72;i++){worker.vehicle.suspension.mechanics.rpm=1000+i;worker.recorder.tick(1/240,input);}
+  const packet=structuredClone(worker.recorder.takeWorkerPacket());assert.equal(packet.samples.length,3);assert.deepEqual(packet.samples.map(s=>s.rpm),[1023,1047,1071]);
+  main.recorder.acceptWorkerPacket(packet);assert.equal(main.recorder.status.samples,3);assert.ok(Math.abs(main.recorder.status.seconds-.3)<1e-9);
+  assert.equal(worker.recorder.takeWorkerPacket().samples.length,0);main.recorder.stop();main.recorder.start();assert.equal(main.recorder.recordingId,2);assert.equal(main.recorder.status.samples,0);
+});
 
 test('physics capture is opt-in, uses simulation time and round-trips through original v2 exporter', () => {
   const { recorder, vehicle } = fixture();

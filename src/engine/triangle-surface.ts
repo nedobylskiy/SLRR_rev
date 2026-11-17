@@ -122,7 +122,7 @@ export class TriangleSurface implements PanelSurface {
     for (const { triangle, normal: n, bounds, active } of cache.faces) {
       if (!active || !query.intersectsBox(bounds)) continue;
       if(profile)profile.triangleTests++;
-      const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < 0 ? -1 : 1;
+      const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < -1e-9 ? -1 : a > 1e-9 ? 1 : b > 1e-9 ? -1 : 1;
       if (sign * b < this.radius && sign * a > sign * b) {
         const time = Math.max(0, (sign * a - this.radius) / (sign * a - sign * b)), center = this.center.copy(from).lerp(to, time), surface = this.surface.copy(center).addScaledVector(n, -this.delta.subVectors(center, triangle.a).dot(n));
         if (time >= 0 && time <= 1 && time < first && triangle.containsPoint(surface)) {
