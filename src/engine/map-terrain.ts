@@ -27,6 +27,17 @@ export class MapTerrain implements Terrain {
   private readonly allFaces: Face[] = [];
   private readonly size = 16;
   faces = 0;
+  physicsSnapshot(){return this.allFaces.map(f=>({...f,normal:f.normal.toArray()}));}
+  static fromPhysicsSnapshot(rows:ReturnType<MapTerrain['physicsSnapshot']>,objects?:MapCollision){
+    const terrain=new MapTerrain(objects);
+    for(const row of rows){
+      const face={...row,normal:new Vector3().fromArray(row.normal)};terrain.allFaces.push(face);terrain.faces++;
+      for(let x=Math.floor(face.minX/terrain.size);x<=Math.floor(face.maxX/terrain.size);x++)for(let z=Math.floor(face.minZ/terrain.size);z<=Math.floor(face.maxZ/terrain.size);z++){
+        const key=`${x},${z}`,cell=terrain.cells.get(key)??{faces:[]};cell.faces.push(face);terrain.cells.set(key,cell);
+      }
+    }
+    terrain.prepare();return terrain;
+  }
   add(model: ScxModel, textures: readonly string[] = []) {
     for (const mesh of model.meshes) {
       const surface = tireSurfaceForTexture(textures[mesh.textureIndex] ?? '');

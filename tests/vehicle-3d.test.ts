@@ -376,7 +376,8 @@ test('a severe impact can still release the hood as one part', () => {
   const shell: number[] = [];
   for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
   demo.register(root, shell, []);
-  demo.reset(50 / 3.6);
+  // Stronger mounts retain a crushed hood at 50 km/h; this tests the severe-release range.
+  demo.reset(70 / 3.6);
   let beforeRelease = demo.soft.get(hood)!.activity.motion().center;
   for (let i = 0; i < 2 * 240 && hood.parent; i++) {
     beforeRelease = demo.soft.get(hood)!.activity.motion().center;
@@ -406,7 +407,7 @@ test('released panel nodes cannot sink deeper through their original chassis sid
   const { world, root, hood, demo } = setup();
   const shell: number[] = [];
   for (const x of [-0.85, 0.85]) for (const y of [-0.55, 0.6]) for (const z of [-2.1, 2.1]) shell.push(x, y, z);
-  demo.register(root, shell, []); demo.reset(50 / 3.6);
+  demo.register(root, shell, []); demo.reset(70 / 3.6);
   for (let i = 0; i < 2 * 240 && hood.parent; i++) demo.advance(1 / 240, neutral);
   const state = demo.soft.get(hood)!, guard = state.guard;
   assert.ok(guard && guard.axis === 1 && guard.sign === 1);
@@ -966,4 +967,35 @@ test('a strongly dented saved panel cannot restore with high condition while its
   const restored=setup();restored.demo.restoreDamage(saved);
   assert.ok(restored.door.condition<=.25,'restoration immediately reconciles permanent shape and part condition');
   assert.equal(restored.door.parent,restored.root,'low condition does not automatically tear off an attached panel');
+});
+
+
+test('local impacts dent doors, bumpers and quarter panels while mounts retain them and vibration decays',()=>{
+  for(const kind of ['door','bumper','quarter'] as const){
+    const {demo,world,root,door,bumper}=setup(false,undefined,240,undefined,true);
+    let part=kind==='door'?door:bumper!;
+    if(kind==='quarter'){
+      root.definition.config.slots.push({id:605,position:[.8,.1,.8],rotation:[0,0,0],attach:[],compatible:[]});
+      part=world.create({key:{pack:'test.rpk',id:99},alias:'rear_quarterpanel.cfg',cfgPath:'rear_quarterpanel.cfg',config:parsePartConfig('slot 0 0 0 0 0 0 1\nbody 0 0 0 0 0 0 10 sphere .5')});
+      world.install(root,605,part,1);const samples:number[]=[];for(const x of [-.15,.15])for(const y of [-.15,.15])for(const z of [-.5,.5])samples.push(x,y,z);demo.register(part,samples,[]);
+    }
+    demo.disableObstacle();demo.placeAt(new Vector3(0,5,0),0);
+    const state=demo.soft.get(part)!,p=state.panel,original=p.positions.slice(),point=new Vector3();for(let i=0;i<p.positions.length;i+=3)point.add(new Vector3().fromArray(p.positions,i));point.multiplyScalar(3/p.positions.length);point.z+=.2;
+    p.impulseAt(kind==='bumper'?[0,0,60]:[-60,0,0],point.toArray(),.15);
+    for(let tick=0;tick<120;tick++)p.advance(1/240);
+    assert.ok(p.attached,`${kind}: a local dent must not tear its mounts`);assert.ok(p.plasticBeams>0,`${kind}: permanent deformation before detachment`);
+    const origin=new Vector3().fromArray(original),now=new Vector3().fromArray(p.positions);let shape=0;
+    for(let i=3;i<p.positions.length;i+=3)shape=Math.max(shape,Math.abs(new Vector3().fromArray(p.positions,i).distanceTo(now)-new Vector3().fromArray(original,i).distanceTo(origin)));
+    assert.ok(shape>.001,`${kind}: node shape actually changed (${shape} m)`);
+    assert.ok(state.activity.motion().internalSpeed<.03,`${kind}: no lingering jelly vibration`);
+    world.dispose();
+  }
+});
+
+test('a 15 km/h bumper impact produces plastic damage before any attachment failure',()=>{
+  const {demo,world,root,bumper}=setup(false,undefined,240,undefined,true),shell:number[]=[];
+  for(const x of [-.85,.85])for(const y of [-.55,.6])for(const z of [-2.1,2.1])shell.push(x,y,z);
+  demo.register(root,shell,[]);demo.reset(15/3.6);let dent=false;
+  for(let tick=0;tick<480;tick++){demo.advance(1/240,neutral);dent||=demo.soft.get(bumper!)!.panel.plasticBeams>0;assert.equal(bumper!.parent,root,'bumper remains mounted throughout the low-speed impact');}
+  assert.ok(dent,'low-speed contact should dent the bumper, not leave it pristine');world.dispose();
 });

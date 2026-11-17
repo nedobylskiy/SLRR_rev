@@ -47,6 +47,12 @@ export class VehiclePairTest {
     this.clock=new FixedClock(a.physicsFrequency,physicsTickBudget(a.physicsFrequency));this.reset();
   }
   get time(){return this.clock.tick*this.clock.dt;}
+  /** Presentation-only bookkeeping when a worker owns the physical world. */
+  observePhysics(time:number,closing?:number){
+    this.clock.restore(Math.round(time/this.clock.dt));
+    if(closing!==undefined){this.contacts++;this.firstImpact??={time,closing};if(this.scenario==='rear-chain')this.rearImpact??={time,speed:closing};}
+    if(this.scenario==='rear-chain'&&!this.obstacleImpact&&this.a.impactSpeed>1)this.obstacleImpact={time,speed:this.a.impactSpeed};
+  }
   reset(scenario:VehiclePairScenario=this.scenario) {
     this.scenario=scenario;this.contacts=0;this.firstImpact=undefined;
     this.obstacleImpact=this.rearImpact=undefined;

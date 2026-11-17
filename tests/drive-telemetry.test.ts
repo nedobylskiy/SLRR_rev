@@ -20,6 +20,14 @@ function fixture() {
 }
 const input = { throttle: 0.75, throttleMode: 'pedal' as const, steer: -0.2, brake: false };
 
+test('worker telemetry preserves substep samples and drains each sample once',()=>{
+  const worker=fixture(),main=fixture();worker.recorder.start();main.recorder.start();
+  for(let i=0;i<72;i++){worker.vehicle.suspension.mechanics.rpm=1000+i;worker.recorder.tick(1/240,input);}
+  const packet=structuredClone(worker.recorder.takeWorkerPacket());assert.equal(packet.samples.length,3);assert.deepEqual(packet.samples.map(s=>s.rpm),[1023,1047,1071]);
+  main.recorder.acceptWorkerPacket(packet);assert.equal(main.recorder.status.samples,3);assert.ok(Math.abs(main.recorder.status.seconds-.3)<1e-9);
+  assert.equal(worker.recorder.takeWorkerPacket().samples.length,0);main.recorder.stop();main.recorder.start();assert.equal(main.recorder.recordingId,2);assert.equal(main.recorder.status.samples,0);
+});
+
 test('physics capture is opt-in, uses simulation time and round-trips through original v2 exporter', () => {
   const { recorder, vehicle } = fixture();
   recorder.tick(1/240,input); assert.equal(recorder.text(),'');

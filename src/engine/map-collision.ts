@@ -4,7 +4,7 @@ import type { ScxModel } from '../formats/scx';
 import { orientedBoxContact, type RigidBody3D } from './rigid-body-3d';
 
 interface Wall { triangle: Triangle; normal: Vector3; minY: number; maxY: number; bounds: Box3 }
-interface StaticBox { interact?: (body:RigidBody3D,hit:NonNullable<ReturnType<typeof orientedBoxContact>>)=>void; matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: Box3 }
+interface StaticBox { id:number; interact?: (body:RigidBody3D,hit:NonNullable<ReturnType<typeof orientedBoxContact>>)=>void; matrix: Matrix4; inverse: Matrix4; half: Vector3; bounds: Box3 }
 
 /** Static, two-sided side contacts from original map meshes. Road support is handled by MapTerrain. */
 export class MapCollision {
@@ -15,11 +15,20 @@ export class MapCollision {
   private readonly size = 8;
   walls = 0;
   boxes = 0;
+  revision=0;
+  private nextBoxId=1;
+  physicsBoxes(){return this.allBoxes.map(b=>({id:b.id,matrix:b.matrix.toArray(),half:b.half.toArray(),interactive:!!b.interact}));}
+  physicsWalls(){return this.allWalls.flatMap(w=>[...w.triangle.a.toArray(),...w.triangle.b.toArray(),...w.triangle.c.toArray()]);}
+  interactPhysicsBox(id:number,body:RigidBody3D,hit:NonNullable<ReturnType<typeof orientedBoxContact>>){this.allBoxes.find(b=>b.id===id)?.interact?.(body,hit);}
+  replacePhysicsBoxes(rows:ReturnType<MapCollision['physicsBoxes']>,interact?:(id:number,body:RigidBody3D,hit:NonNullable<ReturnType<typeof orientedBoxContact>>)=>void){
+    this.allBoxes.length=0;this.boxCells.clear();this.boxes=0;
+    for(const row of rows)this.addBox(new Matrix4().fromArray(row.matrix),new Vector3().fromArray(row.half),row.interactive?(body,hit)=>interact?.(row.id,body,hit):undefined);
+  }
   /** Original CFG `body ... box hx hy hz`, placed by the map object pose. */
   addBox(matrix: Matrix4, half: Vector3, interact?:StaticBox["interact"]) {
     if (![half.x, half.y, half.z].every(n => Number.isFinite(n) && n > 0)) return () => {};
     const bounds = new Box3(new Vector3(-half.x, -half.y, -half.z), half.clone()).applyMatrix4(matrix);
-    const box: StaticBox = { interact, matrix: matrix.clone(), inverse: matrix.clone().invert(), half: half.clone(), bounds };
+    const box: StaticBox = { id:this.nextBoxId++,interact, matrix: matrix.clone(), inverse: matrix.clone().invert(), half: half.clone(), bounds };
     const x0 = Math.floor((bounds.min.x - 0.3) / this.size), x1 = Math.floor((bounds.max.x + 0.3) / this.size);
     const z0 = Math.floor((bounds.min.z - 0.3) / this.size), z1 = Math.floor((bounds.max.z + 0.3) / this.size);
     if ((x1 - x0 + 1) * (z1 - z0 + 1) > 4096) return () => {};
@@ -32,6 +41,7 @@ export class MapCollision {
     }
     this.allBoxes.push(box);
     this.boxes++;
+    this.revision++;
     let removed = false;
     return () => {
       if (removed) return;
@@ -43,6 +53,7 @@ export class MapCollision {
       }
       this.allBoxes.splice(this.allBoxes.indexOf(box), 1);
       this.boxes--;
+      this.revision++;
     };
   }
   add(model: ScxModel) {

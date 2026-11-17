@@ -10,7 +10,14 @@ export class PanelView {
   private rigidLast = false;
   private lastReset = -1;
   private lastTick = -1;
+  private lastShape = -1;
+  private readonly previousOwner:unknown;
+  private readonly previousMatrixAutoUpdate:boolean;
   constructor(private group: THREE.Group, readonly panel: DeformablePanel, localPositions: number[][]) {
+    this.previousOwner=group.userData.panelViewOwnsTransform;
+    this.previousMatrixAutoUpdate=group.matrixAutoUpdate;
+    group.matrixAutoUpdate=false;
+    group.userData.panelViewOwnsTransform=true;
     const meshes = group.children.filter((o): o is THREE.Mesh<THREE.BufferGeometry> => o instanceof THREE.Mesh);
     meshes.forEach((mesh, index) => {
       const position = mesh.geometry.getAttribute('position'), normals = mesh.geometry.getAttribute('normal');
@@ -26,11 +33,17 @@ export class PanelView {
   }
   wireframe(value: boolean) { this.cage.visible = value; if (value) this.update(); }
   update(frame?: THREE.Matrix4, rigid = false) {
-    if (rigid && this.rigidLast && frame && this.skinFrame && this.lastReset === this.panel.resetVersion) {
+    if (rigid && this.rigidLast && frame && this.skinFrame && this.lastReset === this.panel.resetVersion && this.lastShape === this.panel.shapeVersion) {
       // Keep the dented skin on the GPU; carrying it only changes one draw transform.
       this.group.matrix.copy(frame).multiply(this.skinFrame.clone().invert()); this.group.matrixWorldNeedsUpdate = true; return;
     }
-    if (frame && !rigid && this.lastTick === this.panel.clock.tick && this.lastReset === this.panel.resetVersion) return;
+    if (frame && this.skinFrame && !rigid && this.lastTick === this.panel.clock.tick && this.lastReset === this.panel.resetVersion && this.lastShape === this.panel.shapeVersion) {
+      // No new physical shape: keep the last complete skin and carry it with
+      // the part. Never leave a stale world-space skin behind its draw frame.
+      if(this.skinFrame)this.group.matrix.copy(frame).multiply(this.skinFrame.clone().invert());
+      else this.group.matrix.identity();
+      this.group.matrixWorldNeedsUpdate=true;return;
+    }
     this.group.matrix.identity(); this.group.matrixWorldNeedsUpdate = true;
     for (const { geometry, bindings } of this.skins) {
       const position = geometry.getAttribute('position'); bindings.forEach((b, i) => this.panel.skin(b, position.array, i * 3));
@@ -40,9 +53,11 @@ export class PanelView {
       const attribute = this.cage.geometry.getAttribute('position'), p = this.panel.positions;
       this.panel.beams.forEach((b, i) => { for (let axis = 0; axis < 3; axis++) { attribute.array[i * 6 + axis] = p[b.a * 3 + axis]; attribute.array[i * 6 + axis + 3] = p[b.b * 3 + axis]; } }); attribute.needsUpdate = true;
     }
-    this.skinFrame = frame?.clone(); this.rigidLast = rigid; this.lastReset = this.panel.resetVersion; this.lastTick = this.panel.clock.tick;
+    this.skinFrame = frame?.clone(); this.rigidLast = rigid; this.lastReset = this.panel.resetVersion; this.lastTick = this.panel.clock.tick;this.lastShape=this.panel.shapeVersion;
   }
   dispose() {
+    this.group.matrixAutoUpdate=this.previousMatrixAutoUpdate;
+    if(this.previousOwner===undefined)delete this.group.userData.panelViewOwnsTransform;else this.group.userData.panelViewOwnsTransform=this.previousOwner;
     this.cage.removeFromParent(); this.cage.geometry.dispose(); (this.cage.material as THREE.Material).dispose();
     for (const { geometry, original, normals } of this.skins) { geometry.getAttribute('position').array.set(original); geometry.getAttribute('position').needsUpdate = true; geometry.getAttribute('normal').array.set(normals); geometry.getAttribute('normal').needsUpdate = true; geometry.computeBoundingSphere(); geometry.computeBoundingBox(); }
   }

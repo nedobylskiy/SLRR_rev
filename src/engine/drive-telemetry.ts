@@ -1,4 +1,4 @@
-import {XPBD_ITERATIONS,COLLISION_GEOMETRY_HZ,MOUNT_RELEASE_DELAY_S,REFERENCE_PHYSICS_HZ} from './physics-timing';
+import {ROR_MOUNT_RELEASE_DELAY_S,XPBD_ITERATIONS,COLLISION_GEOMETRY_HZ,MOUNT_RELEASE_DELAY_S,REFERENCE_PHYSICS_HZ} from './physics-timing';
 import type { DrivingInput } from './driving-demo';
 import type { Vehicle3D, PanelWork } from './vehicle-3d';
 import { ackermannSteerAngle } from './suspension-3d';
@@ -6,9 +6,26 @@ import type {RouteBenchmark,RoutePose,RouteView,RouteVehicle} from './route-benc
 
 type Fields = Record<string, string | number>;
 interface Session { metadata: Fields; engine: Fields; curves: Fields[]; samples: Fields[]; frames:Fields[]; panelFrames:{seq:number;sim_s:number;panels:PanelWork[]}[]; ended: boolean }
+export interface WorkerTelemetryPacket {elapsed:number;input:DrivingInput;samples:Fields[];poses:RoutePose[];controls:{t:number;input:DrivingInput}[]}
 
 /** Opt-in 10-Hz physics capture plus per-render-frame CPU profiling. */
 export class DriveTelemetry {
+  recordingId=0;
+  private workerSample=0;private workerPose=0;private workerControl=0;
+  takeWorkerPacket():WorkerTelemetryPacket{
+    const samples=this.session?.samples.slice(this.workerSample)??[],poses=this.route?.poses.slice(this.workerPose)??[],controls=this.route?.controls.slice(this.workerControl)??[];
+    this.workerSample=this.session?.samples.length??0;this.workerPose=this.route?.poses.length??0;this.workerControl=this.route?.controls.length??0;
+    return {elapsed:this.elapsed,input:this.lastInput,samples,poses,controls};
+  }
+  acceptWorkerPacket(packet:WorkerTelemetryPacket){
+    if(!this.status.recording)return;
+    this.elapsed=packet.elapsed;this.lastInput=packet.input;this.nextSample=this.elapsed+.1;this.session!.samples.push(...packet.samples);
+    if(this.route){
+      for(const pose of packet.poses){if(this.route.poses.at(-1)?.t===pose.t)this.route.poses[this.route.poses.length-1]=pose;else this.route.poses.push(pose);}
+      for(const control of packet.controls){if(this.route.controls.at(-1)?.t===control.t)this.route.controls[this.route.controls.length-1]=control;else this.route.controls.push(control);}
+    }
+    if(this.session!.samples.length>=this.maxSamples)this.stop('sample_limit');
+  }
   private session?: Session;
   private elapsed = 0;
   private nextSample = 0.1;
@@ -77,6 +94,7 @@ export class DriveTelemetry {
     samples: this.session?.samples.length ?? 0, frames:this.session?.frames.length??0, seconds: this.elapsed, reason: this.reason, hasData: !!(this.session?.samples.length||this.session?.frames.length) }; }
   start(context: Fields = {}) {
     if (this.status.recording) throw new Error('Telemetry is already recording');
+    this.recordingId++;this.workerSample=this.workerPose=this.workerControl=0;
     const v = this.vehicle, m = v.suspension.mechanics;
     if (!m) throw new Error('No physical engine available');
     const p = v.root.world.javaPowertrain?.state?.parameters ?? {};
@@ -85,7 +103,7 @@ export class DriveTelemetry {
       ...Object.fromEntries(Array.from({length:name.length},(_,i) => [`${prefix}_code_${i}`,name.charCodeAt(i)])) });
     const values = m.transmission?.definition.mechanics?.values ?? {};
     this.session = { ended: false, metadata: { source: 'redline-rebuilt', recorder_features: 'host_physics_v1 frame_cpu_v1',
-      started_utc: new Date().toISOString(), frame_cpu_version:1,work_profile_version:1,contact_profile_version:1,contact_timing_stride:32,frame_limit:this.maxFrames,interval_s: 0.1, physics_dt_s: v.physicsDt,physics_hz:1/v.physicsDt,xpbd_iterations:XPBD_ITERATIONS,collision_geometry_hz:COLLISION_GEOMETRY_HZ,mount_release_delay_s:MOUNT_RELEASE_DELAY_S,reference_physics_hz:REFERENCE_PHYSICS_HZ,
+      started_utc: new Date().toISOString(), frame_cpu_version:1,work_profile_version:1,contact_profile_version:1,contact_timing_stride:32,frame_limit:this.maxFrames,interval_s: 0.1, physics_dt_s: v.physicsDt,physics_hz:1/v.physicsDt,panel_solver:v.panelSolver,xpbd_iterations:v.panelSolver==='xpbd'?XPBD_ITERATIONS:0,ror_max_step_s:v.panelSolver==='ror'?.0005:0,collision_geometry_hz:COLLISION_GEOMETRY_HZ,mount_release_delay_s:v.panelSolver==='ror'?ROR_MOUNT_RELEASE_DELAY_S:MOUNT_RELEASE_DELAY_S,reference_physics_hz:REFERENCE_PHYSICS_HZ,
       ...names('model',v.root.definition.alias), ...names('vehicle',v.root.definition.alias),
       chassis_pack: v.root.definition.key.pack, chassis_type: v.root.definition.key.id,
       mass_kg: v.body.mass, mass_source: 'host_rigid_body_kg', idle_rpm: m.idleRpm, redline_rpm: m.redlineRpm,

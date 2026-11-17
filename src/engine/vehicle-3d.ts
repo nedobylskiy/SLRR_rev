@@ -63,6 +63,9 @@ function basis(panel: DeformablePanel) {
 
 /** Full rigid chassis motion with ray suspension and separate deformable or rigid detachable parts. */
 export class Vehicle3D extends CarCrashDemo {
+  readonly physicsRegistration:{part:EnginePart;samples:number[];triangles:number[]}[]=[];
+  physicsRecipe(){return {samples:this.physicsHoodSamples,tree:this.originalTree,triangles:this.triangleSource??[]};}
+  readonly physicsHoodSamples:number[];
   readonly telemetry = new DriveTelemetry(this);
   get physicsDt() { return this.clock.dt; }
   get simulationTime(){return this.clock.tick*this.clock.dt;}
@@ -256,10 +259,11 @@ export class Vehicle3D extends CarCrashDemo {
       part.condition = Math.max(0, part.condition - energy * weight / threshold);
     }
   }
-  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision,readonly physicsFrequency=REFERENCE_PHYSICS_HZ) {
-    // A short suspension shock should remain mostly elastic: retain the original
-    // stiffness/yield and slow permanent rest-length creep instead of hardening metal.
-    super(root, hood, samples, chassisBounds, { stiffness: 500000, thickness: 0.12, plasticRate: 1, yieldStrain: 0.012, mountStrength: 60000 * PANEL_MOUNT_STRENGTH_SCALE,frequency:physicsFrequency });
+  constructor(root: EnginePart, hood: EnginePart, samples: number[], chassisBounds: Box3, readonly terrain: Terrain & { ramp: boolean } = new TestTerrain(), readonly mapCollision?: MapCollision,readonly physicsFrequency=REFERENCE_PHYSICS_HZ,readonly panelSolver:'ror'|'xpbd'='ror') {
+    // Force beams use their own material and a coarse physical cage. The full
+    // render mesh is skinned separately; XPBD remains an offline reference.
+    super(root, hood, samples, chassisBounds, { solver:panelSolver,stiffness: panelSolver==='ror'?117000:500000, resolution:panelSolver==='ror'?[5,7]:[7,9],thickness: 0.12, plasticRate: 1, yieldStrain: panelSolver==='ror'?.04:.012, mountStrength: (panelSolver==='ror'?225000:60000) * PANEL_MOUNT_STRENGTH_SCALE,frequency:physicsFrequency });
+    this.physicsHoodSamples=Array.from(samples);
     this.clock = new FixedClock(this.physicsFrequency,physicsTickBudget(this.physicsFrequency));
     this.originalTree = [...root.world.parts.values()].map(part => ({ part, parent: part.parent, parentSlot: part.parentSlot, ownSlot: part.ownSlot, local: part.local.clone() }));
     const total = vehicleAssemblyMass(root.world.parts.values()), center = vehicleAssemblyCenter(root);
@@ -288,6 +292,7 @@ export class Vehicle3D extends CarCrashDemo {
     }});
   }
   register(part: EnginePart, samples: number[], triangles: number[]) {
+    this.physicsRegistration.push({part,samples:Array.from(samples),triangles:Array.from(triangles)});
     const file = part.definition.cfgPath.split('/').at(-1) ?? '';
     const isRoot = part === this.root, isWheel = this.suspension.wheels.some(w => w.part === part);
     const engineBlock = this.suspension.mechanics?.block, isEngine = part.definition.mechanics?.kind === 'engine';
@@ -301,7 +306,7 @@ export class Vehicle3D extends CarCrashDemo {
     const rigid = isWheel || isEngine && part === engineBlock || !!part.definition.mechanics && !isEngine || /headlight|taillight|window|windshield/i.test(file);
     if (metal && (part !== this.hood || isRoot)) {
       const own = part.definition.config.slots.find(s => s.id === part.ownSlot);
-      const panel = new DeformablePanel(samples, { mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : [4, 5],frequency:this.physicsFrequency, stiffness: isRoot ? 900000 : 750000, yieldStrain: isRoot ? 0.003 : 0.018, mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000) * PANEL_MOUNT_STRENGTH_SCALE, gravity: isRoot ? 0 : 9.81, anchorLayout: isRoot ? 'central-four' : 'panel' });
+      const panel = new DeformablePanel(samples, { solver:this.panelSolver,mass: mass(part), mount: own ? [...own.position] : [0, 0, 0], volume: true, resolution: isRoot ? [5, 7] : this.panelSolver==='ror'?[3,3]:[4,5],frequency:this.physicsFrequency, stiffness: this.panelSolver==='ror'?(isRoot?1080000:240000*Math.min(1,mass(part)/15)):(isRoot?900000:750000), yieldStrain: isRoot ? (this.panelSolver==='ror'?.016:.003) : (this.panelSolver==='ror'?.04:.018), mountStrength: isRoot ? 1e15 : Math.max(12000, mass(part) * 2000) * PANEL_MOUNT_STRENGTH_SCALE * (this.panelSolver==='ror'?1.6:1), gravity: isRoot ? 0 : 9.81, anchorLayout: isRoot ? 'central-four' : 'panel' });
       this.addSoft(part, panel, isRoot); panel.setAnchorFrame(part.matrix().elements); panel.reset();
     } else if (rigid && samples.length && !this.rigid.has(part)) {
       const body = new RigidBody3D(mass(part), isEngine && !this.engineHull.isEmpty() ? this.engineHull.clone() : boundsOf(samples)); body.setFrame(part.matrix()); this.rigid.set(part, { part, body, previous: part.matrix(), peakForce: 0 });
@@ -587,9 +592,7 @@ export class Vehicle3D extends CarCrashDemo {
       this.collisionCue = { speed, impulse: magnitude, position: position.clone() };
   }
   controlInput?: (dt:number)=>DrivingInput;
-  override advance(seconds: number, input: DrivingInput) {
-    if (this.root.world.disposed) throw new Error('3D world disposed');
-    if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
+  beginPhysicsFrame(){
     this.collisionCue = undefined;
     this.advanceVersion++;
     this.profileFrame=this.telemetry.status.recording;
@@ -597,7 +600,12 @@ export class Vehicle3D extends CarCrashDemo {
     this.suspension.workProfile.setEnabled(this.profileFrame);
     for(const key of Object.keys(this.contactProfile) as (keyof typeof this.contactProfile)[])this.contactProfile[key]=0;
     if(this.bodySurface)this.bodySurface.profile=this.profileFrame?this.contactProfile:undefined;
-    Object.assign(this.timings, { panelSurfaceContacts:0,panelGround:0,nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 });
+    for(const key of Object.keys(this.timings) as (keyof typeof this.timings)[])this.timings[key]=0;
+  }
+  override advance(seconds: number, input: DrivingInput, continuingFrame=false) {
+    if (this.root.world.disposed) throw new Error('3D world disposed');
+    if (![input.throttle, input.steer].every(Number.isFinite)) throw new Error('Finite vehicle input required');
+    if(!continuingFrame)this.beginPhysicsFrame();
     return this.clock.advance(seconds, tick => {
       // Restore a reference checkpoint before sampling previous frames or detecting shocks.
       this.beforeReplayTick?.((tick-1)*this.clock.dt);
@@ -699,7 +707,7 @@ export class Vehicle3D extends CarCrashDemo {
         s.panel.profiling=this.profileFrame;
         s.panel.advance(dt);
         if(work){const p=s.panel.profile;work.active_steps+=p.steps;work.solve_ms+=performance.now()-solveStart;work.constraints_ms+=p.constraints;work.contacts_ms+=p.contacts;work.ground_ms+=p.groundMs;work.surfaces_ms+=p.surfaceMs;}
-        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*XPBD_ITERATIONS*p.steps;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;this.timings.panelSurfaceContacts+=p.surfaceMs;this.timings.panelGround+=p.groundMs;}
+        if(this.profileFrame){const p=s.panel.profile;this.timings.nodeSteps+=s.panel.positions.length/3*p.steps;this.timings.beamIterations+=s.panel.beams.length*p.beamPasses;this.timings.panelConstraints+=p.constraints;this.timings.panelContacts+=p.contacts;this.timings.panelUpload+=p.upload;this.timings.panelIntegration+=p.integration;this.timings.panelSurfaceContacts+=p.surfaceMs;this.timings.panelGround+=p.groundMs;}
         if (attached) this.surfaceDirty = true;
         this.timings.panelSolve += performance.now() - solveStart;
         if (attached && s.panel.collisionImpact) {

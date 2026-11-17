@@ -15,6 +15,9 @@ export function restoreReferenceGeometry(group:Group) {
   }
 }
 export function applySavedPanel(group:Group,part:EnginePart) {
+  // A live physics view owns the current skin. Restoring a saved/reference
+  // mesh here would replace world-space vertices between worker snapshots.
+  if(group.userData.panelViewOwnsTransform)return;
   const state=part.savedDamage?.panel;
   if(group.userData.savedPanelApplied&&group.userData.savedPanelState===state)return;
   restoreReferenceGeometry(group);

@@ -81,7 +81,9 @@ function appendJavaEvent(event: BootEvent) {
   el('java-log').append(line);
   el('java-log').scrollTop = el('java-log').scrollHeight;
 }
-async function runGameBoot() {
+let gameBootReady:Promise<void>|undefined;
+function runGameBoot(){return gameBootReady=runGameBootNow();}
+async function runGameBootNow() {
   if (!assets) return;
   await softBodyReady;
   disposeJavaScene?.(); disposeJavaScene = undefined;
@@ -1423,7 +1425,10 @@ async function openMainMenu() {
 }
 async function openCityImpactPlayground(){
   if(!assets||!viewer)return;
-  const source=assets;let other:Awaited<ReturnType<PartFactory['stock']>>|undefined;
+  const source=assets,bootSequence=sequence;
+  if(!activeBoot)await(gameBootReady??runGameBoot());
+  if(source!==assets||bootSequence!==sequence||!viewer)return;
+  let other:Awaited<ReturnType<PartFactory['stock']>>|undefined;
   const boot=activeBoot,nativeCars:ReturnType<typeof jv>[]=[];
   const releaseNative=()=>{for(const car of nativeCars.splice(0))void boot?.jvm.invokeAsync(car,'destroy').catch(error=>appendJavaEvent({level:'error',message:`Playground vehicle cleanup: ${String(error)}`}));};
   let lab:Awaited<ReturnType<Viewer['cityImpactPlayground']>>|undefined;
