@@ -744,7 +744,7 @@ export class Viewer {
       const size=this.getViewportSize();
       this.inspection.update(size.width,size.height,this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
-      if(this.trafficCars.some(car=>car.voice))this.trafficAudio?.listener(renderCamera);
+      this.trafficAudio?.listener(renderCamera);
       if(this.mapAmbience){this.ambientAudio?.listener(renderCamera);this.mapAmbience.update(now,renderCamera.position,timeOfDay,document.hidden?0:this.scriptTimeScale?.()??1);}
       this.mapRoadDebug?.updateTraffic(this.trafficControl);
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
@@ -2167,9 +2167,17 @@ export class Viewer {
     const updateViews=()=>{for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);};
     updateViews();
     let last:number|undefined,disposed=false,wasSleeping=car.sleeping;
+    let voice:TrafficVoice|undefined,fakeRpm=850;
+    if(root.world.spriteOnlyLights&&!control.parked){
+      // fake_racers use the same quiet spatial engine sample as ordinary traffic.
+      this.trafficAudio??=new TrafficAudio();this.trafficAudio.activate();
+      void this.trafficAudio.voice(source.assets).then(ready=>{
+        if(disposed||root.world.disposed){ready.dispose();return;}voice=ready;
+      }).catch(error=>console.warn('Fake racer engine sound could not be loaded',error));
+    }
     const racer={car,update:(now:number)=>{
       if(disposed)return;if(root.world.disposed||!control.active()){racer.dispose();return;}
-      if(document.hidden||(this.scriptTimeScale?.()??1)<=0){last=undefined;return;}
+      if(document.hidden||(this.scriptTimeScale?.()??1)<=0){voice?.setActive(false);last=undefined;return;}
       // Missing streamed ground is not a successful placement. Retry once its
       // geometry changes, without polling four terrain rays on every idle frame.
       const retrySupport=control.parked&&car.sleeping&&!parkedSupportReady&&supportFaces!==source.terrain!.faces;
@@ -2179,7 +2187,15 @@ export class Viewer {
       // Foreground frame time belongs to the fixed clock. Clamping it makes
       // opponents slower than the player as soon as rendering drops below 20 Hz.
       const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
-      const lightMask=drivingLightMask(root.world.lightMask,!control.parked&&!!input.brake,car.suspension.mechanics?.gear===-1,car.suspension.mechanics?.running??true,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??((this.lighting?.direction.y??1)<.1?0:43200));
+      // Native fake cars have no MechanicalSystem. A parked spectator car has
+      // its engine off; waking its collision body does not start that engine.
+      const running=car.suspension.mechanics?.running??!control.parked;
+      if(voice){
+        const speed=car.body.velocity.length(),gear=Math.max(1,Math.min(5,Math.floor(speed/9)+1));
+        fakeRpm+=(850+speed*290/gear+Math.abs(input.throttle)*500-fakeRpm)*(1-Math.exp(-dt*5));
+        voice.setActive(running);voice.update(car.body.position,fakeRpm,input.throttle);
+      }
+      const lightMask=drivingLightMask(root.world.lightMask,!control.parked&&!!input.brake,car.suspension.mechanics?.gear===-1,running,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??((this.lighting?.direction.y??1)<.1?0:43200));
       if(lightMask!==root.world.lightMask){root.world.lightMask=lightMask;this.syncWorldVisuals(root.world);}
       if(car.sleeping&&wasSleeping)return;
       wasSleeping=car.sleeping;
@@ -2191,7 +2207,7 @@ export class Viewer {
       root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);
       updateViews();
       control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
-    },dispose:()=>{if(disposed)return;disposed=true;this.javaRaces.delete(root);this.vehiclePhysics.forget(car);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
+    },dispose:()=>{if(disposed)return;disposed=true;voice?.dispose();this.javaRaces.delete(root);this.vehiclePhysics.forget(car);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
     this.vehiclePhysics.register(car,control.impact);this.javaRaces.set(root,racer);return racer;
   }
   async cityImpactPlayground(roots:[EnginePart,EnginePart],assets:Assets,telemetry:(text:string)=>void){

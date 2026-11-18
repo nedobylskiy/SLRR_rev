@@ -56,7 +56,7 @@ test('sleeping parked render publishes its body skin after placement without a p
     supported();
     placement={position:new Vector3(160,6,260),yaw:-.5,velocity:new Vector3()};
     races.get(vehicle.root).update(1032);supported();
-    assert.equal(vehicle.root.world.lightMask&4,4,'native cars without a scripted engine enable their night flares even while sleeping');
+    assert.equal(vehicle.root.world.lightMask&4,0,'parked native cars without an engine model must not enable night flares');
     for(const group of proxies.values()){
       group.updateMatrixWorld(true);const mesh=group.children[0] as Mesh;
       const box=new Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as Float32BufferAttribute).applyMatrix4(mesh.matrixWorld);
