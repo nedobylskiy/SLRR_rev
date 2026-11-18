@@ -15,6 +15,13 @@ export class VehiclePhysicsClient {
   private worker?:Worker;private busy=false;private sequence=0;private nextId=1;private pending=0;
   private immediate=false;private stepped=false;
   beginFrame(){this.immediate=true;this.stepped=false;}
+  /** Hidden time is a pause, never work to catch up on after restoring the tab. */
+  pause(){
+    this.pending=this.pendingMs=0;
+    for(const entry of this.entries.values())entry.elapsed=0;
+    this.local?.pause();
+    if(this.worker)this.post({kind:'pause'});
+  }
   private entries=new Map<Vehicle3D,Entry>();private local?:VehiclePhysicsWorld;
   private sceneCollision?:Vehicle3D['mapCollision'];private sceneRevision=-1;private sentAt=0;
   workMs=0;roundTripMs=0;snapshotMs=0;pendingMs=0;error='';backend='Main thread / shared vehicle clock';

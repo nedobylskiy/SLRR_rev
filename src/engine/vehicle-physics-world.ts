@@ -10,6 +10,10 @@ export class VehiclePhysicsWorld {
   readonly entries=new Map<number,VehicleWorldEntry>();
   readonly clock:FixedClock;
   constructor(frequency=120){this.clock=new FixedClock(frequency,physicsTickBudget(frequency));}
+  pause(){
+    this.clock.restore(this.clock.tick);
+    for(const {car} of this.entries.values())car.clock.restore(car.clock.tick);
+  }
   add(id:number,entry:VehicleWorldEntry){
     if(entry.car.physicsFrequency!==this.clock.frequency)throw Error('World vehicles require a common physics frequency');
     this.entries.set(id,entry);

@@ -5,6 +5,7 @@ import type {SoftBodyBackend} from './soft-body-wasm';
 import type {PhysicsControl,PhysicsCarSnapshot,PhysicsVehicleSeed} from './vehicle-physics-transfer';
 export interface PhysicsScene {terrain?:ReturnType<MapTerrain['physicsSnapshot']>;walls:number[];boxes:ReturnType<MapCollision['physicsBoxes']>}
 export type PhysicsRequest=
+  |{kind:'pause'}
   |{kind:'add';id:number;seed:PhysicsVehicleSeed;scene?:PhysicsScene}
   |{kind:'remove';id:number}
   |{kind:'step';sequence:number;seconds:number;controls:PhysicsControl[];boxes?:PhysicsScene['boxes'];backend?:SoftBodyBackend};

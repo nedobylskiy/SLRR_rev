@@ -20,6 +20,7 @@ export class VehiclePhysicsWorkerRuntime {
     }:undefined));
   }
   handle(request:PhysicsRequest):PhysicsResponse|undefined{
+    if(request.kind==='pause'){this.world.pause();return;}
     if(request.kind==='add'){
       if(!this.world.entries.size)this.world=new VehiclePhysicsWorld(request.seed.frequency);
       if(request.scene){

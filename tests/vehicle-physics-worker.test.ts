@@ -30,7 +30,7 @@ test('sleeping parked render publishes its body skin after placement without a p
   let groundReady=false;
   const terrain=Object.assign(new TestTerrain(),{faces:0,placementHeight:()=>groundReady?0:-1000});
   const races=new Map(),viewer={generation:0,mapRoadSource:{terrain,collision:{}},scriptTimeOfDay:()=>0,
-    javaRaces:races,vehiclePhysics:client,proxies,pairVehicle:()=>({car:vehicle,positions:(part:unknown)=>samples.get(part)}),syncWorldVisuals:()=>{
+    javaRaces:races,vehiclePhysics:client,profiler:{record(){}},proxies,pairVehicle:()=>({car:vehicle,positions:(part:unknown)=>samples.get(part)}),syncWorldVisuals:()=>{
       for(const [part,group]of proxies)if(!group.userData.panelViewOwnsTransform){group.matrix.copy(modelMatrix(part.matrix()));group.matrixWorldNeedsUpdate=true;}
     }};
   let placement:{position:Vector3;yaw:number;velocity:Vector3}|undefined={position:new Vector3(150,4,250),yaw:.3,velocity:new Vector3()};
@@ -63,6 +63,23 @@ test('sleeping parked render publishes its body skin after placement without a p
       assert.ok(box.getCenter(new Vector3()).distanceTo(vehicle.body.position)<5,`parked body must remain beside its wheels: ${box.getCenter(new Vector3()).toArray()} vs ${vehicle.body.position.toArray()}`);
     }
     assert.equal(vehicle.clock.tick,0,'publishing body geometry does not simulate the sleeping car');
+    // No hidden rAF callback is delivered when Chrome suspends the tab.
+    placement=undefined;vehicle.wakePhysics();vehicle.body.velocity.z=-5;
+    const racer=races.get(vehicle.root);
+    client.beginFrame();racer.update(1066);client.flush();racer.publish();
+    const peer=car();peer.placeAt(new Vector3(300,0,300),0);client.register(peer);
+    // This car has no new elapsed time, but a later submission advances both
+    // cars. Publishing from update() would leave its Java/draw pose one frame old.
+    client.beginFrame();racer.update(1066);client.submit(peer,1/30,neutral);client.flush();racer.publish();
+    assert.ok(published!.distanceTo(vehicle.body.position)<1e-9,'publish after a later vehicle advances the common world');
+    client.forget(peer);peer.dispose();
+    const tickBeforePause=vehicle.clock.tick;
+    racer.pause();client.pause();
+    client.beginFrame();racer.update(61066);client.flush();racer.publish();
+    assert.equal(vehicle.clock.tick,tickBeforePause,'restoring a minimized window must not simulate the hidden minute');
+    client.beginFrame();racer.update(61099);client.flush();racer.publish();
+    assert.ok(vehicle.clock.tick-tickBeforePause<=4,'normal foreground stepping resumes immediately');
+    assert.ok(published!.distanceTo(vehicle.body.position)<1e-9,'Java receives the completed physics frame');
     binding.dispose();
   }finally{
     if(oldDocument)Object.defineProperty(globalThis,'document',oldDocument);else Reflect.deleteProperty(globalThis,'document');
@@ -200,4 +217,16 @@ test('production main-thread world advances before rendering and never waits for
     client.submit(b,1/60,neutral);client.flush();assert.equal(a.clock.tick,(i+1)*2,'one world advance per frame');
   }
   assert.match(client.backend,/Main thread/);assert.equal(client.roundTripMs,0);client.dispose();a.dispose();b.dispose();
+});
+
+test('pausing clears queued catch-up ticks without resetting position, velocity or completed simulation',()=>{
+  const client=new VehiclePhysicsClient(),a=car();
+  client.submit(a,2,neutral);client.flush();
+  const tick=a.clock.tick,position=a.body.position.clone(),velocity=a.body.velocity.clone();
+  client.pause();
+  client.beginFrame();client.submit(a,0,neutral);client.flush();
+  assert.equal(a.clock.tick,tick);assert.deepEqual(a.body.position,position);assert.deepEqual(a.body.velocity,velocity);
+  client.beginFrame();client.submit(a,1/30,neutral);client.flush();
+  assert.equal(a.clock.tick,tick+4,'old backlog must not cause a fast-forward burst');
+  client.dispose();a.dispose();
 });

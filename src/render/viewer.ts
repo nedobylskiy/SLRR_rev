@@ -367,7 +367,7 @@ export class Viewer {
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
   private readonly vehiclePhysics=new VehiclePhysicsClient();
-  private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;dispose():void}>();
+  private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;publish():void;pause():void;dispose():void}>();
   private sceneVisibility=new SceneVisibility();
   private *visibilityObjects():Iterable<VisibilityObject>{
     const cars=[...this.javaRaces.values()].map(r=>r.car);
@@ -552,7 +552,15 @@ export class Viewer {
     if(this.trafficTestEnabled&&this.mapRoadSource)void this.restartTrafficTest(true);
   }
   private trafficAudio?:TrafficAudio;
-  private ambienceVisibility=()=>this.ambientAudio?.pause(document.hidden||(this.scriptTimeScale?.()??1)<=0);
+  private ambienceVisibility=()=>{
+    this.ambientAudio?.pause(document.hidden||(this.scriptTimeScale?.()??1)<=0);
+    // rAF may stop completely while minimized: reset on the event itself,
+    // rather than waiting for a frame that observes document.hidden.
+    this.previousFrame=this.trafficPrevious=this.previousPropFrame=undefined;
+    this.vehiclePhysics.pause();
+    this.trafficClock.restore(this.trafficClock.tick);
+    for(const racer of this.javaRaces.values())racer.pause();
+  };
   private trafficAudioStart=()=>{this.trafficAudio?.activate();this.ambientAudio?.activate();};
   private trafficPeer?:Vehicle3D;
   private playerTrafficDriver?:PlayerTrafficDriver;
@@ -690,6 +698,7 @@ export class Viewer {
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
       this.profiler.measure('Race opponents CPU',()=>{for(const racer of this.javaRaces.values())racer.update(now);});
       this.profiler.measure('Physics frame finalize CPU',()=>this.vehiclePhysics.flush());
+      this.profiler.measure('Race vehicle visuals CPU',()=>{for(const racer of this.javaRaces.values())racer.publish();});
       this.profiler.record('Shared vehicle physics CPU',this.vehiclePhysics.workMs);
 
       this.profiler.measure('Map props CPU',()=>this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000));this.previousPropFrame=now;
@@ -2175,7 +2184,13 @@ export class Viewer {
         if(disposed||root.world.disposed){ready.dispose();return;}voice=ready;
       }).catch(error=>console.warn('Fake racer engine sound could not be loaded',error));
     }
-    const racer={car,update:(now:number)=>{
+    let publishPending=false;
+    const racer={car,pause:()=>{last=undefined;voice?.setActive(false);},publish:()=>{
+      if(disposed||!publishPending)return;
+      publishPending=false;
+      root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);updateViews();
+      control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
+    },update:(now:number)=>{
       if(disposed)return;if(root.world.disposed||!control.active()){racer.dispose();return;}
       if(document.hidden||(this.scriptTimeScale?.()??1)<=0){voice?.setActive(false);last=undefined;return;}
       // Missing streamed ground is not a successful placement. Retry once its
@@ -2199,14 +2214,12 @@ export class Viewer {
       if(lightMask!==root.world.lightMask){root.world.lightMask=lightMask;this.syncWorldVisuals(root.world);}
       if(car.sleeping&&wasSleeping)return;
       wasSleeping=car.sleeping;
+      publishPending=true;
       if(!car.sleeping)this.vehiclePhysics.submit(car,dt,{throttle:0,steer:0,brake:false});
       // Rival recordings need their own frame/detail rows, not just 10-Hz engine samples.
       car.telemetry.recordPerformanceFrame(now,{},document.hidden);
       for(const key of ['suspension','contacts','panels','panelSolve','panelSurface','other'] as const)
         this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
-      root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);
-      updateViews();
-      control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
     },dispose:()=>{if(disposed)return;disposed=true;voice?.dispose();this.javaRaces.delete(root);this.vehiclePhysics.forget(car);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
     this.vehiclePhysics.register(car,control.impact);this.javaRaces.set(root,racer);return racer;
   }
