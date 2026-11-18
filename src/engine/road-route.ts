@@ -152,7 +152,9 @@ export class RoadRoutes {
       const exit=b[2].clone().sub(b[1]).setY(0).normalize();
       if(entry.dot(exit)<Math.cos(Math.PI/9))continue;
       const center=this.nodes.get(incoming.to)!;
-      straightCrossings.push({center:center.toArray(),radius:Math.max(5,center.distanceTo(a[a.length-2]),center.distanceTo(b[1]))+1,direction:entry.toArray()});
+      const crossing=this.network.nodes.find(node=>node.id===incoming.to);
+      const laneExtent=Math.max(0,...(crossing?.lanes??[]).flatMap(lane=>[lane.segment.start,lane.segment.end].map(p=>Math.hypot(p[0]-center.x,p[2]-center.z))));
+      straightCrossings.push({center:center.toArray(),radius:Math.max(5,Math.min(60,laneExtent),center.distanceTo(a[a.length-2]),center.distanceTo(b[1]))+1,direction:entry.toArray()});
     }
     return {length:length+a.distance+b.distance,direction:direction.toArray(),roads:[...new Set(edges.flatMap(e=>e.roads))],points:points.map(p=>p.toArray()),...(this.racing?{straightCrossings}: {})};
   }

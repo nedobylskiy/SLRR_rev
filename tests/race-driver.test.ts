@@ -10,9 +10,11 @@ test('straight crossing releases steering inside its bounds and resumes pursuit 
  const driver=new RaceDriver((start,finish)=>({points:[start,[2,0,-20],finish],length:100,direction:[0,0,-1],roads:[1,2],
    straightCrossings:[{center:[0,0,-20],radius:8,direction:[0,0,-1]}]}));
  const command='AI_race 5,0,-100 1';
- let input=driver.update(command,new Vector3(0,0,-5),0,10,.1);
+ let input=driver.update(command,new Vector3(0,0,5),0,10,.1);
  assert.notEqual(input.steer,0);
+ input=driver.update(command,new Vector3(0,0,-9),0,10,.1);assert.equal(input.steer,0,'lookahead must not pull the car toward the junction centre before entry');
  input=driver.update(command,new Vector3(0,0,-18),0,10,.1);assert.equal(input.steer,0);
+ input=driver.update(command,new Vector3(0,0,-20),Math.PI/6,10,2.1);assert.equal(input.steer,0,'the straight pass survives route refresh timing and moderate yaw drift');
  input=driver.update(command,new Vector3(0,0,-24),0,10,.1);assert.equal(input.steer,0);
  input=driver.update(command,new Vector3(0,0,-35),0,10,.1);assert.notEqual(input.steer,0);
  const sideways=driver.update(command,new Vector3(0,0,-20),Math.PI/2,10,.1);assert.notEqual(sideways.steer,0,'a displaced/spun car still recovers instead of coasting sideways');

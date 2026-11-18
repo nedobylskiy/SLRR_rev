@@ -57,6 +57,7 @@ export class RaceDriver {
   private blockedSeconds=0;private reverseSeconds=0;private reverseSteer=1;private previousThrottle=0;
   private routeRefresh=0;
   private straightCrossings:StraightRaceCrossing[]=[];
+  private straightPass?:StraightRaceCrossing;
   private reaction=0;private launchTime=0;private launchRamp=0;private pace=1;private throttleScale=1;
   private runout?:{finish:Vector3;direction:Vector3};
   nightRace=false;
@@ -80,6 +81,7 @@ export class RaceDriver {
       if(this.nightRace&&this.goal&&speed>2&&position.distanceTo(this.goal)<40&&command&&!raceDestination(command))
         this.runout={finish:this.goal.clone(),direction:new Vector3(-Math.sin(yaw),0,-Math.cos(yaw))};
       this.command=command??'';this.points=[];this.progress=0;
+      this.straightPass=undefined;
       this.blockedSeconds=this.reverseSeconds=this.previousThrottle=0;
       const finish=command&&raceDestination(command);
       this.goal=finish?new Vector3(...finish):undefined;this.nightRace=!!finish&&/\sAI_NightRace(?:\s|$)/.test(command!);
@@ -99,9 +101,17 @@ export class RaceDriver {
     if(this.points.length<2)return hold();
     if(this.reaction>0){this.reaction=Math.max(0,this.reaction-dt);return hold();}
     this.launchTime+=dt;
-    const straightCrossing=()=>this.straightCrossings.some(c=>Math.hypot(position.x-c.center[0],position.z-c.center[2])<=c.radius
-      &&new Vector3(-Math.sin(yaw),0,-Math.cos(yaw)).dot(new Vector3(...c.direction))>Math.cos(Math.PI/7));
-    const coastingStraight=speed>1&&straightCrossing();
+    const lookahead=Math.max(4,Math.min(18,Math.abs(speed)*.8+4));
+    const heading=new Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+    const inPass=(c:StraightRaceCrossing,latched=false)=>{
+      const direction=new Vector3(...c.direction),delta=position.clone().sub(new Vector3(...c.center)).setY(0);
+      const along=delta.dot(direction),lateral=delta.addScaledVector(direction,-along).length();
+      return speed>1&&along>=-c.radius-lookahead&&along<=c.radius+(latched?2:0)&&lateral<=c.radius
+        &&heading.dot(direction)>Math.cos(latched?Math.PI/3:Math.PI/7);
+    };
+    if(this.straightPass&&!inPass(this.straightPass,true))this.straightPass=undefined;
+    this.straightPass??=this.straightCrossings.find(c=>inPass(c));
+    const coastingStraight=!!this.straightPass;
     if(this.routeRefresh===0&&this.status==='racing'&&!coastingStraight&&(!this.nightRace||distance>20))replan();
     if(Math.abs(speed)<.8&&this.previousThrottle>.25&&distance>2)this.blockedSeconds+=dt;
     else this.blockedSeconds=0;
@@ -130,7 +140,7 @@ export class RaceDriver {
     const crossedNightFinish=this.nightRace&&speed>2&&(pastFinish||distance<.1)&&finishDelta.clone().addScaledVector(finishDirection,-finishDelta.dot(finishDirection)).length()<5;
     if(pastFinish&&!crossedNightFinish&&this.progress>=this.routeLength-30&&this.replanDelay===0)replan();
     if(this.points.length<2)return hold();
-    const lookahead=Math.max(4,Math.min(18,Math.abs(speed)*.8+4)),target=at(this.progress+lookahead),error=target.sub(position);error.y=0;
+    const target=at(this.progress+lookahead),error=target.sub(position);error.y=0;
     if(crossedNightFinish)error.copy(finish).addScaledVector(finishDirection,100).sub(position).setY(0);
     const targetYaw=Math.atan2(-error.x,-error.z),angle=Math.atan2(Math.sin(targetYaw-yaw),Math.cos(targetYaw-yaw));
     const curvature=coastingStraight?0:2*Math.sin(angle)/Math.max(2,error.length());
