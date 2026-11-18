@@ -28,6 +28,17 @@ test('a race command accelerates the opponent through normal vehicle physics aft
   assert.ok(demo.body.velocity.length()>1);assert.equal(driver.status,'racing');
   demo.controlInput=undefined;world.dispose();
 });
+test('race physics turns a car back toward a destination it has overshot',()=>{
+  const {demo,world}=setup(false);demo.disableObstacle();demo.placeAt(new Vector3(3,0,-10),0);demo.settleSpawn();
+  const goal=demo.body.position.clone().add(new Vector3(-3,0,15));
+  const driver=new RaceDriver((start,finish)=>({points:[start,finish],length:20,direction:[0,0,1],roads:[1]}));
+  demo.controlInput=dt=>raceVehicleInput(driver,demo,`AI_race ${goal.toArray().join(',')} 42`,dt);
+  for(let i=0;i<2400&&driver.status!=='finished';i++)demo.advance(1/60,neutral);
+  assert.equal(driver.status,'finished',`physical car failed to return: ${demo.body.position.toArray()}`);
+  assert.ok(Math.hypot(demo.body.position.x-goal.x,demo.body.position.z-goal.z)<=1.1);
+  demo.controlInput=undefined;demo.dispose();world.dispose();
+});
+
 test('player traffic driver follows the graph with a full car through its normal solver',()=>{
   const {demo,world}=setup(false);demo.disableObstacle();
   const segment=(start:RoadPoint,end:RoadPoint):RoadSegment=>{const tangent=end.map((n,i)=>n-start[i]) as RoadPoint;return {start,end,startTangent:tangent,endTangent:tangent,length:Math.hypot(...tangent),raw:new Uint32Array(14),flag:0};};

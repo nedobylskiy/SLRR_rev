@@ -83,6 +83,11 @@ SLRR source calls can pass a floating numeric literal to an `int` parameter. The
 
 `allowNumericStringArguments: true` enables a source-call compatibility rule: an `int`, `float`, or `double` can match an interpreted `String` parameter and is converted to text. Numeric overloads still rank ahead of this conversion. The engine enables this for Garage's numeric `Slider.printValue(...)` calls, while the installed Slider source exposes `printValue(String)`. This is an explicit compatibility policy, not a confirmed general rule of the original compiler; it is disabled by default and does not loosen native method signatures.
 
+`allowResourceHandleArguments: true` permits an interpreted `java.util.resource.ResourceRef` argument to match a `java.util.resource.GameRef` parameter. Original 2.2.1 `City.enter` passes a `ResourceRef[]` model entry to the five-argument `ParkingCar(GameRef, GameRef, Vector3, Ypr, int)` constructor this way. The wrapper and native resource identity are preserved; exact overloads still win. This host compatibility policy is disabled by default, is limited to source calls and these two types, and does not enable arbitrary Java downcasts or loosen native signatures.
+
+`isSourceReferenceCompatible(parameter, argument)` lets the host validate additional source reference views after normal Java assignability fails. The host receives a resolved parameter class name and an argument containing a Java object; primitive and null arguments do not use the hook. A successful match preserves that object's identity and ranks below normal exact/upcast matches. The game host uses this only to let an existing live native `car` resource match `Part`/`Chassis`, as original night-race scripts call `Vehicle(Part)` with an unscripted fake-racer `GameRef`. Resource templates, cameras and unrelated objects are rejected. Without the hook, normal Java downcast restrictions remain.
+
+
 ## Current limits
 
 - The shared parser accepts the 3,453 `.java` files currently visible in one Build 940 installation (the original `MainMenu.java` is temporarily renamed for a separate compiler runtime test). It yields 3,499 classes and 5,952 method bodies. Parsing does not imply every method can execute with the current host bindings.

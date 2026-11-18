@@ -215,6 +215,7 @@ export class GameTypeNative {
         if (literal.pack) value.resource = { pack: literal.pack, id: Number(literal.id) | 0 };
         return value;
       }
+      if(this.nodes.get(this.object(receiver))?.destroyed)return jv('int',0);
       const node = this.requireResource(receiver), value = jv('int', node.resourceId);
       // Java stores mapStack[j].id() in an int. Keep its pack so a later
       // new GameRef(id) can resolve the right track script.
@@ -265,7 +266,7 @@ export class GameTypeNative {
       for (const child of [...node.children]) child.setParent(null);
       this.objects.delete(node.id);
       if (node instanceof GameObject) this.liveByResourceId.delete(node.resourceId);
-      this.nodes.delete(this.object(receiver));
+      node.destroyed=true;
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'deleteNative', [], () => {
@@ -518,6 +519,9 @@ export class GameTypeNative {
         this.readVector(args[2]), this.readVector(args[3])); return voidValue();
     });
     jvm.natives.registerAsync(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], async ({ receiver, args }) => {
+      // Track may hide an old renderer after its race target has been destroyed.
+      // Deleted native handles have ID zero and cannot receive further events.
+      if(this.nodes.get(this.object(receiver))?.destroyed)return voidValue();
       const type = Number(args[1].value) | 0;
       if (type === 16 && typeof args[2].value === 'string') {
         const node = this.getResource(receiver);
@@ -570,10 +574,10 @@ export class GameTypeNative {
   }
 
   get(receiver: JavaValue): GameObject | undefined {
-    const node = this.nodes.get(this.object(receiver));
+    const node = this.getResource(receiver);
     return node instanceof GameObject ? node : undefined;
   }
-  getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
+  getResource(receiver: JavaValue): ResourceObject | undefined { const node=this.nodes.get(this.object(receiver));return node?.destroyed?undefined:node; }
   /** File-created texture handles retain a stable RID when Java passes only id(). */
   bindTexture(receiver: JavaValue, identity: ResourceIdentity): void {
     const node = this.allocate(receiver), id = 0x60000000 + identity.id;
@@ -874,7 +878,7 @@ export class GameTypeNative {
   private allocate(receiver: JavaValue): ResourceObject {
     const object = this.object(receiver);
     const current = this.nodes.get(object);
-    if (current) return current;
+    if (current&&!current.destroyed) return current;
     const node = new ResourceObject(this.nextId++, object.className);
     this.nodes.set(object, node);
     this.objects.set(node.id, node);

@@ -151,6 +151,14 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     },
     allowNumericNarrowing: true,
     allowNumericStringArguments: true,
+    allowResourceHandleArguments: true,
+    isSourceReferenceCompatible: (parameter, argument) => {
+      if(parameter!=='java.game.parts.Part'&&parameter!=='java.game.parts.bodypart.Chassis')return false;
+      // Night-race fake racers have a native car CFG but no Part Java script.
+      // Vehicle(Part) wraps that existing native car rather than constructing one.
+      const node=gameTypes.get(argument);
+      return !!node?.resourcePack&&gameTypes.catalogResource(node.resourcePack,node.typeId)?.nativeType==='car';
+    },
     resolveResourceId: (resource, path) => {
       const sourcePath = normalizePath(path);
       const owner = sourcePacks.get(sourcePath)

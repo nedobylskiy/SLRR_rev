@@ -47,6 +47,8 @@ export class MechanicalSystem {
   boost = 0;
   manual = false;
   private shiftTimer = 0;
+  private shiftReconnecting=false;
+  private shiftGrip=1;
   private previousRpm = 0;
   private lastUp = false;
   private lastDown = false;
@@ -83,6 +85,7 @@ export class MechanicalSystem {
     this.drive = this.transmission?.definition.mechanics?.drive ?? 'DT_RWD';
     this.idleRpm = this.root.world.javaPowertrain?.state?.parameters.engine_rpm_idle ?? this.block?.definition.mechanics?.values.rpm_idle ?? 900;
     this.redlineRpm = this.root.world.javaPowertrain?.state?.parameters.RPM_limit ?? this.block?.definition.mechanics?.values.RPM_limit ?? 6500;
+    this.reset();
   }
   health(part?: EnginePart) { return attached(part, this.root); }
   component(index: number, kind: keyof CornerMechanics) { return this.health(this.corners[index][kind]); }
@@ -101,7 +104,7 @@ export class MechanicalSystem {
     const health = this.health(part);
     return { force: (values?.force ?? 0) * health, damping: (values?.damping ?? 0) * health };
   }
-  reset() { this.launchHelping.reset();this.launchThrottleFactor=1; this.brakeHelpClutch=this.clutchHelpClutch=0; this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
+  reset() { this.launchHelping.reset();this.launchThrottleFactor=1; this.brakeHelpClutch=this.clutchHelpClutch=0; this.temperature = 20; this.previousRpm = 0; this.rpm = this.idleRpm; this.running = true; this.starting = false; this.starterRequestSeconds = 0; this.gear = 0; this.boost = 0; this.manual = /TT_MANUAL|TT_SEMIAUTO/.test(this.transmission?.definition.mechanics?.transmissionType ?? ''); this.shiftTimer = 0;this.shiftReconnecting=false;this.shiftGrip=1; this.lastUp = this.lastDown = this.lastNeutral = this.lastStart = false; }
   private updateIgnition(gas: number) {
     if (this.running && this.rpm < Math.max(250,this.idleRpm*0.35)) this.running = false;
     else if (!this.running && this.power>0 && this.rpm >= Math.max(500,this.idleRpm*0.65)
@@ -146,7 +149,7 @@ export class MechanicalSystem {
     return this.displacement * 900000 / (4 * Math.PI) * shape * (1 + this.boost);
   }
   /** Rotational engine/clutch model. Wheel angular velocities are independent of chassis speed. */
-  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; handbrakeAxis?:number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0, wheelContacts?:readonly boolean[]) {
+  advance(dt: number, input: { throttle: number; brake?: boolean; brakeAxis?: number; handbrakeAxis?:number; throttleMode?: 'directional' | 'pedal'; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean; transmissionLocked?: boolean }, wheelOmega: readonly number[], roadOmega: readonly number[] = wheelOmega, roadSpeedMps = 0, wheelContacts?:readonly boolean[]) {
     if (!Number.isFinite(dt) || dt <= 0 || dt > 0.1 || wheelOmega.length !== 4 || wheelOmega.some(v => !Number.isFinite(v)) || roadOmega.length !== 4 || roadOmega.some(v => !Number.isFinite(v)) || !Number.isFinite(roadSpeedMps)) throw new Error('Invalid drivetrain step');
     const throttle = Math.max(-1, Math.min(1, input.throttle)), gas = Math.abs(throttle), values = this.transmission?.definition.mechanics?.values ?? {};
     const idle = this.idleRpm, limit = this.redlineRpm;
@@ -160,16 +163,21 @@ export class MechanicalSystem {
     this.starterRequestSeconds = Math.max(0,this.starterRequestSeconds-dt);
     this.shiftTimer = Math.max(0, this.shiftTimer - dt);
     const up = !!input.gearUp, down = !!input.gearDown, neutral = !!input.neutral;
-    if (neutral && !this.lastNeutral) { this.gear = 0; this.shiftTimer = 0; }
+    if(input.transmissionLocked){this.gear=0;this.shiftTimer=0;this.shiftReconnecting=false;this.shiftGrip=1;}
+    else if (neutral && !this.lastNeutral) { this.gear = 0; this.shiftTimer = 0;this.shiftReconnecting=false;this.shiftGrip=1; }
     else if (!neutral && (up && !this.lastUp || down && !this.lastDown) && this.shiftTimer === 0) {
       if (this.gear !== 0) this.manual = true;
       this.gear = Math.max(-1, Math.min(ratios.filter(r => r > 0).length, this.gear + Number(up) - Number(down)));
-      this.shiftTimer = 0.22;
+      // The lever already opens the clutch for the shift. Reconnect it
+      // progressively, instead of dumping it onto stationary wheels at idle.
+      this.shiftTimer = 0.22;this.shiftReconnecting=this.gear!==0;this.shiftGrip=0;
     }
     this.lastUp = up; this.lastDown = down; this.lastNeutral = neutral;
+    if(input.clutch&&!input.transmissionLocked)this.shiftReconnecting=false;
+    if(this.shiftTimer===0)this.shiftGrip=Math.min(1,this.shiftGrip+dt/.3);
     const mean = shares.reduce((sum, share, i) => sum + wheelOmega[i] * share, 0);
     const roadMean = shares.reduce((sum, share, i) => sum + roadOmega[i] * share, 0);
-    if (this.running && !this.manual && this.shiftTimer === 0) {
+    if (this.running && !this.manual && this.shiftTimer === 0&&!input.transmissionLocked) {
       if (input.throttleMode !== 'pedal' && this.gear > 0 && throttle < 0 && mean < 1.5) this.gear = -1;
       else if (input.throttleMode !== 'pedal' && this.gear < 0 && throttle > 0 && mean > -1.5) this.gear = 1;
       if (this.gear > 0 && !input.clutch && mean > 2) {
@@ -201,7 +209,7 @@ export class MechanicalSystem {
     const turbo = this.engine.some(part => /turbocharger/i.test(part.definition.script ?? '') && this.health(part));
     this.boost += (Math.min(2.5, targetBoost) - this.boost) * (1 - Math.exp(-dt / (turbo ? 0.35 : 0.06)));
     const omega = Math.max(0, this.rpm) * Math.PI / 30;
-    const automaticShift = this.shiftTimer > 0 && !this.manual && !input.clutch;
+    const automaticShift = this.shiftTimer > 0 && this.gear!==0 && !this.manual && !input.clutch;
     const firing = this.running && this.rpm < limit && this.power > 0 && !automaticShift;
     const idleControl = this.rpm < idle ? Math.min(80, 25 + (idle - this.rpm) * 0.25) : 0;
     const lowRpmCombustion = Math.max(0, Math.min(1, (this.rpm - 200) / 450));
@@ -225,7 +233,7 @@ export class MechanicalSystem {
     const idleRisk=Math.max(0,Math.min(1,(idle*1.25-Math.min(this.rpm,Math.abs(shaftOmega)*30/Math.PI))/(idle*.5)));
     this.clutchHelpClutch=(gas<=.05||brakeAxis>.2)?clutchProtection*idleRisk:0;
     const assistedOpening=Math.min(1,this.brakeHelpClutch+this.clutchHelpClutch);
-    const clutchOpen = assistedOpening>=1-1e-9 || !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power || !this.running && !this.manual;
+    const clutchOpen = assistedOpening>=1-1e-9 || !!input.clutch || this.shiftTimer > 0 || !totalRatio || !this.power || !this.running && !this.manual || !!input.transmissionLocked;
     const launch = Math.max(0.65, Math.min(1, (this.rpm - idle) / (idle * 0.55) + gas * 0.28));
     // Dyno torque may be negative outside the combustion band. That is engine
     // braking, not a negative friction capacity for the clutch.
@@ -233,14 +241,14 @@ export class MechanicalSystem {
     const manualCapacity = gas > 0 ? Math.min(stallCapacity * launch, Math.max(0, this.estimateFlywheelTorqueAt(this.rpm)) * (0.95 + gas * 0.2)) : 120;
     const automaticCapacity = gas > 0 ? stallCapacity * launch : 90 * Math.min(1, Math.abs(shaftOmega) / Math.max(1, omega));
     // Torque-derived friction remains only in the non-native fallback below.
-    const capacity = clutchOpen ? 0 : (this.manual ? manualCapacity : automaticCapacity) * (this.clutch ? this.health(this.clutch) : 1) * (1-assistedOpening);
+    const capacity = clutchOpen ? 0 : (this.manual ? manualCapacity : automaticCapacity) * (this.clutch ? this.health(this.clutch) : 1) * (1-assistedOpening)*(this.shiftReconnecting?this.shiftGrip:1);
     let clutchTorque = Math.max(-capacity, Math.min(capacity, (omega - shaftOmega) * 9));
     // Use the same flywheel inertia with the clutch open and closed.
     const inertia = 0.28 + Math.max(0, nativeParameters?.engine_inertia ?? this.crank?.definition.mechanics?.values.inertia ?? 0) * 0.01;
-    if(clutchProtection>0&&clutchTorque>0){
+    if((clutchProtection>0||this.shiftReconnecting)&&clutchTorque>0){
       const idleFloor=idle*.85*Math.PI/30;
       const safeTorque=Math.max(0,engineTorque-drag+(omega-idleFloor)*inertia/dt);
-      clutchTorque+=(Math.min(clutchTorque,safeTorque)-clutchTorque)*clutchProtection;
+      clutchTorque+=(Math.min(clutchTorque,safeTorque)-clutchTorque)*(this.shiftReconnecting?1:clutchProtection);
     }
     if (this.root.world.javaPowertrain?.curve && totalRatio && !clutchOpen) {
       // The host integrates SI torques; native CFG inertia values use its own
@@ -259,10 +267,11 @@ export class MechanicalSystem {
       // Recovered exchange is governed by clutch engagement and both inertias.
       // ClutchF is not a demonstrated SI torque ceiling. Treating its stock 500
       // as Nm made high-torque engines slip indefinitely even on a closed clutch.
-      let grip = this.clutch ? this.health(this.clutch) : 1;
+      let grip = (this.clutch ? this.health(this.clutch) : 1)*(this.shiftReconnecting?this.shiftGrip:1);
       // Automatic clutch control releases before the engine is pulled below
-      // idle. Manual clutch mode must retain the possibility of a stalled launch.
-      if (!this.manual && closed.engineSpeed < uncoupled) {
+      // idle, including the lever-operated reconnection. An explicit manual
+      // clutch pedal cancels that cycle and retains normal manual stall behavior.
+      if ((!this.manual||this.shiftReconnecting) && closed.engineSpeed < uncoupled) {
         const idleFloor = idle * 0.85 * Math.PI / 30;
         grip = Math.min(grip, Math.max(0, uncoupled-idleFloor)/(uncoupled-closed.engineSpeed));
       }
@@ -270,12 +279,14 @@ export class MechanicalSystem {
         const safeGrip=Math.max(0,Math.min(1,(uncoupled-idle*.85*Math.PI/30)/(uncoupled-closed.engineSpeed)));
         grip+=(Math.min(grip,safeGrip)-grip)*clutchProtection;
       }
+      if(this.shiftReconnecting&&grip>=1-1e-9)this.shiftReconnecting=false;
       grip *= 1-assistedOpening;
       const exchange = clutchExchange({...exchangeInput,clutch:1-grip});
       this.rpm = Math.max(0,exchange.engineSpeed*30/Math.PI);
       this.updateIgnition(gas);
       return {torque:shares.map(share=>exchange.wheelDeltaPerDriveWeight*transmissionInertia/dt*share),directionBrake};
     }
+    if(this.shiftReconnecting&&this.shiftGrip===1&&this.rpm>idle&&Math.abs(omega-shaftOmega)<5)this.shiftReconnecting=false;
     const minimumRpm = this.running && !this.manual && idle >= 650 ? idle * 0.65 : 0;
     this.rpm = Math.max(minimumRpm, Math.min(limit * 1.08, this.rpm + (engineTorque - drag - clutchTorque) / inertia * dt * 30 / Math.PI));
     if (automaticShift && this.running) {

@@ -17,8 +17,10 @@ export class VehiclePhysicsWorld {
   advance(seconds:number){
     const entries=[...this.entries.values()];for(const {car}of entries)car.beginPhysicsFrame();
     return this.clock.advance(seconds,()=>{
+      for(const {car}of entries)if(car.sleeping&&(car.body.velocity.lengthSq()>1e-6||car.body.momentum.lengthSq()>1e-6))car.wakePhysics();
       for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++){
-        const a=entries[i],b=entries[j],hit=vehiclePairContact(a.car.body,b.car.body);if(!hit)continue;
+        const a=entries[i],b=entries[j];if(a.car.sleeping&&b.car.sleeping)continue;
+        const hit=vehiclePairContact(a.car.body,b.car.body);if(!hit)continue;
         if(hit.impulse.lengthSq()>1){
           a.car.vehicleContact(hit.impulse,hit.point,b.car.body.bounds.clone().applyMatrix4(b.car.body.matrix()),hit.closing,b.car);
           b.car.vehicleContact(hit.impulse.clone().negate(),hit.point,a.car.body.bounds.clone().applyMatrix4(a.car.body.matrix()),hit.closing,a.car);
@@ -28,7 +30,10 @@ export class VehiclePhysicsWorld {
         a.car.body.position.addScaledVector(hit.normal,depth/a.car.body.mass/inverse);
         b.car.body.position.addScaledVector(hit.normal,-depth/b.car.body.mass/inverse);
       }
-      for(const {car,input}of entries)car.advance(this.clock.dt,input,true);
+      for(const {car,input}of entries){
+        if(car.sleeping)continue;
+        car.advance(this.clock.dt,input,true);car.updatePhysicsSleep(this.clock.dt);
+      }
     });
   }
 }

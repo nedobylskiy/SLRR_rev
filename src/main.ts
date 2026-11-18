@@ -121,7 +121,7 @@ async function runGameBootNow() {
   const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler,(code,hit)=>result.input.cursorEvent(code,hit,true));
   disposeMinimap=()=>minimap.dispose();
   disposeGameBoot = () => {disposeMinimap?.();disposeMinimap=undefined;activeNavigator=undefined;activeBoot=undefined;result.dispose();};
-  viewer?.setJavaSceneCamera(() => javaSceneCamera(result),
+  viewer?.setJavaSceneCamera(() => javaSceneCamera(result,true),
     () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value),()=>result.system.timeScale,()=>music?.getVolume(0)??1);
   let sceneBlocked=()=>false,sceneInputBlocked=()=>false;
   const detachKeyboard = result.input.attachBrowserKeyboard(window,()=>!sceneInputBlocked());

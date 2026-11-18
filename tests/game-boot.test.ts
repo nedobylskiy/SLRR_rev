@@ -480,3 +480,56 @@ test('boot keeps executable methods from system Java sources', async () => {
   assert.match(result.error?.message ?? '', /missingNext/);
   assert.doesNotMatch(result.error?.message ?? '', /isPlayerActive\(int\)/);
 });
+
+
+test('City-style ParkingCar construction accepts the ResourceRef array element through the boot compatibility policy',async()=>{
+ const sources=new Map([
+  ['system/scripts/util/resource/src/ResourceRef.java','package java.util.resource; class ResourceRef { native void newNative(); native void set(int id); public native int id(); ResourceRef(int id) { newNative();set(id); } }'],
+  ['system/scripts/util/resource/src/GameRef.java','package java.util.resource; class GameRef extends ResourceRef { GameRef(int id) { super(id); } }'],
+  ['system/scripts/util/resource/src/GroundRef.java','package java.util.resource; class GroundRef extends GameRef { GroundRef(int id) { super(id); } }'],
+  ['sl/scripts/game/src/Init.java',`package java.game; import java.util.resource.*;
+    class Init extends GameType {
+      Init(int id) {
+        GroundRef map=new GroundRef(10);ResourceRef[] fakers=new ResourceRef[1];fakers[0]=new ResourceRef(42);
+        ParkingCar parked=new ParkingCar(map,fakers[0],null,null,7);
+        if(parked.type.id()!=42 || parked.paint!=7) wrongParkingResource();
+        reachedParkingCar();
+      }
+    }
+    class ParkingCar {
+      GameRef type;int paint;
+      ParkingCar(GameRef map,GameRef model,Vector3 pos,Ypr ori,int seed) { type=model;paint=seed; }
+    }`],
+ ]);
+ const assets=new Assets([...sources].map(([path,source])=>({path,size:source.length})),async path=>new TextEncoder().encode(sources.get(path)!));
+ const result=await bootGame(assets,()=>{});
+ try{assert.match(result.error?.message??'',/reachedParkingCar/);assert.doesNotMatch(result.error?.message??'',/constructor missing|wrongParkingResource/);}finally{result.dispose();}
+});
+
+
+test('night-race Vehicle(Part) wraps only a live native car, not a resource template or unrelated GameRef',async()=>{
+ const sources=new Map([
+  ['system/scripts/util/resource/src/ResourceRef.java','package java.util.resource; class ResourceRef { public native void newNative(); public native void set(ResourceRef ref); public native int id(); ResourceRef() { newNative(); } }'],
+  ['system/scripts/util/resource/src/GameRef.java','package java.util.resource; class GameRef extends ResourceRef {}'],
+  ['system/scripts/lang/src/GameType.java','package java.lang; import java.util.resource.GameRef; public class GameType extends GameRef {}'],
+  ['sl/scripts/game/src/Init.java','package java.game; class Init extends GameType { Init(int id) {} }'],
+  ['sl/scripts/game/src/Vehicle.java','package java.game; import java.game.parts.Part; public class Vehicle extends GameType { public Part chassis; public Vehicle(Part source) { set(source);chassis=source; } }'],
+  ['parts/scripts/src/Part.java','package java.game.parts; import java.util.resource.GameRef; public class Part extends GameRef {}'],
+ ]);
+ sources.set('cars/fake.rpk','');
+ const assets=new Assets([...sources].map(([path,source])=>({path,size:source.length})),async path=>new TextEncoder().encode(sources.get(path)!));
+ assets.pack=async()=>({version:0x200,dependencies:[],warnings:[],entries:[{typeId:6,superId:0,type:8,flags:0,compatibility:1,offset:0,size:0,alias:'fake racer',data:new TextEncoder().encode('native car cars/fake/main.cfg\n')}]});
+ const result=await bootGame(assets,()=>{});
+ try{
+  assert.ifError(result.error);
+  await result.jvm.loadClass('java.game.parts.Part');await result.jvm.loadClass('java.game.Vehicle');
+  const car=jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()}),other=jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()});
+  for(const ref of [car,other])result.jvm.natives.invoke('java.lang.GameType','createNativeInstance',ref,[]);
+  const node=result.gameTypes.get(car)!;node.resourcePack='cars/fake.rpk';node.typeId=6;
+  const vehicle=await result.jvm.constructAsync('java.game.Vehicle',[car]);assert.equal(result.jvm.get(vehicle,'chassis').value,car.value);assert.equal(result.gameTypes.get(vehicle),node);
+  await assert.rejects(()=>result.jvm.constructAsync('java.game.Vehicle',[other]),/constructor missing/);
+  const template=jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()});result.jvm.natives.invoke('java.util.resource.ResourceRef','newNative',template,[]);
+  const resource=result.gameTypes.getResource(template)!;resource.resourcePack=node.resourcePack;resource.typeId=node.typeId;
+  await assert.rejects(()=>result.jvm.constructAsync('java.game.Vehicle',[template]),/constructor missing/,'a template is not an existing vehicle instance');
+ }finally{result.dispose();}
+});

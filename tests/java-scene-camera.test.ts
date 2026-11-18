@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { Vector3 } from 'three';
 import { SlrrJvm, jv } from 'slrr-jvm';
 import { GameTypeNative } from '../src/runtime/game-type-native';
 import { ResourceCatalog } from '../src/runtime/resource-catalog';
@@ -61,6 +62,72 @@ test('shop camera consumes native creation pose and Java render/move/look/height
   jvm.set(jv('class', 'java.game.GameLogic'), 'actualState', state);
   jvm.natives.invoke('java.util.resource.ResourceRef', 'destroy', cam, []);
   assert.equal(javaSceneCamera(result), null);
+});
+
+test('driving scripts can select another car, move/look in chase mode and start/stop camera rotation',async()=>{
+  const source='package java.game; class GameLogic { static Object actualState; static Object player; } class Track { Object cam; Object cameraTarget; int cameraMode=1; }';
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'GameLogic.java',source})});
+  await jvm.loadClass('java.game.GameLogic');await jvm.globalAsync('java.game.GameLogic');await jvm.loadClass('java.game.Track');
+  const types=new GameTypeNative(jvm,()=>{}),ref=(name:string)=>jv(name,{className:name,fields:new Map()});
+  const cam=ref('GameRef'),playerCar=ref('GameRef'),opponent=ref('GameRef');
+  for(const car of [cam,playerCar,opponent])jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[]);
+  types.get(cam)!.cameraRendering=true;
+  types.get(opponent)!.setMatrix({x:100,y:10,z:200},{y:0,p:0,r:0});
+  const state=jvm.construct('java.game.Track',[]);
+  jvm.set(state,'cam',cam);jvm.set(state,'cameraTarget',playerCar);
+  jvm.set(jv('class','java.game.GameLogic'),'actualState',state);
+  jvm.set(jv('class','java.game.GameLogic'),'player',jv('Player',{className:'Player',fields:new Map([['car',playerCar]])}));
+  const result={jvm,gameTypes:types} as unknown as BootResult;
+  const command=async(text:string)=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',cam,[jv('ResourceRef',null),jv('int',16),jv('String',text)]);
+  assert.equal(javaSceneCamera(result,true),null,'ordinary player follow keeps its existing camera');
+  jvm.set(state,'cameraTarget',opponent);
+  assert.deepEqual(javaSceneCamera(result,true)!.target.toArray(),[100,11.1,200]);
+  types.get(opponent)!.position.x=110;
+  assert.equal(javaSceneCamera(result,true)!.target.x,110,'selected racer remains the live target');
+  await command('angle 0 8 0.7853');
+  const start=javaSceneCamera(result,true,1000)!,turned=javaSceneCamera(result,true,3000)!;
+  assert.ok(start.position.distanceTo(turned.position)>5,'rotation advances while script command is unchanged');
+  assert.deepEqual(start.target,turned.target);
+  await command('angle 0 0');
+  assert.deepEqual(javaSceneCamera(result,true,4000)!.position,javaSceneCamera(result,true,5000)!.position);
+  await command('angle 0 8 0.7853');
+  await command('force 1.6 0.5 -0.7');
+  jvm.set(state,'cameraTarget',playerCar);
+  assert.equal(javaSceneCamera(result,true),null,'restoring Follow overrides an old orbit on the reused external camera');
+  jvm.set(state,'cameraTarget',opponent);
+  jvm.set(state,'cameraMode',jv('int',3));
+  await command('dist 2.5 10');
+  await command(`move ${types.get(opponent)!.resourceId} 0,0,0 .01`);
+  await command(`look ${types.get(playerCar)!.resourceId} 0,1,0`);
+  assert.deepEqual(javaSceneCamera(result,true,6000)!.position,javaSceneCamera(result,true,8000)!.position,'a new chase mount cancels the old angle orbit');
+  const chase=javaSceneCamera(result,true)!;
+  assert.deepEqual(chase.target.toArray(),[0,1,0]);assert.ok(chase.position.x>100);
+  types.get(opponent)!.position.x+=50;
+  const following=javaSceneCamera(result,true)!;
+  assert.ok(Math.abs(following.position.x-chase.position.x-50)<1e-8,'move follows the car without cancelling its translation');
+  await command(`move ${types.get(opponent)!.resourceId} 0,0.8,0 0.01 1,-0.2,-6`);
+  const mounted=javaSceneCamera(result,true)!;
+  assert.deepEqual(mounted.position.toArray(),[161,10.6,194],'chase honours the full car-local mount from Track.changeCamChase');
+  types.get(opponent)!.setMatrix({x:200,y:12,z:300},{y:Math.PI/2,p:0,r:0});
+  const turnedMount=javaSceneCamera(result,true)!;
+  assert.ok(turnedMount.position.distanceTo(new Vector3(194,12.6,299))<1e-8,'mount moves and rotates with its vehicle');
+  types.get(playerCar)!.position.x=210;
+  assert.equal(javaSceneCamera(result,true)!.target.x,210,'watching aims at the other live racer selected by Java');
+  // Camera 2 is a stationary roadside shot. Java renews its placement every
+  // three seconds; native look must track the car between those timer calls.
+  jvm.set(state,'cameraMode',jv('int',2));
+  const tvCam=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',tvCam,[]);
+  types.get(tvCam)!.cameraRendering=true;types.get(tvCam)!.setMatrix({x:250,y:14,z:320},{y:0,p:0,r:0});
+  jvm.set(state,'cam',tvCam);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',tvCam,[jv('ResourceRef',null),jv('int',16),jv('String',`look ${types.get(opponent)!.resourceId} 0,0,-1`)]);
+  const tv=javaSceneCamera(result,true)!;types.get(opponent)!.position.z+=80;
+  const tvLater=javaSceneCamera(result,true)!;
+  assert.deepEqual(tvLater.position,tv.position,'TV holds its roadside camera placement');
+  assert.equal(tvLater.target.z-tv.target.z,80,'TV keeps aiming at the moving racer');
+  types.get(tvCam)!.setMatrix({x:300,y:15,z:450},{y:0,p:0,r:0});
+  assert.deepEqual(javaSceneCamera(result,true)!.position.toArray(),[300,15,450],'Java can choose the next roadside shot');
+  jvm.set(state,'cameraMode',jv('int',5));assert.equal(javaSceneCamera(result,true),null);
+  types.dispose();
 });
 
 test('scene camera input follows the Java cursor controller mappings and releases the mouse axes', async () => {
@@ -141,4 +208,22 @@ test('leaving a track invalidates its drive session before the scene poll and ca
   assert.equal(controls.cameraMode(), 1);
   setState(jvm.construct('java.game.Track', []));
   assert.equal(javaTrackIsCurrent(result, scene), false, 'a new Track instance cannot revive the old session');
+});
+
+
+test('Java stop/idle locks the countdown transmission, allows revving and start releases it each race',async()=>{
+  const source='package java.game; class GameLogic { static Player player; static Object actualState; } class Player { Object controller; Object car; }';
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'GameLogic.java',source})});await jvm.loadClass('java.game.GameLogic');await jvm.globalAsync('java.game.GameLogic');
+  const resources=new GameTypeNative(jvm,()=>{}),axes=new Map<number,number>([[1,.5],[28,1],[29,0],[48,0],[49,0],[50,1]]);
+  const car=jv('GameRef',{className:'GameRef',fields:new Map()}),controller=jv('Controller',{className:'Controller',fields:new Map()});
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[]);
+  const player=await jvm.constructAsync('java.game.Player',[]);jvm.set(player,'car',car);jvm.set(player,'controller',controller);jvm.set(jv('class','java.game.GameLogic'),'player',player);
+  const controls=javaDrivingControls({jvm,gameTypes:resources,controllers:{read:(_ref:unknown,id:number)=>axes.get(id)??0,bindings:()=>[]}} as unknown as BootResult);
+  const command=async(text:string)=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',car,[jv('ResourceRef',null),jv('int',16),jv('String',text)]);
+  for(let race=0;race<2;race++){
+    await command('stop');await command('idle');
+    for(const gear of [-1,1]){axes.set(50,gear);const input=controls.sample();assert.equal(input.gearUp,false);assert.equal(input.gearDown,false);assert.equal(input.transmissionLocked,true);assert.equal(input.clutch,true);assert.equal(input.throttle,1,'revving remains possible');assert.equal(input.serviceBrakeAxis,1,'hold the start grid');}
+    await command('start');const input=controls.sample();assert.equal(input.transmissionLocked,false);assert.equal(input.gearUp,true);assert.equal(input.clutch,false);assert.equal(input.serviceBrakeAxis,0);
+  }
+  resources.dispose();
 });

@@ -1,6 +1,8 @@
 /** Native ResourceRef handle and its place in the resource tree. */
 export class ResourceObject {
   readonly children = new Set<ResourceObject>();
+  /** Destroyed native instances stay identifiable through outstanding Java aliases. */
+  destroyed = false;
   /** Visual assembly changes propagate upward once, instead of polling every descendant. */
   visualRevision = 0;
   markVisualChanged(): void {

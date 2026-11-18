@@ -90,7 +90,7 @@ import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
 import {roadImpactScenario} from '../engine/road-impact-scenario';
-import {roadRoutes} from '../engine/road-route';
+import {raceRoadRoutes} from '../engine/road-route';
 import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,safeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel,type JavaTrafficBridge,type TrafficStreamHandle} from '../engine/traffic-models';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
@@ -416,13 +416,14 @@ export class Viewer {
   private stopDriving?: () => void;
   private scriptCamera?: () => JavaSceneCamera | null;
   private scriptCameraId?: number;
+  private scriptCameraPose?:{id:number;position:THREE.Vector3;target:THREE.Vector3};
   private scriptTimeOfDay?: () => number;
   private scriptTimeScale?:()=>number;private ambientEffectsVolume?:()=>number;
   private mapAmbience?:MapAmbience;private ambientAudio?:AmbientAudio;
   private drivingTimeOfDay?: () => number;
   setJavaSceneCamera(reader?: () => JavaSceneCamera | null, timeOfDay?: () => number, timeScale?:()=>number, soundVolume?:()=>number) {
     if (this.scriptCameraId !== undefined && !this.stopDriving) this.controls.enabled = true;
-    this.scriptCamera = reader; this.scriptCameraId = undefined;
+    this.scriptCamera = reader; this.scriptCameraId = undefined; this.scriptCameraPose=undefined;
     this.scriptTimeOfDay = timeOfDay;this.scriptTimeScale=timeScale;this.ambientEffectsVolume=soundVolume;
   }
   private generation = 0;
@@ -697,19 +698,25 @@ export class Viewer {
         });
       }
 
-      const scriptCamera = !this.stopDriving ? this.scriptCamera?.() : null;
+      const scriptCamera = this.scriptCamera?.();
       if (scriptCamera) {
         const factor = this.scriptCameraId !== scriptCamera.id || !scriptCamera.smoothing ? 1
           : 1 - Math.exp(-Math.min(this.frameDuration, 100) / 1000 / scriptCamera.smoothing);
         this.scriptCameraId = scriptCamera.id;
         this.controls.enabled = false;
-        this.camera.position.lerp(scriptCamera.position, factor);
-        this.controls.target.lerp(scriptCamera.target, factor);
+        // The player's chase frame runs before this override. Smooth from the
+        // last SCRIPT pose, never from that unrelated player-camera position.
+        if(this.scriptCameraPose?.id!==scriptCamera.id)this.scriptCameraPose={id:scriptCamera.id,position:scriptCamera.position.clone(),target:scriptCamera.target.clone()};
+        this.scriptCameraPose.position.lerp(scriptCamera.position,factor);
+        this.scriptCameraPose.target.lerp(scriptCamera.target,factor);
+        this.camera.position.copy(this.scriptCameraPose.position);
+        this.controls.target.copy(this.scriptCameraPose.target);
         this.camera.lookAt(this.controls.target);
         this.camera.fov = scriptCamera.fov; this.camera.near = scriptCamera.near; this.normalCameraFar = scriptCamera.far;
         this.updateFarPlane();
         this.camera.updateProjectionMatrix();
       } else {
+        this.scriptCameraPose=undefined;
         if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
         if (this.controls.enabled) this.controls.update();
       }
@@ -1155,7 +1162,8 @@ export class Viewer {
         group=await this.createPreviewWorld(built.world,assets,false);
         const bounds=new THREE.Box3().setFromObject(group),wheels=built.root.definition.config.wheels.map((wheel,i)=>({...wheel,radius:built.world.wheelRefs[i]?.radius??wheel.radius}));
         for(let i=0;i<wheels.length;i++){
-          const wheel=wheels[i];if(!wheel.render){
+          const wheel=wheels[i],installedWheel=built.root.definition.config.slots.find(slot=>slot.type===101+i);
+          if(!wheel.render||installedWheel&&built.root.children.get(installedWheel.id)?.definition.model){
             const frame=trafficWheelFrame(built.root,i),inverse=frame.clone().invert();wheel.position=new THREE.Vector3().setFromMatrixPosition(frame).toArray();
             const mount=new THREE.Group(),rotor=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.userData.spinSign=new THREE.Vector3(1,0,0).transformDirection(frame).x<0?-1:1;mount.matrixAutoUpdate=false;mount.matrix.copy(frame);mount.add(rotor);group.add(mount);
             for(const part of built.world.parts.values()){
@@ -2091,36 +2099,50 @@ export class Viewer {
   async bindJavaRaceCar(root:EnginePart,control:JavaRaceControl){
     const source=this.mapRoadSource,generation=this.generation;
     if(!source?.terrain||!source.collision)throw Error('Race opponent requires a loaded map and collision');
-    const roads=await loadMapRoads(source.assets,source.pack,source.groundId);
-    if(!roads)throw Error('Race opponent requires a road graph');
+    const roads=control.parked?undefined:await loadMapRoads(source.assets,source.pack,source.groundId);
+    if(!roads&&!control.parked)throw Error('Race opponent requires a road graph');
     if(generation!==this.generation||root.world.disposed)return {dispose(){}};
     this.javaRaces.get(root)?.dispose();
     const {car,positions}=this.pairVehicle(root,source.terrain,source.collision);
     const position=new THREE.Vector3().setFromMatrixPosition(root.matrix()),yaw=new THREE.Euler().setFromRotationMatrix(root.matrix(),'YXZ').y;
-    car.disableObstacle();car.placeAt(position,yaw);car.settleSpawn();
+    car.disableObstacle();car.placeAt(position,yaw);if(!control.parked)car.settleSpawn();
     if(root.savedVehicleDamage)car.restoreDamage(root.savedVehicleDamage);
-    const routes=roadRoutes(roads.network);
-    const driver=new RaceDriver(control.route??((start,finish)=>routes.query(start,finish)),car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6);
+    if(control.parked){car.sleepWhenResting=true;car.sleepPhysics();}
+    const routes=roads&&raceRoadRoutes(roads.network);
+    const plan=(start:import('../formats/trc').RoadPoint,finish:import('../formats/trc').RoadPoint)=>{
+      const forward=new THREE.Vector3(0,0,-1).applyQuaternion(car.body.orientation);
+      const bodies=[...(this.trafficCars??[]).filter(other=>other.active).map(other=>other.vehicle.body),
+        ...[...this.javaRaces.values()].filter(other=>other.car!==car).map(other=>other.car.body)];
+      if(this.trafficPeer)bodies.push(this.trafficPeer.body);
+      const occupied=bodies.filter(body=>{const delta=body.position.clone().sub(car.body.position);return delta.dot(forward)>0&&delta.lengthSq()<50*50;}).map(body=>body.position.toArray());
+      return routes?.query(start,finish,occupied);
+    };
+    const driver=control.parked?undefined:new RaceDriver(control.route??plan,car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6,control.randomize?Math.random:undefined);
     let input:DrivingInput={throttle:0,steer:0,brake:true};
-    car.controlInput=dt=>input=raceVehicleInput(driver,car,control.command(),dt);
+    car.controlInput=dt=>input=driver?raceVehicleInput(driver,car,control.command(),dt):{throttle:0,steer:0,brake:false};
     const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part))}));
-    let last:number|undefined,disposed=false;
+    const updateViews=()=>{for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);};
+    updateViews();
+    let last:number|undefined,disposed=false,wasSleeping=car.sleeping;
     const racer={car,update:(now:number)=>{
       if(disposed)return;if(root.world.disposed||!control.active()){racer.dispose();return;}
       if(document.hidden||(this.scriptTimeScale?.()??1)<=0){last=undefined;return;}
       const placement=control.placement?.();
-      if(placement){car.placeAt(placement.position,placement.yaw);car.settleSpawn();car.body.velocity.copy(placement.velocity);last=undefined;}
+      if(placement){car.placeAt(placement.position,placement.yaw);if(!control.parked)car.settleSpawn();car.body.velocity.copy(placement.velocity);if(control.parked){if(placement.velocity.lengthSq()>.01)car.wakePhysics();else car.sleepPhysics();}root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);updateViews();last=undefined;}
       // Foreground frame time belongs to the fixed clock. Clamping it makes
       // opponents slower than the player as soon as rendering drops below 20 Hz.
       const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
-      this.vehiclePhysics.submit(car,dt,{throttle:0,steer:0,brake:false});
+      const lightMask=drivingLightMask(root.world.lightMask,!control.parked&&!!input.brake,car.suspension.mechanics?.gear===-1,car.suspension.mechanics?.running??true,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??((this.lighting?.direction.y??1)<.1?0:43200));
+      if(lightMask!==root.world.lightMask){root.world.lightMask=lightMask;this.syncWorldVisuals(root.world);}
+      if(car.sleeping&&wasSleeping)return;
+      wasSleeping=car.sleeping;
+      if(!car.sleeping)this.vehiclePhysics.submit(car,dt,{throttle:0,steer:0,brake:false});
       // Rival recordings need their own frame/detail rows, not just 10-Hz engine samples.
       car.telemetry.recordPerformanceFrame(now,{},document.hidden);
       for(const key of ['suspension','contacts','panels','panelSolve','panelSurface','other'] as const)
         this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
-      root.world.lightMask=drivingLightMask(root.world.lightMask,!!input.brake,car.suspension.mechanics?.gear===-1,!!car.suspension.mechanics?.running,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:43200));
       root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);
-      for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);
+      updateViews();
       control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
     },dispose:()=>{if(disposed)return;disposed=true;this.javaRaces.delete(root);this.vehiclePhysics.forget(car);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
     this.vehiclePhysics.register(car,control.impact);this.javaRaces.set(root,racer);return racer;
@@ -2351,6 +2373,7 @@ export class Viewer {
     const inertialCamera = new InertialCamera();
     let lastInertialCamera = this.inertialCameraEnabled;
     let cameraWasInternal = false;
+    let previousCameraMode: number | undefined;
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
     this.camera.position.copy(this.controls.target).add(withCrash ? new THREE.Vector3(7, 4, -3) : new THREE.Vector3(5, 3, 7)); this.controls.update();
     if (java) this.controls.enabled = false;
@@ -2366,9 +2389,11 @@ export class Viewer {
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
-      let input = this.playerTrafficDriver?.input ?? (java ? java.sample() : keyboardDrivingInput(keys));
+      const javaInput=java?.sample();
+      let input = this.playerTrafficDriver?.input ?? javaInput ?? keyboardDrivingInput(keys);
+      if(javaInput?.transmissionLocked)input={...input,...javaInput};
       if (crash) { if (!paused) backlogTicks = this.profiler.measure('Player physics advance CPU',()=>crash instanceof Vehicle3D?this.vehiclePhysics.submit(crash,seconds*timeScale,input):crash!.advance(seconds*timeScale,input)).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
-      if(this.playerTrafficDriver)input=this.playerTrafficDriver.input;
+      if(this.playerTrafficDriver&&!javaInput?.transmissionLocked)input=this.playerTrafficDriver.input;
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
@@ -2401,6 +2426,7 @@ export class Viewer {
         }
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
+        if(mode!==previousCameraMode){followCamera.reset();inertialCamera.reset();previousCameraMode=mode;}
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
         this.driverCameraChassis=internalPose?root:undefined;
         if (internalPose) {

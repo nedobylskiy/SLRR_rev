@@ -181,3 +181,56 @@ test('numeric literals narrow to int while variables retain their declared type'
   assert.equal(jvm.invoke(main, 'direct').value, 10);
   assert.throws(() => jvm.invoke(main, 'variable'), /Java constructor missing: demo.Counter\(1\)/);
 });
+
+
+for(const compatible of [false,true])test(`ResourceRef templates match original ParkingCar GameRef parameters only in SLRR compatibility mode (${compatible})`,async()=>{
+  const source=`package java.util.resource;
+    class ResourceRef { int value; ResourceRef(int n) { value=n; } }
+    class GameRef extends ResourceRef { GameRef(int n) { super(n); } }
+    class GroundRef extends GameRef { GroundRef() { super(1); } }
+    class TextureRef extends ResourceRef { TextureRef() { super(2); } }
+    class ParkingCar {
+      GameRef parent; GameRef type; int seed;
+      ParkingCar(GameRef p,GameRef t,Object pos,Object ori,int paint) { parent=p; type=t; seed=paint; }
+      int identity(ResourceRef original) { return type==original ? type.value+seed : -1; }
+    }
+    class Pick {
+      int accept(ResourceRef ref) { return 1; }
+      int accept(GameRef ref) { return 2; }
+    }`;
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'ParkingCar.java',source}),allowResourceHandleArguments:compatible});
+  for(const name of ['ResourceRef','GameRef','GroundRef','ParkingCar','Pick'])await jvm.loadClass('java.util.resource.'+name);
+  const parent=jvm.construct('java.util.resource.GroundRef',[]),template=jvm.construct('java.util.resource.ResourceRef',[jv('int',42)]),args=[parent,template,jv('Object',null),jv('Object',null),jv('int',7)];
+  if(compatible){
+    for(const car of [jvm.construct('java.util.resource.ParkingCar',args),await jvm.constructAsync('java.util.resource.ParkingCar',args)]){
+      assert.equal(jvm.get(car,'type').value,template.value,'native resource identity must be preserved');assert.equal(jvm.invoke(car,'identity',[template]).value,49);
+    }
+    const pick=jvm.construct('java.util.resource.Pick',[]);assert.equal(jvm.invoke(pick,'accept',[template]).value,1,'an exact ResourceRef overload still wins');assert.equal(jvm.invoke(pick,'accept',[parent]).value,2,'normal GameRef upcasts retain priority');
+  }else{
+    assert.throws(()=>jvm.construct('java.util.resource.ParkingCar',args),/constructor missing/);
+    await assert.rejects(()=>jvm.constructAsync('java.util.resource.ParkingCar',args),/constructor missing/);
+  }
+  const unrelated=jv('Object',{className:'java.util.resource.Pick',fields:new Map()});
+  assert.throws(()=>jvm.construct('java.util.resource.ParkingCar',[parent,unrelated,...args.slice(2)]),/constructor missing/,'compatibility never accepts an unrelated object');
+});
+
+
+test('host-validated native car references enter Vehicle(Part) without general Java downcasts',async()=>{
+ const sources=new Map([
+  ['java.util.resource.GameRef','package java.util.resource; public class GameRef {}'],
+  ['java.game.parts.Part','package java.game.parts; import java.util.resource.GameRef; public class Part extends GameRef {}'],
+  ['java.game.Vehicle','package java.game; import java.game.parts.Part; public class Vehicle { public Part chassis; public Vehicle(Part source) { chassis=source; } }'],
+ ]);
+ for(const validate of [false,true]){
+  const cars=new WeakSet<object>();
+  const jvm=new SlrrJvm({resolveImport:({className})=>{const source=sources.get(className);return source?{path:className+'.java',source}:null;},
+   isSourceReferenceCompatible:validate?(wanted,value)=>wanted==='java.game.parts.Part'&&typeof value.value==='object'&&value.value!==null&&cars.has(value.value):undefined});
+  for(const name of sources.keys())await jvm.loadClass(name);
+  const nativeCar=jvm.construct('java.util.resource.GameRef',[]),other=jvm.construct('java.util.resource.GameRef',[]);cars.add(nativeCar.value as object);
+  if(validate){
+   for(const vehicle of [jvm.construct('java.game.Vehicle',[nativeCar]),await jvm.constructAsync('java.game.Vehicle',[nativeCar])])assert.equal(jvm.get(vehicle,'chassis').value,nativeCar.value);
+  }else assert.throws(()=>jvm.construct('java.game.Vehicle',[nativeCar]),/constructor missing/);
+  assert.throws(()=>jvm.construct('java.game.Vehicle',[other]),/constructor missing/,'a camera or other generic GameRef is not a Part');
+  const realPart=jvm.construct('java.game.parts.Part',[]);assert.equal(jvm.get(jvm.construct('java.game.Vehicle',[realPart]),'chassis').value,realPart.value,'normal subclass construction remains available');
+ }
+});

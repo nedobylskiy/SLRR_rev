@@ -94,6 +94,20 @@ export class Vehicle3D extends CarCrashDemo {
     this.lastVelocity.copy(this.body.velocity);this.lastOmega.copy(this.body.omega);
   }
   advanceVersion=0;
+  /** Parked native cars retain collision hulls while their simulation is asleep. */
+  sleeping=false;
+  sleepWhenResting=false;
+  private sleepQuietSeconds=0;
+  wakePhysics(){this.sleeping=false;this.sleepQuietSeconds=0;}
+  sleepPhysics(){this.sleeping=true;this.sleepQuietSeconds=0;this.body.velocity.set(0,0,0);this.body.momentum.set(0,0,0);}
+  updatePhysicsSleep(dt:number){
+    if(!this.sleepWhenResting||this.sleeping)return;
+    const moving=this.body.velocity.lengthSq()>.01||this.body.omega.lengthSq()>.0025
+      ||[...this.soft.values()].some(s=>s.activity.internalSpeed>.1)
+      ||[...this.rigid.values()].some(s=>!s.part.parent&&(s.body.velocity.lengthSq()>.01||s.body.omega.lengthSq()>.0025));
+    this.sleepQuietSeconds=moving?0:this.sleepQuietSeconds+dt;
+    if(this.sleepQuietSeconds>=2)this.sleepPhysics();
+  }
   private profileFrame=false;
   readonly panelWork=new Map<EnginePart,PanelWork>();
   private panelWorkFor(s:SoftBodyPart){
@@ -362,6 +376,7 @@ export class Vehicle3D extends CarCrashDemo {
   override velocity() { return this.body ? this.body.velocity.clone() : super.velocity(); }
   override pointVelocity(point: Vector3) { return this.body ? this.body.pointVelocity(point) : super.pointVelocity(point); }
   override applyImpulse(j: Vector3, point: Vector3) {
+    this.wakePhysics();
     if (this.body) { this.body.impulse(j, point); if (j.length() / this.body.mass / this.clock.dt > 25) this.pendingShock = true; }
     else super.applyImpulse(j, point);
   }
@@ -377,6 +392,7 @@ export class Vehicle3D extends CarCrashDemo {
     this.lastOmega.add(this.body.omega.sub(omega));
   }
   vehicleContact(impulse:Vector3, point:Vector3, otherBounds:Box3, closingSpeed:number,other?:Vehicle3D) {
+    this.wakePhysics();
     if(other&&other!==this)this.contactPeers.set(other,this.simulationTime+.25);
     this.applyLocalizedImpulse(impulse,point);
     const frame=this.body.matrix();
@@ -613,7 +629,8 @@ export class Vehicle3D extends CarCrashDemo {
       this.timings.ticks++;
       const dt = this.clock.dt, previous = this.root.matrix();
       let detached = this.releaseFailedWheels();
-      const tickInput=this.replayInput?.((tick-1)*dt)??this.controlInput?.(dt)??input;
+      let tickInput=this.replayInput?.((tick-1)*dt)??this.controlInput?.(dt)??input;
+      if(input.transmissionLocked)tickInput={...tickInput,transmissionLocked:true,clutch:true,gearUp:false,gearDown:false,brake:true,brakeAxis:1,serviceBrakeAxis:1};
       this.suspension.step(dt, tickInput); this.body.integrate(dt);
       this.timings.suspension += performance.now() - sectionStart; sectionStart = performance.now();
       const incomingVelocity = this.body.velocity.clone(), incomingOmega = this.body.omega, predicted = this.body.matrix();

@@ -44,7 +44,7 @@ export function applyFields(target:any,fields:PhysicsFields){
   }
 }
 const panelFields=['positions','velocities','rest','contacts','impulseVersion','resetVersion','shapeVersion','collisionImpact'];
-const carFields=['impactSpeed','yawVelocity','reboundSpeed','lastVelocity','lastOmega','pendingShock','chassisCrumple','spawn','advanceVersion'];
+const carFields=['impactSpeed','yawVelocity','reboundSpeed','lastVelocity','lastOmega','pendingShock','chassisCrumple','spawn','advanceVersion','sleeping','sleepWhenResting','sleepQuietSeconds'];
 function beamState(panel:Vehicle3D['panel']){const values=new Float64Array(panel.beams.length*2);panel.beams.forEach((b,i)=>{values[i*2]=b.rest;values[i*2+1]=b.lambda;});return values;}
 function mountState(panel:Vehicle3D['panel']){const values=new Float64Array(panel.mounts.length*3);panel.mounts.forEach((m,i)=>{values[i*3]=Number(m.broken);values[i*3+1]=m.force;values[i*3+2]=m.overload;});return values;}
 const activityFields=['deforming','quietTicks','activeTicks','impulseVersion','frame','resting','sleepReason','internalSpeed','threatReason','restTicks'];

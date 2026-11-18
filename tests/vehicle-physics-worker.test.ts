@@ -15,6 +15,62 @@ import {MapCollision} from '../src/engine/map-collision';
 import {MapTerrain} from '../src/engine/map-terrain';
 import type {PhysicsRequest,PhysicsResponse} from '../src/engine/vehicle-physics-protocol';
 const neutral={throttle:0,steer:0,brake:false};
+test('sleeping parked render publishes its body skin after placement without a physics tick',async()=>{
+  const vehicle=car(),client=new VehiclePhysicsClient(),proxies=new Map(),samples=new Map(),geometries:BufferGeometry[]=[],materials:MeshBasicMaterial[]=[];
+  vehicle.placeAt(new Vector3(100,0,200),0);
+  for(const state of vehicle.soft.values()){
+    const points=[-.5,0,-.5,.5,0,-.5,0,.1,.5],geometry=new BufferGeometry();
+    geometry.setAttribute('position',new Float32BufferAttribute(points,3));geometry.computeVertexNormals();
+    const group=new Group(),material=new MeshBasicMaterial();group.add(new Mesh(geometry,material));
+    proxies.set(state.part,group);samples.set(state.part,[points]);geometries.push(geometry);materials.push(material);
+  }
+  const races=new Map(),viewer={generation:0,mapRoadSource:{terrain:new TestTerrain(),collision:{}},scriptTimeOfDay:()=>0,
+    javaRaces:races,vehiclePhysics:client,proxies,pairVehicle:()=>({car:vehicle,positions:(part:unknown)=>samples.get(part)}),syncWorldVisuals:()=>{}};
+  let placement={position:new Vector3(150,1,250),yaw:.3,velocity:new Vector3()};
+  const oldDocument=Object.getOwnPropertyDescriptor(globalThis,'document');
+  Object.defineProperty(globalThis,'document',{configurable:true,value:{hidden:false}});
+  try{
+    const binding=await Viewer.prototype.bindJavaRaceCar.call(viewer as unknown as Viewer,vehicle.root,{parked:true,active:()=>true,command:()=>undefined,placement:()=>placement,motion:()=>{}});
+    races.get(vehicle.root).update(1000);
+    assert.equal(vehicle.root.world.lightMask&4,4,'native cars without a scripted engine enable their night flares even while sleeping');
+    for(const group of proxies.values()){
+      group.updateMatrixWorld(true);const mesh=group.children[0] as Mesh;
+      const box=new Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as Float32BufferAttribute).applyMatrix4(mesh.matrixWorld);
+      assert.ok(box.getCenter(new Vector3()).distanceTo(placement.position)<5,`parked body must remain beside its wheels: ${box.getCenter(new Vector3()).toArray()} vs ${placement.position.toArray()}`);
+    }
+    assert.equal(vehicle.clock.tick,0,'publishing body geometry does not simulate the sleeping car');
+    binding.dispose();
+  }finally{
+    if(oldDocument)Object.defineProperty(globalThis,'document',oldDocument);else Reflect.deleteProperty(globalThis,'document');
+    client.dispose();vehicle.dispose();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());
+  }
+});
+test('parked cars keep collision hulls asleep, wake on vehicle impact and sleep again without repairing dents',()=>{
+  const parked=car(),moving=car(),world=new VehiclePhysicsWorld();
+  parked.sleepWhenResting=true;parked.sleepPhysics();
+  moving.placeAt(new Vector3(0,0,20),0);moving.settleSpawn();
+  world.add(1,{car:parked,input:neutral});world.add(2,{car:moving,input:neutral});
+  const original=parked.body.position.clone(),tick=parked.clock.tick;
+  world.advance(.1);
+  assert.deepEqual(parked.body.position,original);assert.equal(parked.clock.tick,tick,'no suspension or panel ticks while asleep');
+  moving.placeAt(new Vector3(0,0,4.1),0);moving.settleSpawn();moving.body.velocity.z=-12;
+  let contacts=0;const contact=parked.vehicleContact.bind(parked);
+  parked.vehicleContact=(...args)=>{contacts++;contact(...args);};
+  for(let i=0;i<30;i++)world.advance(1/120);
+  assert.ok(contacts>0,'parked collision participates in the shared physical world');
+  assert.equal(parked.sleeping,false);assert.ok(parked.clock.tick>tick);
+  assert.ok(parked.body.position.distanceTo(original)>.01,'impact moves the parked car');
+  parked.panel.positions[0]+=.2;const dent=parked.panel.positions.slice();
+  parked.body.velocity.set(0,0,0);parked.body.momentum.set(0,0,0);
+  for(const state of parked.soft.values())state.activity.internalSpeed=0;
+  parked.updatePhysicsSleep(2.01);
+  assert.equal(parked.sleeping,true);assert.deepEqual(parked.panel.positions,dent,'returning to sleep retains damage');
+  const copy=buildPhysicsCar(structuredClone(createPhysicsSeed(parked)),new TestTerrain());
+  assert.equal(copy.sleeping,true);assert.equal(copy.sleepWhenResting,true);
+  parked.applyImpulse(new Vector3(1000,0,0),parked.body.position);
+  assert.equal(parked.sleeping,false,'external impulses also wake the car');
+  parked.dispose();moving.dispose();copy.dispose();
+});
 function car(){
   const world=new EngineWorld(),make=(file:string,cfg:string)=>world.create({key:{pack:'test.rpk',id:world.parts.size+1},alias:file,cfgPath:file,config:parsePartConfig(cfg)});
   const slots=[101,102,103,104].map((type,i)=>`slot 0 0 0 0 0 0 ${20+i}\nslottype ${type}`).join('\n');

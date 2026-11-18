@@ -21,6 +21,8 @@ export { poseMatrix } from './transforms';
 export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
+  /** Single native CFG car (fake_racers), with inline meshes instead of Part scripts. */
+  nativeOnly?: boolean;
   damage?: VehicleDamageState;
   rootWear?: number;
   nativeId?: number;
@@ -286,6 +288,7 @@ export class PartFactory {
   }
   /** Install the executed Java tree when provided; otherwise read CFG stock declarations. */
   async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection; suspensionMountOffsetY?: number; suspensionMountOffsets?: WheelFrameOffsets } = {}) {
+    if (options.javaSelection?.nativeOnly) options = { ...options, mechanical: false };
     const world = new EngineWorld(), warnings: string[] = [];
     try {
       let definition = await this.definition(key);
@@ -293,12 +296,35 @@ export class PartFactory {
         const render = options.javaSelection.rootRender;
         definition = { ...definition, model: await this.assets.modelForResource(render.pack, render.id) };
       }
+      // Native cars describe their wheels inline, without Java Part instances.
+      // Adapt those supports to the same suspension interface as assembled cars;
+      // their visible wheel meshes already belong to the native CFG render list.
+      const inlineSlots: CfgSlot[] = [];
+      if (options.javaSelection?.nativeOnly) {
+        const slots = [...definition.config.slots];
+        definition.config.wheels.forEach((_, index) => {
+          if (slots.some(slot => slot.type === 101 + index)) return;
+          let id = 10001 + index;
+          while (slots.some(slot => slot.id === id)) id++;
+          const slot: CfgSlot = { id, type: 101 + index, position: [0,0,0], rotation: [0,0,0], attach: [], compatible: [] };
+          slots.push(slot); inlineSlots.push(slot);
+        });
+        definition = { ...definition, config: { ...definition.config, slots } };
+      }
       const root = world.create(definition);
       // User-measured placement correction, shared by installation, linked
       // anchors and the physical suspension. Debug sliders remain additional.
-      if (definition.config.wheels.length) {
+      if (definition.config.wheels.length && !options.javaSelection?.nativeOnly) {
         root.wheelFrameOffsetY = options.suspensionMountOffsetY ?? 0.140;
         root.wheelFrameOffsets = (options.suspensionMountOffsets ?? SUSPENSION_ATTACHMENT_OFFSETS).map(offset => [...offset] as Triple);
+      }
+      for (const slot of inlineSlots) {
+        const wheel = definition.config.wheels[slot.type! - 101];
+        const config = parsePartConfig('slot 0 0 0 0 0 0 1');
+        config.renderPose = wheel.render?.pose;
+        const support = world.create({ key, alias: `Native wheel ${slot.type! - 101}`, cfgPath: definition.cfgPath,
+          config, model: wheel.render ? await this.assets.modelForResource(key.pack, wheel.render.resource) : undefined });
+        world.install(root, slot.id, support, 1);
       }
       const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;

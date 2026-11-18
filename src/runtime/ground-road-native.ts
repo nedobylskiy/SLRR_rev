@@ -23,6 +23,13 @@ export class GroundRoadNative {
     const point=(value:JavaValue):RoadPoint|undefined=>{if(value.value==null)return;const p=['x','y','z'].map(axis=>Number(jvm.get(value,axis).value)) as RoadPoint;return p.every(Number.isFinite)?p:undefined;};
     const vector=(p:RoadPoint)=>jv('Vector3',{className:'java.lang.Vector3',fields:new Map(['x','y','z'].map((axis,i)=>[axis,jv('float',Math.fround(p[i]))]))});
     const stateFor=(receiver:JavaValue)=>{const key=this.key(receiver);if(!key)return;let state=this.halts.get(key);if(!state){state={revision:0,roads:new Set(),crossings:new Map()};this.halts.set(key,state);}return state;};
+    jvm.natives.registerAsync('java.util.resource.GroundRef','alignToRoad',['Vector3'],async({receiver,args})=>{
+      const p=point(args[0]),network=receiver.value!=null&&p?await networkFor(receiver):undefined;
+      const aligned=network&&p?roadRoutes(network).align(p):undefined;
+      // City uses [0] for placement and [1] for the road's direction. Both are
+      // independent mutable Java vectors; this query must not replace plotRoute.
+      return jv('Vector3[]',aligned?[vector(aligned.position).value,vector(aligned.direction).value]:null);
+    });
     for(const method of ['getRouteLength','getStartDirection','haltTrafficPath'])jvm.natives.registerAsync('java.util.resource.GroundRef',method,['Vector3','Vector3'],async({receiver,args})=>{
       const a=point(args[0]),b=point(args[1]),network=receiver.value!=null&&a&&b?await networkFor(receiver):undefined;
       const graph=network&&roadRoutes(network),route=graph&&a&&b?graph.query(a,b):undefined;

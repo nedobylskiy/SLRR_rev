@@ -54,7 +54,7 @@ export class VehiclePhysicsClient {
     if(this.entries.size===1){this.sceneCollision=car.mapCollision;this.sceneRevision=car.mapCollision?.revision??0;scene={terrain:car.terrain instanceof MapTerrain?car.terrain.physicsSnapshot():undefined,walls:car.mapCollision?.physicsWalls()??[],boxes:car.mapCollision?.physicsBoxes()??[]};}
     this.post({kind:'add',id:entry.id,seed:createPhysicsSeed(car),scene});if(this.local)return;
     let nested=0;
-    for(const name of ['reset','placeAt','settleSpawn','jump','applyImpulse','vehicleContact','setChassisCrumple','disableObstacle','rearCrash','roll','dropOnRoof'] as const){
+    for(const name of ['reset','placeAt','settleSpawn','sleepPhysics','wakePhysics','jump','applyImpulse','vehicleContact','setChassisCrumple','disableObstacle','rearCrash','roll','dropOnRoof'] as const){
       const original=(car[name] as Function).bind(car);
       (car as any)[name]=(...args:any[])=>{
         if(nested)return original(...args);nested++;const before=this.bodyFields(car);
