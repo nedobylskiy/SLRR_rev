@@ -13,9 +13,15 @@ export class PanelView {
   private lastShape = -1;
   private readonly previousOwner:unknown;
   private readonly previousMatrixAutoUpdate:boolean;
+  private readonly originalDrawFrame:THREE.Matrix4;
+  private attachmentFrame?:THREE.Matrix4;
+  private attachments:{group:THREE.Group;matrix:THREE.Matrix4}[]=[];
   constructor(private group: THREE.Group, readonly panel: DeformablePanel, localPositions: number[][]) {
     this.previousOwner=group.userData.panelViewOwnsTransform;
     this.previousMatrixAutoUpdate=group.matrixAutoUpdate;
+    this.originalDrawFrame=group.matrix.clone();
+    this.attachments=group.children.filter((child):child is THREE.Group=>child instanceof THREE.Group)
+      .map(group=>({group,matrix:group.matrix.clone()}));
     group.matrixAutoUpdate=false;
     group.userData.panelViewOwnsTransform=true;
     const meshes = group.children.filter((o): o is THREE.Mesh<THREE.BufferGeometry> => o instanceof THREE.Mesh);
@@ -32,17 +38,26 @@ export class PanelView {
     this.cage.frustumCulled = false; this.cage.visible = false; group.add(this.cage); this.update();
   }
   wireframe(value: boolean) { this.cage.visible = value; if (value) this.update(); }
+  private updateAttachments(frame?:THREE.Matrix4){
+    if(!this.attachments.length)return;
+    // The skin vertices become world-space, but lamps/extra renders are still
+    // authored in the original centimetre draw frame. Keep them on the part.
+    if(frame&&!this.attachmentFrame)this.attachmentFrame=frame.clone().invert().multiply(this.originalDrawFrame);
+    const desired=frame&&this.attachmentFrame?frame.clone().multiply(this.attachmentFrame):this.originalDrawFrame;
+    const local=this.group.matrix.clone().invert().multiply(desired);
+    for(const attachment of this.attachments){attachment.group.matrix.copy(local).multiply(attachment.matrix);attachment.group.matrixWorldNeedsUpdate=true;}
+  }
   update(frame?: THREE.Matrix4, rigid = false) {
     if (rigid && this.rigidLast && frame && this.skinFrame && this.lastReset === this.panel.resetVersion && this.lastShape === this.panel.shapeVersion) {
       // Keep the dented skin on the GPU; carrying it only changes one draw transform.
-      this.group.matrix.copy(frame).multiply(this.skinFrame.clone().invert()); this.group.matrixWorldNeedsUpdate = true; return;
+      this.group.matrix.copy(frame).multiply(this.skinFrame.clone().invert()); this.group.matrixWorldNeedsUpdate = true; this.updateAttachments(frame); return;
     }
     if (frame && this.skinFrame && !rigid && this.lastTick === this.panel.clock.tick && this.lastReset === this.panel.resetVersion && this.lastShape === this.panel.shapeVersion) {
       // No new physical shape: keep the last complete skin and carry it with
       // the part. Never leave a stale world-space skin behind its draw frame.
       if(this.skinFrame)this.group.matrix.copy(frame).multiply(this.skinFrame.clone().invert());
       else this.group.matrix.identity();
-      this.group.matrixWorldNeedsUpdate=true;return;
+      this.group.matrixWorldNeedsUpdate=true;this.updateAttachments(frame);return;
     }
     this.group.matrix.identity(); this.group.matrixWorldNeedsUpdate = true;
     for (const { geometry, bindings } of this.skins) {
@@ -54,11 +69,13 @@ export class PanelView {
       this.panel.beams.forEach((b, i) => { for (let axis = 0; axis < 3; axis++) { attribute.array[i * 6 + axis] = p[b.a * 3 + axis]; attribute.array[i * 6 + axis + 3] = p[b.b * 3 + axis]; } }); attribute.needsUpdate = true;
     }
     this.skinFrame = frame?.clone(); this.rigidLast = rigid; this.lastReset = this.panel.resetVersion; this.lastTick = this.panel.clock.tick;this.lastShape=this.panel.shapeVersion;
+    this.updateAttachments(frame);
   }
   dispose() {
     this.group.matrixAutoUpdate=this.previousMatrixAutoUpdate;
     if(this.previousOwner===undefined)delete this.group.userData.panelViewOwnsTransform;else this.group.userData.panelViewOwnsTransform=this.previousOwner;
     this.cage.removeFromParent(); this.cage.geometry.dispose(); (this.cage.material as THREE.Material).dispose();
+    for(const attachment of this.attachments){attachment.group.matrix.copy(attachment.matrix);attachment.group.matrixWorldNeedsUpdate=true;}
     for (const { geometry, original, normals } of this.skins) { geometry.getAttribute('position').array.set(original); geometry.getAttribute('position').needsUpdate = true; geometry.getAttribute('normal').array.set(normals); geometry.getAttribute('normal').needsUpdate = true; geometry.computeBoundingSphere(); geometry.computeBoundingBox(); }
   }
 }
