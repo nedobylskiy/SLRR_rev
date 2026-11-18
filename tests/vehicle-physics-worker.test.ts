@@ -13,30 +13,54 @@ import {VehiclePhysicsWorkerRuntime} from '../src/workers/vehicle-physics-worker
 import {TestTerrain} from '../src/engine/suspension-3d';
 import {MapCollision} from '../src/engine/map-collision';
 import {MapTerrain} from '../src/engine/map-terrain';
+import {modelMatrix} from '../src/engine/model-transform';
 import type {PhysicsRequest,PhysicsResponse} from '../src/engine/vehicle-physics-protocol';
 const neutral={throttle:0,steer:0,brake:false};
 test('sleeping parked render publishes its body skin after placement without a physics tick',async()=>{
-  const vehicle=car(),client=new VehiclePhysicsClient(),proxies=new Map(),samples=new Map(),geometries:BufferGeometry[]=[],materials:MeshBasicMaterial[]=[];
+  const vehicle=car(),client=new VehiclePhysicsClient(),proxies=new Map(),samples=new Map(),lamps=new Map(),geometries:BufferGeometry[]=[],materials:MeshBasicMaterial[]=[];
   vehicle.placeAt(new Vector3(100,0,200),0);
   for(const state of vehicle.soft.values()){
     const points=[-.5,0,-.5,.5,0,-.5,0,.1,.5],geometry=new BufferGeometry();
     geometry.setAttribute('position',new Float32BufferAttribute(points,3));geometry.computeVertexNormals();
     const group=new Group(),material=new MeshBasicMaterial();group.add(new Mesh(geometry,material));
+    group.matrixAutoUpdate=false;group.matrix.copy(modelMatrix(state.part.matrix()));
+    const lamp=new Group();lamp.matrixAutoUpdate=false;lamp.matrix.makeScale(100,100,100).multiply(new Matrix4().makeTranslation(.5,.2,1.8));group.add(lamp);lamps.set(state.part,lamp);
     proxies.set(state.part,group);samples.set(state.part,[points]);geometries.push(geometry);materials.push(material);
   }
-  const races=new Map(),viewer={generation:0,mapRoadSource:{terrain:new TestTerrain(),collision:{}},scriptTimeOfDay:()=>0,
-    javaRaces:races,vehiclePhysics:client,proxies,pairVehicle:()=>({car:vehicle,positions:(part:unknown)=>samples.get(part)}),syncWorldVisuals:()=>{}};
-  let placement={position:new Vector3(150,1,250),yaw:.3,velocity:new Vector3()};
+  let groundReady=false;
+  const terrain=Object.assign(new TestTerrain(),{faces:0,placementHeight:()=>groundReady?0:-1000});
+  const races=new Map(),viewer={generation:0,mapRoadSource:{terrain,collision:{}},scriptTimeOfDay:()=>0,
+    javaRaces:races,vehiclePhysics:client,proxies,pairVehicle:()=>({car:vehicle,positions:(part:unknown)=>samples.get(part)}),syncWorldVisuals:()=>{
+      for(const [part,group]of proxies)if(!group.userData.panelViewOwnsTransform){group.matrix.copy(modelMatrix(part.matrix()));group.matrixWorldNeedsUpdate=true;}
+    }};
+  let placement:{position:Vector3;yaw:number;velocity:Vector3}|undefined={position:new Vector3(150,4,250),yaw:.3,velocity:new Vector3()};
+  let published:Vector3|undefined;
   const oldDocument=Object.getOwnPropertyDescriptor(globalThis,'document');
   Object.defineProperty(globalThis,'document',{configurable:true,value:{hidden:false}});
   try{
-    const binding=await Viewer.prototype.bindJavaRaceCar.call(viewer as unknown as Viewer,vehicle.root,{parked:true,active:()=>true,command:()=>undefined,placement:()=>placement,motion:()=>{}});
+    const binding=await Viewer.prototype.bindJavaRaceCar.call(viewer as unknown as Viewer,vehicle.root,{parked:true,active:()=>true,command:()=>undefined,placement:()=>placement,motion:p=>{published=p.clone();}});
+    const checkLamps=()=>{for(const [part,lamp]of lamps){proxies.get(part).updateMatrixWorld(true);const actual=new Vector3().setFromMatrixPosition(lamp.matrixWorld),expected=new Vector3(.5,.2,1.8).applyMatrix4(part.matrix());assert.ok(actual.distanceTo(expected)<1e-7,`flare must follow the settled car, not its old spawn pose: ${actual.toArray()} != ${expected.toArray()}`);}};
+    checkLamps();
     races.get(vehicle.root).update(1000);
+    assert.ok(vehicle.body.position.y>=4,'missing map data must not drop the car to the fallback floor');
+    groundReady=true;terrain.faces++;placement=undefined;
+    races.get(vehicle.root).update(1016);
+    const supported=()=>{
+      for(const wheel of vehicle.suspension.wheels){
+        const center=wheel.center.clone().applyMatrix4(vehicle.body.matrix());
+        assert.ok(Math.abs(center.y-wheel.radius)<1e-6,'a sleeping wheel must touch map geometry without a physics tick');
+      }
+      assert.deepEqual(published?.toArray(),new Vector3().setFromMatrixPosition(vehicle.root.local).toArray(),'publish the corrected model origin, not the elevated center of mass, back to Java');
+      checkLamps();
+    };
+    supported();
+    placement={position:new Vector3(160,6,260),yaw:-.5,velocity:new Vector3()};
+    races.get(vehicle.root).update(1032);supported();
     assert.equal(vehicle.root.world.lightMask&4,4,'native cars without a scripted engine enable their night flares even while sleeping');
     for(const group of proxies.values()){
       group.updateMatrixWorld(true);const mesh=group.children[0] as Mesh;
       const box=new Box3().setFromBufferAttribute(mesh.geometry.getAttribute('position') as Float32BufferAttribute).applyMatrix4(mesh.matrixWorld);
-      assert.ok(box.getCenter(new Vector3()).distanceTo(placement.position)<5,`parked body must remain beside its wheels: ${box.getCenter(new Vector3()).toArray()} vs ${placement.position.toArray()}`);
+      assert.ok(box.getCenter(new Vector3()).distanceTo(vehicle.body.position)<5,`parked body must remain beside its wheels: ${box.getCenter(new Vector3()).toArray()} vs ${vehicle.body.position.toArray()}`);
     }
     assert.equal(vehicle.clock.tick,0,'publishing body geometry does not simulate the sleeping car');
     binding.dispose();

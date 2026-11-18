@@ -228,7 +228,8 @@ export class JavaSceneVehicles {
     const needsContact=this.terrain&&(settled?.pose!==pose||settled.revision!==pose.poseRevision||settled.contacts!==contactSignature);
     if(needsContact)for(const {center,radius} of contacts){
       // Search the placement's floor, not furniture/ceilings above its origin.
-      const ground = this.terrain!.height(center.x, center.z, pose.position.y);
+      const ground = (this.terrain as Pick<MapTerrain,'height'|'placementHeight'>).placementHeight?.(center.x, center.z, pose.position.y)
+        ?? this.terrain!.height(center.x, center.z, pose.position.y);
       if (Number.isFinite(ground) && ground > -999) lift = Math.max(lift, ground - (center.y - radius));
     }
     if (Number.isFinite(lift) && Math.abs(lift) > 0.001) {

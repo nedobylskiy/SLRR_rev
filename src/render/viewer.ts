@@ -32,6 +32,7 @@ import { MapDistanceCutoff } from './map-distance-cutoff';
 import { MapBackfaceCulling } from './map-backface-culling';
 import { MapRaycastOcclusion } from './map-raycast-occlusion';
 import {MapGpuOcclusion} from './map-gpu-occlusion';
+import {SceneVisibility,type VisibilityObject} from './scene-visibility';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
@@ -299,7 +300,7 @@ export class Viewer {
     if(!this.mapStream)return;
     const continuation=this.streamThrottle&&now<this.nextStreamUpdate;
     if(continuation&&!this.mapStream.hasPendingWork)return;
-    this.mapStream.update(this.mapStreamFocus??this.camera.position,this.camera,continuation);
+    this.mapStream.update(this.camera.position,this.camera,continuation);
     if(!continuation)this.nextStreamUpdate=now+this.streamIntervalMs;
   }
   setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
@@ -367,6 +368,21 @@ export class Viewer {
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
   private readonly vehiclePhysics=new VehiclePhysicsClient();
   private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;dispose():void}>();
+  private sceneVisibility=new SceneVisibility();
+  private *visibilityObjects():Iterable<VisibilityObject>{
+    const cars=[...this.javaRaces.values()].map(r=>r.car);
+    if(this.trafficPeer)cars.push(this.trafficPeer);
+    const bounds=new Map(cars.map(car=>[car.root,car.body.bounds.clone().applyMatrix4(car.body.matrix()).expandByScalar(.5)]));
+    for(const [part,object]of this.proxies){let root=part;while(root.parent)root=root.parent;yield {object,bounds:bounds.get(root)};}
+    for(const car of this.trafficCars)if(car.active)yield {object:car.group,bounds:car.vehicle.body.bounds.clone().applyMatrix4(car.vehicle.body.matrix()).expandByScalar(.5)};
+    for(const [id,object]of this.javaRenderNodes)if(!this.javaSkyDomeNodes.has(id))yield {object};
+    for(const binding of this.javaDrivers.values())if(binding.driver)yield {object:binding.driver.root};
+    for(const object of [...this.pedestrianCrowd?.root.children??[]])yield {object};
+    for(const object of [...this.staticMapRoot?.children??[]]){
+      if(object.userData.globalFacadeBatch||object.userData.mergedStatic)continue;
+      yield {object,exclude:!!object.userData.streamAuxiliary};
+    }
+  }
   get vehicleSceneRevision(){return this.generation;}
   private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
   private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
@@ -721,12 +737,12 @@ export class Viewer {
         if (this.controls.enabled) this.controls.update();
       }
       this.updateFarPlane();
-      this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
+      this.mapDistanceCutoff.focus.value.copy(this.camera.position);
       this.mapDistanceCutoff.radius.value=this.mapStreamRange;
       this.profiler.measure('Streaming CPU', () => this.updateMapStream(now));
       this.profiler.measure('Occlusion CPU',()=>this.rayOcclusion.prepare(this.camera,this.staticMapRoot));
       const size=this.getViewportSize();
-      this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
+      this.inspection.update(size.width,size.height,this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
       if(this.trafficCars.some(car=>car.voice))this.trafficAudio?.listener(renderCamera);
       if(this.mapAmbience){this.ambientAudio?.listener(renderCamera);this.mapAmbience.update(now,renderCamera.position,timeOfDay,document.hidden?0:this.scriptTimeScale?.()??1);}
@@ -734,17 +750,21 @@ export class Viewer {
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
-      this.lighting.updateSun(this.sunLight, this.mapStreamFocus ?? this.controls.target);
+      this.lighting.updateSun(this.sunLight, this.camera.position);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.lighting.direction, 500);
+      // The observer shows primary-camera culling; only the explicit resident
+      // inspection switch bypasses it. Keep the filter active for ALL passes.
+      if(!(this.inspection.enabled&&this.inspectResident))
+        this.profiler.measure('Scene visibility CPU',()=>this.sceneVisibility.apply(this.camera,this.mapStream?this.mapStreamRange:Infinity,this.visibilityObjects()));
       this.profiler.beginGpu();
       this.inspection.helpers.visible=false;
       if(this.mapRoadDebug)this.mapRoadDebug.root.visible=false;
       try {
         this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
-          this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.shadowRevision ?? 0,now)));
+          this.camera.position,this.lighting.direction,(this.mapStream?.shadowRevision??0)+(this.mapStream?.revision??0),now)));
         this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
-          this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
+          this.camera.position, [...this.proxies.values()], now)));
       } finally {this.inspection.helpers.visible=this.inspection.enabled;if(this.mapRoadDebug)this.mapRoadDebug.root.visible=true;}
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(renderCamera.position).add(offset);
@@ -761,6 +781,7 @@ export class Viewer {
       this.profiler.endGpu();
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.endFrame());
       }finally{
+        this.sceneVisibility.restore();
         this.profiler.endGpu();this.profiler.endFrame();
         if(this.renderRecorder?.status.recording){const size=this.renderer.getDrawingBufferSize(new THREE.Vector2());
           this.renderRecorder.recordRenderFrame(now,{...this.renderer.info.render,width:size.x,height:size.y},document.hidden);
@@ -2105,7 +2126,25 @@ export class Viewer {
     this.javaRaces.get(root)?.dispose();
     const {car,positions}=this.pairVehicle(root,source.terrain,source.collision);
     const position=new THREE.Vector3().setFromMatrixPosition(root.matrix()),yaw=new THREE.Euler().setFromRotationMatrix(root.matrix(),'YXZ').y;
-    car.disableObstacle();car.placeAt(position,yaw);if(!control.parked)car.settleSpawn();
+    let parkedSupportReady=false,supportFaces=source.terrain.faces;
+    const place=(position:THREE.Vector3,yaw:number)=>{
+      car.placeAt(position,yaw);
+      if(!control.parked){car.settleSpawn();return;}
+      // A Java reset can arrive after the static assembly was grounded. Sleeping
+      // cars never integrate gravity, so resolve support before putting them to sleep.
+      let correction=-Infinity;
+      const frame=car.body.matrix();
+      for(const wheel of car.suspension.wheels){
+        if(wheel.part.parent!==root)continue;
+        const center=wheel.center.clone().applyMatrix4(frame);
+        const ground=source.terrain!.placementHeight(center.x,center.z,position.y);
+        if(Number.isFinite(ground)&&ground>-999)correction=Math.max(correction,ground-center.y+wheel.radius);
+      }
+      parkedSupportReady=Number.isFinite(correction);
+      if(parkedSupportReady&&Math.abs(correction)>.001)
+        car.placeAt(position.clone().add(new THREE.Vector3(0,correction,0)),yaw);
+    };
+    car.disableObstacle();place(position,yaw);
     if(root.savedVehicleDamage)car.restoreDamage(root.savedVehicleDamage);
     if(control.parked){car.sleepWhenResting=true;car.sleepPhysics();}
     const routes=roads&&raceRoadRoutes(roads.network);
@@ -2120,6 +2159,10 @@ export class Viewer {
     const driver=control.parked?undefined:new RaceDriver(control.route??plan,car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6,control.randomize?Math.random:undefined);
     let input:DrivingInput={throttle:0,steer:0,brake:true};
     car.controlInput=dt=>input=driver?raceVehicleInput(driver,car,control.command(),dt):{throttle:0,steer:0,brake:false};
+    // Placement/settling changed the assembly after showWorld created its draw
+    // matrices. PanelView captures those matrices as the lamps' attachment frame:
+    // synchronize them now or its skin and flares retain different spawn poses.
+    this.syncWorldVisuals(root.world);
     const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part))}));
     const updateViews=()=>{for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);};
     updateViews();
@@ -2127,8 +2170,12 @@ export class Viewer {
     const racer={car,update:(now:number)=>{
       if(disposed)return;if(root.world.disposed||!control.active()){racer.dispose();return;}
       if(document.hidden||(this.scriptTimeScale?.()??1)<=0){last=undefined;return;}
-      const placement=control.placement?.();
-      if(placement){car.placeAt(placement.position,placement.yaw);if(!control.parked)car.settleSpawn();car.body.velocity.copy(placement.velocity);if(control.parked){if(placement.velocity.lengthSq()>.01)car.wakePhysics();else car.sleepPhysics();}root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);updateViews();last=undefined;}
+      // Missing streamed ground is not a successful placement. Retry once its
+      // geometry changes, without polling four terrain rays on every idle frame.
+      const retrySupport=control.parked&&car.sleeping&&!parkedSupportReady&&supportFaces!==source.terrain!.faces;
+      supportFaces=source.terrain!.faces;
+      const placement=control.placement?.()??(retrySupport?{position:car.body.position.clone(),yaw:new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,velocity:new THREE.Vector3()}:undefined);
+      if(placement){place(placement.position,placement.yaw);car.body.velocity.copy(placement.velocity);if(control.parked){if(placement.velocity.lengthSq()>.01)car.wakePhysics();else car.sleepPhysics();}root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);updateViews();control.motion(control.parked?new THREE.Vector3().setFromMatrixPosition(root.local):car.body.position,placement.yaw,car.body.velocity);last=undefined;}
       // Foreground frame time belongs to the fixed clock. Clamping it makes
       // opponents slower than the player as soon as rendering drops below 20 Hz.
       const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
