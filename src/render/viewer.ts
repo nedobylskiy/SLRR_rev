@@ -1673,7 +1673,7 @@ export class Viewer {
           .multiply(light.pose ? poseMatrix(light.pose) : new THREE.Matrix4());
         lamp.userData.lightFlags = light.flags ?? 0; lamp.visible = cfgRenderVisible(light.flags, world.lightMask);
         lamp.add(flare); group.add(lamp);
-        if (light.source.beam && ((light.flags ?? 0) & 4)) {
+        if (!world.spriteOnlyLights && light.source.beam && ((light.flags ?? 0) & 4)) {
           try {
             const beam = createVehicleBeam(light.source);
             if (generation !== this.generation || world.disposed) {

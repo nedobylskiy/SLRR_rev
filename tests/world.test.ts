@@ -152,6 +152,7 @@ test('a native-only fake car keeps its CFG meshes without an empty scripted powe
     nativeOnly:true,nativeId:123,body:[],mechanical:[],tyres:[],wheelRefs:[],installed:[],
   }});
   assert.equal(built.world.mechanical,false);assert.equal(built.world.javaPowertrain,undefined);
+  assert.equal(built.world.spriteOnlyLights,true,'native headlights must not compile a city-wide set of spotlights when their flares turn on');
   assert.equal(built.root.nativeId,123);assert.equal(built.root.definition.additionalModels?.length,1);
   assert.equal(built.world.parts.size,1);built.world.dispose();
 });

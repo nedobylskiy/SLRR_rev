@@ -93,6 +93,8 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  /** Native fake cars use optical sprites, never dozens of scene projectors. */
+  spriteOnlyLights = false;
   /** Active CFG render channels: brake=1, reverse=2, running lights=4, indicators=16. */
   lightMask = 0;
   javaPowertrain?: JavaStockSelection['powertrain'];
@@ -290,6 +292,7 @@ export class PartFactory {
   async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection; suspensionMountOffsetY?: number; suspensionMountOffsets?: WheelFrameOffsets } = {}) {
     if (options.javaSelection?.nativeOnly) options = { ...options, mechanical: false };
     const world = new EngineWorld(), warnings: string[] = [];
+    world.spriteOnlyLights=!!options.javaSelection?.nativeOnly;
     try {
       let definition = await this.definition(key);
       if (options.javaSelection?.rootRender) {
