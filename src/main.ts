@@ -157,7 +157,7 @@ async function runGameBootNow() {
     const drivingVehicleExcluded=(ref:import('slrr-jvm').JavaValue)=>{
       const player=result.jvm.get(jv('class','java.game.GameLogic'),'player');
       const car=player.value!=null?result.jvm.get(player,'car'):undefined;
-      return !!car&&result.gameTypes.getResource(ref)===result.gameTypes.getResource(car)||result.traffic.ownsCar(ref);
+      return car?.value!=null&&result.gameTypes.getResource(ref)===result.gameTypes.getResource(car)||result.traffic.ownsCar(ref);
     };
     viewer.setPerformanceContext(()=>[
       `Java scheduler: ${animating?`animating for ${(performance.now()-animateStartTime).toFixed(1)} ms`:'idle'} · skipped animation ticks ${animationSkipped} · animate period 50 ms · scene poll period 150 ms · map loading ${loadingTrack?'yes':'no'}`,
@@ -856,19 +856,20 @@ for(const [title,min,max,step,initial,set] of [
 const inspectPedestriansButton=textElement('button','Inspect pedestrians');inspectPedestriansButton.onclick=()=>viewer?.inspectPedestrians();mapDebugOptions.append(inspectPedestriansButton);
 pedestrianCrowdCheck.onchange=()=>{const pending=viewer?.showWalkingPedestrians(pedestrianCrowdCheck.checked);pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';void pending?.then(()=>{pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';});};
 
-const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 25'),trafficCountSlider=document.createElement('input');
-trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='25';trafficCountSlider.setAttribute('aria-label','Traffic cars');
+const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars in world: 25'),trafficCountSlider=document.createElement('input');
+trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='500';trafficCountSlider.step='1';trafficCountSlider.value='25';trafficCountSlider.setAttribute('aria-label','Traffic cars');
 trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
-trafficCountSlider.oninput=()=>{const count=Number(trafficCountSlider.value);trafficCountValue.textContent=`Traffic cars: ${count}`;void viewer?.setTrafficCount(count);};
+trafficCountLabel.title='Persistent cars distributed over connected roads when entering the world. Distant cars sleep at their saved positions.';
+trafficCountSlider.oninput=()=>{const count=Number(trafficCountSlider.value);trafficCountValue.textContent=`Traffic cars in world: ${count}`;void viewer?.setTrafficCount(count);};
 const trafficRadiusLabel=textElement('label',''),trafficRadiusValue=textElement('span','Traffic physics radius: 30 m'),trafficRadiusSlider=document.createElement('input');
 trafficRadiusSlider.type='range';trafficRadiusSlider.min='5';trafficRadiusSlider.max='200';trafficRadiusSlider.step='5';trafficRadiusSlider.value='30';trafficRadiusSlider.setAttribute('aria-label','Traffic physics radius');
 trafficRadiusLabel.append(trafficRadiusValue,trafficRadiusSlider);mapDebugOptions.append(trafficRadiusLabel);
 trafficRadiusSlider.oninput=()=>{const radius=Number(trafficRadiusSlider.value);trafficRadiusValue.textContent=`Traffic physics radius: ${radius} m`;viewer?.setTrafficPhysicsRadius(radius);};
-const trafficSpawnLabel=textElement('label',''),trafficSpawnValue=textElement('span','Traffic spawn radius: 100 m'),trafficSpawnSlider=document.createElement('input');
-trafficSpawnSlider.type='range';trafficSpawnSlider.min='25';trafficSpawnSlider.max='500';trafficSpawnSlider.step='25';trafficSpawnSlider.value='100';trafficSpawnSlider.setAttribute('aria-label','Traffic spawn radius');
-trafficSpawnLabel.title='New cars appear on the nearest free graph lanes within this radius. Existing cars remain until they leave the map streaming radius.';
+const trafficSpawnLabel=textElement('label',''),trafficSpawnValue=textElement('span','Traffic activation radius: 275 m'),trafficSpawnSlider=document.createElement('input');
+trafficSpawnSlider.type='range';trafficSpawnSlider.min='25';trafficSpawnSlider.max='500';trafficSpawnSlider.step='25';trafficSpawnSlider.value='275';trafficSpawnSlider.setAttribute('aria-label','Traffic activation radius');
+trafficSpawnLabel.title='Wake existing world traffic near the player. Cars sleep again 50 m beyond this range, preserving position and speed. Camera direction has no effect.';
 trafficSpawnLabel.append(trafficSpawnValue,trafficSpawnSlider);mapDebugOptions.append(trafficSpawnLabel);
-trafficSpawnSlider.oninput=()=>{const radius=Number(trafficSpawnSlider.value);trafficSpawnValue.textContent=`Traffic spawn radius: ${radius} m`;viewer?.setTrafficSpawnRadius(radius);};
+trafficSpawnSlider.oninput=()=>{const radius=Number(trafficSpawnSlider.value);trafficSpawnValue.textContent=`Traffic activation radius: ${radius} m`;viewer?.setTrafficSpawnRadius(radius);};
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
 const playerTrafficLabel=textElement('label','Traffic controls my car'),playerTrafficCheck=document.createElement('input');
 playerTrafficCheck.type='checkbox';playerTrafficLabel.prepend(playerTrafficCheck);mapDebugOptions.append(playerTrafficLabel);

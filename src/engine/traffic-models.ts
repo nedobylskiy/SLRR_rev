@@ -12,7 +12,7 @@ export interface JavaTrafficBridge {
  selection(model:TrafficModel):Promise<JavaStockSelection|undefined>;
 }
 export const DEFAULT_TRAFFIC_MODELS:readonly TrafficModel[]=[{pack:'cars/traffic/pickup.rpk',id:6,weight:1}];
-export const MAX_TRAFFIC_CARS=50;
+export const MAX_TRAFFIC_CARS=500;
 export function pickTrafficModel(models:readonly TrafficModel[],random=Math.random):TrafficModel|undefined {
   const eligible=models.filter(model=>Number.isFinite(model.weight)&&model.weight>0),total=eligible.reduce((sum,model)=>sum+model.weight,0);
   if(!eligible.length||!Number.isFinite(total))return;

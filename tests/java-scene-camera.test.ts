@@ -27,7 +27,7 @@ test('shop camera consumes native creation pose and Java render/move/look/height
   await jvm.natives.invokeAsync('java.util.resource.GameRef', 'create', cam,
     [map, template, jv('String', '10,2,-3,0,0,0,0x13,1.8,0,0.05'), jv('String', 'camera')]);
   assert.deepEqual(resources.get(cam)?.position, { x: 10, y: 2, z: -3 });
-  const state = jv('CarMarket', { className: 'java.game.CarMarket', fields: new Map([['cam', cam]]) });
+  const state = jv('CarMarket', { className: 'java.game.CarMarket', fields: new Map([['cam', cam], ['cameraTarget',jv('Vehicle',null)]]) });
   jvm.set(jv('class', 'java.game.GameLogic'), 'actualState', state);
   const result = { jvm, gameTypes: resources } as unknown as BootResult;
   const command = async (text: string) => jvm.natives.invokeAsync('java.util.resource.GameRef', 'queueEvent', cam,

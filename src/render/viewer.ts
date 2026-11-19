@@ -1,5 +1,6 @@
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {LodPlayground} from './lod-playground';
+import {worldTrafficSpawn,trafficResidentActive} from '../engine/traffic-residency';
 import {AmbientAudio} from '../audio/ambient-audio';
 import {cacheUnchangedTransform} from './stable-transform';
 import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
@@ -93,7 +94,7 @@ import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
 import {roadImpactScenario} from '../engine/road-impact-scenario';
 import {raceRoadRoutes} from '../engine/road-route';
-import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,safeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
+import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel,type JavaTrafficBridge,type TrafficStreamHandle} from '../engine/traffic-models';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
 import { TrafficDamageView } from './traffic-damage-view';
@@ -118,7 +119,7 @@ import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine
 import {createTrafficSignals} from './traffic-signals';
 
 type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[];panels:RivalPanelDefinition[]};
-type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView|RivalPanelView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
+type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;placed?:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView|RivalPanelView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -494,35 +495,16 @@ export class Viewer {
   private get trafficFollower(){return this.trafficCars.filter(car=>car.active)[1];}
   private trafficCount=25;
   private trafficPhysicsRadius=30;
-  private trafficSpawnRadius=100;
-  private trafficSpawnSphereRadius=4;
-  private trafficSpawnCenterHeight=1.5;
+  private trafficSpawnRadius=275;
   get trafficSpawnRange(){return this.trafficSpawnRadius;}
-  setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic spawn radius must be 25–500 m');this.trafficSpawnRadius=radius;}
+  setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic activation radius must be 25–500 m');this.trafficSpawnRadius=radius;}
   private trafficOccupant(body:import('../engine/rigid-body-3d').RigidBody3D):TrafficOccupant {const point=body.position.clone() as TrafficOccupant,size=body.bounds.getSize(new THREE.Vector3());point.trafficRadius=Math.hypot(size.x,size.z)*.5;point.trafficVelocity=body.velocity.clone();return point;}
   private rivalInRange(model:TrafficModel){const pose=this.javaTrafficBridge?.location(model);return !!pose&&Math.hypot(pose.position.x-this.trafficFocus().x,pose.position.z-this.trafficFocus().z)<=this.mapStreamRange;}
-  private chooseTrafficSpawn(occupied:readonly TrafficOccupant[],bounds?:THREE.Box3,height=0,model?:TrafficModel){
-    if(bounds){const sphere=bounds.getBoundingSphere(new THREE.Sphere());this.trafficSpawnSphereRadius=sphere.radius+Math.hypot(sphere.center.x,sphere.center.z)+.5;this.trafficSpawnCenterHeight=height-.1+sphere.center.y;}
-    const radius=Math.min(this.trafficSpawnRadius,this.mapStreamRange);
-    // The primary/player camera owns spawning; the independent inspection camera must not affect it.
-    this.camera.updateMatrixWorld();
-    const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
-    const sphere=new THREE.Sphere(new THREE.Vector3(),this.trafficSpawnSphereRadius);
-    const center=this.trafficFocus(),forward=this.trafficPeer?new THREE.Vector3(0,0,-1).applyQuaternion(this.trafficPeer.body.orientation):this.camera.getWorldDirection(new THREE.Vector3());forward.y=0;forward.normalize();
-    const speed=this.trafficPeer?.body.velocity.length()??0,bodyRadius=bounds?Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5:6;
-    const offscreen=(spawn:TrafficSpawn)=>{
-      sphere.center.copy(spawn.position);sphere.center.y+=this.trafficSpawnCenterHeight;
-      return !frustum.intersectsSphere(sphere);
-    };
-    if(model?.registrationId&&this.javaTrafficBridge){
-      const pose=this.javaTrafficBridge.location(model);if(!pose||!this.rivalInRange(model))return;
-      const spawn=this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
-      return spawn&&!this.trafficControl?.roadHalted(spawn.road)&&safeTrafficSpawn(spawn,center,forward,speed,!offscreen(spawn),occupied,bodyRadius)?spawn:undefined;
-    }
-    return this.trafficSpawns&&chooseSafeTrafficSpawn(this.trafficSpawns,center,radius,this.mapStreamRange,occupied,forward,speed,bodyRadius,offscreen,Math.random,spawn=>!this.trafficControl?.roadHalted(spawn.road));
+  private registeredTrafficSpawn(model:TrafficModel){
+    const pose=this.javaTrafficBridge?.location(model);
+    return pose&&this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
   }
   private trafficSpawns?:TrafficSpawnIndex;
-  private trafficRefillAt=0;
   get trafficAmount(){return this.trafficCount;}
   async prepareJavaScene(){
     const generation=this.generation,focus=this.trafficFocus().clone();
@@ -532,7 +514,7 @@ export class Viewer {
   get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
   setTrafficPhysicsRadius(radius:number){if(!Number.isFinite(radius)||radius<5||radius>200)throw Error("Traffic physics radius must be 5–200 m");this.trafficPhysicsRadius=radius;}
   async setTrafficCount(count:number){
-    if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error("Traffic count must be an integer from 0 to 50");
+    if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error(`Traffic count must be an integer from 0 to ${MAX_TRAFFIC_CARS}`);
     this.trafficCount=count;this.trafficTestEnabled=true;
     this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;car.group.visible=false;car.voice?.setActive(false);}});
     if(this.mapRoadSource&&(!this.trafficControl||this.trafficCars.length<count))await this.restartTrafficTest(true);
@@ -1273,8 +1255,7 @@ export class Viewer {
         const nearby=models.filter(m=>m.registrationId&&this.javaTrafficBridge!.available(m)&&this.rivalInRange(m));
         const target=Math.min(Math.floor(this.trafficCount/2),nearby.length),present=this.trafficCars.filter(c=>c.model.registrationId).length;
         if(target>present){
-          this.camera.updateMatrixWorld();const view=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
-          const replace=this.trafficCars.filter(c=>!c.model.registrationId&&(!c.active||!view.intersectsBox(c.vehicle.body.bounds.clone().applyMatrix4(c.vehicle.body.matrix())))).slice(0,target-present);
+          const replace=this.trafficCars.filter(c=>!c.model.registrationId&&!c.active).slice(0,target-present);
           for(const car of replace){this.disposeTrafficCar(car);this.trafficCars.splice(this.trafficCars.indexOf(car),1);}
         }
       }
@@ -1304,10 +1285,12 @@ export class Viewer {
       this.trafficControl=control;
       const cars=staged.splice(0);for(const test of cars){
         this.scene.add(test.group);
-        const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
-        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height,test.model);if(spawn)this.recycleTrafficCar(test,spawn);
+        const occupied=this.trafficCars.filter(car=>car.placed).map(car=>this.trafficOccupant(car.vehicle.body));
+        const bounds=test.vehicle.body.bounds,bodyRadius=Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5;
+        const spawn=test.model.registrationId?this.registeredTrafficSpawn(test.model):worldTrafficSpawn(this.trafficSpawns!,occupied,bodyRadius,this.trafficFocus());
+        if(spawn)this.recycleTrafficCar(test,spawn);
       }
-      this.trafficTestStatus=`Streaming active · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
+      this.trafficTestStatus=`Persistent world population · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
       for(const test of cars){
         try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(generation===this.generation&&this.trafficCars.includes(test))test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
       }
@@ -1317,7 +1300,7 @@ export class Viewer {
   }
   trafficTestInfo() {
     const cars=this.trafficCars.filter(car=>car.active),physical=cars.filter(car=>car.lod.physical).length;
-    return `Traffic ${cars.length}/${this.trafficCount} · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · spawn ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
+    return `Traffic active ${cars.length} / world ${this.trafficCars.filter(car=>car.placed).length} (limit ${this.trafficCount}) · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · activation ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
       cars.map((test,i)=>`${test.model.pack.split('/').at(-1)?.replace(/\.rpk$/i,'')} ${i+1} · ${test.lod.physical?'physics':'puppet'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${test.car.phase} · ${test.bot.trafficStatus||'free'}`).join('\n')+
       `\nDriver calculations: ${this.trafficAgents?.available?`worker · 30 Hz · last CPU ${this.trafficAgents.workMs.toFixed(2)} ms · round trip ${this.trafficAgents.roundTripMs.toFixed(1)} ms`:`main thread${this.trafficAgents?.error?' · '+this.trafficAgents.error:''}`}\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
   }
@@ -1330,9 +1313,16 @@ export class Viewer {
     const peers=this.trafficCars.filter(car=>car.active&&car!==test).map(car=>car.vehicle.body);if(this.trafficPeer)peers.push(this.trafficPeer.body);
     test.bot=initializeTrafficMotion(route,test.lod,this.trafficControl,peers);
     test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
-    test.java?.remove();test.java=undefined;
-    if(this.javaTrafficBridge){test.java=this.javaTrafficBridge.spawn(test.model,{position:test.vehicle.body.position,yaw:Math.atan2(-route.direction.x,-route.direction.z),velocity:test.vehicle.body.velocity});if(!test.java){test.active=false;test.group.visible=false;return;}}
-    test.active=true;test.group.visible=true;
+    test.java?.remove();test.java=undefined;test.placed=true;
+    test.active=false;test.group.visible=false;
+  }
+  private wakeTrafficResident(test:TrafficTestCar){
+    if(this.javaTrafficBridge){
+      const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
+      test.java=this.javaTrafficBridge.spawn(test.model,{position:test.vehicle.body.position,yaw:Math.atan2(-forward.x,-forward.z),velocity:test.vehicle.body.velocity});
+      if(!test.java)return false;
+    }
+    test.active=true;return true;
   }
   focusTrafficTest() {
     if(!this.trafficTest)return;
@@ -1349,19 +1339,24 @@ export class Viewer {
     if((this.scriptTimeScale?.()??1)<=0){this.trafficPrevious=undefined;return;}
     this.trafficControl.setHalts(this.javaTrafficBridge?.halts?.()??{revision:0,roads:[],crossings:[]});
     const center=this.trafficFocus();
+    const activation=Math.max(this.trafficPhysicsRadius+10,Math.min(this.trafficSpawnRadius,this.mapStreamRange));
     for(const [i,test] of this.trafficCars.entries()){
-      const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
-      if(i>=this.trafficCount||this.trafficControl.roadHalted(test.car.roadId)||distance>this.mapStreamRange+20||test.car.stopped&&distance>this.trafficPhysicsRadius+10||test.java&&!test.java.active()){test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;}
-      else test.group.visible=test.active&&distance<=this.mapStreamRange;
-      test.voice?.setActive(test.active&&test.group.visible);
-    }
-    if(now>=this.trafficRefillAt&&this.trafficSpawns){
-      this.trafficRefillAt=now+200;
-      const test=this.trafficCars.slice(0,this.trafficCount).find(car=>!car.active&&(!this.javaTrafficBridge||this.javaTrafficBridge.available(car.model)));
-      if(test){const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
-        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height,test.model);
-        if(spawn)this.recycleTrafficCar(test,spawn);
+      const available=!this.javaTrafficBridge||this.javaTrafficBridge.available(test.model);
+      // Script-owned rivals keep their existing global Java location. Ordinary
+      // traffic never chooses another spawn when it leaves the active range.
+      if(test.model.registrationId&&!test.active&&available&&this.rivalInRange(test.model)){
+        const pose=this.javaTrafficBridge?.location(test.model),spawn=pose&&this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
+        if(spawn&&(!test.placed||test.vehicle.body.position.distanceTo(new THREE.Vector3(pose!.position.x,pose!.position.y,pose!.position.z))>5))this.recycleTrafficCar(test,spawn);
       }
+      const wanted=i<this.trafficCount&&test.placed&&available&&trafficResidentActive(test.vehicle.body.position,center,activation,test.active)&&!this.trafficControl.roadHalted(test.car.roadId);
+      if(!wanted||test.java&&!test.java.active()){
+        test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;
+      }else{
+        if(!test.active)this.wakeTrafficResident(test);
+        const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
+        test.group.visible=test.active&&distance<=this.mapStreamRange;
+      }
+      test.voice?.setActive(test.active&&test.group.visible);
     }
     const cars=this.trafficCars.filter(car=>car.active);
     this.trafficAgents?.ready(now);
@@ -1370,7 +1365,7 @@ export class Viewer {
       const test=cars.find(car=>this.trafficAgentIds.get(car.bot)===result.id);
       // A collision/recycle after dispatch invalidates the old control, never the current physical body.
       if(!test||test.bot.impactRevision!==result.revision||test.vehicle.collisionVersion!==result.collision||result.haltsRevision!==this.trafficControl.halts.revision)continue;
-      test.car.restore(result.cursor);Object.assign(test.bot,{input:result.input,mode:result.mode,rpm:result.rpm,cruiseSpeed:result.speed,desiredSpeed:result.desired,trafficStatus:result.status});test.lod.setMode(result.mode);
+      test.car.applyPlan(result.cursor);Object.assign(test.bot,{input:result.input,mode:result.mode,rpm:result.rpm,cruiseSpeed:result.speed,desiredSpeed:result.desired,trafficStatus:result.status});test.lod.setMode(result.mode);
     }
     this.trafficAudio?.setHidden(document.hidden);
     if(document.hidden){this.trafficPrevious=undefined;return;}

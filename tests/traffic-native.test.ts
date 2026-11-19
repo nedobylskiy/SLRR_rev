@@ -68,7 +68,14 @@ test('streamed cars report stable Java IDs, poses, type and balanced appearance 
  call('remTrafficCar',map,[jv('int',id)]);assert.equal(again.active(),false);assert.ok(types.get(rival));assert.equal(bridge.available(rivalModel),false);
  types.dispatchQueuedEvents();assert.equal(jvm.get(listener,'calls').value,6);
  const last=bridge.spawn(model,pose)!;assert.ok(last);
- call('delTraffic',map,[]);assert.equal(last.active(),false);assert.deepEqual(traffic.models(map),[]);assert.equal(bridge.available(model),false);
+ const adopted=traffic.registeredCar(last.id)!;const nativeId=types.getResource(adopted)!.resourceId;
+ call('remTrafficCar',map,[jv('int',last.id)]);
+ assert.equal(last.active(),false,'a police bot leaves normal traffic');
+ assert.ok(types.get(adopted),'remTrafficCar keeps the vehicle adopted by Bot.followCar alive');
+ assert.equal(types.getResource(adopted)!.resourceId,nativeId,'the Java car reference retains its original ID');
+ last.remove();assert.ok(types.get(adopted),'a late stream cleanup cannot destroy the adopted car');
+ const cleanup=bridge.spawn(model,pose)!;assert.ok(cleanup);
+ call('delTraffic',map,[]);assert.equal(cleanup.active(),false);assert.deepEqual(traffic.models(map),[]);assert.equal(bridge.available(model),false);
  traffic.dispose();
  types.dispose();
 });
@@ -86,9 +93,9 @@ test('Java traffic declarations preserve per-ground resource identities, density
  add(ground,taxi,0);add(ground,taxi,-1);assert.deepEqual(traffic.models(ground),[]);
 });
 
-test('traffic selection uses Java density proportions, supports fifty slots and respects an explicitly empty catalogue',()=>{
+test('traffic selection uses Java density proportions, supports five hundred slots and respects an explicitly empty catalogue',()=>{
  const models=[{pack:'taxi.rpk',id:6,weight:40},{pack:'bus.rpk',id:6,weight:10}];
- assert.equal(MAX_TRAFFIC_CARS,50);assert.equal(pickTrafficModel(models,()=>.79)?.pack,'taxi.rpk');assert.equal(pickTrafficModel(models,()=>.8)?.pack,'bus.rpk');
+ assert.equal(MAX_TRAFFIC_CARS,500);assert.equal(pickTrafficModel(models,()=>.79)?.pack,'taxi.rpk');assert.equal(pickTrafficModel(models,()=>.8)?.pack,'bus.rpk');
  assert.equal(pickTrafficModel([],()=>0),undefined);assert.equal(pickTrafficModel([{...models[0],weight:0}]),undefined);
  assert.equal(pickTrafficModel(models,()=>1)?.pack,'bus.rpk');
 });

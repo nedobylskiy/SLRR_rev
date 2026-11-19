@@ -8,6 +8,7 @@ import {RoadTrafficCar} from '../src/engine/road-traffic';
 import {TrafficControl} from '../src/engine/traffic-control';
 import {RigidBody3D} from '../src/engine/rigid-body-3d';
 import {TrafficVehicle} from '../src/engine/traffic-vehicle';
+import {TrafficVehicleLod} from '../src/engine/traffic-stream';
 import type {RoadNetwork,RoadPoint,RoadSegment} from '../src/formats/trc';
 import type {PedestrianWalk} from '../src/formats/pedestrian';
 
@@ -21,6 +22,23 @@ function traffic(graph:RoadNetwork,x=10):TrafficAgentState{
   b.setFrame(new Matrix4().makeRotationY(-Math.PI/2).setPosition(x,0,0));b.velocity.set(5,0,0);
   return {id:1,revision:0,body:agentBody(b),cursor:route.snapshot(),collision:0,physical:true,wheelbase:3,maxSteer:.6,speed:10,mode:'cruise'};
 }
+
+test('rail motion stays continuous through a crossing with delayed 10 Hz worker plans',()=>{
+  const graph=network(),sim=new AgentSimulation(()=>.5),route=new RoadTrafficCar(graph,new Vector3(90,0,0),()=>.5,2);
+  sim.update({kind:'traffic-init',network:graph,control:new TrafficControl(graph,[]).snapshot()});
+  const vehicle=new TrafficVehicle(new Box3(new Vector3(-1,-.5,-2),new Vector3(1,1,2)),1400,[],{height:()=>0,normal:()=>new Vector3(0,1,0)});
+  vehicle.place(route.position,route.direction,1);vehicle.body.velocity.set(10,0,0);
+  const lod=new TrafficVehicleLod(vehicle,route,1);let input={throttle:0,steer:0,brake:false} as import('../src/engine/driving-demo').DrivingInput;
+  let pending:ReturnType<AgentSimulation['update']>,previous=vehicle.body.position.clone();
+  for(let frame=0;frame<300;frame++){
+    if(frame%6===0)pending=sim.update({kind:'traffic',dt:.1,time:frame/60,agents:[{id:1,revision:0,body:agentBody(vehicle.body),cursor:route.snapshot(),collision:0,physical:false,wheelbase:3,maxSteer:.6,speed:10,mode:'cruise'}]});
+    if(frame%6===4&&pending?.kind==='traffic'){const plan=pending.agents[0];route.applyPlan(structuredClone(plan.cursor));input=plan.input;}
+    lod.step(1/60,input);
+    const advance=vehicle.body.position.x-previous.x;
+    assert.ok(advance>.02&&advance<.5,`continuous rail progress despite delayed plans: ${advance}`);previous.copy(vehicle.body.position);
+  }
+  assert.equal(route.roadId,3);assert.equal(route.crossingsPassed,1);assert.ok(vehicle.body.position.x>120);
+});
 test('background driver follows the live body, reacts to a lead car and never integrates physical state',()=>{
   const graph=network(),sim=new AgentSimulation(()=>0),control=new TrafficControl(graph,[]),agent=traffic(graph);
   sim.update({kind:'traffic-init',network:structuredClone(graph),control:control.snapshot()});

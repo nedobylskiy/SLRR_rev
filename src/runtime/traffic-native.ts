@@ -41,7 +41,9 @@ export class TrafficNative {
         const enabled=!!args[1].value;if(entry.visible&&entry.notify!==enabled)this.event(entry,enabled?'car_add':'car_rem');entry.notify=enabled;return jv('int',1);
       });
       jvm.natives.register('java.util.resource.GroundRef','remTrafficCar',['int'],({receiver,args})=>{
-        const entry=this.registrations.get(Number(args[0].value));if(entry&&entry.ground===this.ground(receiver))this.remove(entry,true);return jv('void',undefined);
+        // Bot.followCar/startRace detach the existing car from traffic before
+        // taking control. Only the registration dies, not the adopted vehicle.
+        const entry=this.registrations.get(Number(args[0].value));if(entry&&entry.ground===this.ground(receiver))this.remove(entry,true,false);return jv('void',undefined);
       });
       this.gameTypes.setTrafficInfoReader((receiver,query)=>{
         const node=this.gameTypes!.getResource(receiver),entry=node&&this.byCar.get(node);
@@ -58,11 +60,11 @@ export class TrafficNative {
     if(!target||!node||!this.gameTypes?.get(target))return;
     this.gameTypes.queueStringEvent(target,entry.map,16,jv('String',`${command} ${node.resourceId}${command==='car_add'?` ${entry.id}`:''}`));
   }
-  private remove(entry:Registration,permanent:boolean){
+  private remove(entry:Registration,permanent:boolean,destroyCar=true){
     if(!entry.valid)return;
     if(entry.visible&&(!entry.individual||entry.notify))this.event(entry,'car_rem');entry.visible=false;
     if(permanent||!entry.individual){entry.valid=false;this.registrations.delete(entry.id);if(entry.individual)this.catalogs.set(entry.ground,(this.catalogs.get(entry.ground)??[]).filter(m=>m.registrationId!==entry.id));}
-    if(!entry.individual){const node=this.gameTypes?.getResource(entry.car);if(node?.resourceType)this.jvm.natives.invoke('java.util.resource.ResourceRef','destroy',entry.car,[]);}
+    if(destroyCar&&!entry.individual){const node=this.gameTypes?.getResource(entry.car);if(node?.resourceType)this.jvm.natives.invoke('java.util.resource.ResourceRef','destroy',entry.car,[]);}
   }
   registeredCar(id:number):JavaValue|undefined {return this.registrations.get(id)?.car;}
   ownsCar(car:JavaValue):boolean {

@@ -577,7 +577,14 @@ export class GameTypeNative {
     const node = this.getResource(receiver);
     return node instanceof GameObject ? node : undefined;
   }
-  getResource(receiver: JavaValue): ResourceObject | undefined { const node=this.nodes.get(this.object(receiver));return node?.destroyed?undefined:node; }
+  getResource(receiver: JavaValue): ResourceObject | undefined {
+    // Optional Java fields (notably Player.car and Track.cameraTarget) remain
+    // typed null references while a scene is being assembled or released.
+    // Read-only lookup has no native object in that case; mutations still use
+    // object()/requireResource() and reject invalid receivers.
+    if(receiver.value==null)return undefined;
+    const node=this.nodes.get(this.object(receiver));return node?.destroyed?undefined:node;
+  }
   /** File-created texture handles retain a stable RID when Java passes only id(). */
   bindTexture(receiver: JavaValue, identity: ResourceIdentity): void {
     const node = this.allocate(receiver), id = 0x60000000 + identity.id;

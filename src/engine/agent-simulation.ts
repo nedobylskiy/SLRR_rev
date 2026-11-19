@@ -31,6 +31,7 @@ export class AgentSimulation {
           const bot=new Bot(route,proxy,this.random,state.speed,control);bot.mode=state.mode;
           entry={revision:state.revision,bot,proxy};this.drivers.set(state.id,entry);
         }
+        entry.bot.route.restore(state.cursor);
         setBody(entry.proxy.body,state.body);entry.proxy.collisionVersion=state.collision;entry.proxy.physicalSteering=state.physical;
       }
       const peers=[...this.drivers.values()].map(e=>e.proxy.body);if(request.peer)peers.push(body(request.peer));

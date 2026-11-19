@@ -1,6 +1,6 @@
 import { Box3, Vector3 } from 'three';
 import { FixedClock } from '../runtime/fixed-clock';
-import { RoadTrafficCar } from './road-traffic';
+import { RoadTrafficCar, trafficSpeedBand } from './road-traffic';
 import type { RigidBody3D } from './rigid-body-3d';
 import type { DrivingInput } from './driving-demo';
 import type { Vehicle3D } from './vehicle-3d';
@@ -141,7 +141,7 @@ export class Bot {
     this.route.follow(body.position,mayEnter,physical?Math.max(1.5,Math.min(4,wheelbase*.5)):1.5);
     if(this.route.crossingsPassed!==this.speedCrossings){
       this.speedCrossings=this.route.crossingsPassed;
-      if(this.route.speedGroup!==undefined){const fast=this.route.speedGroup===0;this.cruiseSpeed=((fast?60:15)+this.random()*(fast?40:20))/3.6;this.cruiseCommand=Math.max(0,speed);}
+      if(this.route.speedGroup!==undefined){const [min,max]=trafficSpeedBand(this.route.speedGroup);this.cruiseSpeed=(min+this.random()*(max-min))/3.6;this.cruiseCommand=Math.max(0,speed);}
     }
     // Ramp from the real exit speed, avoiding both hard braking and a surge back to the old cruise target.
     const cruiseDelta=this.cruiseSpeed-this.cruiseCommand;

@@ -41,6 +41,7 @@ const notes = new Map<string, {status: Status; note: string}>();
 const annotate = (owner: string, methods: string[], status: Status, note: string) => {
   for (const method of methods) notes.set(owner + '#' + method, {status,note});
 };
+annotate('java.game.Vehicle',['hasCrime'],'implemented','Host road-zone adaptation: returns the current road speed-band maximum in m/s (urban 35, rural 100 km/h); -1 off-road or without a graph. City applies its own 10% tolerance. Original native reads zone enter/leave state.');
 annotate('java.game.Vehicle',['getHorn'],'implemented','Reads the player controller’s original AXIS_HORN mapping and script sethorn state. Career scripts may consume the request with sethorn 0; playback uses original sound:0x0015.');
 annotate('java.lang.GarbageCollector',['<init>','push','flush'],'mocked','No-op host adapter; no original collector lifecycle. JavaScript manages memory.');
 annotate('java.util.resource.ResourceRef',['precache','cache','unload'],'mocked','Logs the call; no original resource-cache operation or explicit unloading.');

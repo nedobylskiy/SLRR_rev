@@ -1,6 +1,6 @@
 import {Vector3} from 'three';
 import {sampleRoadSegment,type RoadNetwork} from '../formats/trc';
-import {trafficConnections,trafficRoadSpeedGroups,RoadTrafficCar} from './road-traffic';
+import {trafficConnections,trafficRoadSpeedGroups,trafficSpeedBand,RoadTrafficCar} from './road-traffic';
 import {TrafficVehicle} from './traffic-vehicle';
 import {Bot,type BotMode,type BotVehicle} from './bot';
 import type {TrafficControl} from './traffic-control';
@@ -9,7 +9,12 @@ import type {DrivingInput} from './driving-demo';
 
 export interface TrafficSpawn {road:number;position:Vector3;direction:Vector3;speedGroup?:0|1}
 export type TrafficOccupant=Vector3&{trafficRadius?:number;trafficVelocity?:Vector3};
-export function trafficCruiseSpeed(group:0|1|undefined,random=Math.random){return ((group===0?60:15)+random()*(group===0?40:20))/3.6;}
+export type TrafficSpawnSector='ahead'|'around'|'behind';
+export function trafficSpawnSector(position:Vector3,center:Vector3,forward:Vector3):TrafficSpawnSector{
+  const x=position.x-center.x,z=position.z-center.z,distance=Math.hypot(x,z),alignment=(x*forward.x+z*forward.z)/Math.max(1,distance);
+  return alignment>.35?'ahead':alignment<-.35?'behind':'around';
+}
+export function trafficCruiseSpeed(group:0|1|undefined,random=Math.random){const [min,max]=trafficSpeedBand(group);return (min+random()*(max-min))/3.6;}
 /** Seed real velocity as well as the driver's target; queues, curves and red lights still cap it. */
 export function initializeTrafficMotion(route:RoadTrafficCar,vehicle:BotVehicle,control?:TrafficControl,peers:readonly RigidBody3D[]=[],random=Math.random){
   const speed=trafficCruiseSpeed(route.speedGroup,random),bot=new Bot(route,vehicle,random,speed,control);
@@ -21,7 +26,8 @@ export function initializeTrafficMotion(route:RoadTrafficCar,vehicle:BotVehicle,
 /** Reject close visible/front spawns and imminent overlaps even when the target population is not full. */
 export function safeTrafficSpawn(spawn:TrafficSpawn,center:Vector3,forward:Vector3,playerSpeed:number,visible:boolean,occupied:readonly TrafficOccupant[],bodyRadius:number){
   const delta=spawn.position.clone().sub(center),distance=Math.hypot(delta.x,delta.z),ahead=delta.dot(forward)/Math.max(1,distance);
-  if(distance<20+bodyRadius)return false;
+  if(distance<35+bodyRadius)return false;
+  if(ahead<-.35&&distance<Math.max(100,playerSpeed*3+bodyRadius+20))return false;
   if((visible||ahead>.25)&&distance<Math.max(80,playerSpeed*4+bodyRadius+10))return false;
   const velocity=spawn.direction.clone().multiplyScalar(trafficCruiseSpeed(spawn.speedGroup,()=>1));
   for(const peer of occupied){
@@ -85,10 +91,19 @@ export class TrafficSpawnIndex {
 
 export function chooseSafeTrafficSpawn(index:TrafficSpawnIndex,center:Vector3,radius:number,streamRadius:number,occupied:readonly TrafficOccupant[],forward:Vector3,playerSpeed:number,bodyRadius:number,offscreen:(spawn:TrafficSpawn)=>boolean,random=Math.random,accept?:(spawn:TrafficSpawn)=>boolean){
   radius=Math.min(radius,streamRadius);
-  const choose=(range:number,blindOnly:boolean)=>index.choose(center,range,occupied,random,20,true,offscreen,bodyRadius,
-    spawn=>(!accept||accept(spawn))&&(!blindOnly||offscreen(spawn))&&safeTrafficSpawn(spawn,center,forward,playerSpeed,!offscreen(spawn),occupied,bodyRadius));
-  // Population is a cap: never relax safety just to fill every slot. Expansion is offscreen only.
-  return choose(radius,true)??choose(Math.min(streamRadius,Math.max(radius*2,radius+100)),true)??choose(radius,false);
+  const counts={ahead:0,around:0,behind:0},weights={ahead:.45,around:.4,behind:.15};let count=0;
+  for(const point of occupied)if(point.distanceTo(center)>5){counts[trafficSpawnSector(point,center,forward)]++;count++;}
+  const sectors=(['ahead','around','behind'] as TrafficSpawnSector[]).map(sector=>({sector,priority:weights[sector]*(count+1)-counts[sector]+random()*.05})).sort((a,b)=>b.priority-a.priority);
+  // Reservoir selection across lane samples, rather than the nearest hidden lane.
+  // Missing sectors stay unfilled instead of concentrating all slots behind the player.
+  for(const {sector,priority} of sectors){
+    if(priority<-.75)continue;
+    const choose=(range:number)=>index.choose(center,range,occupied,random,35,false,undefined,bodyRadius,
+      spawn=>trafficSpawnSector(spawn.position,center,forward)===sector&&(!accept||accept(spawn))&&offscreen(spawn)&&safeTrafficSpawn(spawn,center,forward,playerSpeed,false,occupied,bodyRadius));
+    const found=choose(radius)??choose(Math.min(streamRadius,Math.max(radius*2,radius+150)));
+    if(found)return found;
+  }
+  return undefined;
 }
 
 /** Same persistent body/dents at both levels; distant movement never invokes the physical solver. */
@@ -107,7 +122,7 @@ export class TrafficVehicleLod implements BotVehicle {
   updateRange(center:Vector3,radius:number){
     const distance=Math.hypot(this.body.position.x-center.x,this.body.position.z-center.z);
     if(!this.physical&&distance<=radius)this.physical=true;
-    else if(this.physical&&distance>radius+10&&this.mode==='cruise')this.physical=false;
+    else if(this.physical&&distance>radius+10&&this.mode==='cruise'){this.route.follow(this.body.position,false);this.physical=false;}
   }
   impact(impulse:Vector3,point:Vector3,closing:number){this.physical=true;this.vehicle.impact(impulse,point,closing);}
   step(dt:number,input:DrivingInput){
@@ -116,7 +131,8 @@ export class TrafficVehicleLod implements BotVehicle {
     const speed=Math.max(0,oldSpeed+(Math.max(0,input.throttle)*3-brake*8-oldSpeed*.05)*dt);
     // Blend positions/tangents across the real connected route. This rounds
     // graph joints locally without delaying progress or changing the chosen exit.
-    this.route.steeringTargetAhead(speed*dt,Math.min(1.5,this.wheelbase*.5),this.point,this.direction);
+    this.route.advanceDistance(speed*dt);
+    this.route.steeringTargetAhead(0,Math.min(1.5,this.wheelbase*.5),this.point,this.direction);
     // Use the same complete spline tangent at spawn and during puppet motion.
     // Dropping its Y component made distant traffic stay horizontal on ramps.
     this.vehicle.place(this.point,this.direction,this.height,1-Math.exp(-dt*8));
