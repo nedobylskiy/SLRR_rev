@@ -23,10 +23,15 @@ export class SystemNative {
     private readonly memoryBytes: () => number = () => {
       const browserPerformance = globalThis.performance as (Performance & { memory?: { usedJSHeapSize?: number } }) | undefined;
       return browserPerformance?.memory?.usedJSHeapSize ?? 0;
-    }) {
+    },
+    private readonly showAlert:(message:string)=>void=message=>globalThis.alert(message)) {
     this.startedAt = this.now();
     this.lastSample = this.startedAt;
     const owner = 'java.lang.System';
+    jvm.natives.register(owner,'exit',['String'],({args})=>{
+      this.showAlert(String(args[0].value??''));
+      return jv('void',undefined);
+    });
     jvm.natives.register(owner, 'currentTime', [], () => jv('float', Math.fround((this.now() - this.startedAt) / 1000)));
     jvm.natives.register(owner, 'simTime', [], () => jv('float', Math.fround(this.sampleSimulation())));
     jvm.natives.register(owner, 'syncGameTime', ['float'], ({ args }) => {

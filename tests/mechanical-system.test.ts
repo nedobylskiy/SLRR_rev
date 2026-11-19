@@ -111,11 +111,11 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
     world.dispose();
   }
   const { world, system } = build('DT_RWD');
-  for (let i = 0; i < 240; i++) system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]);
-  assert.equal(system.gear, 0, 'throttle cannot engage neutral automatically');
+  for (let i = 0; i < 240; i++) system.advance(1 / 240, { throttle: 1,clutch:true }, [0, 0, 0, 0]);
+  assert.equal(system.gear, 0, 'an explicit clutch keeps neutral available for free revs');
   assert.ok(system.rpm > 2000, `neutral revs: ${system.rpm}`);
-  system.advance(1 / 240, { throttle: 0, gearUp: true }, [0, 0, 0, 0]);
-  assert.equal(system.gear, 1); assert.equal(system.manual, false, 'selecting drive keeps an automatic transmission automatic');
+  system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]);
+  assert.equal(system.gear, 1); assert.equal(system.manual, false, 'automatic selects drive when pressing forward');
   for (let i = 0; i < 60; i++) system.advance(1 / 240, { throttle: 0 }, [0, 0, 0, 0]);
   for (let i = 0; i < 240; i++) system.advance(1 / 240, { throttle: 1, clutch: true }, [0, 0, 0, 0]);
   assert.ok(system.rpm > 2000, `free revs: ${system.rpm}`);
@@ -128,6 +128,10 @@ test('drivetrain keeps engine RPM independent of road speed, shifts and distribu
   assert.equal(system.gear, 0);
   assert.ok(system.advance(1 / 240, { throttle: 1 }, [0, 0, 0, 0]).torque.every(t => t === 0));
   system.reset(); assert.equal(system.gear, 0); assert.equal(system.boost, 0); assert.equal(system.manual, false);
+  system.advance(1/240,{throttle:-1},[0,0,0,0]);assert.equal(system.gear,-1,'backward axis selects reverse from neutral');
+  system.reset();system.advance(1/240,{throttle:1,neutral:true},[0,0,0,0]);assert.equal(system.gear,0,'held neutral takes priority');
+  system.reset();system.manual=true;system.advance(1/240,{throttle:1},[0,0,0,0]);assert.equal(system.gear,0,'manual remains manual');
+  system.reset();system.advance(1/240,{throttle:1,throttleMode:'pedal'},[0,0,0,0]);assert.equal(system.gear,1,'automatic also starts in drive with a throttle pedal');
   world.javaPowertrain = {curve:{rpmStep:1000,torque:[0,100,200,220,210,180,100,0],watts:[],nitroTorque:[],nitroWatts:[]},
     state:{revision:1,parameters:{engine_inertia:7,engine_mass:40,engine_rpm_idle:900,RPM_limit:6500,rearend_ratio:3,ClutchF:500},ratios:[0,3.5,2.1,1.4,0,0,0,-3],descendantPartIds:[]}};
   assert.equal(system.estimateFlywheelTorqueAt(2500),210,'driving samples the executed Java engine table');

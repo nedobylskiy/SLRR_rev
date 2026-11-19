@@ -7,6 +7,7 @@ import { MapMaterialPool } from './map-material-pool';
 import { splitMapGeometry } from './map-geometry-chunks';
 import {mergeStaticMapParts} from './map-static-batches';
 import {MapAutoLod} from './map-auto-lod';
+import {useWholeObjectBounds} from './map-object-bounds';
 
 export interface StreamPlacement { movable?:boolean; matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
@@ -237,7 +238,7 @@ export class MapObjectStream {
           mesh.userData={...part.userData};mesh.layers.mask=part.layers.mask;mesh.matrixAutoUpdate=false;mesh.count=0;mesh.visible=false;
           if(pending.placements.some(p=>p.paintColor!==undefined))mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));
           return mesh;
-        });this.selectMeshes(pending);
+        });if(pending.category==='trees')useWholeObjectBounds(pending.mergedMeshes);this.selectMeshes(pending);
       }
     }
     const next=this.prepareChunks.values().next().value;
@@ -409,6 +410,10 @@ export class MapObjectStream {
         &&material&&!material.transparent&&!material.alphaTest?this.lod.get(mesh.geometry):undefined;
       let lodMesh=type.lodMeshes.get(mesh);
       if(lodGeometry&&!lodMesh){
+        if(type.category==='trees'){
+          lodGeometry.boundingBox=mesh.geometry.boundingBox!.clone();
+          lodGeometry.boundingSphere=mesh.geometry.boundingSphere!.clone();
+        }
         lodMesh=new InstancedMesh(lodGeometry,mesh.material,type.placements.length);
         lodMesh.name=`${mesh.name} / generated LOD`;lodMesh.renderOrder=mesh.renderOrder;lodMesh.castShadow=mesh.castShadow;lodMesh.receiveShadow=mesh.receiveShadow;
         lodMesh.userData.staticMapCaster=mesh.userData.staticMapCaster;lodMesh.userData.mapOcclusionRole=mesh.userData.mapOcclusionRole;lodMesh.matrixAutoUpdate=false;lodMesh.visible=false;lodMesh.count=0;
@@ -504,6 +509,7 @@ export class MapObjectStream {
         const retained=new Set(parts.map(part=>part.geometry));
         for(const geometry of new Set(original.map(part=>part.geometry)))if(!retained.has(geometry))geometry.dispose();
       }
+      if(type.category==='trees')useWholeObjectBounds(parts);
       type.localBounds = new Sphere().makeEmpty();
       type.meshes = parts.map(part => {
         if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere();
@@ -543,6 +549,7 @@ export class MapObjectStream {
         if(base.instanceColor)mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));return mesh;
       });
     });
+    if(type.category==='trees'&&type.chunkMeshes)useWholeObjectBounds(type.chunkMeshes);
     const selected=this.geometryCutoff?type.chunkMeshes!:this.mergeStatic&&type.mergedMeshes?type.mergedMeshes:type.baseMeshes;
     const retained=new Set(selected);
     for(const mesh of type.meshes??[])if(!retained.has(mesh)){

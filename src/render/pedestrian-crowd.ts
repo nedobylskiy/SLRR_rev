@@ -78,7 +78,9 @@ export class PedestrianCrowd {
     ...cars.map(car=>({position:car.position,radius:car.bounds.getSize(new Vector3()).length()*.5+1,velocity:car.velocity})),
   ];}
 
-  update(now:number,cars:readonly RigidBody3D[],focus?:Vector3,offscreen?:(point:Vector3)=>boolean,timeScale=1){
+  update(now:number,cars:readonly RigidBody3D[],focus?:Vector3,offscreen?:(point:Vector3)=>boolean,timeScale=1,daytime=true){
+    this.root.visible=daytime;
+    if(!daytime){this.lastTime=undefined;return;}
     if(this.disposed)return;if(focus)this.focus.copy(focus);
     if(now>=this.pruneAt){
       const active=this.actors.filter(a=>a.active).sort((a,b)=>(b.character.ragdollPosition??b.walker.position).distanceToSquared(this.focus)-(a.character.ragdollPosition??a.walker.position).distanceToSquared(this.focus));

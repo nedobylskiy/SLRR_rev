@@ -7,6 +7,10 @@ export function applyRenderColor(root: Object3D, argb: number | null, cloneMater
     if (!(object instanceof Mesh)) return;
     const apply = (material: Material) => {
       const copy = (cloneMaterials ? material.clone() : material) as Material & { color?: Color };
+      if(cloneMaterials&&material.userData.sky){
+        copy.onBeforeCompile=material.onBeforeCompile;
+        copy.customProgramCacheKey=material.customProgramCacheKey;
+      }
       copy.color?.multiply(new Color(argb & 0xffffff));
       copy.opacity *= (argb >>> 24) / 255;
       copy.transparent ||= copy.opacity < 1;

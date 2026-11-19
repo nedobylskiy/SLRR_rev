@@ -1,8 +1,9 @@
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
+import {LodPlayground} from './lod-playground';
 import {AmbientAudio} from '../audio/ambient-audio';
 import {cacheUnchangedTransform} from './stable-transform';
 import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
-import {MapProps} from '../engine/map-props';
+import {MapProps,settleMapPropFrame} from '../engine/map-props';
 import {partGeometryBounds} from './part-geometry-bounds';
 import {trafficWheelIndex,trafficWheelFrame} from '../engine/traffic-running-gear';
 import {RivalPanelView} from './rival-panel-view';
@@ -108,6 +109,8 @@ import { FrameProfiler } from './frame-profiler';
 import { SceneLighting } from './scene-lighting';
 import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
+import { PathChaseCamera } from './path-chase-camera';
+import { skyMaterial } from './sky-material';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 import { FixedClock } from '../runtime/fixed-clock';
@@ -410,6 +413,7 @@ export class Viewer {
   private frame?: (now: number) => void;
   private afterFrame?:()=>void;
   private suspensionPlayground?:SuspensionPlayground;
+  private lodPlayground?:LodPlayground;
   private suspensionSkins=new Map<EnginePart,VehicleSuspensionSkin>();
   private suspensionBonesEnabled=true;
   setSuspensionBonesEnabled(enabled:boolean){this.suspensionBonesEnabled=enabled;for(const binding of this.suspensionSkins.values())binding.setEnabled(enabled);}
@@ -433,6 +437,8 @@ export class Viewer {
   private scriptCamera?: () => JavaSceneCamera | null;
   private scriptCameraId?: number;
   private scriptCameraPose?:{id:number;position:THREE.Vector3;target:THREE.Vector3};
+  private scriptPathChase=new PathChaseCamera();
+  private scriptPathChaseActive=false;
   private scriptTimeOfDay?: () => number;
   private scriptTimeScale?:()=>number;private ambientEffectsVolume?:()=>number;
   private mapAmbience?:MapAmbience;private ambientAudio?:AmbientAudio;
@@ -466,6 +472,7 @@ export class Viewer {
   roadDebugStatus = 'Road graph off';
   pedestrianDebugStatus='Pedestrian graph off';
   pedestrianCrowdStatus='Walking pedestrians off';
+  walkingPedestriansEnabled=true;
   private pedestrianCrowd?:PedestrianCrowd;
   private pedestrianCrowdRevision=0;
   private pedestrianCount=25;private pedestrianRadius=100;
@@ -708,14 +715,14 @@ export class Viewer {
         binding.driver.update();
       }});
       this.profiler.measure('Traffic CPU',()=>this.updateTrafficTest(now));
-      this.profiler.measure('Pedestrians CPU',()=>{
-      if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
-      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1);}
-      });
-      // Shops and garages share the same day/night quality policy as driving.
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
       const night = isNightTime(timeOfDay);
+      this.profiler.measure('Pedestrians CPU',()=>{
+      if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
+      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1,!night);}
+      });
+      // Shops and garages share the same day/night quality policy as driving.
       if (this.lighting.setNightShadows(this.renderer, this.sunLight, night)) {
         this.staticMapShadows.setNightQuality(night);
         this.scene.traverse(object => {
@@ -725,6 +732,7 @@ export class Viewer {
 
       const scriptCamera = this.scriptCamera?.();
       if (scriptCamera) {
+        const chaseSnap=this.scriptCameraId!==scriptCamera.id||!this.scriptPathChaseActive;
         const factor = this.scriptCameraId !== scriptCamera.id || !scriptCamera.smoothing ? 1
           : 1 - Math.exp(-Math.min(this.frameDuration, 100) / 1000 / scriptCamera.smoothing);
         this.scriptCameraId = scriptCamera.id;
@@ -732,8 +740,16 @@ export class Viewer {
         // The player's chase frame runs before this override. Smooth from the
         // last SCRIPT pose, never from that unrelated player-camera position.
         if(this.scriptCameraPose?.id!==scriptCamera.id)this.scriptCameraPose={id:scriptCamera.id,position:scriptCamera.position.clone(),target:scriptCamera.target.clone()};
-        this.scriptCameraPose.position.lerp(scriptCamera.position,factor);
-        this.scriptCameraPose.target.lerp(scriptCamera.target,factor);
+        if(scriptCamera.pathChase){
+          const offset=scriptCamera.position.clone().sub(scriptCamera.target);offset.y=0;
+          if(offset.lengthSq()<1e-8)offset.set(0,0,1);
+          offset.normalize().multiplyScalar(12);offset.y=2.4;
+          this.scriptPathChase.update(this.scriptCameraPose.position,this.scriptCameraPose.target,scriptCamera.target,offset,document.hidden?0:this.frameDuration/1000,chaseSnap);
+        }else{
+          this.scriptCameraPose.position.lerp(scriptCamera.position,factor);
+          this.scriptCameraPose.target.lerp(scriptCamera.target,factor);
+        }
+        this.scriptPathChaseActive=!!scriptCamera.pathChase;
         this.camera.position.copy(this.scriptCameraPose.position);
         this.controls.target.copy(this.scriptCameraPose.target);
         this.camera.lookAt(this.controls.target);
@@ -741,6 +757,7 @@ export class Viewer {
         this.updateFarPlane();
         this.camera.updateProjectionMatrix();
       } else {
+        this.scriptPathChaseActive=false;
         this.scriptCameraPose=undefined;
         if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
         if (this.controls.enabled) this.controls.update();
@@ -806,6 +823,7 @@ export class Viewer {
     });
   }
   clear() {
+    this.lodPlayground?.dispose();this.lodPlayground=undefined;
     this.suspensionPlayground?.dispose();this.suspensionPlayground=undefined;
     this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;
     for(const racer of this.javaRaces.values())racer.dispose();this.javaRaces.clear();
@@ -993,7 +1011,8 @@ export class Viewer {
           object.renderOrder = -1000;
           object.castShadow = false; object.receiveShadow = false;
           const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach(material => this.configureSkyMaterial(material));
+          const sky=materials.map(material=>this.configureSkyMaterial(material));
+          object.material=Array.isArray(object.material)?sky:sky[0];
         });
         if (generation !== this.generation) this.disposeGroup(template);
         if (warnings.length) console.warn(`Java RenderRef ${node.alias}: ${warnings.join('; ')}`);
@@ -1443,6 +1462,7 @@ export class Viewer {
     this.inspection.enabled=false;this.controls.target.copy(point).add(new THREE.Vector3(0,1,0));this.camera.position.copy(point).add(new THREE.Vector3(6,4,6));this.controls.update();
   }
   async showWalkingPedestrians(enabled:boolean){
+    this.walkingPedestriansEnabled=enabled;
     const revision=++this.pedestrianCrowdRevision,source=this.mapRoadSource,mapRevision=this.mapRoadRevision;
     this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
     this.pedestrianCrowdStatus=enabled?'Loading walking pedestrians…':'Walking pedestrians off';
@@ -1459,7 +1479,8 @@ export class Viewer {
         return (await texture).clone();
       },source.terrain?(point)=>source.terrain!.height(point.x,point.z,point.y+1):undefined,{count:this.pedestrianCount,radius:this.pedestrianRadius},this.pedestrianOffscreen);
       if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision){crowd.dispose();return;}
-      this.pedestrianCrowd=crowd;crowd.configure(this.pedestrianCount,this.pedestrianRadius);this.scene.add(crowd.root);
+      this.pedestrianCrowd=crowd;crowd.configure(this.pedestrianCount,this.pedestrianRadius);
+      crowd.root.visible=!isNightTime(this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??43200);this.scene.add(crowd.root);
       this.pedestrianCrowdStatus=`${crowd.count} walking pedestrians · experimental zone routing / curved transitions / car avoidance / contact ragdoll. Toggle again to respawn nearby.`;
     }catch(error){if(revision===this.pedestrianCrowdRevision)this.pedestrianCrowdStatus=String(error);}
   }
@@ -1497,6 +1518,12 @@ export class Viewer {
     const warnings = await this.append(model, assets, textures, this.model, generation);
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  async showLodPlayground(model:ScxModel,assets:Assets,textures:string[]){
+    this.clear();const generation=this.generation;
+    await this.append(model,assets,textures,this.model,generation);
+    if(generation!==this.generation)throw Error('LOD preview superseded');
+    this.fit();return this.lodPlayground=new LodPlayground(this.model);
   }
   setDriverCutaway(enabled:boolean){
     for(const [group,visible] of this.driverCutawayVisibility)group.visible=visible;this.driverCutawayVisibility.clear();
@@ -1914,16 +1941,19 @@ export class Viewer {
             const raw=cfg.unknown.find(command=>command.command==='bounds')?.args.slice(0,6).map(Number);
             if(raw?.length===6&&raw.every(Number.isFinite)){
               const declared=new THREE.Box3(new THREE.Vector3(raw[0],raw[1],raw[2]),new THREE.Vector3(raw[3],raw[4],raw[5]));
-              // Some legacy physical SCX origins disagree with their CFG body pose
-              // (e.g. tabla_c). Keep their collider within the declared object extent.
-              if(movableBounds.isEmpty()||!declared.clone().expandByScalar(.05).containsBox(movableBounds))movableBounds.copy(declared);
+              // `bounds` is a legacy broad-phase extent, not a replacement for
+              // the authored body pose. tabla_c's declared extent is 0.8 m below
+              // both its physical SCX and render. Use it only if no body loaded.
+              if(movableBounds.isEmpty())movableBounds.copy(declared);
             }
           }
           const movable=movableBodies.length>0&&!movableBounds.isEmpty();
+          const propFrames=new Map<number,THREE.Matrix4>();
+          if(movable)for(const instance of instances)propFrames.set(instance.id,settleMapPropFrame(poseMatrix(instance.pose),movableBounds,terrain));
           const movingParts=new Map<number,Array<{placement:StreamPlacement;original:THREE.Matrix4}>>();
           if(movable)for(const instance of instances){
             const parts:Array<{placement:StreamPlacement;original:THREE.Matrix4}>=[];movingParts.set(instance.id,parts);
-            this.mapProps!.add(poseMatrix(instance.pose),movableBounds,movableBodies.reduce((n,b)=>n+b.mass,0),delta=>{
+            this.mapProps!.add(propFrames.get(instance.id)!,movableBounds,movableBodies.reduce((n,b)=>n+b.mass,0),delta=>{
               for(const {placement,original}of parts){placement.matrix.multiplyMatrices(delta,original);placement.position.setFromMatrixPosition(placement.matrix);}
               stream.placementsMoved(parts.map(p=>p.placement));
             });
@@ -1955,7 +1985,7 @@ export class Viewer {
                 batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, placements: [] };
                 objectBatches.set(key, batch);
               }
-              const matrix = poseMatrix(instance.pose);
+              const matrix = propFrames.get(instance.id)?.clone()??poseMatrix(instance.pose);
               if (render.pose) matrix.multiply(poseMatrix(render.pose));
               const placement:StreamPlacement={matrix,position:new THREE.Vector3().setFromMatrixPosition(matrix),paintColor:color,movable};
               batch.placements.push(placement);movingParts.get(instance.id)?.push({placement,original:matrix.clone()});
@@ -2011,6 +2041,7 @@ export class Viewer {
       terrain.prepare(); this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position);
       if(this.mapRoadSource){this.mapRoadSource.terrain=terrain;this.mapRoadSource.collision=collision;}
       if(this.trafficTestEnabled)void this.restartTrafficTest();
+      if(this.walkingPedestriansEnabled)void this.showWalkingPedestrians(true);
     }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
@@ -2447,6 +2478,7 @@ export class Viewer {
     const followed = demo.position.clone();
     const followCamera = new FollowCamera();
     const inertialCamera = new InertialCamera();
+    const pathChaseCamera = new PathChaseCamera();
     let lastInertialCamera = this.inertialCameraEnabled;
     let cameraWasInternal = false;
     let previousCameraMode: number | undefined;
@@ -2502,7 +2534,7 @@ export class Viewer {
         }
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
-        if(mode!==previousCameraMode){followCamera.reset();inertialCamera.reset();previousCameraMode=mode;}
+        if(mode!==previousCameraMode){followCamera.reset();inertialCamera.reset();pathChaseCamera.reset();previousCameraMode=mode;}
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
         this.driverCameraChassis=internalPose?root:undefined;
         if (internalPose) {
@@ -2544,7 +2576,9 @@ export class Viewer {
           offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
           const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
           offset.y -= 1.1;
-          if (this.inertialCameraEnabled)
+          if(mode===3)
+            pathChaseCamera.update(this.camera.position,this.controls.target,target,offset,seconds,firstFrame||cameraWasInternal);
+          else if (this.inertialCameraEnabled)
             inertialCamera.update(this.camera.position, this.controls.target, target, offset, seconds, 5, firstFrame || cameraWasInternal);
           else followCamera.update(this.camera.position, this.controls.target, target, offset, seconds, mode === 1 ? 5 : 9, firstFrame);
           cameraWasInternal = false;
@@ -2751,27 +2785,13 @@ export class Viewer {
     });
     group.clear();
   }
-  private configureSkyMaterial(material: THREE.Material): void {
-    material.userData.sky = true;
+  private configureSkyMaterial(material: THREE.Material): THREE.MeshBasicMaterial {
     const fogColor = new THREE.Color(this.mapFog.color);
     const fogEnabled = { value: this.mapFogEnabled ? 1 : 0 };
     this.skyFogUniforms.add({ color: fogColor, enabled: fogEnabled });
-    const previousCompile = material.onBeforeCompile;
-    material.onBeforeCompile = (shader, renderer) => {
-      previousCompile.call(material, shader, renderer);
-      shader.uniforms.slrrSkyFogColor = { value: fogColor };
-      shader.uniforms.slrrSkyFogEnabled = fogEnabled;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying float vSlrrSkyElevation;')
-        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvec3 slrrSkyWorldPosition = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvSlrrSkyElevation = normalize( slrrSkyWorldPosition - cameraPosition ).y;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 slrrSkyFogColor;\nuniform float slrrSkyFogEnabled;\nvarying float vSlrrSkyElevation;')
-        .replace('#include <opaque_fragment>', 'float slrrHorizonFog = ( 1.0 - smoothstep( -0.015, 0.14, vSlrrSkyElevation ) ) * slrrSkyFogEnabled;\noutgoingLight = mix( outgoingLight, slrrSkyFogColor, slrrHorizonFog );\n#include <opaque_fragment>');
-    };
-    const previousKey = material.customProgramCacheKey.bind(material);
-    material.customProgramCacheKey = () => `${previousKey()}slrr-sky-horizon-fog-v1`;
-    material.depthWrite = false;
-    material.needsUpdate = true;
+    const sky=skyMaterial(material,fogColor,fogEnabled);
+    material.dispose();
+    return sky;
   }
   private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide): Promise<string[]> {
     const boundTextures = partPaintTextures(textures, paint);
@@ -2855,6 +2875,7 @@ export class Viewer {
             secondLayer = layer;
             this.lighting.configureMaterial(layerMaterial, !!part.colors);
             if(mapSurface)this.mapDistanceCutoff.configure(layerMaterial);
+            if(mapSurface)this.mapBackfaces.configure(layerMaterial,layerGeometry);
             layer.receiveShadow = true;
             layer.name = `${part.name} / layer2`;
             layer.renderOrder = 1;

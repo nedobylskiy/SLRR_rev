@@ -178,6 +178,8 @@ export class MechanicalSystem {
     const mean = shares.reduce((sum, share, i) => sum + wheelOmega[i] * share, 0);
     const roadMean = shares.reduce((sum, share, i) => sum + roadOmega[i] * share, 0);
     if (this.running && !this.manual && this.shiftTimer === 0&&!input.transmissionLocked) {
+      if(this.gear===0&&gas>.01&&!neutral&&!input.clutch)
+        this.gear=throttle<0&&input.throttleMode!=='pedal'?-1:1;
       if (input.throttleMode !== 'pedal' && this.gear > 0 && throttle < 0 && mean < 1.5) this.gear = -1;
       else if (input.throttleMode !== 'pedal' && this.gear < 0 && throttle > 0 && mean > -1.5) this.gear = 1;
       if (this.gear > 0 && !input.clutch && mean > 2) {

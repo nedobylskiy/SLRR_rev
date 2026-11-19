@@ -5,6 +5,21 @@ import type {MapTerrain} from './map-terrain';
 
 interface Prop {body?:RigidBody3D;quiet:number;bodyInitialized:boolean;remove:()=>void;refresh:()=>void}
 
+/** Settle initially sleeping props without allocating or stepping a rigid body. */
+export function settleMapPropFrame(frame:Matrix4,bounds:Box3,terrain:MapTerrain):Matrix4{
+  const result=frame.clone();let correction=-Infinity;
+  const center=bounds.getCenter(new Vector3());
+  for(const [x,z] of [[center.x,center.z],[bounds.min.x,bounds.min.z],[bounds.min.x,bounds.max.z],[bounds.max.x,bounds.min.z],[bounds.max.x,bounds.max.z]]){
+    const foot=new Vector3(x,bounds.min.y,z).applyMatrix4(frame);
+    const support=terrain.sample(foot.x,foot.z,foot.y+.05);
+    if(support)correction=Math.max(correction,support.height-foot.y);
+  }
+  // Only settle nearby ground beneath the authored placement. Preserve props
+  // over missing terrain/deep drops and don't lift intersecting objects.
+  if(correction<-.01&&correction>=-2)result.elements[13]+=correction;
+  return result;
+}
+
 /** A prop starts as a cheap spatial trigger. Only touched props allocate a solver body. */
 export class MapProps {
   private readonly active=new Set<Prop>();

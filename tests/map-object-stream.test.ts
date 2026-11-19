@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream, isMapTreeAlias } from '../src/render/map-object-stream';
+import {MapGpuOcclusion} from '../src/render/map-gpu-occlusion';
+import type {WebGLRenderer} from 'three';
 
 test('initial scene waits for nearby models and placements without loading distant props',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,100,4);
@@ -394,6 +396,27 @@ test('per-part frustum drops only the off-screen component and retains its shado
   stream.dispose();
 });
 
+test('tree trunk and crown share complete bounds in both frustum and Hi-Z tests',async()=>{
+  const root=new Group(),stream=new MapObjectStream(root,200),camera=new PerspectiveCamera(25,1,.1,200);
+  const trunk=new Mesh(new BoxGeometry(.5,3,.5).translate(0,1.5,0),new MeshStandardMaterial());trunk.name='trunk';
+  const crown=new Mesh(new BoxGeometry(6,6,6).translate(0,7,0),new MeshStandardMaterial({alphaTest:.5}));crown.name='crown';
+  for(const part of [trunk,crown])part.userData.mapOcclusionRole='prop';
+  camera.position.set(0,8,0);camera.lookAt(0,8,-10);camera.updateMatrixWorld();
+  stream.add([{position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)}],async()=>[trunk,crown],'trees',true);
+  await stream.preparePinnedModels();stream.update(camera.position,camera);root.updateMatrixWorld(true);
+  const meshes=root.children.filter((m):m is InstancedMesh=>m instanceof InstancedMesh&&!m.userData.streamAuxiliary);
+  assert.equal(meshes.length,2);assert.ok(meshes.every(m=>m.count===1),'the trunk stays even when only the crown intersects the view');
+  assert.deepEqual(trunk.geometry.boundingBox,crown.geometry.boundingBox);
+  const cull=new MapGpuOcclusion({shadowMap:{render(){}}} as unknown as WebGLRenderer),api=cull as any;
+  api.collect(root);
+  const states=meshes.map(mesh=>api.states.get(mesh));
+  assert.deepEqual(states[0].bounds[0],states[1].bounds[0],'GPU tests the full tree for both materials');
+  const items=api.prepareCandidates();assert.equal(items.length,2);
+  api.apply({items,bytes:new Uint8Array(items.length*4)});
+  assert.ok(states.every(state=>state.hidden===1),'full occlusion hides both trunk and crown');
+  cull.dispose();stream.dispose();
+});
+
 test('all nearby object types load after the concurrent-load slots are freed', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100);
   const loads = Array(6).fill(0);
@@ -419,7 +442,7 @@ test('all nearby object types load after the concurrent-load slots are freed', a
   parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
 });
 
-test('tree toggle hides trunks, foliage and auxiliary casters, then restores resident instances',async()=>{
+test('tree toggle hides trunks and foliage together, then restores resident instances',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,200),camera=new PerspectiveCamera(60,1,.1,500);
   camera.updateMatrixWorld();stream.setShadowRange(150);
   const placement={position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)};
@@ -429,7 +452,7 @@ test('tree toggle hides trunks, foliage and auxiliary casters, then restores res
   stream.add([placement],async()=>{const mesh=new Mesh(new BoxGeometry(),new MeshBasicMaterial());mesh.name='building';return [mesh];});
   stream.update(new Vector3(),camera);await Promise.resolve();stream.update(new Vector3(),camera);
   const count=(name:string)=>(parent.children.find(m=>m.name===name) as InstancedMesh).count;
-  assert.equal(count('trunk'),1);assert.equal(count('leaves / auxiliary casters'),1);
+  assert.equal(count('trunk'),1);assert.equal(count('leaves'),1,'tree parts share the same visibility selection');
   stream.setTreesHidden(true);stream.setInspectResident(true);stream.update(new Vector3(),camera);
   for(const mesh of parent.children as InstancedMesh[])if(mesh.name!=='building'){assert.equal(mesh.count,0);assert.equal(mesh.visible,false);}
   assert.equal(count('building'),1);assert.equal(stream.active,2,'toggle preserves residency');

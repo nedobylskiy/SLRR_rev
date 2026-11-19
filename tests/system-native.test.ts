@@ -4,6 +4,16 @@ import { SlrrJvm, jv } from 'slrr-jvm';
 import { SystemNative } from '../src/runtime/system-native';
 import type { BootEvent } from '../src/runtime/game-boot';
 
+test('System.exit(String) displays the message and returns without terminating Java',async()=>{
+  const jvm=new SlrrJvm({resolveImport:({className})=>className==='java.lang.System'?{path:'System.java',source:'package java.lang; class System { static native void exit(String message); static native int buildNumber(); }'}:null});
+  const messages:string[]=[];
+  new SystemNative(jvm,()=>{},()=>0,()=>0,message=>messages.push(message));
+  await jvm.loadClass('java.lang.System');const receiver=jv('class','java.lang.System');
+  assert.equal(jvm.invoke(receiver,'exit',[jv('String','Police debug\nmessage')]).type,'void');
+  assert.deepEqual(messages,['Police debug\nmessage']);
+  assert.equal(jvm.invoke(receiver,'buildNumber').value,940);
+});
+
 test('System clocks use seconds and simulation time follows time warp', async () => {
   const source = `package java.lang; class System {
     static native float currentTime(); static native float simTime();

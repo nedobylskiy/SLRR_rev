@@ -6,6 +6,7 @@ import { GameObject } from './game-object';
 export interface JavaSceneCamera {
   id: number; position: Vector3; target: Vector3;
   fov: number; near: number; far: number; smoothing: number;
+  pathChase?:boolean;
 }
 const controlledPoses = new WeakMap<GameObject, { revision: number; commands: string; offset: Vector3 }>();
 const rotations = new WeakMap<GameObject, { command: string; started: number; azimuth: number }>();
@@ -93,6 +94,7 @@ export function javaSceneCamera(result: BootResult, includeDriving = false, now 
   }
   const lookTarget = driving && mode === 6 ? undefined
     : driving && mode === 1 ? selectedPosition?.clone().add(new Vector3(0,1.1,0)) : targetOf('look');
+  if(driving&&mode===3&&!lookTarget)return null;
   const target = lookTarget ?? position.clone().add(new Vector3(0, 0, -1).applyEuler(
     new Euler(camera.orientation.p, camera.orientation.y, camera.orientation.r, 'YXZ')));
   const poseCommands = [selectedNode?.resourceId, ...['move', 'look', 'dist', 'height', 'angle'].map(name => gameTypes.lastCommand(ref, name))].join('|');
@@ -141,5 +143,5 @@ export function javaSceneCamera(result: BootResult, includeDriving = false, now 
   }
   const fov = number('zoom', 60), near = Math.max(0.001, number('nearplane', 0.05)), far = number('farplane', 1000);
   return { id: camera.resourceId, position, target, fov: Math.max(1, Math.min(179, fov)),
-    near, far: Math.max(near + 1, far), smoothing: Math.max(0, number('smooth', 0)) };
+    near, far: Math.max(near + 1, far), smoothing: Math.max(0, number('smooth', 0)),pathChase:driving&&mode===3&&!rotating };
 }

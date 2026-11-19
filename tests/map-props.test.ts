@@ -1,10 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Box3,Matrix4,Vector3} from 'three';
-import {MapProps} from '../src/engine/map-props';
+import {MapProps,settleMapPropFrame} from '../src/engine/map-props';
 import {MapCollision} from '../src/engine/map-collision';
 import {MapTerrain} from '../src/engine/map-terrain';
 import {RigidBody3D} from '../src/engine/rigid-body-3d';
+
+test('floating sleeping props settle once with a shared physical/render frame',()=>{
+  const terrain={sample:()=>({height:10,normal:new Vector3(0,1,0)})} as unknown as MapTerrain;
+  const bounds=new Box3(new Vector3(-.7,.828827,-.7),new Vector3(.7,4.710883,.7));
+  const authored=new Matrix4().makeTranslation(4,10,8),settled=settleMapPropFrame(authored,bounds,terrain);
+  assert.ok(Math.abs(new Vector3(0,bounds.min.y,0).applyMatrix4(settled).y-10)<1e-8);
+  assert.equal(authored.elements[13],10,'authored placement stays untouched');
+  const collision=new MapCollision(),props=new MapProps(collision,terrain);
+  const prop=props.add(settled,bounds,400,()=>{});props.update(1);
+  assert.equal(prop.body,undefined,'settling requires no active physics');assert.equal(props.awake,0);props.dispose();
+  const missing={sample:()=>undefined} as unknown as MapTerrain;
+  assert.ok(settleMapPropFrame(authored,bounds,missing).equals(authored));
+});
+
+test('initial settling respects the highest footprint support at a curb',()=>{
+  const terrain={sample:(x:number)=>({height:x>0?.2:0,normal:new Vector3(0,1,0)})} as unknown as MapTerrain;
+  const bounds=new Box3(new Vector3(-.5,.8,-.5),new Vector3(.5,4,.5));
+  const settled=settleMapPropFrame(new Matrix4(),bounds,terrain);
+  assert.ok(Math.abs(settled.elements[13]+.6)<1e-8);
+});
 
 test('untouched props have no solver body; a car transfers momentum instead of hitting a static wall',()=>{
   const collision=new MapCollision(),props=new MapProps(collision,new MapTerrain(collision));

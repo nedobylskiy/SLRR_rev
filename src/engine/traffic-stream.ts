@@ -1,4 +1,4 @@
-import {Matrix4,Vector3} from 'three';
+import {Vector3} from 'three';
 import {sampleRoadSegment,type RoadNetwork} from '../formats/trc';
 import {trafficConnections,trafficRoadSpeedGroups,RoadTrafficCar} from './road-traffic';
 import {TrafficVehicle} from './traffic-vehicle';
@@ -114,11 +114,12 @@ export class TrafficVehicleLod implements BotVehicle {
     if(this.physical||this.mode!=='cruise'){this.physical=true;this.vehicle.step(dt,input);return;}
     const oldSpeed=this.body.velocity.length(),brake=input.brakeAxis??(input.brake?1:0);
     const speed=Math.max(0,oldSpeed+(Math.max(0,input.throttle)*3-brake*8-oldSpeed*.05)*dt);
-    this.route.targetAhead(speed*dt,this.point,this.direction);
-    const ground=this.vehicle.terrain.height(this.point.x,this.point.z,this.point.y+.5);
-    if(ground>-999)this.point.y=ground+this.height-.1;
-    const yaw=Math.atan2(-this.direction.x,-this.direction.z);
-    this.body.setFrame(new Matrix4().makeRotationY(yaw).setPosition(this.point));
+    // Blend positions/tangents across the real connected route. This rounds
+    // graph joints locally without delaying progress or changing the chosen exit.
+    this.route.steeringTargetAhead(speed*dt,Math.min(1.5,this.wheelbase*.5),this.point,this.direction);
+    // Use the same complete spline tangent at spawn and during puppet motion.
+    // Dropping its Y component made distant traffic stay horizontal on ramps.
+    this.vehicle.place(this.point,this.direction,this.height,1-Math.exp(-dt*8));
     this.body.velocity.copy(this.direction).multiplyScalar(speed);
     for(let i=0;i<this.vehicle.wheels.length;i++){const wheel=this.vehicle.wheels[i];wheel.spin+=speed*dt/wheel.radius;wheel.steer=i<2?input.steer*.6:0;wheel.center.copy(wheel.mount).add(new Vector3(0,-.25,0));}
     this.vehicle.travelled+=speed*dt;

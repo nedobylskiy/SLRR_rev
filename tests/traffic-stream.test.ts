@@ -152,6 +152,49 @@ test('puppets follow lanes and animate wheels without invoking the physical solv
  assert.equal(physics,0);assert.equal(lod.physical,false);assert.ok(vehicle.body.position.x>105);assert.ok(Math.abs(vehicle.body.position.z)<.01);assert.ok(vehicle.wheels.some(w=>w.spin>0));
 });
 
+test('distant traffic follows uphill and downhill spline pitch and retains it at the physics handoff',()=>{
+ for(const slope of [-.2,.2])for(const heading of [new Vector3(1,0,0),new Vector3(0,0,-1),new Vector3(-1,0,1).normalize()]){
+  const {vehicle,lod}=car(),direction=heading.clone().setY(slope).normalize();
+  const route={targetAhead:(_distance:number,position:Vector3,tangent:Vector3)=>{position.set(100,20,0);tangent.copy(direction);}} as unknown as RoadTrafficCar;
+  route.steeringTargetAhead=(_distance,_window,position,tangent)=>route.targetAhead(_distance,position,tangent);
+  lod.route=route;
+  vehicle.place(new Vector3(100,20,0),direction,1.107);
+  const forward=()=>new Vector3(0,0,-1).applyQuaternion(vehicle.body.orientation);
+  assert.ok(forward().distanceTo(direction)<1e-9,'spawn includes the slope');
+  vehicle.step=()=>{throw Error('a puppet must not run suspension physics');};
+  lod.step(1/60,{throttle:1,steer:0,brake:false});
+  assert.ok(forward().distanceTo(direction)<1e-9,'puppet movement retains spline pitch for every heading');
+  const orientation=vehicle.body.orientation.clone(),position=vehicle.body.position.clone();
+  lod.updateRange(position,30);
+  assert.equal(lod.physical,true);assert.ok(vehicle.body.orientation.equals(orientation),'physics adopts the current tilted pose');
+  assert.ok(vehicle.body.position.equals(position));
+ }
+});
+
+test('puppet traffic rounds a sharp route joint and rotates continuously, without running physics',()=>{
+ const {vehicle,lod}=car();let progress=-3;
+ const route={targetAhead:(distance:number,point:Vector3,direction:Vector3)=>{
+   const t=progress+distance;
+   if(t<0){point.set(100+t,0,0);direction.set(1,0,0);}
+   else {point.set(100,0,-t);direction.set(0,0,-1);}
+ }} as unknown as RoadTrafficCar;
+ route.steeringTargetAhead=RoadTrafficCar.prototype.steeringTargetAhead;
+ lod.route=route;vehicle.place(new Vector3(97,0,0),new Vector3(1,0,0),1.107);vehicle.body.velocity.set(3,0,0);
+ vehicle.step=()=>{throw Error('distant traffic must not invoke physics');};
+ let previous=vehicle.body.orientation.clone(),largestTurn=0,rounded=false;
+ for(let i=0;i<180;i++){
+   progress+=.05;lod.step(1/60,{throttle:0,steer:0,brake:false});
+   largestTurn=Math.max(largestTurn,previous.angleTo(vehicle.body.orientation));previous.copy(vehicle.body.orientation);
+   const origin=new Vector3().setFromMatrixPosition(vehicle.body.matrix());
+   if(origin.x<99.99&&origin.z<-.01)rounded=true;
+ }
+ assert.ok(rounded,'the car follows a short rounded corner instead of an angular vertex');
+ assert.ok(largestTurn<.15,'a right-angle spline joint cannot snap the body through 90 degrees');
+ assert.ok(new Vector3(0,0,-1).applyQuaternion(vehicle.body.orientation).distanceTo(new Vector3(0,0,-1))<.01);
+ const pose=vehicle.body.orientation.clone();lod.updateRange(vehicle.body.position,30);
+ assert.ok(vehicle.body.orientation.equals(pose),'the physical handoff retains the smoothed pose');
+});
+
 test('LOD handoffs retain pose, speed and dents, use hysteresis, and wake physics for impact',()=>{
  const {vehicle,lod,bot}=car();vehicle.body.velocity.set(5,0,0);
  vehicle.crush.hit(new Vector3(0,0,1),new Vector3(9000,0,0),10,1400);const dents=vehicle.crush.offsets.slice();

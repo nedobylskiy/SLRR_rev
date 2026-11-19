@@ -499,7 +499,40 @@ async function openMinimapPreview(map='city'){
   }catch(error){preview?.dispose();stage?.remove();if(nav)void result.jvm.invokeAsync(nav,'hide').catch(()=>{});status('Minimap preview error',true);el('details').textContent=String(error);}
 }
 
-const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';driverIkButton.after(suspensionButton);
+const lodButton=textElement('button','LOD playground');lodButton.className='hood-button';driverIkButton.after(lodButton);
+lodButton.onclick=()=>{
+  if(!assets||!viewer)return;
+  stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
+  const opening=++sequence;viewer.clear();
+  el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;
+  vinControls.replaceChildren();vinControls.hidden=false;
+  const row=textElement('div','','character-playground-row'),search=document.createElement('input'),models=document.createElement('select');
+  search.type='search';search.placeholder='Filter SCX models…';search.setAttribute('aria-label','Filter LOD models');models.setAttribute('aria-label','LOD model');models.style.maxWidth='480px';
+  const label=textElement('label','Detail '),slider=document.createElement('input'),value=document.createElement('output'),info=document.createElement('output');
+  slider.type='range';slider.min='1';slider.max='100';slider.step='1';slider.value='100';slider.setAttribute('aria-label','LOD remaining detail');label.append(slider,value);
+  const wireLabel=textElement('label','Wireframe'),wire=document.createElement('input');wire.type='checkbox';wireLabel.prepend(wire);
+  const reset=textElement('button','Original');row.append(search,models,label,wireLabel,reset);vinControls.append(row,info);
+  let lab:Awaited<ReturnType<NonNullable<typeof viewer>['showLodPlayground']>>|undefined,loadRevision=0;
+  const update=()=>{value.textContent=`${slider.value}%`;lab?.setRatio(Number(slider.value)/100,message=>{if(sequence===opening)info.textContent=message;});};
+  const load=async()=>{
+    const path=models.value;if(!path)return;const revision=++loadRevision;lab=undefined;slider.disabled=true;status('Loading LOD model…');
+    try{
+      const [model,textures]=await Promise.all([assets.read(path).then(parseScxAsync),companionTextures(path)]);
+      if(sequence!==opening||revision!==loadRevision)return;
+      const next=await viewer!.showLodPlayground(model,assets,textures);
+      if(sequence!==opening||revision!==loadRevision)return;
+      lab=next;lab.wireframe(wire.checked);slider.disabled=false;update();
+      el('filename').textContent=path;status('LOD playground ready');
+    }catch(error){if(sequence===opening&&revision===loadRevision){info.textContent=String(error);status('LOD model error',true);}}
+  };
+  const files=assets.files.filter(file=>/\.scx$/i.test(file.path)).sort((a,b)=>a.path.localeCompare(b.path));
+  const filter=()=>{const previous=models.value,query=search.value.toLowerCase();models.replaceChildren();for(const file of files.filter(file=>file.path.toLowerCase().includes(query))){const option=document.createElement('option');option.value=option.textContent=file.path;models.append(option);}if([...models.options].some(option=>option.value===previous))models.value=previous;};
+  filter();const initial=files.find(file=>/baiern.*(hood|chassis).*\.scx$/i.test(file.path));if(initial)models.value=initial.path;
+  search.oninput=filter;models.onchange=()=>{void load();};slider.oninput=update;wire.onchange=()=>lab?.wireframe(wire.checked);reset.onclick=()=>{slider.value='100';update();};
+  el('format').textContent='LOD / MODEL SIMPLIFICATION';el('details').textContent='Experimental edge-collapse simplification in a worker. Detail controls the remaining vertex budget per material section; actual triangle reduction is shown above. UVs, normals and vertex colors are retained where supported. Extra attribute channels and grouped geometry keep their original shape. This preview does not change world LOD settings.';
+  el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Detail 100% restores the original';void load();
+};
+const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';lodButton.after(suspensionButton);
 suspensionButton.onclick=()=>{void (async()=>{
   if(!assets||!viewer)return;const request=++sequence;stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
   el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;status('Loading suspension bones…');
@@ -812,7 +845,7 @@ for(const [layer,title] of [['graph','Pedestrian graph'],['rest','Pedestrian res
 }
 mapDebugOptions.append(pedestrianDebugStatus);
 const pedestrianCrowdLabel=textElement('label','Walking pedestrians'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
-pedestrianCrowdCheck.type='checkbox';pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
+pedestrianCrowdCheck.type='checkbox';pedestrianCrowdCheck.checked=true;pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
 for(const [title,min,max,step,initial,set] of [
   ['Pedestrians',0,50,1,25,(n:number)=>viewer?.setPedestrianCount(n)],
   ['Pedestrian spawn radius (m)',50,300,25,100,(n:number)=>viewer?.setPedestrianRadius(n)],
@@ -1001,6 +1034,7 @@ fogCheck.onchange = () => viewer?.setMapFogEnabled(fogCheck.checked);
 const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { walls: number; boxes: number } }) => {
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;
+  pedestrianCrowdCheck.checked=viewer?.walkingPedestriansEnabled??true;
   roadDebugStatus.textContent='';
   pedestrianDebugStatus.textContent='';pedestrianCrowdStatus.textContent='';
   vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
