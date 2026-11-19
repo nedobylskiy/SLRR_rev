@@ -35,6 +35,9 @@ const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> =
 /** Physical input samples and hotkey registrations; Java handlers receive the events. */
 export class InputNative {
   private pickedPosition=[0,0,0];
+  private picked?:{id:number;local:number[];world:number[];normal?:number[]};
+  setPickedTarget(hit?:{id:number;local:number[];world:number[];normal?:number[]}){this.picked=hit;if(hit)this.pickedPosition=[...hit.world];}
+  pickedTarget(){return this.picked;}
   private cursorPosition=[0,0,0];
   private readonly axes = new Map<string, number>();
   private readonly pressedKeys: number[] = [];
@@ -117,7 +120,9 @@ export class InputNative {
   }
 
   /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
-  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[] },targetNotifications=false): void {
+  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[]; normal?:number[] },targetNotifications=false): void {
+    if(hit&&code!==16)this.setPickedTarget(hit);
+    if(code===16&&hit?.id===this.picked?.id)this.setPickedTarget();
     if(hit?.world.length===3&&hit.world.every(Number.isFinite))this.pickedPosition=[...hit.world];
     const cursor = this.mouseCursor();
     if (!cursor?.value) return;

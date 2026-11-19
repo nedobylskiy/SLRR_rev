@@ -43,6 +43,7 @@ export class JavaMouse {
     viewport.addEventListener('wheel', this.wheel, { passive: false });
     viewport.addEventListener('contextmenu', this.context);
     window.addEventListener('blur', this.cancel);
+    window.addEventListener('pointerup',this.up);
     this.timer = setInterval(() => this.update(), 50);
     this.update();
   }
@@ -54,6 +55,12 @@ export class JavaMouse {
   private trackPosition(event:MouseEvent){
     const rect=this.viewport.getBoundingClientRect?.();if(!rect?.width||!rect.height)return;
     this.result.input.setCursorPosition?.((event.clientX-rect.left)/rect.width*2-1,(event.clientY-rect.top)/rect.height*2-1);
+  }
+  private pickWhilePressed(event:MouseEvent){
+    // Pointer capture retargets events to the viewport instead of the canvas.
+    // Ray picking still uses client coordinates; OSD controls block world paint.
+    if(this.result.osdButtons?.physicsAt(event.clientX,event.clientY))return;
+    return this.pick?.(event.clientX,event.clientY);
   }
   private down = (event: PointerEvent) => {
     this.trackPosition(event);
@@ -86,7 +93,10 @@ export class JavaMouse {
         this.viewport.setPointerCapture(event.pointerId);
         if (pressed.hit) this.result.input.cursorEvent(9, pressed.hit);
       }
-      if (pressed.dragged) { event.preventDefault(); return; }
+      if (pressed.dragged) {
+        this.result.input.setPickedTarget?.(this.pickWhilePressed(event));
+        event.preventDefault(); return;
+      }
     }
     if (event.pointerId !== this.pointer) {
       const hit = this.controlled() && event.target instanceof HTMLCanvasElement ? this.pick?.(event.clientX, event.clientY) : undefined;
@@ -94,6 +104,7 @@ export class JavaMouse {
         if (this.hovered) this.result.input.cursorEvent(16, this.hovered);
         if (hit) this.result.input.cursorEvent(15, hit);
       }
+      this.result.input.setPickedTarget?.(hit);
       this.hovered = hit;
       return;
     }
@@ -114,6 +125,7 @@ export class JavaMouse {
         event.preventDefault();
         const target = this.result.osdButtons?.physicsAt(event.clientX, event.clientY);
         if (pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
+        if (pressed.hit) this.result.input.cursorEvent(2,this.pickWhilePressed(event)??pressed.hit);
         if (target) {
           const node = pressed.hit && this.result.gameTypes.getByResourceId(pressed.hit.id);
           const source = pressed.physics ? { physics: pressed.physics }
@@ -147,6 +159,8 @@ export class JavaMouse {
       if (pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
       if (this.viewport.hasPointerCapture(pressed.pointer)) this.viewport.releasePointerCapture(pressed.pointer);
     }
+    if(pressed?.hit)this.result.input.cursorEvent(2,pressed.hit);
+    this.result.input.setPickedTarget?.();
     if (this.pointer === undefined) return;
     const id = this.pointer; this.pointer = undefined;
     this.rightOrigin = undefined;
@@ -232,6 +246,7 @@ export class JavaMouse {
     this.viewport.removeEventListener('wheel', this.wheel);
     this.viewport.removeEventListener('contextmenu', this.context);
     window.removeEventListener('blur', this.cancel);
+    window.removeEventListener('pointerup',this.up);
     delete this.viewport.dataset.gameCursor; this.viewport.style.removeProperty('cursor');
     this.styles.clear();
   }

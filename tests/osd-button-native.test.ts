@@ -143,8 +143,18 @@ test('an OSD PhysicsRef creates an HTML hit target and clicks its Java Button', 
   (osd.value as { fields: Map<string, JavaValue> }).fields.set('cam', object('java.render.Camera'));
   bridge.sync();
   (gadget.value as { fields: Map<string, JavaValue> }).fields.set('disabled', jv('int', 1));
+  await bridge.hover(physics);
+  assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'hover').value, 2,
+    'disabled buttons still invoke Java focus, which draws their forbidden overlay');
   await bridge.activate(physics);
   assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'count').value, 1);
+  await bridge.leave(physics);
+  assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'leave').value, 2,
+    'leaving the disabled button clears its overlay');
+  (gadget.value as { fields: Map<string, JavaValue> }).fields.set('nofocus', jv('int', 1));
+  await bridge.hover(physics);
+  assert.equal(jvm.get(jv('class', 'java.render.Clicks'), 'hover').value, 2,
+    'explicitly unfocusable controls still ignore hover');
   bridge.dispose();
   assert.equal(removed, true);
 });

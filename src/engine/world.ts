@@ -1,3 +1,4 @@
+import type {PaintStroke} from './paint-stroke';
 import { applyAssemblyDamage, type VehicleDamageState, type PartDamageState } from './vehicle-damage';
 import {parseScxAsync} from '../formats/scx-worker-client';
 import { Matrix4, Quaternion, Vector3 } from 'three';
@@ -28,6 +29,8 @@ export interface JavaStockSelection {
   nativeId?: number;
   rootRender?: ResourceKey;
   rootTexture?: ResourceKey;
+  rootPaintColor?:number;
+  rootPaintStrokes?:readonly PaintStroke[];
   powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
@@ -44,6 +47,8 @@ export interface JavaInstalledPart {
   positions: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
   render?: ResourceKey;
   texture?: ResourceKey;
+  paintColor?:number;
+  paintStrokes?:readonly PaintStroke[];
   wear: number;
   children: JavaInstalledPart[];
 }
@@ -67,6 +72,8 @@ export class EnginePart {
   savedVehicleDamage?: VehicleDamageState;
   renderVisible = true;
   paintTexture?: ResourceKey;
+  paintColor?:number;
+  paintStrokes?:readonly PaintStroke[];
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
   /** Steering in parent axes, separate from suspension travel for linked arms. */
@@ -188,11 +195,12 @@ export class PartFactory {
     };
     positions(root, selection.rootPositions);
     root.paintTexture = selection.rootTexture;
+    root.paintColor=selection.rootPaintColor;root.paintStrokes=selection.rootPaintStrokes;
     for (const { node } of desired) positions(existing.get(node.nativeId!)!, node.positions);
     for (const { node, parentId } of desired) {
       const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
       part.condition = Math.max(0, Math.min(1, node.wear));
-      part.paintTexture = node.texture;
+      part.paintTexture = node.texture;part.paintColor=node.paintColor;part.paintStrokes=node.paintStrokes;
       if (part.parent) world.refreshAttachment(part);
       else world.install(parent, node.parentSlot, part, node.ownSlot);
     }
@@ -335,6 +343,7 @@ export class PartFactory {
         root.nativeId = options.javaSelection.nativeId;
         root.condition=Math.max(0,Math.min(1,options.javaSelection.rootWear??1));
         root.paintTexture = options.javaSelection.rootTexture;
+        root.paintColor=options.javaSelection.rootPaintColor;root.paintStrokes=options.javaSelection.rootPaintStrokes;
         world.wheelRefs = [...options.javaSelection.wheelRefs];
         world.javaPowertrain = options.javaSelection.powertrain;
         for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
@@ -347,7 +356,7 @@ export class PartFactory {
           if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
           const part = world.create(definition);
           part.nativeId = node.nativeId;
-          part.paintTexture = node.texture;
+          part.paintTexture = node.texture;part.paintColor=node.paintColor;part.paintStrokes=node.paintStrokes;
           part.condition = Math.max(0, Math.min(1, node.wear));
           for (const [slot, pose] of node.positions) {
             if (pose.position) part.slotPositions.set(slot, pose.position);

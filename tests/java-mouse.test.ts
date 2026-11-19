@@ -4,6 +4,32 @@ import { JavaMouse } from '../src/render/java-mouse';
 import type { BootResult } from '../src/runtime/game-boot';
 import type { Assets } from '../src/assets';
 
+test('captured painting retains its pick and always emits left release on window up or cancellation',()=>{
+  class Surface extends EventTarget {
+    dataset:Record<string,string>={};style={cursor:'',removeProperty(){}};
+    setPointerCapture(_:number){}hasPointerCapture(_:number){return false;}releasePointerCapture(_:number){}
+  }
+  class Canvas extends Surface {}
+  const originals=['HTMLCanvasElement','window'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+  const win=new EventTarget();Object.defineProperty(globalThis,'HTMLCanvasElement',{value:Canvas,configurable:true});Object.defineProperty(globalThis,'window',{value:win,configurable:true});
+  const surface=new Surface(),canvas=new Canvas(),events:number[]=[];
+  const hit={id:42,local:[1,2,3],world:[4,5,6],normal:[0,0,1]};let picked:unknown;
+  const result={input:{mouseCursor:()=>({value:{}}),cursorEvent:(code:number)=>events.push(code),setPhysicalAxis(){},physicalAxis:()=>0,setPickedTarget:(value:unknown)=>{picked=value;}},
+    jvm:{get:(_:unknown,key:string)=>({value:key==='visible'?0:{}})},gameTypes:{lastCommand:()=>undefined}} as unknown as BootResult;
+  const mouse=new JavaMouse(surface as unknown as HTMLElement,result,{} as Assets,()=>{},()=>hit);
+  const send=(type:string,x:number,target:EventTarget=surface,on:EventTarget=surface)=>{
+    const event=new Event(type,{cancelable:true});Object.assign(event,{button:0,pointerId:1,clientX:x,clientY:10});Object.defineProperty(event,'target',{value:target});on.dispatchEvent(event);
+  };
+  try{
+    send('pointerdown',0,canvas);send('pointermove',30);assert.equal(picked,hit,'capture retargeting does not clear the paint hit');
+    send('pointerup',30,win,win);assert.deepEqual(events,[1,9,10,2]);
+    events.length=0;send('pointerdown',0,canvas);win.dispatchEvent(new Event('blur'));assert.deepEqual(events,[1,2]);
+    events.length=0;send('pointerdown',0,canvas);send('pointermove',30);send('pointercancel',30);assert.deepEqual(events,[1,9,10,2]);
+  }finally{
+    mouse.dispose();for(const [key,original]of originals)if(original)Object.defineProperty(globalThis,key,original);else Reflect.deleteProperty(globalThis,key);
+  }
+});
+
 test('right click sends the picked part to Java, while drag and cancellation never click', () => {
   class Canvas extends EventTarget {
     dataset: Record<string, string> = {};
@@ -77,7 +103,7 @@ test('left drag carries car parts or dock gadgets to OSD without clicking or dro
   try {
     pointer('pointerdown',10); pointer('pointermove',30); pointer('pointerup',110);
     await Promise.resolve();
-    assert.deepEqual(events,[1,9,10]); assert.deepEqual(drops,[{onto:target,source:{object:part}}]);
+    assert.deepEqual(events,[1,9,10,2]); assert.deepEqual(drops,[{onto:target,source:{object:part}}]);
     const click=new Event('click',{cancelable:true});surface.dispatchEvent(click);assert.equal(click.defaultPrevented,true);
     events.length=0; drops.length=0;
     pointer('pointerdown',55);pointer('pointermove',70);pointer('pointerup',110);await Promise.resolve();

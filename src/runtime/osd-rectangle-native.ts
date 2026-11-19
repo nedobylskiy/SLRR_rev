@@ -1,4 +1,4 @@
-import type { JavaObject, JavaValue, ResourceIdentity } from 'slrr-jvm';
+import {jv,type JavaObject,type JavaValue,type ResourceIdentity} from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import type { GameTypeNative } from './game-type-native';
 import type { RenderObject } from './render-object';
@@ -17,9 +17,15 @@ export class OsdRectangleNative {
     private readonly stageAspect: () => number = () => 16 / 9) {}
 
   sync(render: RenderObject): boolean {
-    if (render.alias !== 'Rectangle' || render.parent?.className !== 'java.render.Group') return false;
+    const cursorOwned=render.parent?.className==='java.io.MouseCursor'||render.parent?.parent?.className==='java.io.MouseCursor';
+    if (render.alias !== 'Rectangle' || (!cursorOwned&&render.parent?.className !== 'java.render.Group')) return false;
     if (!this.layer) return true;
-    const groupRef = this.resources.reference(render.parent);
+    const cursorGroup:JavaObject|undefined=cursorOwned?{className:'java.render.Group',fields:new Map([
+      ['active',jv('int',1)],['osd',jv('Osd',{className:'java.render.Osd',fields:new Map([
+        ['vpAspect',jv('float',this.stageAspect())],['vpWidth',jv('float',1)],['vpHeight',jv('float',1)],['cam',jv('Camera',{})]
+      ])})]
+    ])}:undefined;
+    const groupRef = cursorGroup?jv('Group',cursorGroup):this.resources.reference(render.parent!);
     const group = this.object(groupRef);
     const osd = this.object(group?.fields.get('osd'));
     const type = render.renderType;
@@ -43,7 +49,7 @@ export class OsdRectangleNative {
     const height = mesh.meshScale.y / (1.47 * vpHeight);
     const x = mode === 'normalized' ? render.position.x / aspect : render.position.x / scaleX;
     const y = -render.position.y / scaleY;
-    const viewport = this.viewportLayout(groupRef);
+    const viewport = cursorOwned?{...FULL_OSD_VIEWPORT,priority:127}:this.viewportLayout(groupRef);
     const projected = projectOsdBounds(viewport, x, y, width, height);
     // The original event list uses this 1366px frame as a full-width lower panel.
     // Keep its Java vertical placement while spanning the active viewport.

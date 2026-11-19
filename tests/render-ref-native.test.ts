@@ -7,10 +7,36 @@ import { RenderRefNative } from '../src/runtime/render-ref-native';
 import { RenderObject } from '../src/runtime/render-object';
 
 const ref = (name: string): JavaValue => jv(name.split('.').at(-1)!, { className: name, fields: new Map() });
+
+test('PaintCan RGB modulation is opaque, while explicit RenderRef ARGB retains alpha',()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null}),types=new GameTypeNative(jvm,()=>{});new RenderRefNative(jvm,types);
+  const parent=ref('GameRef'),model=ref('RenderRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',parent,[]);types.createRender(model,parent,null,'cannaatska');
+  jvm.natives.invoke('java.util.resource.RenderRef','setColor',model,[jv('int',0x123456)]);assert.equal(types.getRender(model)!.color,0xff123456);
+  jvm.natives.invoke('java.util.resource.RenderRef','setColor',model,[jv('int',0)]);assert.equal(types.getRender(model)!.color,0xff000000,'black is visible paint');
+  jvm.natives.invoke('java.util.resource.RenderRef','setColor',model,[jv('int',0x80123456)]);assert.equal(types.getRender(model)!.color,0x80123456);
+});
 const vector = (x: number, y: number, z: number) => jv('Vector3', { className: 'java.lang.Vector3',
   fields: new Map([['x', jv('float', x)], ['y', jv('float', y)], ['z', jv('float', z)]]) });
 const ypr = (y: number, p: number, r: number) => jv('Ypr', { className: 'java.lang.Ypr',
   fields: new Map([['y', jv('float', y)], ['p', jv('float', p)], ['r', jv('float', r)]]) });
+
+test('Painter decal model survives duplicate -> id -> RenderRef constructor with its private texture replacement',()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null}),resources=new GameTypeNative(jvm,()=>{});
+  new RenderRefNative(jvm,resources);
+  const source=ref('RenderRef'),clone=ref('RenderRef'),wrapper=ref('RenderRef'),parent=ref('GameRef'),render=ref('RenderRef');
+  const rid=jv('int',0x83);rid.resource={pack:'misc/garage.rpk',id:0x83};
+  jvm.natives.invoke('java.util.resource.ResourceRef','set',source,[rid]);
+  jvm.natives.invoke('java.util.resource.ResourceRef','duplicate',clone,[jv('ResourceRef',source.value)]);
+  const cloned=resources.getResource(clone)!;cloned.resourceReplacements.set(0x103,0x55);cloned.resourceReplacementPacks.set(0x103,'decals.rpk');
+  const id=jvm.natives.invoke('java.util.resource.ResourceRef','id',clone,[])!;
+  jvm.natives.invoke('java.util.resource.ResourceRef','set',wrapper,[id]);
+  assert.equal(resources.getResource(wrapper),cloned);
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',parent,[]);
+  resources.createRender(render,parent,wrapper,'decal button');
+  assert.deepEqual(resources.getRender(render)!.renderResource,{pack:'misc/garage.rpk',id:0x83});
+  assert.equal(resources.getRender(render)!.renderType!.resourceReplacements.get(0x103),0x55);
+  assert.equal(resources.getResource(source)!.resourceReplacements.size,0);
+});
 
 test('vehicle driver commands identify separate render instances rather than their shared model',async()=>{
  const jvm=new SlrrJvm({resolveImport:()=>null}),changes:RenderObject[]=[];

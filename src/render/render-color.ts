@@ -7,11 +7,22 @@ export function applyRenderColor(root: Object3D, argb: number | null, cloneMater
     if (!(object instanceof Mesh)) return;
     const apply = (material: Material) => {
       const copy = (cloneMaterials ? material.clone() : material) as Material & { color?: Color };
-      if(cloneMaterials&&material.userData.sky){
+      if(cloneMaterials&&(material.userData.sky||material.userData.slrrPaintMask)){
         copy.onBeforeCompile=material.onBeforeCompile;
         copy.customProgramCacheKey=material.customProgramCacheKey;
       }
-      copy.color?.multiply(new Color(argb & 0xffffff));
+      const tint=new Color(argb&0xffffff);
+      if(material.userData.slrrPaintMask){
+        // SCX paint materials reserve texture alpha for coverage: tint belongs
+        // in their paint uniform, while opaque label/cap pixels retain their RGB.
+        const previous=copy.onBeforeCompile,key=copy.customProgramCacheKey();
+        copy.onBeforeCompile=(shader,renderer)=>{
+          previous.call(copy,shader,renderer);
+          shader.uniforms.slrrPaintColor={value:tint};
+        };
+        copy.customProgramCacheKey=()=>`${key}|render-paint-tint`;
+        copy.userData.slrrPaintColor=tint.toArray();
+      }else copy.color?.multiply(tint);
       copy.opacity *= (argb >>> 24) / 255;
       copy.transparent ||= copy.opacity < 1;
       return copy;

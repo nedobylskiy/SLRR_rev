@@ -251,7 +251,9 @@ export class OsdButtonNative {
     const box = this.boxes.get(this.requireObject(physics));
     if (!box || !this.visible(box)) return;
     const gadget = await this.findGadget(box, physics);
-    if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0) || Number(gadget.fields.get('nofocus')?.value ?? 0)) return;
+    // Disabled gadgets still focus on mouse hover: the original Gadget.focus
+    // draws HIGHLIGHT_DISABLED (the crossed-out overlay). Only activation is blocked.
+    if (!gadget || Number(gadget.fields.get('nofocus')?.value ?? 0)) return;
     const group = this.requireObject(box.group);
     const osd = this.object(group.fields.get('osd'));
     if (!osd || osd.fields.get('pointedGadget')?.value === gadget) return;

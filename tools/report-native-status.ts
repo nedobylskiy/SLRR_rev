@@ -41,6 +41,8 @@ const notes = new Map<string, {status: Status; note: string}>();
 const annotate = (owner: string, methods: string[], status: Status, note: string) => {
   for (const method of methods) notes.set(owner + '#' + method, {status,note});
 };
+annotate('java.game.Painter',['paintPart'],'implemented','Fills the picked part\'s authored paint texture slot with the selected opaque RGB and invalidates its owning assembly. Other material slots and neighbouring parts retain their textures.');
+annotate('java.game.Painter',['doPaint','xPaint'],'implemented','Projects spray/decal strokes onto the picked paintable part using cursor position/normal, brush texture, size, rotation, flip and alpha. Temporary decal previews are replaced and cleared on flush; committed strokes remain in host scene state.');
 annotate('java.game.Vehicle',['hasCrime'],'implemented','Host road-zone adaptation: returns the current road speed-band maximum in m/s (urban 35, rural 100 km/h); -1 off-road or without a graph. City applies its own 10% tolerance. Original native reads zone enter/leave state.');
 annotate('java.game.Vehicle',['getHorn'],'implemented','Reads the player controller’s original AXIS_HORN mapping and script sethorn state. Career scripts may consume the request with sethorn 0; playback uses original sound:0x0015.');
 annotate('java.lang.GarbageCollector',['<init>','push','flush'],'mocked','No-op host adapter; no original collector lifecycle. JavaScript manages memory.');

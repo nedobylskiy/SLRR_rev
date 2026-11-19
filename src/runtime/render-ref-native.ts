@@ -35,7 +35,9 @@ export class RenderRefNative {
     jvm.natives.register(owner, 'setColor', ['int'], ({ receiver, args }) => {
       const render = this.resources.getRender(receiver);
       if (!render) throw new Error('RenderRef.setColor has no render instance');
-      render.color = Number(args[0].value) >>> 0;
+      const color=Number(args[0].value)>>>0;
+      // InventoryItem_Paint passes an RGB PaintCan.color, with no alpha byte.
+      render.color = color>>>24 ? color : (color|0xff000000)>>>0;
       render.markVisualChanged();
       this.resources.notifyRenderChanged(render);
       return voidValue();

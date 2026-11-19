@@ -41,6 +41,7 @@ export async function javaPartPreviewSelection(result: BootResult, assets: Asset
   const project = async (part: ReturnType<BootResult['parts']['installedTree']>[number]): Promise<JavaInstalledPart> => ({
     nativeId: part.node.resourceId, key: await resolve(part.node.typeId, part.node.resourcePack ?? native.resourcePack!),
     parentSlot: part.parentSlot, ownSlot: part.ownSlot, positions: part.positions, wear: part.wear,
+    paintColor:part.paintColor,paintStrokes:part.paintStrokes,
     render: part.renderType ? await resolve(part.renderType, part.node.resourcePack ?? native.resourcePack!) : undefined,
     texture: part.texture?.value ? part.texture.resource ?? await resolve(Number(part.texture.value), part.node.resourcePack ?? native.resourcePack!) : undefined,
     children: await Promise.all(part.children.map(project)),
@@ -48,6 +49,7 @@ export async function javaPartPreviewSelection(result: BootResult, assets: Asset
   const render = result.parts.renderTypeFor(ref);
   const texture = result.parts.textureFor(ref);
   const selection: JavaStockSelection = {
+    rootPaintColor:result.parts.paintColorFor?.(ref),rootPaintStrokes:result.parts.paintStrokesFor?.(ref),
     rootWear: result.parts.wearFor?.(ref), damage: result.parts.damageFor?.(ref), nativeId: native.resourceId, rootRender: render ? await resolve(render, native.resourcePack) : undefined,
     rootTexture: texture?.value ? texture.resource ?? await resolve(Number(texture.value), native.resourcePack) : undefined,
     body: [], mechanical: [], tyres: [], wheelRefs: [], rootPositions: result.parts.slotOverrides(ref),

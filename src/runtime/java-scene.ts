@@ -105,6 +105,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
     parentSlot: native.parentSlot, ownSlot: native.ownSlot,
     positions: native.positions,
     render: native.renderType ? await resolve(native.renderType, native.node.resourcePack ?? chassisPack) : undefined,
+    paintColor:native.paintColor,paintStrokes:native.paintStrokes,
     texture: native.texture?.value ? native.texture.resource ?? await resolve(Number(native.texture.value), native.node.resourcePack ?? chassisPack) : undefined,
     wear: native.wear,
     children: await Promise.all(native.children.map(project)),
@@ -135,7 +136,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   };
   const texture = result.parts.textureFor?.(chassis);
   const rootTexture = texture?.value ? texture.resource ?? await resolve(Number(texture.value)) : undefined;
-  return { rootWear: result.parts.wearFor?.(chassis), damage: result.parts.damageFor?.(chassis), nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
+  return { rootPaintStrokes:result.parts.paintStrokesFor?.(chassis),rootPaintColor:result.parts.paintColorFor?.(chassis), rootWear: result.parts.wearFor?.(chassis), damage: result.parts.damageFor?.(chassis), nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */

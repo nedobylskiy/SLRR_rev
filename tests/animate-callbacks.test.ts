@@ -5,6 +5,22 @@ import { GameTypeNative } from '../src/runtime/game-type-native';
 import { InputNative } from '../src/runtime/input-native';
 import { ControllerNative } from '../src/runtime/controller-native';
 
+test('registered control hooks run without animate hooks and stop immediately on release',async()=>{
+  const source='package demo; class Painter { int strokes; float dt; void control(float seconds) { strokes++; dt=seconds; } }';
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'Painter.java',source})}),events=new GameTypeNative(jvm,()=>{});
+  await jvm.loadClass('demo.Painter');const painter=jvm.construct('demo.Painter',[]);
+  jvm.natives.invoke('java.lang.GameType','registerCallback',painter,[jv('int',8)]);
+  const fail=(error:Error)=>{throw error;};
+  await events.animateCallbacks(fail,1000);await events.animateCallbacks(fail,1050);
+  assert.equal(jvm.get(painter,'strokes').value,2);assert.ok(Math.abs(Number(jvm.get(painter,'dt').value)-.05)<1e-6);
+  events.setExecutionBlocked(()=>true);await events.animateCallbacks(fail,200000);
+  events.setExecutionBlocked(undefined);await events.animateCallbacks(fail,200050);
+  assert.ok(Math.abs(Number(jvm.get(painter,'dt').value)-.05)<1e-6,'unpausing does not catch up hidden time');
+  jvm.natives.invoke('java.lang.GameType','unregisterCallback',painter,[jv('int',8)]);
+  await events.animateCallbacks(fail,200100);assert.equal(jvm.get(painter,'strokes').value,3);
+  events.dispose();
+});
+
 test('native animation dispatch reaches Java OSD text processing as well as the active section', async () => {
   const source = `package demo; import java.io.Input;
     class Section { int frames; void animate() { frames++; } }

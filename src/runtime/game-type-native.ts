@@ -40,6 +40,7 @@ export class GameTypeNative {
   private nextId = 1;
   private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
+  private readonly clonedResources = new Map<number,ResourceObject>();
   private readonly trackPackSlots = new Map<string, number>();
   private readonly savedResources = new Map<number, ResourceIdentity>();
   private readonly savedResourceIds = new Map<string, number>();
@@ -101,6 +102,12 @@ export class GameTypeNative {
       const object = this.object(receiver);
       const id = Number(args[0].value) | 0;
       const origin = args[0].resource ?? this.resolveResourceIdentity(id);
+      const clone=this.clonedResources.get(id);
+      if(clone&&!clone.destroyed){
+        const prior=this.nodes.get(object);
+        if(prior&&prior!==clone)this.objects.delete(prior.id);
+        this.nodes.set(object,clone);return voidValue();
+      }
       const live = this.liveByResourceId.get(id);
       // getInfo(GII_OWNER) yields a plain instance ID. It can numerically overlap
       // a loaded packed resource, so only an explicit resource literal outranks it.
@@ -188,6 +195,7 @@ export class GameTypeNative {
         || source.resourceType === 0;
       target.resourceId = cloned ? this.nextClonedResourceId++ : source.resourceId;
       target.copiedFromResourceId = cloned ? source.resourceId : null;
+      if(cloned)this.clonedResources.set(target.resourceId,target);
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'scaleMesh', ['float', 'float', 'float'], ({ receiver, args }) => {
@@ -250,6 +258,7 @@ export class GameTypeNative {
       for (const listener of this.resourceDestroyListeners) listener(receiver);
       const node = this.getResource(receiver);
       if (!node) return voidValue();
+      this.clonedResources.delete(node.resourceId);
       this.notifications.delete(this.object(receiver));
       this.callbacks.delete(this.object(receiver));
       for (const [handler, subscriptions] of this.notifications) {
@@ -704,19 +713,27 @@ export class GameTypeNative {
   }
   /** Native animate hooks include OSDs, not just GameLogic.actualState. */
   setExecutionBlocked(reader:(()=>boolean)|undefined):void {this.executionBlocked=reader;}
-  async animateCallbacks(onError: (error: Error) => void): Promise<void> {
-    if (this.animatingCallbacks || this.executionBlocked?.()) return;
+  private previousCallbackAt?:number;
+  async animateCallbacks(onError: (error: Error) => void,now=performance.now()): Promise<void> {
+    if (this.animatingCallbacks) return;
+    const dt=this.previousCallbackAt===undefined?.05:Math.max(0,Math.min(.1,(now-this.previousCallbackAt)/1000));
+    this.previousCallbackAt=now;
+    if(this.executionBlocked?.())return;
     this.animatingCallbacks = true;
     try {
       for (const object of [...this.callbacks.keys()]) {
         if(this.executionBlocked?.())break;
-        if (!this.callbacks.get(object)?.has(28)) continue;
-        try { await this.jvm.invokeAsync(jv(object.className, object), 'animate'); }
-        catch (reason) {
-          const callbacks = this.callbacks.get(object);
-          callbacks?.delete(28);
-          if (!callbacks?.size) this.callbacks.delete(object);
-          onError(new Error(`${object.className}.animate: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }));
+        // GII_CONTROL drives Painter's spray and other Java control hooks.
+        // It is independent of GII_ANIMATE and must stop as soon as unregistered.
+        for(const [callback,method,args]of [[8,'control',[jv('float',dt)]],[28,'animate',[]]] as const){
+          if(!this.callbacks.get(object)?.has(callback)||this.executionBlocked?.())continue;
+          try { await this.jvm.invokeAsync(jv(object.className, object),method,[...args]); }
+          catch (reason) {
+            const callbacks = this.callbacks.get(object);
+            callbacks?.delete(callback);
+            if (!callbacks?.size) this.callbacks.delete(object);
+            onError(new Error(`${object.className}.${method}: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }));
+          }
         }
       }
     } finally { this.animatingCallbacks = false; }
@@ -853,6 +870,7 @@ export class GameTypeNative {
   }
 
   dispose(): void {
+    this.clonedResources.clear();
     for (const object of this.timers.keys()) this.cancelTimers(object);
     this.pendingEvents.length = 0;
     this.notifications.clear();

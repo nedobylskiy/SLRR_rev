@@ -1,3 +1,5 @@
+import type {PaintStroke} from '../engine/paint-stroke';
+import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {LodPlayground} from './lod-playground';
 import {worldTrafficSpawn,trafficResidentActive} from '../engine/traffic-residency';
@@ -38,7 +40,7 @@ import {SceneVisibility,type VisibilityObject} from './scene-visibility';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
-import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
+import { partPaint, partPaintTextures, solidPartPaint, type PartPaint } from './part-paint';
 import { applyRenderColor } from './render-color';
 import { normalizePath } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
@@ -455,6 +457,14 @@ export class Viewer {
   private mapStream?: MapObjectStream;
   private mapTextures = new TextureSourceCache();
   private vehicleTextures = new AssetTextureSources();
+  private readonly livePaint=new WeakMap<EnginePart,{color:number|undefined;strokes:readonly PaintStroke[]|undefined}>();
+  /** Publish a native paint edit straight onto its existing GPU proxy. */
+  async updateJavaPaint(id:number,color:number|undefined,strokes:readonly PaintStroke[]|undefined,assets:Assets){
+    for(const [part]of this.proxies)if(part.nativeId===id&&!part.world.disposed){
+      this.livePaint.set(part,{color,strokes});part.paintColor=color;part.paintStrokes=strokes;
+      await this.updatePartPaint(part,assets);
+    }
+  }
   private mapStreamRange = 500;
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
@@ -946,9 +956,9 @@ export class Viewer {
 
     // A render instance is just a transform until its RPK resource is resolved and its SCX is loaded.
     const identity = node.renderResource;
-    // Navigator tiles are per-instance clones whose textures are replaced by the Java script.
-    // Keep this interpretation scoped to those aliases; other RenderRefs retain existing semantics.
-    const overrides = node.alias === 'navigator_segment' ? node.renderType : null;
+    // Navigator tiles and Painter decal buttons both clone a model and replace
+    // its texture without changing the shared resource template.
+    const overrides = node.renderType?.resourceReplacements.size ? node.renderType : null;
     const overrideKey = overrides ? [...overrides.resourceReplacements]
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
@@ -1622,9 +1632,12 @@ export class Viewer {
   disposePreviewWorld(group: THREE.Group): void { this.disposeGroup(group); }
   private async updatePartPaint(part: EnginePart, assets: Assets): Promise<void> {
     if (part.definition.config.texture === undefined) return;
+    // A slower Java assembly refresh may finish with an older paint snapshot.
+    const latest=this.livePaint?.get(part);if(latest){part.paintColor=latest.color;part.paintStrokes=latest.strokes;}
     const group = this.proxies.get(part);
     if (!group) return;
-    const key = part.paintTexture ? `${part.paintTexture.pack}:${part.paintTexture.id}` : 'default';
+    await this.updatePartPaintStrokes(part,assets,group);
+    const key = part.paintColor!==undefined?`color:${part.paintColor}`:part.paintTexture ? `${part.paintTexture.pack}:${part.paintTexture.id}` : 'default';
     if (group.userData.paintKey === key) return;
     const paint = await partPaint(part, assets);
     if (!paint) return;
@@ -1634,7 +1647,7 @@ export class Viewer {
         if (material.userData.paintDefault) materials.push(material);
     } });
     for (const material of materials) {
-      const texture = await this.vehicleTextures.acquire(assets, paint.to,
+      const texture = paint.color!==undefined?solidPartPaint(paint.color):await this.vehicleTextures.acquire(assets, paint.to,
         async () => this.texture(await assets.read(paint.to), paint.to));
       if (part.world.disposed || this.proxies.get(part) !== group) { texture.dispose(); return; }
       texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -1643,6 +1656,50 @@ export class Viewer {
     }
     group.userData.paintKey = key;
   }
+  private async updatePartPaintStrokes(part:EnginePart,assets:Assets,group:THREE.Group){
+    const strokes=part.paintStrokes;
+    if(group.userData.paintStrokes===strokes)return;
+    const request=(group.userData.paintStrokeRequest??0)+1;group.userData.paintStrokeRequest=request;
+    let projected=group.userData.paintStrokeGroup as THREE.Group|undefined;
+    if(!projected){projected=new THREE.Group();projected.name='Paint strokes';group.add(projected);group.userData.paintStrokeGroup=projected;}
+    const existing:Map<PaintStroke,THREE.Group>=group.userData.paintStrokeMeshes??new Map();group.userData.paintStrokeMeshes=existing;
+    const wanted=new Set(strokes??[]);
+    const meshes:THREE.Mesh[]=[];
+    group.updateWorldMatrix(true,true);
+    group.traverse(object=>{if(object instanceof THREE.Mesh&&!object.userData.paintStroke){
+      const materials=Array.isArray(object.material)?object.material:[object.material];
+      if(materials.some(material=>material.userData.paintDefault))meshes.push(object);
+    }});
+    for(const stroke of strokes??[]){
+      if(existing.has(stroke))continue;
+      const addition=new THREE.Group();
+      try{
+        const source=entryProperties((await assets.resource(stroke.brush.pack,stroke.brush.id)).entry).find(property=>property.key==='sourcefile')?.value;
+        if(!source)continue;
+        const texture=await this.vehicleTextures.acquire(assets,source,()=>this.textureFromPaintBrush(assets,source));
+        if(part.world.disposed||group.userData.paintStrokeRequest!==request){texture.dispose();return;}
+        texture.colorSpace=THREE.SRGBColorSpace;
+        if(stroke.flip){texture.wrapS=THREE.RepeatWrapping;texture.repeat.x=-1;}
+        const frame=part.matrix(),point=new THREE.Vector3(...stroke.position).applyMatrix4(frame);
+        const normal=new THREE.Vector3(...stroke.normal).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(frame));
+        const orientation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+        orientation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stroke.rotation));
+        const material=new THREE.MeshBasicMaterial({map:texture,color:stroke.color&0xffffff,opacity:(stroke.color>>>24)/255,
+          transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4,side:THREE.FrontSide});
+        for(const mesh of meshes){
+          const geometry=new DecalGeometry(mesh,point,new THREE.Euler().setFromQuaternion(orientation),new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5));
+          geometry.applyMatrix4(group.matrixWorld.clone().invert());
+          const overlay=new THREE.Mesh(geometry,material);overlay.userData.paintStroke=true;overlay.renderOrder=2;addition.add(overlay);
+        }
+        if(!meshes.length){material.dispose();texture.dispose();}
+        projected.add(addition);existing.set(stroke,addition);
+      }catch(error){this.disposeGroup(addition);throw error;}
+    }
+    if(group.userData.paintStrokeRequest!==request)return;
+    for(const [stroke,mesh]of existing)if(!wanted.has(stroke)){mesh.removeFromParent();this.disposeGroup(mesh);existing.delete(stroke);}
+    group.userData.paintStrokes=strokes;
+  }
+  private async textureFromPaintBrush(assets:Assets,source:string){return this.texture(await assets.read(source),source);}
   syncWorldVisuals(world: EngineWorld): void {
     this.profiler.measure('Vehicle mesh sync CPU',()=>this.syncWorldVisualsCore(world));
   }
@@ -1663,7 +1720,7 @@ export class Viewer {
       this.suspensionSkins.get(part)?.update();
     }
   }
-  pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
+  pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[];normal?:number[] } | undefined {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1,
@@ -1674,7 +1731,9 @@ export class Viewer {
     if (!hit) return;
     const entry = groups.find(([, group]) => { for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) if (node === group) return true; return false; });
     if (!entry) return;
-    return { id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
+    const normal=hit.face?.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
+    if(normal)normal.applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(entry[0].matrix().invert()));
+    return { normal:normal?.toArray(),id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
   }
   async showWorld(world: EngineWorld, assets: Assets, keepScene = false, publishTogether = false): Promise<string[]> {
     world.experimentalHubGeometry = this.experimentalHubGeometry;
@@ -1696,6 +1755,7 @@ export class Viewer {
       this.collisionMeshes.set(part, collision);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint, true, THREE.FrontSide));
       if (generation !== this.generation) return warnings;
+      await this.updatePartPaintStrokes(part,assets,group);
       applySavedPanel(group,part);
       const primaryPose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
       for (const extra of part.definition.additionalModels ?? []) {
@@ -2822,7 +2882,9 @@ export class Viewer {
       const file = boundTextures[diffuseIndex];
       if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
         { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
-      if (file) {
+      if(paint?.color!==undefined&&material.userData.paintDefault){
+        material.map=solidPartPaint(paint.color);material.color.set(0xffffff);material.needsUpdate=true;
+      }else if (file) {
         try {
           const selected = await stockContainerTexture(part, file, await read(file), assets);
           const texture = await loadTexture(selected.bytes, selected.path);

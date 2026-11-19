@@ -474,6 +474,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
+  partNative.setPaintPickReader(()=>input.pickedTarget());
+  partNative.setPaintBrushResolver(id=>resolveResourceIdentity(id)??undefined);
   const hornSound = jv('SfxRef', { className: 'java.util.resource.SfxRef', fields: new Map<string, JavaValue>() });
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', hornSound, [gameTypes.remountSavedResource('sound.rpk', 0x15)]);
   const horns = new VehicleHornNative(jvm, gameTypes, controllers, {

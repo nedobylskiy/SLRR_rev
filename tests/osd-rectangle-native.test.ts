@@ -7,6 +7,17 @@ import { ResourceObject } from '../src/runtime/resource-object';
 import type { GameTypeNative } from '../src/runtime/game-type-native';
 import type { OsdLayer } from '../src/osd/osd-layer';
 
+test('cursor-owned tooltip rectangles stay in the OSD rather than attempting to load a world mesh',()=>{
+  const cursor=new ResourceObject(1,'java.io.MouseCursor'),template=new ResourceObject(2,'RenderRef'),mesh=new ResourceObject(3,'RenderRef');
+  mesh.copiedFromResourceId=0xd9;mesh.resourceId=0x40000003;mesh.meshScale={x:1,y:.2,z:1};
+  template.resourceReplacements.set(0xaf,0x98);template.resourceReplacementPacks.set(0xaf,'frontend.rpk');template.resourceReplacements.set(0xd9,mesh.resourceId);
+  const render=new RenderObject(4,'RenderRef',template,'Rectangle');render.setParent(cursor);
+  let depth=0;const resources={getByResourceId:(id:number)=>id===mesh.resourceId?mesh:undefined} as unknown as GameTypeNative;
+  const layer={createRectangle:(_x:number,_y:number,_w:number,_h:number,z:number)=>{depth=z;return{node:{remove(){}},setBounds(){},show(){},hide(){}};}} as unknown as OsdLayer;
+  const bridge=new OsdRectangleNative(resources,layer);
+  assert.equal(bridge.sync(render),true);assert.equal(depth,127000000);bridge.dispose();
+});
+
 test('Java Rectangle resources become positioned OSD images and obey Group visibility', () => {
   const osd = { className: 'java.render.Osd', fields: new Map([
     ['vpAspect', jv('float', 16 / 9)], ['vpWidth', jv('float', 1)],
