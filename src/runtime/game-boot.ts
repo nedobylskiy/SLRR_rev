@@ -1,3 +1,4 @@
+import {OsdDecalNative} from './osd-decal-native';
 import {registerFrontendAliases} from './frontend-aliases';
 import { VehicleHornNative } from './vehicle-horn-native';
 import {NavigatorNative} from './navigator-native';
@@ -275,6 +276,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const osdButtons = new OsdButtonNative(jvm, osd,
     error => report({ level: 'error', message: `OSD click: ${error.message}` }), viewportLayout, stageAspect);
   let osdRectangles: OsdRectangleNative | undefined;
+  let osdDecals:OsdDecalNative|undefined;
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
   // Native resource trees include part/car descendants before their scripts
@@ -337,7 +339,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   const readResourceBounds: ReturnType<typeof resourceBoundsReader> = resourceBoundsReader(assets, () => gameTypes);
   const gameTypes: GameTypeNative = new GameTypeNative(jvm, report, node => {
-    if (!osdRectangles?.sync(node)) renderChanged?.(node);
+    if (!osdRectangles?.sync(node)&&!osdDecals?.sync(node)) renderChanged?.(node);
   }, resourceCatalog,
     async (script, typeId, pack) => {
       const { className, simpleName, content } = await loadResourceScript(script, pack);
@@ -359,7 +361,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    }, resolvePackedResource, node => { osdRectangles?.remove(node); renderChanged?.(node); },
+    }, resolvePackedResource, node => { osdRectangles?.remove(node); osdDecals?.remove(node); renderChanged?.(node); },
     async (receiver, cfgPath) => {
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);
@@ -373,11 +375,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const { className } = await loadResourceScript(script, pack);
       return jvm.isInstance(jv(className, { className, fields: new Map() }), base);
     }, resourceSizeReader(assets, () => gameTypes, readResourceBounds));
-  jvm.natives.register('java.util.resource.ResourceRef', 'makeTexture', ['ResourceRef', 'String'], ({ receiver, args }) => {
-    const path = normalizePath(String(args[1].value ?? ''));
+  gameTypes.setTextureLoader(path => {
     const identity = assets.registerTexture(path);
     resourceCatalog.registerTexture(identity.pack, identity.id, path);
-    gameTypes.bindTexture(receiver, identity);
+    return identity;
+  });
+  jvm.natives.register('java.util.resource.ResourceRef', 'makeTexture', ['ResourceRef', 'String'], ({ receiver, args }) => {
+    const path = normalizePath(String(args[1].value ?? ''));
+    const ref = gameTypes.restoreTextureIdentity({ pack: '__runtime/textures.rpk', id: 0, source: path });
+    gameTypes.bindTexture(receiver, gameTypes.resolveResourceIdentity(Number(ref.value))!);
     return jv('void', undefined);
   });
   const physicsRefs = new PhysicsRefNative(jvm, gameTypes);
@@ -403,6 +409,9 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
     resolvePackedResource(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
+  osdDecals=new OsdDecalNative(assets,gameTypes,osd,viewportLayout,error=>report({level:'error',message:`Decal button: ${error.message}`}),
+    async (icon,owner)=>{await jvm.invokeAsync(jv('Osd',owner),'event_handler',[
+      jv('GameRef',gameTypes.reference(icon).value),jv('int',0),jv('String','5')]);});
   chassisNative = new ChassisNative(jvm, gameTypes, readResourceBounds);
   const partFactory = new PartFactory(assets);
   partNative = new PartNative(jvm, gameTypes, async (parent, parentSlot, child, childSlot) => {
@@ -617,7 +626,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    horns.dispose();traffic.dispose();navigator.dispose();animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    horns.dispose();traffic.dispose();navigator.dispose();animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose();osdDecals?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
@@ -631,7 +640,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       renderTicker = setInterval(() => measureOsdSync(() => {
         osdButtons.sync();
         osdText.syncVisibility();
-        osdRectangles?.syncVisibility();
+        osdRectangles?.syncVisibility();osdDecals?.syncVisibility();
         jvm.natives.invoke('java.lang.Object', 'notifyAll', renderSignal, []);
       }), 50);
       void jvm.invokeAsync(loadingScreen, 'run').catch(reason => {

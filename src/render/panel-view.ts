@@ -1,6 +1,7 @@
 import {deformationNormals} from './deformation-normals';
 import * as THREE from 'three';
 import type { DeformablePanel, PanelBinding } from '../engine/deformable-panel';
+import { PanelPaintSkin } from './panel-paint-skin';
 
 /** World-space skin owns the hood draw transform while physics is active. */
 export class PanelView {
@@ -15,16 +16,29 @@ export class PanelView {
   private readonly previousMatrixAutoUpdate:boolean;
   private readonly originalDrawFrame:THREE.Matrix4;
   private attachmentFrame?:THREE.Matrix4;
-  private attachments:{group:THREE.Group;matrix:THREE.Matrix4}[]=[];
-  constructor(private group: THREE.Group, readonly panel: DeformablePanel, localPositions: number[][]) {
+  private paintSkin: PanelPaintSkin;
+  private attachments:{group:THREE.Group;matrix:THREE.Matrix4;matrixAutoUpdate:boolean}[]=[];
+  constructor(private group: THREE.Group, readonly panel: DeformablePanel, localPositions: number[][],
+    drawFrame: THREE.Matrix4 = group.matrix, partFrame?: THREE.Matrix4) {
     this.previousOwner=group.userData.panelViewOwnsTransform;
     this.previousMatrixAutoUpdate=group.matrixAutoUpdate;
-    this.originalDrawFrame=group.matrix.clone();
+    // Placement/settling can move the physical part after the garage proxy was
+    // built. The caller supplies its current draw frame, not the stale proxy.
+    this.originalDrawFrame=drawFrame.clone();
+    if(partFrame)this.attachmentFrame=partFrame.clone().invert().multiply(this.originalDrawFrame);
     this.attachments=group.children.filter((child):child is THREE.Group=>child instanceof THREE.Group)
-      .map(group=>({group,matrix:group.matrix.clone()}));
+      .map(group=>{
+        const matrixAutoUpdate=group.matrixAutoUpdate;
+        if(matrixAutoUpdate)group.updateMatrix();
+        // Physics writes the attachment matrix explicitly. Three's automatic
+        // position/rotation update otherwise resets paint overlays to identity.
+        group.matrixAutoUpdate=false;
+        return {group,matrix:group.matrix.clone(),matrixAutoUpdate};
+      });
     group.matrixAutoUpdate=false;
     group.userData.panelViewOwnsTransform=true;
     const meshes = group.children.filter((o): o is THREE.Mesh<THREE.BufferGeometry> => o instanceof THREE.Mesh);
+    this.paintSkin=new PanelPaintSkin(group,meshes);
     meshes.forEach((mesh, index) => {
       const position = mesh.geometry.getAttribute('position'), normals = mesh.geometry.getAttribute('normal');
       const samples = localPositions[index];
@@ -46,6 +60,9 @@ export class PanelView {
     const desired=frame&&this.attachmentFrame?frame.clone().multiply(this.attachmentFrame):this.originalDrawFrame;
     const local=this.group.matrix.clone().invert().multiply(desired);
     for(const attachment of this.attachments){attachment.group.matrix.copy(local).multiply(attachment.matrix);attachment.group.matrixWorldNeedsUpdate=true;}
+  }
+  private paintDrawFrame(frame?:THREE.Matrix4){
+    return frame&&this.attachmentFrame?frame.clone().multiply(this.attachmentFrame):this.originalDrawFrame.clone();
   }
   update(frame?: THREE.Matrix4, rigid = false) {
     if (rigid && this.rigidLast && frame && this.skinFrame && this.lastReset === this.panel.resetVersion && this.lastShape === this.panel.shapeVersion) {
@@ -70,12 +87,14 @@ export class PanelView {
     }
     this.skinFrame = frame?.clone(); this.rigidLast = rigid; this.lastReset = this.panel.resetVersion; this.lastTick = this.panel.clock.tick;this.lastShape=this.panel.shapeVersion;
     this.updateAttachments(frame);
+    if(this.paintSkin.active)this.paintSkin.update(this.paintDrawFrame(frame).invert());
   }
   dispose() {
+    this.paintSkin.dispose();
     this.group.matrixAutoUpdate=this.previousMatrixAutoUpdate;
     if(this.previousOwner===undefined)delete this.group.userData.panelViewOwnsTransform;else this.group.userData.panelViewOwnsTransform=this.previousOwner;
     this.cage.removeFromParent(); this.cage.geometry.dispose(); (this.cage.material as THREE.Material).dispose();
-    for(const attachment of this.attachments){attachment.group.matrix.copy(attachment.matrix);attachment.group.matrixWorldNeedsUpdate=true;}
+    for(const attachment of this.attachments){attachment.group.matrix.copy(attachment.matrix);attachment.group.matrixAutoUpdate=attachment.matrixAutoUpdate;attachment.group.matrixWorldNeedsUpdate=true;}
     for (const { geometry, original, normals } of this.skins) { geometry.getAttribute('position').array.set(original); geometry.getAttribute('position').needsUpdate = true; geometry.getAttribute('normal').array.set(normals); geometry.getAttribute('normal').needsUpdate = true; geometry.computeBoundingSphere(); geometry.computeBoundingBox(); }
   }
 }

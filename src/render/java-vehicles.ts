@@ -80,6 +80,21 @@ export class JavaSceneVehicles {
     // canonical reference can therefore be the Chassis, not the Vehicle wrapper.
     try {
       const state = jvm.get(jv('class', 'java.game.GameLogic'), 'actualState').value as JavaObject | null;
+      // Police scouts live in City.alertedScouts (Vector<PoliceScout>), with
+      // their Bot one level below each entry. They are not direct City fields.
+      const scouts = state?.fields.get('alertedScouts')?.value as JavaObject | null;
+      const scoutData = scouts?.fields?.get('elementData')?.value;
+      const scoutCount = Number(scouts?.fields?.get('elementCount')?.value ?? 0);
+      if (Array.isArray(scoutData)) for (const value of scoutData.slice(0, scoutCount)) {
+        const scout = (value && typeof value === 'object' && 'value' in value ? value.value : value) as JavaObject | null;
+        const bot = scout?.fields?.get('bot')?.value as JavaObject | null;
+        const car = bot?.fields?.get('car'), brain = bot?.fields?.get('brain');
+        if (car?.value != null) {
+          consider(car);
+          const node = gameTypes.get(car);
+          if (node && brain?.value != null) this.brains.set(node, brain);
+        }
+      }
       for (const [name,value] of state?.fields ?? []) {
         if (Array.isArray(value.value)) for (const item of value.value) {
           const entry = item && typeof item === 'object' && 'value' in item ? item as JavaValue
@@ -310,6 +325,11 @@ export class JavaSceneVehicles {
         const racer=await this.viewer.bindJavaRaceCar?.(built.root,{
           parked:!brain,
           randomize:!!selection.nativeOnly,
+          target:id=>{
+            const target=this.result.gameTypes.getByResourceId(id);
+            return target instanceof GameObject && !target.destroyed
+              ? new Vector3(target.position.x,target.position.y,target.position.z) : undefined;
+          },
           command:()=>{
             const command=brain?raceCommand(names=>this.result.gameTypes.latestCommand(brain,names)):undefined;
             return command?.startsWith('AI_race ')&&this.nightRacers.has(node)&&!command.endsWith('AI_NightRace')?`${command} AI_NightRace`:command;

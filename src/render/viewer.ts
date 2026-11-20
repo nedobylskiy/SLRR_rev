@@ -1,5 +1,9 @@
 import type {PaintStroke} from '../engine/paint-stroke';
-import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
+import { advancePartFlap } from '../engine/part-flap';
+import {paintTargets} from './paint-targets';
+import {hasPaintSurface,isPaintSurface,paintSurfaceGeometry} from './paint-surface';
+import {projectPaintGeometry,maskPaintProjection} from './paint-projection';
+import {isOsdRender} from '../runtime/osd-render-scope';
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {LodPlayground} from './lod-playground';
 import {worldTrafficSpawn,trafficResidentActive} from '../engine/traffic-residency';
@@ -42,7 +46,7 @@ import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, solidPartPaint, type PartPaint } from './part-paint';
 import { applyRenderColor } from './render-color';
-import { normalizePath } from '../assets';
+import { normalizePath, resourceTextureSource } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
 import { trafficLampDefinitions, createTrafficLamps, type TrafficLamp } from './traffic-lamps';
@@ -181,6 +185,8 @@ function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: Suspens
 }
 
 export class Viewer {
+  private javaFlapReader?: (id: number) => boolean;
+  setJavaFlapReader(read: (id: number) => boolean) { this.javaFlapReader = read; }
   /** Optional garage alignment override; normal Java setsteer resumes when cleared. */
   calibrationSteering?: number;
   private suspensionDebug = defaultSuspensionDebug();
@@ -458,6 +464,7 @@ export class Viewer {
   private mapTextures = new TextureSourceCache();
   private vehicleTextures = new AssetTextureSources();
   private readonly livePaint=new WeakMap<EnginePart,{color:number|undefined;strokes:readonly PaintStroke[]|undefined}>();
+  javaPaintTargets(hit:{id:number;local:number[];normal?:number[]},size:number){return paintTargets(this.proxies,hit,size);}
   /** Publish a native paint edit straight onto its existing GPU proxy. */
   async updateJavaPaint(id:number,color:number|undefined,strokes:readonly PaintStroke[]|undefined,assets:Assets){
     for(const [part]of this.proxies)if(part.nativeId===id&&!part.world.disposed){
@@ -691,10 +698,17 @@ export class Viewer {
         this.profiler.recordFrame(now - this.previousFrame);
         this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
       }
+      const flapSeconds = this.previousFrame === undefined ? 0 : (now - this.previousFrame) / 1000;
       this.previousFrame = document.hidden ? undefined : now;
+      let flapChanged = false;
+      if (this.javaFlapReader) for (const [part] of this.proxies) {
+        if (part.nativeId !== undefined)
+          flapChanged = advancePartFlap(part, this.javaFlapReader(part.nativeId), flapSeconds) || flapChanged;
+      }
       this.graphicsDiagnostics.beginFrame();
       this.vehiclePhysics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
+      if (flapChanged) this.syncWorld();
       this.profiler.measure('Race opponents CPU',()=>{for(const racer of this.javaRaces.values())racer.update(now);});
       this.profiler.measure('Physics frame finalize CPU',()=>this.vehiclePhysics.flush());
       this.profiler.measure('Race vehicle visuals CPU',()=>{for(const racer of this.javaRaces.values())racer.publish();});
@@ -866,7 +880,7 @@ export class Viewer {
   async upsertJavaRenderObject(node: RenderObject, assets: Assets, bindVehicleDriver = false): Promise<void> {
     const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
-    if (node.resourceType !== 3) {
+    if (node.resourceType !== 3||isOsdRender(node)) {
       this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
       this.javaRenderModels.delete(node.id);
@@ -1666,15 +1680,18 @@ export class Viewer {
     const wanted=new Set(strokes??[]);
     const meshes:THREE.Mesh[]=[];
     group.updateWorldMatrix(true,true);
-    group.traverse(object=>{if(object instanceof THREE.Mesh&&!object.userData.paintStroke){
-      const materials=Array.isArray(object.material)?object.material:[object.material];
-      if(materials.some(material=>material.userData.paintDefault))meshes.push(object);
-    }});
+    // showWorld stages rebuilt cars with their proxy root hidden until every
+    // part is ready. Culling may also hide that root. Neither means its paint
+    // surfaces are absent: project before publishing the car, while retaining
+    // authored visibility of child renders (e.g. inactive light variants).
+    for (const child of group.children) child.traverseVisible(object=>{
+      if(object instanceof THREE.Mesh&&!object.userData.paintStroke&&hasPaintSurface(object))meshes.push(object);
+    });
     for(const stroke of strokes??[]){
       if(existing.has(stroke))continue;
       const addition=new THREE.Group();
       try{
-        const source=entryProperties((await assets.resource(stroke.brush.pack,stroke.brush.id)).entry).find(property=>property.key==='sourcefile')?.value;
+        const source=await resourceTextureSource(assets,stroke.brush);
         if(!source)continue;
         const texture=await this.vehicleTextures.acquire(assets,source,()=>this.textureFromPaintBrush(assets,source));
         if(part.world.disposed||group.userData.paintStrokeRequest!==request){texture.dispose();return;}
@@ -1683,15 +1700,34 @@ export class Viewer {
         const frame=part.matrix(),point=new THREE.Vector3(...stroke.position).applyMatrix4(frame);
         const normal=new THREE.Vector3(...stroke.normal).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(frame));
         const orientation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+        if(stroke.tangent){
+          const x=new THREE.Vector3(...stroke.tangent).transformDirection(frame);
+          x.addScaledVector(normal,-x.dot(normal)).normalize();
+          const y=new THREE.Vector3().crossVectors(normal,x).normalize();
+          orientation.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,normal));
+        }
         orientation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stroke.rotation));
         const material=new THREE.MeshBasicMaterial({map:texture,color:stroke.color&0xffffff,opacity:(stroke.color>>>24)/255,
           transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4,side:THREE.FrontSide});
         for(const mesh of meshes){
-          const geometry=new DecalGeometry(mesh,point,new THREE.Euler().setFromQuaternion(orientation),new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5));
-          geometry.applyMatrix4(group.matrixWorld.clone().invert());
-          const overlay=new THREE.Mesh(geometry,material);overlay.userData.paintStroke=true;overlay.renderOrder=2;addition.add(overlay);
+          const originals=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+          for(let index=0;index<originals.length;index++){
+            const original=originals[index];if(!isPaintSurface(original))continue;
+            const surface=paintSurfaceGeometry(mesh,normal,index);if(!surface)continue;
+            const detail=original.userData.detailTexture as THREE.Texture|undefined;
+            const diffuse=(original as THREE.MeshStandardMaterial).map;
+            const coverage=detail&&surface.hasAttribute('slrrDetailUv')?'slrrDetailUv':original.userData.slrrPaintMask&&diffuse?'uv':undefined;
+            const mask=coverage==='slrrDetailUv'?detail:coverage?diffuse:undefined;
+            if(coverage==='uv')diffuse?.updateMatrix();
+            const geometry=projectPaintGeometry(surface,mesh.matrixWorld,point,new THREE.Euler().setFromQuaternion(orientation),new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5),coverage,coverage==='uv'?diffuse?.matrix:undefined);
+            surface.dispose();
+            if(!geometry.getAttribute('position').count){geometry.dispose();continue;}
+            geometry.applyMatrix4(group.matrixWorld.clone().invert());
+            const overlayMaterial=material.clone();if(mask)maskPaintProjection(overlayMaterial,mask);
+            const overlay=new THREE.Mesh(geometry,overlayMaterial);overlay.userData.paintStroke=true;overlay.renderOrder=2;addition.add(overlay);
+          }
         }
-        if(!meshes.length){material.dispose();texture.dispose();}
+        material.dispose();if(!addition.children.length)texture.dispose();
         projected.add(addition);existing.set(stroke,addition);
       }catch(error){this.disposeGroup(addition);throw error;}
     }
@@ -2251,14 +2287,14 @@ export class Viewer {
       const occupied=bodies.filter(body=>{const delta=body.position.clone().sub(car.body.position);return delta.dot(forward)>0&&delta.lengthSq()<50*50;}).map(body=>body.position.toArray());
       return routes?.query(start,finish,occupied);
     };
-    const driver=control.parked?undefined:new RaceDriver(control.route??plan,car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6,control.randomize?Math.random:undefined);
+    const driver=control.parked?undefined:new RaceDriver(control.route??plan,car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6,control.randomize?Math.random:undefined,control.target);
     let input:DrivingInput={throttle:0,steer:0,brake:true};
     car.controlInput=dt=>input=driver?raceVehicleInput(driver,car,control.command(),dt):{throttle:0,steer:0,brake:false};
     // Placement/settling changed the assembly after showWorld created its draw
     // matrices. PanelView captures those matrices as the lamps' attachment frame:
     // synchronize them now or its skin and flares retain different spawn poses.
     this.syncWorldVisuals(root.world);
-    const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part))}));
+    const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part),modelMatrix(state.part.matrix(),partRenderPose(state.part)),state.part.matrix())}));
     const updateViews=()=>{for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);};
     updateViews();
     let last:number|undefined,disposed=false,wasSleeping=car.sleeping;
@@ -2378,7 +2414,7 @@ export class Viewer {
     if(barrier){barrier.position.copy(pair.barrier.getCenter(new THREE.Vector3()));this.model.add(barrier);}
     const views:{view:PanelView;part:EnginePart;car:Vehicle3D}[]=[],soft=new Set<EnginePart>();
     for(const {car,positions} of built)for(const state of car.soft.values()){
-      soft.add(state.part);views.push({view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part)),part:state.part,car});
+      soft.add(state.part);views.push({view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part),modelMatrix(state.part.matrix(),partRenderPose(state.part)),state.part.matrix()),part:state.part,car});
     }
     this.ground.visible=true;this.grid.visible=false;this.driveGrid.visible=true;
     this.model.position.set(0,0,0);this.model.scale.setScalar(1);this.controls.enabled=true;
@@ -2457,7 +2493,7 @@ export class Viewer {
       crash.setBodyTriangles(triangles);
       if (track && crash instanceof Vehicle3D) { crash.disableObstacle(); crash.placeAt(track.position, track.yaw); crash.settleSpawn(); }
       if (crash instanceof Vehicle3D && root.savedVehicleDamage) crash.restoreDamage(root.savedVehicleDamage);
-      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part)); panelViews.push(view); panelParts.set(view, s.part); }
+      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part),modelMatrix(s.part.matrix(),partRenderPose(s.part)),s.part.matrix()); panelViews.push(view); panelParts.set(view, s.part); }
       const rampGeometry = new THREE.BufferGeometry();
       rampGeometry.setAttribute('position', new THREE.Float32BufferAttribute([-1.8, 0, -4, 1.8, 0, -4, 1.8, 1.12, -8, -1.8, 0, -4, 1.8, 1.12, -8, -1.8, 1.12, -8], 3)); rampGeometry.computeVertexNormals();
       ramp = new THREE.Mesh(rampGeometry, new THREE.MeshStandardMaterial({ color: 0x668d9d, side: THREE.DoubleSide })); ramp.visible = false; if (!track) this.model.add(ramp);

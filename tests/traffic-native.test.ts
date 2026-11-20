@@ -69,11 +69,14 @@ test('streamed cars report stable Java IDs, poses, type and balanced appearance 
  types.dispatchQueuedEvents();assert.equal(jvm.get(listener,'calls').value,6);
  const last=bridge.spawn(model,pose)!;assert.ok(last);
  const adopted=traffic.registeredCar(last.id)!;const nativeId=types.getResource(adopted)!.resourceId;
+ types.getResource(adopted)!.resourceType=1; // Real streamed cars have a bound RPK resource.
  call('remTrafficCar',map,[jv('int',last.id)]);
  assert.equal(last.active(),false,'a police bot leaves normal traffic');
  assert.ok(types.get(adopted),'remTrafficCar keeps the vehicle adopted by Bot.followCar alive');
  assert.equal(types.getResource(adopted)!.resourceId,nativeId,'the Java car reference retains its original ID');
- last.remove();assert.ok(types.get(adopted),'a late stream cleanup cannot destroy the adopted car');
+ last.remove();last.remove();assert.ok(types.get(adopted),'a late stream cleanup cannot destroy the adopted car');
+ assert.equal(types.getResource(adopted)!.resourceId,nativeId);
+ assert.equal(types.getResource(adopted)!.destroyed,false);
  const cleanup=bridge.spawn(model,pose)!;assert.ok(cleanup);
  call('delTraffic',map,[]);assert.equal(cleanup.active(),false);assert.deepEqual(traffic.models(map),[]);assert.equal(bridge.available(model),false);
  traffic.dispose();

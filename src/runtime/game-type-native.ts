@@ -6,6 +6,7 @@ import type { ResourceCatalog } from './resource-catalog';
 import type { BootEvent } from './game-boot';
 import type { ResourceIdentity } from 'slrr-jvm';
 import { normalizeResourcePackPath } from '../assets';
+import { encodeTextureReference, decodeTextureReference, type SavedTextureIdentity } from './texture-reference';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
@@ -32,6 +33,33 @@ interface Notification {
 
 /** Connects interpreted GameRef/GameType methods to one persistent host game object. */
 export class GameTypeNative {
+  private textureLoader?: (source: string) => ResourceIdentity;
+  private readonly textureSources = new Map<string, string>();
+  private readonly textureBytes = new Map<number, Uint8Array>();
+  setTextureLoader(load: (source: string) => ResourceIdentity) { this.textureLoader = load; }
+  savedTextureIdentity(identity: ResourceIdentity): SavedTextureIdentity {
+    const source = this.textureSources.get(`${normalizeResourcePackPath(identity.pack)}:${identity.id}`);
+    return source ? { ...identity, source } : identity;
+  }
+  restoreTextureIdentity(identity: SavedTextureIdentity): JavaValue {
+    if (!identity.source) {
+      // A session-local number from an old save cannot identify a texture in
+      // this session: that slot may already belong to an unrelated decal.
+      const pack = normalizeResourcePackPath(identity.pack) === '__runtime/textures.rpk'
+        ? '__runtime/legacy-textures.rpk' : identity.pack;
+      return this.remountSavedResource(pack, identity.id);
+    }
+    if (!this.textureLoader) throw Error('Saved texture loader is not connected');
+    const mounted = this.textureLoader(identity.source);
+    const ref = this.remountSavedResource(mounted.pack, mounted.id);
+    this.textureSources.set(`${normalizeResourcePackPath(mounted.pack)}:${mounted.id}`, identity.source);
+    this.textureBytes.set(Number(ref.value), encodeTextureReference(identity.source));
+    return ref;
+  }
+  restoreEmbeddedTexture(bytes: Uint8Array): JavaValue | undefined {
+    const source = decodeTextureReference(bytes);
+    return source ? this.restoreTextureIdentity({ pack: '__runtime/textures.rpk', id: 0, source }) : undefined;
+  }
   private readonly nodes = new WeakMap<JavaObject, ResourceObject>();
   private readonly objects = new Map<number, ResourceObject>();
   private readonly liveByResourceId = new Map<number, GameObject>();
@@ -179,6 +207,7 @@ export class GameTypeNative {
       target.sceneLightManaged = source.sceneLightManaged;
       target.resourcePack = source.resourcePack;
       target.resourceScript = source.resourceScript;
+      target.embeddedBytes=source.embeddedBytes?.slice();
       target.params = source.params;
       target.alias = source.alias;
       target.setParent(source.parent);
@@ -601,6 +630,11 @@ export class GameTypeNative {
     node.resourceId = node.typeId = id;
     node.resourcePack = identity.pack;
     node.resourceType = 7;
+    // Decal(String) uses this native ID, whereas SDAT restoration uses a
+    // remounted ID. Both aliases must carry the same persistent source path.
+    const source = this.textureSources.get(`${normalizeResourcePackPath(identity.pack)}:${identity.id}`);
+    node.embeddedBytes = source ? encodeTextureReference(source) : undefined;
+    if (node.embeddedBytes) this.textureBytes.set(id, node.embeddedBytes);
   }
   resolveResourceIdentity(id: number): ResourceIdentity | undefined {
     return this.savedResources.get(id) ?? this.resolvePackedResource?.(id);
@@ -613,6 +647,17 @@ export class GameTypeNative {
     return this.catalog?.resolve(pack, local);
   }
   /** Remount a saved RPK entry independently of the current source dependency slots. */
+  createEmbeddedResource(kind:number,bytes:Uint8Array):JavaValue {
+    if (kind === 7) { const texture = this.restoreEmbeddedTexture(bytes); if (texture) return texture; }
+    const ref=jv('ResourceRef',{className:'java.util.resource.ResourceRef',fields:new Map()});
+    const node=this.allocate(ref);node.resourceId=this.nextClonedResourceId++;node.resourceType=kind;node.embeddedBytes=bytes.slice();
+    this.clonedResources.set(node.resourceId,node);return jv('int',node.resourceId);
+  }
+  embeddedResource(id:number){return this.clonedResources.get(id)?.embeddedBytes ?? this.textureBytes.get(id);}
+  updateEmbeddedResource(id:number,bytes:Uint8Array){
+    const node=this.clonedResources.get(id);if(!node||node.destroyed||!node.embeddedBytes)return false;
+    node.embeddedBytes=bytes.slice();return true;
+  }
   remountSavedResource(pack: string, localId: number): JavaValue {
     const identity = { pack: normalizeResourcePackPath(pack), id: localId & 0xffff };
     const key = `${identity.pack}:${identity.id}`;

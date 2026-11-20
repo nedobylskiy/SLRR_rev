@@ -1,7 +1,8 @@
 export type Triple = [number, number, number];
 export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
-export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
+export interface CfgFlap { pivot: Triple; axis: Triple; direction: Triple; low: number; high: number }
+export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple; flap?: CfgFlap }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple; render?: { resource: number; pose?: CfgPose } }
 export interface CfgCamera extends CfgPose { fov?: number }
 /** Original car config defaults; enginepower only overwrites supplied fields (00443f90). */
@@ -59,6 +60,10 @@ export function parsePartConfig(source: string): PartConfig {
       case 'bonepos':
         if (!slot) throw new Error(`CFG line ${line}: bonepos before slot`);
         slot.bonePosition = [number(0), number(1), number(2)]; break;
+      case 'flap':
+        if (!slot) throw new Error(`CFG line ${line}: flap before slot`);
+        slot.flap = { pivot: [number(0), number(1), number(2)], axis: [number(3), number(4), number(5)],
+          direction: [number(6), number(7), number(8)], low: number(9), high: number(10) }; break;
       case 'linked': {
         const links = args.map((_, i) => integer(i));
         result.links.push(links);

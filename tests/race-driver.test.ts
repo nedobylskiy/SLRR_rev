@@ -6,6 +6,25 @@ import type {RoadPoint} from '../src/formats/trc';
 import {SlrrJvm,jv} from 'slrr-jvm';import {GameTypeNative} from '../src/runtime/game-type-native';
 const plan=(_start:RoadPoint,finish:RoadPoint)=>({points:[[0,0,0],[0,0,-30],finish] as RoadPoint[],length:100,direction:[0,0,-1] as RoadPoint,roads:[1,2]});
 
+test('police follow a moving car, stop at the requested gap, and resume when it drives away',()=>{
+ let target:Vector3|undefined=new Vector3(0,0,-100),plans=0;
+ const driver=new RaceDriver((start,finish)=>{plans++;return {points:[start,finish],length:100,direction:[0,0,-1],roads:[1]};},2.7,.6,undefined,id=>id===42?target:undefined);
+ const command='AI_follow 0,0,10 42';
+ assert.ok(driver.update(command,new Vector3(),0,0,.02).throttle>0);
+ for(let i=0;i<20;i++){target!.z-=.1;driver.update(command,new Vector3(0,0,-i),0,10,.02);}
+ assert.equal(plans,1,'a moving target does not restart route planning each physics tick');
+ target!.set(20,0,-160);
+ for(let i=0;i<60;i++)driver.update(command,new Vector3(0,0,-20),0,10,.02);
+ assert.ok(plans>=2);
+ const near=target!.clone().add(new Vector3(0,0,5));
+ assert.equal(driver.update(command,near,0,0,.02).brake,true);
+ target!.z-=50;
+ assert.ok(driver.update(command,near,0,0,.02).throttle>0);
+ target=undefined;
+ assert.equal(driver.update(command,near,0,0,.02).throttle,0);
+ assert.equal(driver.update('AI_stop',near,0,0,.02).brake,true);
+});
+
 test('straight crossing releases steering inside its bounds and resumes pursuit afterwards',()=>{
  const driver=new RaceDriver((start,finish)=>({points:[start,[2,0,-20],finish],length:100,direction:[0,0,-1],roads:[1,2],
    straightCrossings:[{center:[0,0,-20],radius:8,direction:[0,0,-1]}]}));

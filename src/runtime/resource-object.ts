@@ -16,6 +16,8 @@ export class ResourceObject {
   resourceScript: string | null = null;
   /** ResourceRef.type(); zero until a host resource has been created. */
   resourceType = 0;
+  /** Host-authored resource data embedded in SDAT rather than referenced by RPK ID. */
+  embeddedBytes?:Uint8Array;
   /** setLight currently drives the existing scene sun/ambient bridge. */
   sceneLightManaged = false;
   /** Source resource ID when this binding was duplicated as an independent resource. */

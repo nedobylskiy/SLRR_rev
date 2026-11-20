@@ -6,13 +6,79 @@ import {PartNative} from '../src/runtime/part-native';
 import {parsePartConfig} from '../src/formats/cfg';
 import {partPaint,partPaintTextures,solidPartPaint} from '../src/render/part-paint';
 import type {EnginePart} from '../src/engine/world';
-import type {Assets} from '../src/assets';
+import {Assets} from '../src/assets';
 import {InputNative} from '../src/runtime/input-native';
 import {ControllerNative} from '../src/runtime/controller-native';
 import {Viewer} from '../src/render/viewer';
 import {EngineWorld} from '../src/engine/world';
 import {Group,Mesh,BoxGeometry,MeshStandardMaterial,DataTexture} from 'three';
 import {AssetTextureSources} from '../src/render/texture-source-cache';
+
+test('a legacy session-only texture cannot abort loading the vehicle',async()=>{
+  const assets=new Assets([],async()=>{throw Error('A synthetic texture pack is not a game file');});
+  assets.resource=async(pack)=>{
+    assert.equal(pack,'car.rpk');
+    return {packPath:pack,entry:{data:new TextEncoder().encode('sourcefile body.png\n')}} as Awaited<ReturnType<Assets['resource']>>;
+  };
+  const world=new EngineWorld(),part=world.create({key:{pack:'car.rpk',id:1},alias:'hood',cfgPath:'hood.cfg',config:parsePartConfig('texture 0x10')});
+  part.paintTexture={pack:'__runtime/textures.rpk',id:99};
+  assert.deepEqual(await partPaint(part,assets),{from:'body.png',to:'body.png'});
+  part.paintColor=0xff123456;
+  assert.deepEqual(await partPaint(part,assets),{from:'body.png',to:'body.png',color:0xff123456});
+  world.dispose();
+});
+
+test('a legacy decal brush cannot abort rebuilding the car, while registered runtime decals still render',async()=>{
+  const assets=new Assets([{path:'decals/logo.png',size:0}],async()=>new Uint8Array());
+  const world=new EngineWorld(),part=world.create({key:{pack:'car.rpk',id:1},alias:'hood',cfgPath:'hood.cfg',config:parsePartConfig('')});
+  const group=new Group(),material=new MeshStandardMaterial();material.userData.paintDefault='paint.png';
+  group.add(new Mesh(new BoxGeometry(1,1,1),material));
+  const legacy={position:[0,0,.5] as [number,number,number],normal:[0,0,1] as [number,number,number],color:0xffffffff,
+    brush:{pack:'__runtime/textures.rpk',id:99},size:.4,rotation:0,flip:false,temporary:false};
+  part.paintStrokes=[legacy];
+  const context={vehicleTextures:new AssetTextureSources(),textureFromPaintBrush:async()=>new DataTexture(new Uint8Array([255,255,255,255]),1,1),disposeGroup:()=>{}};
+  const project=(Viewer.prototype as unknown as {updatePartPaintStrokes:(part:EnginePart,assets:Assets,group:Group)=>Promise<void>}).updatePartPaintStrokes;
+  await project.call(context,part,assets,group);
+  assert.deepEqual(part.paintStrokes,[legacy],'unrecoverable legacy data remains intact');
+  part.paintStrokes=[legacy,{...legacy,brush:assets.registerTexture('decals/logo.png')}];
+  await project.call(context,part,assets,group);
+  const strokes=group.userData.paintStrokeGroup as Group;
+  assert.equal(strokes.children.length,1,'one missing legacy brush cannot hide a valid decal');
+  assert.ok(((strokes.children[0] as Group).children[0] as Mesh).geometry.getAttribute('position').count>0);
+  world.dispose();
+});
+
+test('leaving and rebuilding a garage scene republishes committed decals before showing the car',async()=>{
+  const scx=new Uint8Array([73,78,86,79,3,0,0,0]);
+  const assets={read:async()=>scx,runtimeTextureSource:()=>undefined,resource:async()=>({entry:{data:new TextEncoder().encode('sourcefile decal.png\n')}})} as unknown as Assets;
+  const saved=[{position:[0,0,.5] as [number,number,number],normal:[0,0,1] as [number,number,number],color:0xffffffff,
+    brush:{pack:'decals.rpk',id:8},size:.4,rotation:0,flip:false,temporary:false}];
+  const context={generation:0,model:new Group(),proxies:new Map(),collisionMeshes:new Map(),suspensionSkins:new Map(),
+    javaRaces:new Map(),javaDrivers:new Map(),vehicleTextures:new AssetTextureSources(),
+    profiler:{measure:(_name:string,work:()=>unknown)=>work()},
+    textureFromPaintBrush:async()=>new DataTexture(new Uint8Array([255,255,255,255]),1,1),
+    append:async(_parsed:unknown,_assets:unknown,_textures:unknown,group:Group)=>{
+      assert.equal(group.visible,false,'the actual scene builder hides the staged car');
+      const material=new MeshStandardMaterial();material.userData.paintDefault='paint.png';
+      group.add(new Mesh(new BoxGeometry(100,100,100),material));return [];
+    },
+    disposeGroup:(group:Group)=>group.traverse(object=>{if(object instanceof Mesh){object.geometry.dispose();
+      for(const material of Array.isArray(object.material)?object.material:[object.material])material.dispose();}}),
+  };
+  const viewer=context as unknown as Viewer;Object.setPrototypeOf(viewer,Viewer.prototype);
+  for(let visit=0;visit<3;visit++){
+    const world=new EngineWorld(),part=world.create({key:{pack:'car.rpk',id:1},alias:'hood',cfgPath:'hood.cfg',
+      config:parsePartConfig(''),model:{path:'hood.scx',textures:[]}});
+    part.paintStrokes=structuredClone([{...saved[0],brush:{pack:'__runtime/textures.rpk',id:99}},...saved]);
+    await viewer.showWorld(world,assets,true,true);
+    const group=context.proxies.get(part) as Group;
+    assert.equal(group.visible,true);
+    let vertices=0;group.userData.paintStrokeGroup.traverse((mesh:unknown)=>{if(mesh instanceof Mesh)vertices+=mesh.geometry.getAttribute('position').count;});
+    assert.ok(vertices>0,`garage visit ${visit+1} restores the decal geometry`);
+    viewer.removeWorld(world);world.dispose();
+    assert.equal(context.proxies.size,0);
+  }
+});
 
 test('native paint reaches the existing part immediately and a stale assembly cannot replace its overlay state',async()=>{
   const world=new EngineWorld(),part=world.create({key:{pack:'test.rpk',id:1},alias:'panel',cfgPath:'panel.cfg',config:parsePartConfig('texture 0x10')});part.nativeId=42;
@@ -28,11 +94,12 @@ test('native paint reaches the existing part immediately and a stale assembly ca
   assert.equal(rendered,strokes,'a delayed snapshot cannot remove strokes already drawn by the fast path');world.dispose();
 });
 
-test('spray and decal projection produces local geometry and removes a transient preview',async()=>{
+for (const staged of [false,true]) test(`spray and decal projection rebuilds on ${staged?'a staged garage re-entry':'a visible part'} and retains existing stroke meshes`,async()=>{
   const world=new EngineWorld(),part=world.create({key:{pack:'test.rpk',id:1},alias:'panel',cfgPath:'panel.cfg',config:parsePartConfig('texture 0x10')});
   const group=new Group(),material=new MeshStandardMaterial();material.userData.paintDefault='paint.png';
+  group.visible=!staged;group.userData.partLoading=staged;
   group.add(new Mesh(new BoxGeometry(1,1,1),material));
-  part.paintStrokes=[{position:[0,0,.5],normal:[0,0,1],color:0x66ff0000,brush:{pack:'garage.rpk',id:1},size:.3,rotation:0,flip:false,temporary:true}];
+  part.paintStrokes=[{position:[0,0,.5],normal:[0,0,1],color:0x66ff0000,brush:{pack:'garage.rpk',id:1},size:.3,rotation:0,flip:false,temporary:false}];
   const assets={resource:async()=>({entry:{data:new TextEncoder().encode('sourcefile brush.png\n')}}),read:async()=>new Uint8Array()} as unknown as Assets;
   let decoded=0;
   const context={vehicleTextures:new AssetTextureSources(),textureFromPaintBrush:async()=>{decoded++;return new DataTexture(new Uint8Array([255,255,255,255]),1,1);},disposeGroup:(root:Group)=>root.traverse(object=>{if(object instanceof Mesh){object.geometry.dispose();const materials=Array.isArray(object.material)?object.material:[object.material];for(const material of materials){(material as MeshStandardMaterial).map?.dispose();material.dispose();}}})};
@@ -69,6 +136,21 @@ test('Painter follows the cursor pick, commits strokes and clears only a tempora
   assert.equal(parts.paintStrokesFor(panel)?.length,1,'persistent spray survives flushing its preview');
   input.setPickedTarget();stroke(0);assert.equal(parts.paintStrokesFor(panel)?.length,1,'no paint hits the last car after the cursor leaves');
   jvm.natives.invoke('java.game.Painter','paintPart',painter,[cursor,jv('int',-1)]);assert.equal(parts.paintColorFor(panel),0xff00ff00);
+});
+
+test('a cross-panel stamp commits once per panel and clearing its preview removes it from every panel',()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null}),types=new GameTypeNative(jvm,()=>{}),parts=new PartNative(jvm,types);
+  const create=()=>{const ref=jv('GameRef',{className:'java.util.resource.GameRef',fields:new Map()});jvm.natives.invoke('java.lang.GameType','createNativeInstance',ref,[]);parts.configure(ref,parsePartConfig('texture 0x10'));return ref;};
+  const panels=[create(),create()],cursor=create(),painter=jv('Painter',{className:'java.game.Painter',fields:new Map()});
+  parts.setPaintPickReader(()=>({id:types.get(panels[0])!.resourceId,local:[0,0,0],world:[0,0,0],normal:[0,0,1]}));
+  parts.setPaintTargetsReader(()=>panels.map((panel,i)=>({id:types.get(panel)!.resourceId,position:[-i,0,0],normal:[0,0,1],tangent:[1,0,0]})));
+  const brush=jv('int',0x102);brush.resource={pack:'misc/garage.rpk',id:0x102};
+  const stamp=(temporary:number)=>jvm.natives.invoke('java.game.Painter','doPaint',painter,[cursor,jv('int',-1),brush,jv('int',temporary),jv('float',.3),jv('float',.7),jv('int',0)]);
+  stamp(0);stamp(1);
+  for(const panel of panels)assert.equal(parts.paintStrokesFor(panel)?.length,2);
+  jvm.natives.invoke('java.game.Painter','xPaint',painter,[panels[0]]);
+  for(const panel of panels){assert.equal(parts.paintStrokesFor(panel)?.length,1);assert.equal(parts.paintStrokesFor(panel)?.[0].rotation,.3);}
+  assert.deepEqual(parts.paintStrokesFor(panels[1])?.[0].position,[-1,0,0]);
 });
 
 test('Painter fills the picked paintable part through a GameRef alias without repainting its neighbours',()=>{

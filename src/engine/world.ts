@@ -76,6 +76,8 @@ export class EnginePart {
   paintStrokes?:readonly PaintStroke[];
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
+  /** Parent-space hinge motion; local retains the closed attachment pose. */
+  flapTransform?: Matrix4;
   /** Steering in parent axes, separate from suspension travel for linked arms. */
   readonly steeringTransform = new Matrix4();
   /** Experimental unsteered arm carrier, independent of hub tilt and wheel spin. */
@@ -91,7 +93,12 @@ export class EnginePart {
   get condition() { return this.health; }
   set condition(value: number) { if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid part condition'); this.health = value; }
   constructor(readonly world: EngineWorld, readonly id: number, readonly definition: PartDefinition) {}
-  matrix(): Matrix4 { return this.parent ? this.parent.matrix().multiply(this.local) : this.local.clone(); }
+  matrix(): Matrix4 {
+    if (!this.parent) return this.local.clone();
+    const frame = this.parent.matrix();
+    if (this.flapTransform) frame.multiply(this.flapTransform);
+    return frame.multiply(this.local);
+  }
 }
 
 export class EngineWorld {

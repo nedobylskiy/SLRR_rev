@@ -241,9 +241,17 @@ export class OsdButtonNative {
     const osd = this.object(this.requireObject(box.group).fields.get('osd'));
     const active = this.object(osd?.fields.get('actGadget'));
     // Publish the active editor before dispatching a different gadget's command.
-    // Do not send its submit command: that would also wake a modal dialog's wait.
-    if (osd && active && active !== gadget && this.jvm.isInstance(jv('Gadget', active), 'java.render.osd.StringInput'))
+    if (osd && active && active !== gadget && this.jvm.isInstance(jv('Gadget', active), 'java.render.osd.StringInput')) {
       this.jvm.set(jv('Osd', osd), 'stringValue', active.fields.get('inputString') ?? jv('String', ''));
+      const handler = this.object(osd.fields.get('globalHandler'));
+      if (Number(gadget.fields.get('cmd')?.value) === 0 && handler &&
+          this.jvm.isInstance(jv(handler.className, handler), 'java.render.osd.dialog.FileRequesterDialog')) {
+        // FileRequester stores fileName only on its editor's command. Keep
+        // actGadget set while publishing it: clearing focus would auto-submit
+        // the requester and then submit it a second time with the Save click.
+        await this.jvm.invokeAsync(jv(active.className, active), 'sendMessage');
+      }
+    }
     await this.jvm.invokeAsync(jv(gadget.className.split('.').at(-1)!, gadget), 'click');
   }
 

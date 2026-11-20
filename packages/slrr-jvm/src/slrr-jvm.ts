@@ -652,7 +652,9 @@ export class SlrrJvm implements JavaHost {
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
     if (this.options.allowNumericNarrowing && parameter === 'int' && ['float', 'double'].includes(argument.type)) return 6;
     if (sourceCall && this.options.allowNumericStringArguments && (parameter === 'String' || parameter === 'java.lang.String')
-      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 8;
+      // Dialect compatibility is a fallback. It must not beat a valid Java
+      // overload such as (Object,int) for an OSD handler and command number.
+      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 1000;
     if(sourceCall&&this.options.allowResourceHandleArguments
       &&this.resolveName(parameter)==='java.util.resource.GameRef'
       &&this.resolveName(argument.type)==='java.util.resource.ResourceRef')return 8;

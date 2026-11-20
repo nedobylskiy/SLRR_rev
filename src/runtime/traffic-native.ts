@@ -61,6 +61,9 @@ export class TrafficNative {
     this.gameTypes.queueStringEvent(target,entry.map,16,jv('String',`${command} ${node.resourceId}${command==='car_add'?` ${entry.id}`:''}`));
   }
   private remove(entry:Registration,permanent:boolean,destroyCar=true){
+    // A Bot may already have adopted this car. A delayed renderer cleanup owns
+    // only the former traffic registration, never the Bot's live vehicle.
+    if(!entry.valid)return;
     if(!entry.valid)return;
     if(entry.visible&&(!entry.individual||entry.notify))this.event(entry,'car_rem');entry.visible=false;
     if(permanent||!entry.individual){entry.valid=false;this.registrations.delete(entry.id);if(entry.individual)this.catalogs.set(entry.ground,(this.catalogs.get(entry.ground)??[]).filter(m=>m.registrationId!==entry.id));}

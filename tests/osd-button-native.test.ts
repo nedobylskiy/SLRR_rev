@@ -9,6 +9,69 @@ import { PhysicsRefNative } from '../src/runtime/physics-ref-native';
 const object = (className: string, fields: Record<string, JavaValue> = {}) =>
   jv(className.split('.').at(-1)!, { className, fields: new Map(Object.entries(fields)) });
 
+test('Save commits an active file-name editor before confirming, without auto-submitting twice', async () => {
+  const sources: Record<string,string> = {
+    'java.render.osd.Gadget': `package java.render.osd;
+      class Gadget { java.render.Osd osd; int cmd; void click() { osd.globalHandler.osdCommand(cmd); } }
+      class Button extends Gadget {}
+      class StringInput extends Gadget { String inputString; void sendMessage() {
+        osd.stringValue = inputString; osd.globalHandler.osdCommand(cmd);
+      } }`,
+    'java.render.Osd': `package java.render;
+      class Osd { java.render.osd.Gadget actGadget; String stringValue;
+        java.render.osd.dialog.FileRequesterDialog globalHandler; }
+      class Group {}
+      class Vector { Object[] data; int size() { return data.length; } Object elementAt(int i) { return data[i]; } }`,
+    'java.render.osd.dialog.FileRequesterDialog': `package java.render.osd.dialog;
+      class FileRequesterDialog { java.render.Osd osd; String fileName; int submissions; int cancels; int edits;
+        void osdCommand(int cmd) {
+          if (cmd == 200) { edits++; fileName = osd.stringValue; if (!osd.actGadget) osdCommand(0); }
+          if (cmd == 0 && fileName && fileName.length() > 0) submissions++;
+          if (cmd == 1) cancels++;
+        }
+      }`,
+  };
+  const jvm = new SlrrJvm({resolveImport:({className}) => {
+    const key=className.startsWith('java.render.osd.dialog.') ? 'java.render.osd.dialog.FileRequesterDialog'
+      : className.startsWith('java.render.osd.') ? 'java.render.osd.Gadget' : 'java.render.Osd';
+    return {path:key+'.java',source:sources[key]};
+  }});
+  await jvm.loadClass('java.render.osd.Gadget');
+  await jvm.loadClass('java.render.osd.StringInput');
+  await jvm.loadClass('java.render.osd.Button');
+  await jvm.loadClass('java.render.Osd');
+  await jvm.loadClass('java.render.Vector');
+  await jvm.loadClass('java.render.osd.dialog.FileRequesterDialog');
+  jvm.natives.register('java.lang.String','length',[],({receiver})=>jv('int',String(receiver.value).length));
+  const resources=new GameTypeNative(jvm,()=>{}), physics=new PhysicsRefNative(jvm,resources);
+  const bridge=new OsdButtonNative(jvm); bridge.setWorldPhysics(physics);
+  const osd=object('java.render.Osd',{cam:object('Camera')});
+  const handler=object('java.render.osd.dialog.FileRequesterDialog',{
+    osd,fileName:jv('String',null),submissions:jv('int',0),cancels:jv('int',0),edits:jv('int',0),
+  });
+  const editor=object('java.render.osd.StringInput',{osd,cmd:jv('int',200),inputString:jv('String','eggman')});
+  jvm.set(osd,'globalHandler',handler); jvm.set(osd,'actGadget',editor);
+  const phy=object('java.util.resource.PhysicsRef');
+  const button=object('java.render.osd.Button',{osd,phy,cmd:jv('int',0)});
+  const group=object('java.render.Group',{osd,active:jv('int',1),gadget:object('java.render.Vector',{data:jv('Object[]',[button])})});
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',group,[]);
+  jvm.natives.invoke('java.util.resource.PhysicsRef','createBox',phy,[jv('ResourceRef',group.value),jv('float',1),jv('float',1),jv('float',.001),jv('String','')]);
+  try {
+    await bridge.activate(phy);
+    assert.equal(jvm.get(handler,'fileName').value,'eggman');
+    assert.equal(jvm.get(handler,'submissions').value,1);
+    assert.equal(jvm.get(handler,'edits').value,1);
+    jvm.set(button,'cmd',jv('int',1));
+    jvm.set(editor,'inputString',jv('String','uncommitted'));
+    await bridge.activate(phy);
+    assert.equal(jvm.get(handler,'cancels').value,1);
+    assert.equal(jvm.get(handler,'fileName').value,'eggman','Cancel does not commit the editor');
+    jvm.set(button,'cmd',jv('int',0)); jvm.set(editor,'inputString',jv('String',''));
+    await bridge.activate(phy);
+    assert.equal(jvm.get(handler,'submissions').value,1,'an empty filename is still rejected');
+  } finally { bridge.dispose(); resources.dispose(); }
+});
+
 test('night-race menus get a background behind the text, following their Java group visibility', async () => {
   const jvm = new SlrrJvm({resolveImport: ({className}) => className === 'java.game.City'
     ? {path:'City.java',source:'package java.game; class City {}'}

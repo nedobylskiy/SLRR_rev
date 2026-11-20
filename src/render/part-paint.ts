@@ -1,19 +1,21 @@
 import {DataTexture,RGBAFormat,SRGBColorSpace,RepeatWrapping} from 'three';
 import type { Assets } from '../assets';
-import { normalizePath } from '../assets';
-import { entryProperties } from '../formats/rpk';
+import { normalizePath, resourceTextureSource } from '../assets';
 import type { EnginePart } from '../engine/world';
 
 export interface PartPaint { from: string; to: string; color?:number }
 export async function partPaint(part: EnginePart, assets: Assets): Promise<PartPaint | undefined> {
   const id = part.definition.config.texture;
   if (id === undefined) return;
-  const source = async (pack: string, id: number) => entryProperties((await assets.resource(pack, id)).entry)
-    .find(property => property.key === 'sourcefile')?.value;
+  const source = (pack: string, id: number) => resourceTextureSource(assets, { pack, id });
   const from = await source(part.definition.key.pack, id);
   if (!from) return;
   if(part.paintColor!==undefined)return {from,to:from,color:part.paintColor};
   const override = part.paintTexture;
+  // Older host saves wrote session-local texture numbers without their source
+  // path. Keep the vehicle loadable using its authored material in that case.
+  if (override?.pack === '__runtime/legacy-textures.rpk' || override?.pack === '__runtime/textures.rpk' && !assets.runtimeTextureSource(override.id))
+    return { from, to: from };
   const to = override ? await source(override.pack, override.id) : from;
   return to ? { from, to } : undefined;
 }

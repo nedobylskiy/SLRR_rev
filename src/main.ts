@@ -121,6 +121,8 @@ async function runGameBootNow() {
     if(source!==assets||run!==sequence||!viewer)return;
     void viewer.updateJavaPaint(id,color,strokes,source).catch(reason=>appendJavaEvent({level:'error',message:`Paint overlay: ${reason instanceof Error?reason.message:String(reason)}`}));
   });
+  result.parts.setPaintTargetsReader((hit,size)=>viewer?.javaPaintTargets(hit,size)??[]);
+  viewer?.setJavaFlapReader(id => result.parts.flapOpen(id));
   activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
   const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler,(code,hit)=>result.input.cursorEvent(code,hit,true));
   disposeMinimap=()=>minimap.dispose();

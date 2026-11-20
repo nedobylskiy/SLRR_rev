@@ -70,6 +70,18 @@ wheel .67 -.634 1.2 0 0 0 0 1 1 0`)});
   assert.equal(bindings.filter(binding=>binding.parked).length,1,'only the spectator car starts asleep without a driver');
   renderer.update(map,terrain,car=>[player,traffic].some(other=>types.get(other)===types.get(car)));
   assert.equal(shown.length,2,'unchanged models remain resident');
+  const stateFields=(state.value as JavaObject).fields;
+  const bot=stateFields.get('nrBot1')!;
+  stateFields.delete('nrBot1');
+  stateFields.set('alertedScouts',ref('Vector',{
+    elementCount:jv('int',1),elementData:jv('Object[]',[ref('PoliceScout',{bot}).value]),
+  }));
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',`AI_follow 0,0,10 ${types.get(player)!.resourceId}`)]);
+  await renderer.prepare(map,terrain,car=>[player,traffic].some(other=>types.get(other)===types.get(car)));
+  assert.equal(bindings.length,2,'a scout nested in City.alertedScouts retains its live AI binding');
+  assert.equal(control!.parked,false);
+  assert.match(control!.command()!,/^AI_follow /);
+  assert.ok(control!.target!(types.get(player)!.resourceId));
   renderer.dispose(); types.dispose();
 });
 

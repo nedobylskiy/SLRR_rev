@@ -15,7 +15,7 @@ export function raceTrafficContact(car:Pick<Vehicle3D,'body'|'vehicleContact'>,t
   return true;
 }
 
-export const RACE_COMMANDS=['AI_race','AI_suspend','AI_stop','AI_BeginRace','leave'] as const;
+export const RACE_COMMANDS=['AI_race','AI_follow','AI_suspend','AI_stop','AI_BeginRace','leave'] as const;
 /** NightRace modifies the current destination; it does not replace AI_race. */
 export function raceCommand(readLatest:(names:readonly string[])=>string|undefined):string|undefined {
   const main=readLatest(RACE_COMMANDS);
@@ -27,6 +27,7 @@ export interface JavaRaceControl {
   parked?:boolean;
   randomize?:boolean;
   command():string|undefined;
+  target?(id:number):Vector3|undefined;
   active():boolean;
   /** A new Java placement, excluding poses published by the physics itself. */
   placement?():{position:Vector3;yaw:number;velocity:Vector3}|undefined;
@@ -62,11 +63,15 @@ export class RaceDriver {
   private runout?:{finish:Vector3;direction:Vector3};
   nightRace=false;
   status='suspended';
-  constructor(private plan:(start:RoadPoint,finish:RoadPoint)=>RoadRoute|undefined,private wheelbase=2.7,private maxSteer=.6,private random?:()=>number){}
+  constructor(private plan:(start:RoadPoint,finish:RoadPoint)=>RoadRoute|undefined,private wheelbase=2.7,private maxSteer=.6,private random?:()=>number,
+    private target?:(id:number)=>Vector3|undefined){}
   update(command:string|undefined,position:Vector3,yaw:number,speed:number,dt:number):DrivingInput {
     if(command?.trim()==='AI_NightRace'&&this.goal)command=`${this.command.replace(/\s+AI_NightRace$/, '')} AI_NightRace`;
     this.replanDelay=Math.max(0,this.replanDelay-dt);
     this.routeRefresh=Math.max(0,this.routeRefresh-dt);
+    const follow = /^AI_follow\s+([\d.eE+,-]+)\s+(\d+)\s*$/.exec(command??'');
+    const followGoal = follow && this.target?.(Number(follow[2]));
+    const followDistance = follow ? Math.max(2, Math.abs(Number(follow[1].split(',')[2])) || 2) : 0;
     const replan=()=>{
       this.progress=0;this.points=[];this.replanDelay=1;this.routeRefresh=2;this.routeLength=0;
       const route=this.goal&&this.plan(position.toArray(),this.goal.toArray());
@@ -83,13 +88,21 @@ export class RaceDriver {
       this.command=command??'';this.points=[];this.progress=0;
       this.straightPass=undefined;
       this.blockedSeconds=this.reverseSeconds=this.previousThrottle=0;
-      const finish=command&&raceDestination(command);
+      const finish=followGoal?.toArray()??(command&&raceDestination(command));
       this.goal=finish?new Vector3(...finish):undefined;this.nightRace=!!finish&&/\sAI_NightRace(?:\s|$)/.test(command!);
       if(this.goal)this.runout=undefined;
       if(this.goal&&this.random){this.reaction=.05+this.random()*.4;this.launchRamp=.15+this.random()*.45;this.pace=.94+this.random()*.14;this.throttleScale=.88+this.random()*.12;this.launchTime=0;}
       if(this.goal)replan();else this.status='suspended';
     }
     const hold=():DrivingInput=>({throttle:0,steer:0,brake:true,brakeAxis:1,clutch:true});
+    if (follow) {
+      if (!followGoal) { this.status='suspended'; return hold(); }
+      if (position.distanceTo(followGoal)<=followDistance) { this.status='following'; return hold(); }
+      // Follow a moving target without restarting launch/recovery every frame.
+      if (!this.goal || this.goal.distanceTo(followGoal)>5 && this.replanDelay===0 || this.status==='following') {
+        this.goal=followGoal.clone(); replan();
+      }
+    }
     if(this.runout){
       if(speed>1&&position.clone().sub(this.runout.finish).dot(this.runout.direction)<10)
         return {throttle:0,steer:0,brake:false,start:true};
