@@ -1,3 +1,4 @@
+import {fullGeometry} from './lod-library';
 import {deformationNormals} from './deformation-normals';
 import * as THREE from 'three';
 import type { DeformablePanel, PanelBinding } from '../engine/deformable-panel';
@@ -40,10 +41,10 @@ export class PanelView {
     const meshes = group.children.filter((o): o is THREE.Mesh<THREE.BufferGeometry> => o instanceof THREE.Mesh);
     this.paintSkin=new PanelPaintSkin(group,meshes);
     meshes.forEach((mesh, index) => {
-      const position = mesh.geometry.getAttribute('position'), normals = mesh.geometry.getAttribute('normal');
+      const full = fullGeometry(mesh), position = full.getAttribute('position'), normals = full.getAttribute('normal');
       const samples = localPositions[index];
-      deformationNormals(mesh.geometry);
-      this.skins.push({ geometry: mesh.geometry, original: new Float32Array(position.array), normals: new Float32Array(normals.array), bindings: Array.from({ length: position.count }, (_, i) => panel.bind(samples.slice(i * 3, i * 3 + 3))) });
+      deformationNormals(full);
+      this.skins.push({ geometry: full, original: new Float32Array(position.array), normals: new Float32Array(normals.array), bindings: Array.from({ length: position.count }, (_, i) => panel.bind(samples.slice(i * 3, i * 3 + 3))) });
       mesh.frustumCulled = false;
     });
     this.group.matrix.identity(); this.group.matrixWorldNeedsUpdate = true;

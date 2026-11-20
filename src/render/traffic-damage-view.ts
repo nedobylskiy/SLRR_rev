@@ -1,3 +1,4 @@
+import {fullGeometry} from './lod-library';
 import {deformationNormals} from './deformation-normals';
 import { BufferGeometry, Group, Matrix4, Mesh, Vector3 } from 'three';
 import type { TrafficCrush } from '../engine/traffic-vehicle';
@@ -14,7 +15,7 @@ export class TrafficDamageView {
       this.group.traverse(object=>{
         if(!(object instanceof Mesh))return;
         for(let parent=object.parent;parent&&parent!==this.group;parent=parent.parent)if(parent.userData.trafficWheel)return;
-        const base=object.geometry,geometry=base.clone(),toRoot=inverse.clone().multiply(object.matrixWorld);
+        const base=fullGeometry(object),geometry=base.clone(),toRoot=inverse.clone().multiply(object.matrixWorld);
         deformationNormals(geometry);
         object.geometry=geometry;this.skins.push({mesh:object,geometry,base,original:new Float32Array(geometry.getAttribute('position').array),toRoot,fromRoot:toRoot.clone().invert()});
       });

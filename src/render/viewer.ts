@@ -123,6 +123,9 @@ import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 import { FixedClock } from '../runtime/fixed-clock';
 import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
 import {createTrafficSignals} from './traffic-signals';
+import {LodLibrary} from './lod-library';
+import {ObjectLod} from './object-lod';
+import {lodReach} from './lod-distance';
 
 type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[];panels:RivalPanelDefinition[]};
 type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;placed?:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView|RivalPanelView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
@@ -225,7 +228,17 @@ export class Viewer {
   private excludedNightMapInstances=0;
   private geometryCutoff=false;
   private staticBatching=false;
-  private autoMapLod=false;
+  private autoMapLod=true;
+  /** Generated meshoptimizer LOD chains shared by map objects and vehicles. */
+  private readonly lodLibrary=new LodLibrary();
+  readonly vehicleLod=new ObjectLod(this.lodLibrary);
+  private readonly vehicleLodRefresh=this.lodLibrary.onChange(()=>this.vehicleLod.refresh());
+  get lodInfo(){return `Vehicle LOD: ${this.vehicleLod.enabled?'on':'off'} · ${this.vehicleLod.size} tracked · ${this.lodLibrary.info}`;}
+  setVehicleLodEnabled(enabled:boolean){this.vehicleLod.enabled=enabled;}
+  private lodStrength=1;
+  get lodReachDistance(){return lodReach(this.mapStreamRange,this.lodStrength);}
+  /** Shared by map objects and vehicles: higher strength reaches the coarsest level closer to the camera. */
+  setLodStrength(strength:number){this.lodStrength=strength;this.mapStream?.setLodStrength(strength);this.nextStreamUpdate=-Infinity;}
   private tightMapFrustum=true;
   private globalFacadeBatching=false;
   private mapGlobalFacadeBatching=false;
@@ -348,6 +361,7 @@ export class Viewer {
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
     `Auxiliary map caster instances (excluded from main color): ${this.mapStream?.auxiliaryVisible??0}`,
+    this.lodInfo,
     ...(this.mapStream?[this.mapStream.chunkInfo,this.mapStream.optimizationInfo,this.mapStream.treeInfo,this.mapStream.cachedCellInfo,this.mapStream.globalFacadeInfo]:[]),
     ...this.rayOcclusion.lines(),...this.gpuOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
@@ -536,7 +550,7 @@ export class Viewer {
   async setTrafficCount(count:number){
     if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error(`Traffic count must be an integer from 0 to ${MAX_TRAFFIC_CARS}`);
     this.trafficCount=count;this.trafficTestEnabled=true;
-    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;car.group.visible=false;car.voice?.setActive(false);}});
+    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;this.showTrafficCar(car,false);car.voice?.setActive(false);}});
     if(this.mapRoadSource&&(!this.trafficControl||this.trafficCars.length<count))await this.restartTrafficTest(true);
   }
   private trafficFocus(){return this.trafficPeer?.body.position??this.mapStreamFocus??this.camera.position;}
@@ -792,6 +806,9 @@ export class Viewer {
       // inspection switch bypasses it. Keep the filter active for ALL passes.
       if(!(this.inspection.enabled&&this.inspectResident))
         this.profiler.measure('Scene visibility CPU',()=>this.sceneVisibility.apply(this.camera,this.mapStream?this.mapStreamRange:Infinity,this.visibilityObjects()));
+      // Pedestrians load lazily; tracking an already tracked mount is a map lookup.
+      if(this.pedestrianCrowd)for(const mount of this.pedestrianCrowd.mounts)this.vehicleLod.track(mount,1,{skinned:true});
+      this.profiler.measure('Vehicle LOD CPU',()=>this.vehicleLod.update(this.camera.position,this.lodReachDistance));
       this.profiler.beginGpu();
       this.inspection.helpers.visible=false;
       if(this.mapRoadDebug)this.mapRoadDebug.root.visible=false;
@@ -1204,7 +1221,15 @@ export class Viewer {
     this.trafficSignalError=undefined;
     this.trafficModelErrors.clear();this.trafficTestStatus='Traffic test off';
   }
-  private disposeTrafficCar(test:TrafficTestCar){test.java?.remove();test.java=undefined;test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
+  /**
+   * Hidden residents leave the scene graph: three.js recomputes world matrices of invisible objects too, and a
+   * few hundred parked cars of ~50 nodes each otherwise cost more per frame than the whole visible city.
+   */
+  private showTrafficCar(test:TrafficTestCar,shown:boolean){
+    test.group.visible=shown;
+    if(!shown)test.group.removeFromParent();else if(!test.group.parent)this.scene.add(test.group);
+  }
+  private disposeTrafficCar(test:TrafficTestCar){this.vehicleLod.untrack(test.group);test.java?.remove();test.java=undefined;test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
   async setTrafficPairEnabled(enabled:boolean){await this.setTrafficCount(enabled?2:1);}
   private trafficTemplate(assets:Assets,key:TrafficModel=DEFAULT_TRAFFIC_MODELS[0]):Promise<TrafficTemplate>{
     let cache=this.trafficTemplates.get(assets);if(!cache){cache=new Map();this.trafficTemplates.set(assets,cache);}
@@ -1298,7 +1323,8 @@ export class Viewer {
         const route=new RoadTrafficCar(roads.network,this.trafficFocus());
         const lamps=await createTrafficLamps(template.lamps,source.assets);
         if(!current()){lamps.dispose();return;}
-        const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
+        // Track before lamps join the car: lamp glows are not surfaces to simplify.
+        const group=template.group.clone(true);this.vehicleLod.track(group);group.matrixAutoUpdate=false;group.add(lamps.group);
         const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
         vehicle.place(route.position,route.direction,template.height);
         const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
@@ -1311,7 +1337,6 @@ export class Viewer {
       this.trafficCars.push(...staged);
       this.trafficControl=control;
       const cars=staged.splice(0);for(const test of cars){
-        this.scene.add(test.group);
         const occupied=this.trafficCars.filter(car=>car.placed).map(car=>this.trafficOccupant(car.vehicle.body));
         const bounds=test.vehicle.body.bounds,bodyRadius=Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5;
         const spawn=test.model.registrationId?this.registeredTrafficSpawn(test.model):worldTrafficSpawn(this.trafficSpawns!,occupied,bodyRadius,this.trafficFocus());
@@ -1341,7 +1366,7 @@ export class Viewer {
     test.bot=initializeTrafficMotion(route,test.lod,this.trafficControl,peers);
     test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
     test.java?.remove();test.java=undefined;test.placed=true;
-    test.active=false;test.group.visible=false;
+    test.active=false;this.showTrafficCar(test,false);
   }
   private wakeTrafficResident(test:TrafficTestCar){
     if(this.javaTrafficBridge){
@@ -1377,11 +1402,11 @@ export class Viewer {
       }
       const wanted=i<this.trafficCount&&test.placed&&available&&trafficResidentActive(test.vehicle.body.position,center,activation,test.active)&&!this.trafficControl.roadHalted(test.car.roadId);
       if(!wanted||test.java&&!test.java.active()){
-        test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;
+        test.java?.remove();test.java=undefined;test.active=false;this.showTrafficCar(test,false);
       }else{
         if(!test.active)this.wakeTrafficResident(test);
         const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
-        test.group.visible=test.active&&distance<=this.mapStreamRange;
+        this.showTrafficCar(test,test.active&&distance<=this.mapStreamRange);
       }
       test.voice?.setActive(test.active&&test.group.visible);
     }
@@ -1449,7 +1474,7 @@ export class Viewer {
     this.profiler.record('Rival panels CPU',rivalPanelCpu);
   }
   private resetRoadDebug() {
-    this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
+    this.pedestrianCrowdRevision++;if(this.pedestrianCrowd)this.vehicleLod.untrackWithin(this.pedestrianCrowd.root);this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
     this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
     this.stopTrafficTest();this.javaTrafficBridge=undefined;this.javaTrafficTypes=undefined;this.javaTrafficEligible=undefined;
     this.mapTrafficFixtures=[];
@@ -1486,7 +1511,7 @@ export class Viewer {
   async showWalkingPedestrians(enabled:boolean){
     this.walkingPedestriansEnabled=enabled;
     const revision=++this.pedestrianCrowdRevision,source=this.mapRoadSource,mapRevision=this.mapRoadRevision;
-    this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
+    if(this.pedestrianCrowd)this.vehicleLod.untrackWithin(this.pedestrianCrowd.root);this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
     this.pedestrianCrowdStatus=enabled?'Loading walking pedestrians…':'Walking pedestrians off';
     if(!enabled)return;
     if(!source){this.pedestrianCrowdStatus='No map loaded';return;}
@@ -1524,6 +1549,7 @@ export class Viewer {
   dispose() {
     this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);document.removeEventListener('keydown',this.trafficAudioStart,true);document.removeEventListener('visibilitychange',this.ambienceVisibility);this.stopTrafficTest();this.trafficAudio?.dispose();
     for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
+    this.vehicleLod.dispose();this.vehicleLodRefresh();this.lodLibrary.dispose();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
@@ -1847,6 +1873,7 @@ export class Viewer {
         }catch(error){warnings.push(`Suspension skin ${part.definition.alias}: ${String(error)}`);}
       }
       for (const group of staged) delete group.userData.partLoading;
+      for(const [part,group] of this.proxies)if(part.world===world)this.vehicleLod?.track(group);
       this.syncWorldVisuals(world);
     }
     if (generation === this.generation && !keepScene) this.fit();
@@ -1943,7 +1970,7 @@ export class Viewer {
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setStaticBatching(this.staticBatching);
-    stream.setAutoLod(this.autoMapLod);
+    stream.setLodLibrary(this.lodLibrary);stream.setAutoLod(this.autoMapLod);stream.setLodStrength(this.lodStrength);
     stream.setTightFrustum(this.tightMapFrustum);
     for(const category of this.hiddenMapCategories)stream.setCategoryHidden(category,true);
     stream.setMaterialSharing(this.sharedMapMaterials);
@@ -2868,6 +2895,8 @@ export class Viewer {
     }});
   }
   private disposeGroup(group: THREE.Group): void {
+    // Generated level views share vertex buffers; restore the owned geometry before disposing it.
+    this.vehicleLod?.untrackWithin(group);
     group.traverse(object => {
       object.userData.disposeVehicleLight?.();
       if (object instanceof Lensflare) return;

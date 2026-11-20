@@ -54,6 +54,7 @@
   },
   "dependencies": {
     "cannon-es": "^0.20.0",
+    "meshoptimizer": "1.3.0",
     "slrr-jvm": "file:packages/slrr-jvm",
     "slrr-jvm-decompiler": "github:nedobylskiy/SLRR-JVM-decompiler#54f953d",
     "three": "^0.180.0"

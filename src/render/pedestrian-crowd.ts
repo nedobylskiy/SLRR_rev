@@ -39,6 +39,8 @@ export class PedestrianCrowd {
       yield {object:actor.mount,bounds:new Box3().setFromCenterAndSize(point,new Vector3(2,actor.height+.5,2))};
     }
   }
+  /** Walking mounts (active or parked for reuse); each holds one skinned character. */
+  get mounts(){return this.actors.map(actor=>actor.mount);}
   get inspectionPoint(){const actor=this.actors.find(a=>a.active);return actor?.character.ragdollPosition??actor?.walker.position.clone();}
   configure(count:number,radius:number){
     if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');

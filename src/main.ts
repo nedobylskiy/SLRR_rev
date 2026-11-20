@@ -18,6 +18,7 @@ import { parseRpk, entryProperties } from './formats/rpk';
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
+import { LOD_STRENGTH_MAX } from './render/lod-distance';
 import { defaultSuspensionDebug, type SuspensionDebugSettings } from './render/suspension-debug';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
@@ -517,13 +518,18 @@ lodButton.onclick=()=>{
   const label=textElement('label','Detail '),slider=document.createElement('input'),value=document.createElement('output'),info=document.createElement('output');
   slider.type='range';slider.min='1';slider.max='100';slider.step='1';slider.value='100';slider.setAttribute('aria-label','LOD remaining detail');label.append(slider,value);
   const wireLabel=textElement('label','Wireframe'),wire=document.createElement('input');wire.type='checkbox';wireLabel.prepend(wire);
-  const reset=textElement('button','Original');row.append(search,models,label,wireLabel,reset);vinControls.append(row,info);
+  const choice=(name:string,options:[string,string][])=>{const select=document.createElement('select');select.setAttribute('aria-label',name);for(const [v,text] of options){const option=document.createElement('option');option.value=v;option.textContent=text;select.append(option);}return select;};
+  const mode=choice('LOD simplification mode',[['quality','Quality (attribute-aware)'],['aggressive','Aggressive (sloppy)']]);
+  const textureLevels=choice('LOD texture size',[['auto','Textures: auto'],['0','Textures: full'],['1','Textures: 1/2'],['2','Textures: 1/4'],['3','Textures: 1/8'],['4','Textures: 1/16']]);
+  const reset=textElement('button','Original');row.append(search,models,label,mode,textureLevels,wireLabel,reset);vinControls.append(row,info);
   let lab:Awaited<ReturnType<NonNullable<typeof viewer>['showLodPlayground']>>|undefined,loadRevision=0;
-  const update=()=>{value.textContent=`${slider.value}%`;lab?.setRatio(Number(slider.value)/100,message=>{if(sequence===opening)info.textContent=message;});};
+  const update=()=>{value.textContent=`${slider.value}%`;lab?.apply({ratio:Number(slider.value)/100,mode:mode.value as 'quality'|'aggressive',textureLevels:textureLevels.value==='auto'?'auto':Number(textureLevels.value)},message=>{if(sequence===opening)info.textContent=message;});};
   const load=async()=>{
     const path=models.value;if(!path)return;const revision=++loadRevision;lab=undefined;slider.disabled=true;status('Loading LOD model…');
     try{
-      const [model,textures]=await Promise.all([assets.read(path).then(parseScxAsync),companionTextures(path)]);
+      const [model,companion]=await Promise.all([assets.read(path).then(parseScxAsync),companionTextures(path)]);
+      // Vehicle and part meshes have no .tex file; their texture slots live on the RPK render resource.
+      const textures=companion.length?companion:await assets.texturesForModelSource(path)??[];
       if(sequence!==opening||revision!==loadRevision)return;
       const next=await viewer!.showLodPlayground(model,assets,textures);
       if(sequence!==opening||revision!==loadRevision)return;
@@ -534,8 +540,8 @@ lodButton.onclick=()=>{
   const files=assets.files.filter(file=>/\.scx$/i.test(file.path)).sort((a,b)=>a.path.localeCompare(b.path));
   const filter=()=>{const previous=models.value,query=search.value.toLowerCase();models.replaceChildren();for(const file of files.filter(file=>file.path.toLowerCase().includes(query))){const option=document.createElement('option');option.value=option.textContent=file.path;models.append(option);}if([...models.options].some(option=>option.value===previous))models.value=previous;};
   filter();const initial=files.find(file=>/baiern.*(hood|chassis).*\.scx$/i.test(file.path));if(initial)models.value=initial.path;
-  search.oninput=filter;models.onchange=()=>{void load();};slider.oninput=update;wire.onchange=()=>lab?.wireframe(wire.checked);reset.onclick=()=>{slider.value='100';update();};
-  el('format').textContent='LOD / MODEL SIMPLIFICATION';el('details').textContent='Experimental edge-collapse simplification in a worker. Detail controls the remaining vertex budget per material section; actual triangle reduction is shown above. UVs, normals and vertex colors are retained where supported. Extra attribute channels and grouped geometry keep their original shape. This preview does not change world LOD settings.';
+  search.oninput=filter;models.onchange=()=>{void load();};slider.oninput=update;mode.onchange=textureLevels.onchange=update;wire.onchange=()=>lab?.wireframe(wire.checked);reset.onclick=()=>{slider.value='100';update();};
+  el('format').textContent='LOD / MODEL SIMPLIFICATION';el('details').textContent='meshoptimizer edge-collapse simplification in a worker. Detail is the whole-model triangle budget: one geometric error threshold is searched across all material sections, so small parts collapse or disappear before large surfaces lose their outline. Quality mode weighs normals, UVs and vertex colours and keeps UV seams intact; Aggressive clusters vertices without preserving topology, for distant LODs. Vertices are never moved, so every channel (lightmap, detail and reflection UVs) stays exact. Textures drop whole DDS mip levels; auto removes one level per 4× fewer triangles. This preview does not change world LOD settings.';
   el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Detail 100% restores the original';void load();
 };
 const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';lodButton.after(suspensionButton);
@@ -741,9 +747,24 @@ staticBatchCheck.type='checkbox';staticBatchLabel.prepend(staticBatchCheck);mapD
 staticBatchLabel.title='Experimental: combine compatible opaque parts by material and 128 m cell within each streamed model. Original geometry stays cached for comparison.';
 staticBatchCheck.onchange=()=>viewer?.setStaticBatchingEnabled(staticBatchCheck.checked);
 const autoLodLabel=textElement('label','Generated map LOD'),autoLodCheck=document.createElement('input');
-autoLodCheck.type='checkbox';autoLodLabel.prepend(autoLodCheck);mapDebugOptions.append(autoLodLabel);
-autoLodLabel.title='Experimental: quality-checked closed opaque surfaces only, far at 200 m / near 160 m. Open facades, cutout foliage and unsupported extra UV channels stay original.';
+autoLodCheck.type='checkbox';autoLodCheck.checked=true;autoLodLabel.prepend(autoLodCheck);mapDebugOptions.append(autoLodLabel);
+autoLodLabel.title='meshoptimizer levels per placement: 100% to 40 m, then 90% … 20% at the view distance (finer steps near the camera). Opaque parts and their layer passes; cutout leaf/fence cards and blended parts stay original.';
 autoLodCheck.onchange=()=>viewer?.setAutoMapLodEnabled(autoLodCheck.checked);
+const vehicleLodLabel=textElement('label','Generated vehicle LOD'),vehicleLodCheck=document.createElement('input');
+vehicleLodCheck.type='checkbox';vehicleLodCheck.checked=true;vehicleLodLabel.prepend(vehicleLodCheck);mapDebugOptions.append(vehicleLodLabel);
+vehicleLodLabel.title='Traffic and world vehicles switch whole-car meshoptimizer levels by camera distance with the same 40 m → view-distance scale. Dents keep showing at every level.';
+vehicleLodCheck.onchange=()=>viewer?.setVehicleLodEnabled(vehicleLodCheck.checked);
+const lodStrengthStorageKey='slrr.graphics.lodStrength.v1';
+const lodStrengthLabel=textElement('label',''),lodStrengthValue=textElement('span',''),lodStrengthSlider=document.createElement('input');
+lodStrengthSlider.type='range';lodStrengthSlider.min='1';lodStrengthSlider.max=String(LOD_STRENGTH_MAX);lodStrengthSlider.step='0.25';lodStrengthSlider.value='1';
+try{const saved=Number(localStorage.getItem(lodStrengthStorageKey));if(saved>=1&&saved<=LOD_STRENGTH_MAX)lodStrengthSlider.value=String(saved);}catch{ /* Keep the default when browser storage is unavailable. */ }
+lodStrengthSlider.setAttribute('aria-label','LOD strength');lodStrengthLabel.append(lodStrengthValue,lodStrengthSlider);mapDebugOptions.append(lodStrengthLabel);
+lodStrengthLabel.title='Brings the coarsest level (20%) closer: the view distance divided by this strength, never inside 60 m. Full detail stays within 40 m. Applies to map objects, vehicles and pedestrians. Saved in this browser.';
+const showLodStrength=()=>{const strength=Number(lodStrengthSlider.value);lodStrengthValue.textContent=`LOD strength: ${strength.toFixed(2)}× · 20% from ${Math.round(viewer?.lodReachDistance??0)} m`;};
+lodStrengthSlider.oninput=()=>{
+  try{localStorage.setItem(lodStrengthStorageKey,lodStrengthSlider.value);}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setLodStrength(Number(lodStrengthSlider.value));showLodStrength();
+};
 const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
 const tightFrustumLabel=textElement('label','Per-part frustum culling'),tightFrustumCheck=document.createElement('input');
 tightFrustumCheck.type='checkbox';tightFrustumCheck.checked=true;tightFrustumLabel.prepend(tightFrustumCheck);mapDebugOptions.append(tightFrustumLabel);
@@ -941,7 +962,7 @@ streamRangeInput.setAttribute('aria-label', 'Streaming radius in meters');
 const updateStreamRange = () => {
   const value = Number(streamRangeInput.value);
   streamRangeValue.textContent = `Streaming radius: ${value} m`;
-  viewer?.setMapStreamRange(value);
+  viewer?.setMapStreamRange(value);showLodStrength();
 };
 streamRangeInput.oninput = updateStreamRange;
 streamRangeLabel.append(streamRangeValue, streamRangeInput); mapDebugPanel.append(streamRangeLabel);
@@ -1624,7 +1645,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); viewer.setLodStrength(Number(lodStrengthSlider.value)); showLodStrength(); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

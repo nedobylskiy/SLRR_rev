@@ -119,6 +119,39 @@ export class Assets {
     return { path: model.path, textures: textures.length ? textures : model.textures };
   }
 
+  /**
+   * Reverse lookup for a bare SCX path: find the mesh resource whose sourcefile names it, then the
+   * render resource that points at that mesh, and return its RSD texture slots. Packs in ancestor
+   * folders are searched first, then the rest of the same top-level folder.
+   */
+  async texturesForModelSource(path: string): Promise<string[] | undefined> {
+    const wanted = new Set([normalizePath(path), normalizePath(path.replace(/\.scx$/i, '.scy'))]);
+    const directory = (file: string) => file.slice(0, file.lastIndexOf('/') + 1);
+    const folder = directory(normalizePath(path)), top = folder.split('/')[0] + '/';
+    const packs = [...this.byPath.keys()].filter(file => file.endsWith('.rpk') && file.startsWith(top))
+      .sort((a, b) => Number(folder.startsWith(directory(b))) - Number(folder.startsWith(directory(a)))
+        || directory(b).length - directory(a).length);
+    for (const packPath of packs) {
+      let pack: RpkPack;
+      try { pack = await this.pack(packPath); } catch { continue; }
+      const meshes = pack.entries.filter(entry => {
+        const source = entryProperties(entry).find(p => p.key === 'sourcefile')?.value;
+        if (!source) return false;
+        try { return wanted.has(normalizePath(source)); } catch { return false; }
+      });
+      for (const mesh of meshes) for (const entry of pack.entries) {
+        const reference = entryProperties(entry).find(p => p.key === 'mesh');
+        if (!reference) continue;
+        try {
+          const location = await this.resourceLocation(packPath, parseRid(reference.value));
+          if (location.id !== mesh.typeId || normalizePath(location.packPath) !== normalizeResourcePackPath(packPath)) continue;
+          const model = await this.modelForResource(packPath, entry.typeId);
+          if (model.textures.length) return model.textures;
+        } catch { /* An unrelated broken render entry must not hide a valid one. */ }
+      }
+    }
+  }
+
   private resourceOverride(packPath: string, localId: number, overrides?: ResourceOverrides) {
     if (!overrides) return undefined;
     const normalizedPack = normalizeResourcePackPath(packPath);
