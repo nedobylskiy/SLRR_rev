@@ -1,6 +1,15 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {Box3,Vector3} from 'three';
-import {RigidBody3D} from '../src/engine/rigid-body-3d';import {pedestrianCarContact} from '../src/engine/pedestrian-contact';
+import {RigidBody3D} from '../src/engine/rigid-body-3d';import {pedestrianCarContact,ragdollUpdateNeeded} from '../src/engine/pedestrian-contact';
 const makeCar=()=>new RigidBody3D(1200,new Box3(new Vector3(-1,0,-2),new Vector3(1,1.4,2)));
+
+test('offscreen ragdolls skip work except when a nearby car can still hit them',()=>{
+ const point=new Vector3(),car=makeCar();car.position.set(100,0,0);
+ assert.equal(ragdollUpdateNeeded(point,1.8,false,[car]),false);
+ assert.equal(ragdollUpdateNeeded(point,1.8,true,[car]),true);
+ assert.equal(ragdollUpdateNeeded(point,1.8,true,[car],0),false);
+ car.position.set(3,0,0);assert.equal(ragdollUpdateNeeded(point,1.8,false,[car]),true);
+ car.position.set(15,0,0);car.velocity.set(-120,0,0);assert.equal(ragdollUpdateNeeded(point,1.8,false,[car]),true,'include fast car travel before the next update');
+});
 test('vehicle sweep catches a pedestrian between frames, while near misses and a different deck do not trigger ragdoll',()=>{
  const car=makeCar();car.position.set(-5,.7,0);const previous=car.matrix();car.position.x=5;car.velocity.x=30;
  const hit=pedestrianCarContact(new Vector3(),1.8,.25,new Vector3(),car,previous);assert.ok(hit);assert.ok(hit.fraction>0&&hit.fraction<1);assert.ok(hit.impulse.x>0);assert.ok(hit.point.toArray().every(Number.isFinite));

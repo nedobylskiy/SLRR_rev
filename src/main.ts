@@ -81,7 +81,9 @@ function appendJavaEvent(event: BootEvent) {
   el('java-log').append(line);
   el('java-log').scrollTop = el('java-log').scrollHeight;
 }
-async function runGameBoot() {
+let gameBootReady:Promise<void>|undefined;
+function runGameBoot(){return gameBootReady=runGameBootNow();}
+async function runGameBootNow() {
   if (!assets) return;
   await softBodyReady;
   disposeJavaScene?.(); disposeJavaScene = undefined;
@@ -112,19 +114,29 @@ async function runGameBoot() {
     settings => { if (source === assets && run === sequence) viewer?.setMapFog(settings); },
     settings => { if (source === assets && run === sequence) viewer?.setSceneLight(settings); },
     texture => source === assets && run === sequence ? viewer?.setGlobalEnvmap(texture) : undefined,
-    flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined);
+    flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined,
+    work => viewer ? viewer.profiler.measure('Java OSD sync CPU', work) : work());
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
+  result.parts.setPaintListener((id,color,strokes)=>{
+    if(source!==assets||run!==sequence||!viewer)return;
+    void viewer.updateJavaPaint(id,color,strokes,source).catch(reason=>appendJavaEvent({level:'error',message:`Paint overlay: ${reason instanceof Error?reason.message:String(reason)}`}));
+  });
+  result.parts.setPaintTargetsReader((hit,size)=>viewer?.javaPaintTargets(hit,size)??[]);
+  viewer?.setJavaFlapReader(id => result.parts.flapOpen(id));
   activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
-  const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);});
+  const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler,(code,hit)=>result.input.cursorEvent(code,hit,true));
   disposeMinimap=()=>minimap.dispose();
   disposeGameBoot = () => {disposeMinimap?.();disposeMinimap=undefined;activeNavigator=undefined;activeBoot=undefined;result.dispose();};
-  viewer?.setJavaSceneCamera(() => javaSceneCamera(result),
-    () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value));
-  const detachKeyboard = result.input.attachBrowserKeyboard(window);
+  viewer?.setJavaSceneCamera(() => javaSceneCamera(result,true),
+    () => Number(result.jvm.get(jv('class', 'java.game.GameLogic'), 'time').value),()=>result.system.timeScale,()=>music?.getVolume(0)??1);
+  let sceneBlocked=()=>false,sceneInputBlocked=()=>false;
+  const detachKeyboard = result.input.attachBrowserKeyboard(window,()=>!sceneInputBlocked());
   const javaMouse = new JavaMouse(el('viewport'), result, source,
     message => appendJavaEvent({ level: 'error', message }), (x, y) => viewer?.pickJavaPart(x, y));
   const poll = window.setInterval(() => {
     try {
+      sceneBlocked();
+      if(sceneInputBlocked())return;
       if(viewer)viewer.profiler.measure('Java input poll CPU',()=>{result.horns.update();result.input.pollCooperative();});
       else {result.horns.update();result.input.pollCooperative();}
     }
@@ -148,6 +160,11 @@ async function runGameBoot() {
   } else if (viewer) {
     const javaControls = javaDrivingControls(result);
     const sceneVehicles = new JavaSceneVehicles(result, source, viewer, message => appendJavaEvent({ level: 'error', message }));
+    const drivingVehicleExcluded=(ref:import('slrr-jvm').JavaValue)=>{
+      const player=result.jvm.get(jv('class','java.game.GameLogic'),'player');
+      const car=player.value!=null?result.jvm.get(player,'car'):undefined;
+      return car?.value!=null&&result.gameTypes.getResource(ref)===result.gameTypes.getResource(car)||result.traffic.ownsCar(ref);
+    };
     viewer.setPerformanceContext(()=>[
       `Java scheduler: ${animating?`animating for ${(performance.now()-animateStartTime).toFixed(1)} ms`:'idle'} · skipped animation ticks ${animationSkipped} · animate period 50 ms · scene poll period 150 ms · map loading ${loadingTrack?'yes':'no'}`,
       `Java native registry: ${JSON.stringify(result.gameTypes.runtimeStats())} (allocated instances are not automatically animated)`,
@@ -173,9 +190,38 @@ async function runGameBoot() {
     };
     let sceneTerrain: Awaited<ReturnType<Viewer['showMap']>>['terrain'] | undefined;
     let loadedTrackKey = '', loadedTrackState: unknown, activeTrackCleanup: (() => void) | undefined;
+    let trackReady=false;
+    const trackKey=(selected:NonNullable<ReturnType<typeof activeJavaTrack>>)=>{
+      const start=selected.start?[selected.start.x,selected.start.y,selected.start.z,selected.start.yaw].map(v=>v.toFixed(3)).join(','):'';
+      return `${selected.mapPack}:${selected.mapResourceId}|${selected.chassis?.pack??''}|${selected.chassis?.id??''}|${start}`;
+    };
+    const sceneAssetsPending=()=>{
+      const selected=activeJavaTrack(result);
+      const actual=result.jvm.get(jv('class','java.game.GameLogic'),'actualState');
+      return selected?loadingTrack||!trackReady||loadedTrackState!==selected.state.value||loadedTrackKey!==trackKey(selected)
+        :actual.value!=null&&result.jvm.isInstance(actual,'java.game.Track');
+    };
+    result.system.setLoadingReader(sceneAssetsPending);
+    // The original loading dialog may require Enter/click after assets finish.
+    sceneInputBlocked=sceneAssetsPending;
+    let wasSceneBlocked=false;
+    sceneBlocked=()=>{
+      const pending=sceneAssetsPending();
+      let loadingDialog=false;
+      try{
+        const screen=result.jvm.get(jv('class','java.render.Frontend'),'loadingScreen');
+        loadingDialog=screen.value!=null&&result.jvm.get(screen,'loadingDialog').value!=null;
+      }catch{/* Installations without the Java loading-screen class. */}
+      const blocked=pending||loadingDialog;
+      if(blocked&&!wasSceneBlocked)result.input.clearPhysicalInput();
+      wasSceneBlocked=blocked;
+      result.system.setSceneLoading(blocked);
+      return blocked;
+    };
+    result.gameTypes.setExecutionBlocked(sceneBlocked);
     let pendingTrackKey = '', pendingCarPose = '', pendingTrackSince = 0;
     const animationTimer = window.setInterval(() => {
-      if (animating || replacingGarageCar){animationSkipped++;return;}
+      if (animating || replacingGarageCar || sceneBlocked()){animationSkipped++;return;}
       animating = true;
       const animateStart = performance.now();
       animateStartTime=animateStart;
@@ -200,6 +246,7 @@ async function runGameBoot() {
       let persistPhysics: (() => void) | undefined;
       try {
         status('Loading Java track…');
+        trackReady=false;sceneBlocked();
         if (selected.driving && selected.chassis && source.byPath.has(selected.chassis.pack)) {
           try {
             const selection = await javaStockSelection(result, source, selected.chassis.pack);
@@ -216,6 +263,7 @@ async function runGameBoot() {
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose(); return;
         }
+        if(selected.driving&&selected.chassis&&!built)throw new Error('Player vehicle assembly is not ready');
         const map = await viewer!.showMap(selected.mapPack, source, (done, total) => {
           if (source === assets && run === sequence) status(`Java track ${done}/${total}`);
         }, true, { groundId: selected.mapResourceId, preserveCamera: !selected.driving,trafficTypes:result.traffic.models(selected.map),trafficBridge:result.traffic.bridge(selected.map,selected.state,async(car,pack)=>javaStockSelection(result,source,pack,jv('Vehicle',{className:'java.game.Vehicle',fields:new Map([['chassis',car]])}))) });
@@ -228,7 +276,7 @@ async function runGameBoot() {
         physicsBinding = result.physicsRefs.bindCollision(selected.map, map.collision);
         showMapDebugControls(map);
         if (built && selected.driving) {
-          gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config) : null;
+          gauges = selected.chassis ? new JavaGauges(gameOsd, selected.chassis.pack, built.root.definition.config, assets) : null;
           const point = selected.carPose ?? selected.start ?? (selected.mapPack === 'maps/test_track.rpk'
             ? { x: 0, y: 0, z: -1461.785, yaw: Math.PI } : { x: 0, y: 0, z: 0, yaw: 0 });
           const ground = map.terrain.height(point.x, point.z);
@@ -251,13 +299,13 @@ async function runGameBoot() {
             const javaVehicle = result.gameTypes.get(car);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { physicsBinding?.sync(); return javaControls.sample(); },
+              { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync()); return javaControls.sample(); },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
-                  result.gameTypes.updateTriggerContacts(car);
+                  viewer!.profiler.measure('Java triggers CPU',()=>result.gameTypes.updateTriggerContacts(car));
                 } });
             const driverRender=result.gameTypes.getResource(result.jvm.get(player,'render'));
             if(driverRender instanceof RenderObject){
@@ -271,6 +319,7 @@ async function runGameBoot() {
           } catch (reason) {
             gauges?.dispose(); gauges = null;
             appendJavaEvent({ level: 'error', message: `Java car simulation: ${reason instanceof Error ? reason.message : String(reason)}` });
+            throw reason;
           }
         }
         activeTrackCleanup = () => {
@@ -282,7 +331,13 @@ async function runGameBoot() {
         el('format').textContent = 'JAVA / TRACK';
         el('details').textContent = `${map.loaded} map models · ${map.objects} placed objects · Java selected ${selected.chassis?.pack ?? 'no car'}`;
         status('Java track loaded');
+        await viewer!.prepareJavaScene();
+        if(selected.driving)await sceneVehicles.prepare(selected.map,sceneTerrain,drivingVehicleExcluded);
+        // Publish the assembled scene before timers, controls and physics resume.
+        await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+        if(source===assets&&run===sequence&&javaTrackIsCurrent(result,selected))trackReady=true;
       } catch (reason) {
+        session?.();gauges?.dispose();
         physicsBinding?.dispose();
         if (built) viewer?.removeWorld(built.world);
         built?.world.dispose();
@@ -317,13 +372,11 @@ async function runGameBoot() {
         pendingTrackKey = '';
         return;
       }
-      if(selected.driving&&selected.carPose)void result.traffic.advanceDistant(selected.map,selected.carPose,(viewer?.trafficPhysicalRange??30)+20).catch(error=>appendJavaEvent({level:'error',message:`Distant rivals: ${String(error)}`}));
-      const javaStart = selected.start
-        ? `${selected.start.x.toFixed(3)},${selected.start.y.toFixed(3)},${selected.start.z.toFixed(3)},${selected.start.yaw.toFixed(3)}` : '';
-      const key = `${selected.mapPack}:${selected.mapResourceId}|${selected.chassis?.pack ?? ''}|${selected.chassis?.id ?? ''}|${javaStart}`;
+      if(selected.driving&&selected.carPose&&!sceneBlocked())void result.traffic.advanceDistant(selected.map,selected.carPose,(viewer?.trafficPhysicalRange??30)+20).catch(error=>appendJavaEvent({level:'error',message:`Distant rivals: ${String(error)}`}));
+      const key = trackKey(selected);
       if(key===loadedTrackKey&&!loadingTrack)viewer?.setJavaTrafficTypes(result.traffic.models(selected.map));
       if (key === loadedTrackKey && !loadingTrack)
-        sceneVehicles.update(!selected.driving && javaSceneCamera(result) ? selected.map : null, sceneTerrain);
+        sceneVehicles.update(selected.driving||javaSceneCamera(result)?selected.map:null,sceneTerrain,selected.driving?drivingVehicleExcluded:undefined);
       if (key === loadedTrackKey || loadingTrack) return;
       // GameLogic.actualState changes before Track.enter() finishes. Wait until
       // Java has attached the car to this map and its scripted pose has settled;
@@ -336,11 +389,13 @@ async function runGameBoot() {
       }
       if (performance.now() - pendingTrackSince < 450) return;
       loadingTrack = true;
+      trackReady=false;sceneBlocked();
       loadedTrackKey = key; loadedTrackState = selected.state.value;
-      void loadSelectedTrack(selected).finally(() => { loadingTrack = false; });
+      void loadSelectedTrack(selected).finally(() => { loadingTrack = false;sceneBlocked(); });
     };
     const trackPoll = window.setInterval(()=>viewer?.profiler.measure('Java scene poll CPU',checkActiveTrack), 150);
     disposeJavaScene = () => {
+      result.gameTypes.setExecutionBlocked(undefined);result.system.setLoadingReader(undefined);sceneBlocked=sceneInputBlocked=()=>false;result.system.setSceneLoading(false);
       garageCarButton.hidden = true; garageCarButton.onclick = null;
       mapDebugPanel.hidden = true;
       viewer?.setJavaSceneCamera(undefined);
@@ -391,6 +446,8 @@ document.addEventListener('keydown', event => {
 const driveButton = textElement('button', 'Test drive') as HTMLButtonElement;
 const hoodButton = textElement('button', 'Hood impact test'); hoodButton.className = 'hood-button'; el('counts').before(hoodButton);
 const crashButton = textElement('button', 'Car and obstacle'); crashButton.className = 'hood-button'; hoodButton.after(crashButton);
+const cityImpactButton=textElement('button','City AI impact playground');cityImpactButton.className='hood-button';crashButton.after(cityImpactButton);
+cityImpactButton.onclick=()=>void openCityImpactPlayground();
 const crashControls = textElement('div', '', 'hood-controls'); crashControls.hidden = true; el('scene-help').before(crashControls);
 const pairControls = textElement('div', '', 'hood-controls'); pairControls.hidden = true; el('scene-help').before(pairControls);
 const playgroundButton=textElement('button','Character playground');playgroundButton.className='hood-button';crashButton.after(playgroundButton);
@@ -448,7 +505,40 @@ async function openMinimapPreview(map='city'){
   }catch(error){preview?.dispose();stage?.remove();if(nav)void result.jvm.invokeAsync(nav,'hide').catch(()=>{});status('Minimap preview error',true);el('details').textContent=String(error);}
 }
 
-const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';driverIkButton.after(suspensionButton);
+const lodButton=textElement('button','LOD playground');lodButton.className='hood-button';driverIkButton.after(lodButton);
+lodButton.onclick=()=>{
+  if(!assets||!viewer)return;
+  stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
+  const opening=++sequence;viewer.clear();
+  el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;
+  vinControls.replaceChildren();vinControls.hidden=false;
+  const row=textElement('div','','character-playground-row'),search=document.createElement('input'),models=document.createElement('select');
+  search.type='search';search.placeholder='Filter SCX models…';search.setAttribute('aria-label','Filter LOD models');models.setAttribute('aria-label','LOD model');models.style.maxWidth='480px';
+  const label=textElement('label','Detail '),slider=document.createElement('input'),value=document.createElement('output'),info=document.createElement('output');
+  slider.type='range';slider.min='1';slider.max='100';slider.step='1';slider.value='100';slider.setAttribute('aria-label','LOD remaining detail');label.append(slider,value);
+  const wireLabel=textElement('label','Wireframe'),wire=document.createElement('input');wire.type='checkbox';wireLabel.prepend(wire);
+  const reset=textElement('button','Original');row.append(search,models,label,wireLabel,reset);vinControls.append(row,info);
+  let lab:Awaited<ReturnType<NonNullable<typeof viewer>['showLodPlayground']>>|undefined,loadRevision=0;
+  const update=()=>{value.textContent=`${slider.value}%`;lab?.setRatio(Number(slider.value)/100,message=>{if(sequence===opening)info.textContent=message;});};
+  const load=async()=>{
+    const path=models.value;if(!path)return;const revision=++loadRevision;lab=undefined;slider.disabled=true;status('Loading LOD model…');
+    try{
+      const [model,textures]=await Promise.all([assets.read(path).then(parseScxAsync),companionTextures(path)]);
+      if(sequence!==opening||revision!==loadRevision)return;
+      const next=await viewer!.showLodPlayground(model,assets,textures);
+      if(sequence!==opening||revision!==loadRevision)return;
+      lab=next;lab.wireframe(wire.checked);slider.disabled=false;update();
+      el('filename').textContent=path;status('LOD playground ready');
+    }catch(error){if(sequence===opening&&revision===loadRevision){info.textContent=String(error);status('LOD model error',true);}}
+  };
+  const files=assets.files.filter(file=>/\.scx$/i.test(file.path)).sort((a,b)=>a.path.localeCompare(b.path));
+  const filter=()=>{const previous=models.value,query=search.value.toLowerCase();models.replaceChildren();for(const file of files.filter(file=>file.path.toLowerCase().includes(query))){const option=document.createElement('option');option.value=option.textContent=file.path;models.append(option);}if([...models.options].some(option=>option.value===previous))models.value=previous;};
+  filter();const initial=files.find(file=>/baiern.*(hood|chassis).*\.scx$/i.test(file.path));if(initial)models.value=initial.path;
+  search.oninput=filter;models.onchange=()=>{void load();};slider.oninput=update;wire.onchange=()=>lab?.wireframe(wire.checked);reset.onclick=()=>{slider.value='100';update();};
+  el('format').textContent='LOD / MODEL SIMPLIFICATION';el('details').textContent='Experimental edge-collapse simplification in a worker. Detail controls the remaining vertex budget per material section; actual triangle reduction is shown above. UVs, normals and vertex colors are retained where supported. Extra attribute channels and grouped geometry keep their original shape. This preview does not change world LOD settings.';
+  el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Detail 100% restores the original';void load();
+};
+const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';lodButton.after(suspensionButton);
 suspensionButton.onclick=()=>{void (async()=>{
   if(!assets||!viewer)return;const request=++sequence;stopDrive();engineRoot=undefined;engineWorld?.dispose();engineWorld=undefined;disposeMemoryLab?.();disposeMemoryLab=undefined;
   el('viewport').hidden=false;el('inspector').hidden=true;el('scene-help').hidden=false;status('Loading suspension bones…');
@@ -644,6 +734,9 @@ globalFacadesCheck.onchange=()=>{
   applyGlobalFacadesPreference();unifiedBuildingsStatus.textContent='Saved · re-enter map / reload page / Run benchmark to apply';
 };
 const staticBatchLabel=textElement('label','Merge static map geometry'),staticBatchCheck=document.createElement('input');
+const stableTransformsLabel=textElement('label','Cache unchanged scene transforms'),stableTransformsCheck=document.createElement('input');
+stableTransformsCheck.type='checkbox';stableTransformsCheck.checked=true;stableTransformsLabel.prepend(stableTransformsCheck);mapDebugOptions.append(stableTransformsLabel);
+stableTransformsCheck.onchange=()=>viewer?.setStableTransformsEnabled(stableTransformsCheck.checked);
 staticBatchCheck.type='checkbox';staticBatchLabel.prepend(staticBatchCheck);mapDebugOptions.append(staticBatchLabel);
 staticBatchLabel.title='Experimental: combine compatible opaque parts by material and 128 m cell within each streamed model. Original geometry stays cached for comparison.';
 staticBatchCheck.onchange=()=>viewer?.setStaticBatchingEnabled(staticBatchCheck.checked);
@@ -758,9 +851,9 @@ for(const [layer,title] of [['graph','Pedestrian graph'],['rest','Pedestrian res
 }
 mapDebugOptions.append(pedestrianDebugStatus);
 const pedestrianCrowdLabel=textElement('label','Walking pedestrians'),pedestrianCrowdCheck=document.createElement('input'),pedestrianCrowdStatus=textElement('pre','','map-debug-data');
-pedestrianCrowdCheck.type='checkbox';pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
+pedestrianCrowdCheck.type='checkbox';pedestrianCrowdCheck.checked=true;pedestrianCrowdLabel.prepend(pedestrianCrowdCheck);mapDebugOptions.append(pedestrianCrowdLabel,pedestrianCrowdStatus);mapDebugChecks.push(pedestrianCrowdCheck);
 for(const [title,min,max,step,initial,set] of [
-  ['Pedestrians',0,50,1,6,(n:number)=>viewer?.setPedestrianCount(n)],
+  ['Pedestrians',0,50,1,25,(n:number)=>viewer?.setPedestrianCount(n)],
   ['Pedestrian spawn radius (m)',50,300,25,100,(n:number)=>viewer?.setPedestrianRadius(n)],
 ] as const){
   const label=textElement('label',''),value=textElement('span',`${title}: ${initial}`),slider=document.createElement('input');slider.type='range';slider.min=String(min);slider.max=String(max);slider.step=String(step);slider.value=String(initial);slider.setAttribute('aria-label',title);
@@ -769,19 +862,20 @@ for(const [title,min,max,step,initial,set] of [
 const inspectPedestriansButton=textElement('button','Inspect pedestrians');inspectPedestriansButton.onclick=()=>viewer?.inspectPedestrians();mapDebugOptions.append(inspectPedestriansButton);
 pedestrianCrowdCheck.onchange=()=>{const pending=viewer?.showWalkingPedestrians(pedestrianCrowdCheck.checked);pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';void pending?.then(()=>{pedestrianCrowdStatus.textContent=viewer?.pedestrianCrowdStatus??'';});};
 
-const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars: 2'),trafficCountSlider=document.createElement('input');
-trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='50';trafficCountSlider.step='1';trafficCountSlider.value='2';trafficCountSlider.setAttribute('aria-label','Traffic cars');
+const trafficCountLabel=textElement('label',''),trafficCountValue=textElement('span','Traffic cars in world: 25'),trafficCountSlider=document.createElement('input');
+trafficCountSlider.type='range';trafficCountSlider.min='0';trafficCountSlider.max='500';trafficCountSlider.step='1';trafficCountSlider.value='25';trafficCountSlider.setAttribute('aria-label','Traffic cars');
 trafficCountLabel.append(trafficCountValue,trafficCountSlider);mapDebugOptions.append(trafficCountLabel);
-trafficCountSlider.oninput=()=>{const count=Number(trafficCountSlider.value);trafficCountValue.textContent=`Traffic cars: ${count}`;void viewer?.setTrafficCount(count);};
+trafficCountLabel.title='Persistent cars distributed over connected roads when entering the world. Distant cars sleep at their saved positions.';
+trafficCountSlider.oninput=()=>{const count=Number(trafficCountSlider.value);trafficCountValue.textContent=`Traffic cars in world: ${count}`;void viewer?.setTrafficCount(count);};
 const trafficRadiusLabel=textElement('label',''),trafficRadiusValue=textElement('span','Traffic physics radius: 30 m'),trafficRadiusSlider=document.createElement('input');
 trafficRadiusSlider.type='range';trafficRadiusSlider.min='5';trafficRadiusSlider.max='200';trafficRadiusSlider.step='5';trafficRadiusSlider.value='30';trafficRadiusSlider.setAttribute('aria-label','Traffic physics radius');
 trafficRadiusLabel.append(trafficRadiusValue,trafficRadiusSlider);mapDebugOptions.append(trafficRadiusLabel);
 trafficRadiusSlider.oninput=()=>{const radius=Number(trafficRadiusSlider.value);trafficRadiusValue.textContent=`Traffic physics radius: ${radius} m`;viewer?.setTrafficPhysicsRadius(radius);};
-const trafficSpawnLabel=textElement('label',''),trafficSpawnValue=textElement('span','Traffic spawn radius: 100 m'),trafficSpawnSlider=document.createElement('input');
-trafficSpawnSlider.type='range';trafficSpawnSlider.min='25';trafficSpawnSlider.max='500';trafficSpawnSlider.step='25';trafficSpawnSlider.value='100';trafficSpawnSlider.setAttribute('aria-label','Traffic spawn radius');
-trafficSpawnLabel.title='New cars appear on the nearest free graph lanes within this radius. Existing cars remain until they leave the map streaming radius.';
+const trafficSpawnLabel=textElement('label',''),trafficSpawnValue=textElement('span','Traffic activation radius: 275 m'),trafficSpawnSlider=document.createElement('input');
+trafficSpawnSlider.type='range';trafficSpawnSlider.min='25';trafficSpawnSlider.max='500';trafficSpawnSlider.step='25';trafficSpawnSlider.value='275';trafficSpawnSlider.setAttribute('aria-label','Traffic activation radius');
+trafficSpawnLabel.title='Wake existing world traffic near the player. Cars sleep again 50 m beyond this range, preserving position and speed. Camera direction has no effect.';
 trafficSpawnLabel.append(trafficSpawnValue,trafficSpawnSlider);mapDebugOptions.append(trafficSpawnLabel);
-trafficSpawnSlider.oninput=()=>{const radius=Number(trafficSpawnSlider.value);trafficSpawnValue.textContent=`Traffic spawn radius: ${radius} m`;viewer?.setTrafficSpawnRadius(radius);};
+trafficSpawnSlider.oninput=()=>{const radius=Number(trafficSpawnSlider.value);trafficSpawnValue.textContent=`Traffic activation radius: ${radius} m`;viewer?.setTrafficSpawnRadius(radius);};
 const trafficTestStatus=textElement('pre','','map-debug-data');mapDebugOptions.append(trafficTestStatus);
 const playerTrafficLabel=textElement('label','Traffic controls my car'),playerTrafficCheck=document.createElement('input');
 playerTrafficCheck.type='checkbox';playerTrafficLabel.prepend(playerTrafficCheck);mapDebugOptions.append(playerTrafficLabel);
@@ -947,6 +1041,7 @@ fogCheck.onchange = () => viewer?.setMapFogEnabled(fogCheck.checked);
 const showMapDebugControls = (map?: { terrain: { faces: number }; collision: { walls: number; boxes: number } }) => {
   mapDebugPanel.hidden = false; mapDebugPanel.open = false;
   for (const input of mapDebugChecks) input.checked = false;
+  pedestrianCrowdCheck.checked=viewer?.walkingPedestriansEnabled??true;
   roadDebugStatus.textContent='';
   pedestrianDebugStatus.textContent='';pedestrianCrowdStatus.textContent='';
   vehicleFramesCheck.checked = false; bodyVisibleCheck.checked = true;
@@ -958,6 +1053,10 @@ const vehicleTeleportButton = textElement('button', 'Move car to (0, 1, 0)');
 vehicleTeleportButton.title = 'Teleport the car to the city center and reset its motion';
 vehicleTeleportButton.onclick = () => mapDebugSession?.teleport(new Vector3(0, 1, 0), 0);
 vehicleDebugPanel.append(vehicleTeleportButton);
+const vehicleRenderTestTeleportButton=textElement('button','Move car to render test');
+vehicleRenderTestTeleportButton.title='Teleport to (-359.9, 10.4, -475.2) and reset motion';
+vehicleRenderTestTeleportButton.onclick=()=>mapDebugSession?.teleport(new Vector3(-359.9,10.4,-475.2),0);
+vehicleDebugPanel.append(vehicleRenderTestTeleportButton);
 const telemetryStart = textElement('button', 'Start physics recording') as HTMLButtonElement;
 const telemetryStop = textElement('button', 'Stop & download telemetry') as HTMLButtonElement;
 const telemetryDownload = textElement('button', 'Download last recording') as HTMLButtonElement;
@@ -1365,6 +1464,61 @@ async function openMainMenu() {
     status('Main menu');
   } catch (error) { if (request === sequence) { status('MainMenu.java execution error', true); el('details').textContent = String(error); } }
 }
+async function openCityImpactPlayground(){
+  if(!assets||!viewer)return;
+  const source=assets,bootSequence=sequence;
+  if(!activeBoot)await(gameBootReady??runGameBoot());
+  if(source!==assets||bootSequence!==sequence||!viewer)return;
+  let other:Awaited<ReturnType<PartFactory['stock']>>|undefined;
+  const boot=activeBoot,nativeCars:ReturnType<typeof jv>[]=[];
+  const releaseNative=()=>{for(const car of nativeCars.splice(0))void boot?.jvm.invokeAsync(car,'destroy').catch(error=>appendJavaEvent({level:'error',message:`Playground vehicle cleanup: ${String(error)}`}));};
+  let lab:Awaited<ReturnType<Viewer['cityImpactPlayground']>>|undefined;
+  const opening=openWorld('cars/racers/Baiern.rpk',6),request=sequence;
+  await opening;if(request!==sequence||!engineRoot||!viewer)return;
+  const previousTraffic=viewer.trafficTestActive;
+  try{
+    status('Loading city impact playground…');
+    await viewer.setTrafficTestEnabled(false);
+    if(!boot)throw Error('Wait for Java initialization before opening the city impact playground');
+    const build=async()=>{
+      const parent=boot.jvm.get(jv('class','java.game.GameLogic'),'player');
+      const id=boot.gameTypes.remountSavedResource('cars/racers/Baiern.rpk',6);
+      const car=await boot.jvm.constructAsync('java.game.Vehicle',[parent,id,jv('int',0),jv('float',1),jv('float',1),jv('float',1),jv('float',1)]);
+      nativeCars.push(car);
+      const selection=await javaStockSelection(boot,source,'cars/racers/Baiern.rpk',car);
+      return new PartFactory(source).stock({pack:'cars/racers/Baiern.rpk',id:6},{mechanical:true,javaSelection:selection});
+    };
+    // Execute addStockParts: the CFG-only recipe is incomplete in class-only 2.2.1 installations.
+    const first=await build();
+    if(request!==sequence){first.world.dispose();releaseNative();return;}
+    if(engineWorld){viewer.removeWorld(engineWorld);engineWorld.dispose();}
+    engineWorld=first.world;engineRoot=first.root;await viewer.showWorld(first.world,source,true);
+    other=await build();
+    if(request!==sequence){other.world.dispose();return;}
+    await viewer.showWorld(other.world,source,true);
+    await viewer.showMap('maps/city.rpk',source,undefined,true);
+    if(request!==sequence){viewer.removeWorld(other.world);other.world.dispose();return;}
+    await viewer.prepareJavaScene();
+    lab=await viewer.cityImpactPlayground([engineRoot,other.root],source,text=>{driveHud.textContent=text;});
+    if(request!==sequence){lab.dispose();viewer.removeWorld(other.world);other.world.dispose();return;}
+    const session=lab,second=other;
+    disposeDriving=()=>{session.dispose();viewer?.removeWorld(second.world);second.world.dispose();releaseNative();void viewer?.setTrafficTestEnabled(previousTraffic);};
+    pairControls.replaceChildren();
+    for(const [label,action]of [
+      ['Restart approach',()=>session.reset()],
+      ['Start 20 s capture',()=>session.record()],
+      ['Stop capture',()=>session.stopCapture()],
+      ['Download impact report',()=>downloadText(session.report(),`slrr-city-impact-${Date.now()}.json`)],
+    ] as const){const button=textElement('button',label);button.onclick=action;pairControls.append(button);}
+    pairControls.hidden=false;driveHud.hidden=false;driveHud.classList.add('crash-hud');
+    el('viewport').parentElement?.classList.add('physics-scene');driveButton.textContent='End drive';
+    el('format').textContent='PHYSICS / CITY AI IMPACT';el('filename').textContent='Baiern ×2 · real city road collisions';
+    el('details').textContent='Two complete cars on the nearest lane to (0, 0, 0) with a 60 m approach before a junction. The rival uses the race AI steering and normal 120 Hz vehicle physics; its lane route is fixed for repeatable impacts. The orange marker is the impact point occupied by the braked player car; the AI finish is 200 m beyond it, so it keeps accelerating into the collision. Random traffic is disabled. Capture resets both cars and records 20 simulated seconds (60 real seconds maximum), including separate player/opponent timings and simulation debt.';
+    el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Restart restores both cars';
+    status('City AI impact playground ready');
+  }catch(error){lab?.dispose();if(other){viewer?.removeWorld(other.world);other.world.dispose();}releaseNative();void viewer?.setTrafficTestEnabled(previousTraffic);if(request===sequence){status('City impact playground failed',true);el('details').textContent=String(error);}}
+}
+
 async function openVehiclePairTest(scenario:'offset'|'side'|'rear-chain') {
   if(!assets||!viewer)return;
   const source=assets;let request=sequence;

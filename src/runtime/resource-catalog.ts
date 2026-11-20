@@ -20,9 +20,11 @@ export class ResourceCatalog {
     for (const entry of pack.entries) {
       const properties = entryProperties(entry);
       const script = entry.type === 8 ? properties.find(prop => prop.key === 'script')?.value : undefined;
-      const cfgPath = /^(?:car|part)\s+(.+\.cfg)$/i.exec(properties.find(prop => prop.key === 'native')?.value ?? '')?.[1];
+      const native=properties.find(prop=>prop.key==='native')?.value;
+      const body=/^(car|part)\s+(.+\.cfg)$/i.exec(native??'');
+      const cfgPath=body?.[2],nativeType=body?.[1].toLowerCase()??(native==='camera'?'camera':undefined);
       const resource: CatalogResource = { pack: path, id: entry.typeId, type: entry.type, alias: entry.alias,
-        ...(properties.some(property => property.key === 'native' && property.value === 'camera') ? { nativeType: 'camera' } : {}),
+        ...(nativeType?{nativeType}:{}),
         ...(script ? { script } : {}), ...(cfgPath ? { cfgPath: normalizePath(cfgPath) } : {}) };
       this.resources.set(ResourceCatalog.key(path, entry.typeId), resource);
       if (!entry.superId) continue;

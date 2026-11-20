@@ -40,7 +40,7 @@ test('C++/WASM matches TS deformation, contacts, collective release, reset and n
     const ts = new DeformablePanel(samples, { ...options, backend: 'ts' });
     const wasm = new DeformablePanel(samples, { ...options, backend: 'wasm' });
     assert.equal(wasm.backend, 'wasm');
-    assert.equal(wasm.positions.buffer.byteLength, 640 * 1024);
+    assert.equal(wasm.positions.buffer.byteLength, 1024 * 1024);
     for (const p of [ts, wasm]) {
       p.setAnchorFrame(new Matrix4().makeTranslation(0, -4, 0).elements); p.reset();
       p.groundHeight = (x, z) => -4 + x * 0.02 + z * 0.03;
@@ -149,5 +149,24 @@ test('slow permanent creep retains TS/WASM parity without changing the yield thr
     assert.equal(ts.yieldStrain,wasm.yieldStrain);
     if(plasticRate===0)assert.equal(ts.permanentDamage,0);
     else assert.ok(ts.permanentDamage>0,'strong impacts can still leave permanent dents');
+  }
+});
+
+
+test('RoR force kernel agrees with its scalar reference through plastic deformation and moving mounts',async()=>{
+  assert.ok(await softBodyRuntime.load(bytes));
+  for(const impulse of [1,300]){
+    const options:PanelOptions={solver:'ror',mass:38.5,mount:[0,1.3,.7],stiffness:90000,yieldStrain:.08,mountStrength:200000,resolution:[5,7],anchorLayout:'hood-five'};
+    const ts=new DeformablePanel(samples,{...options,backend:'ts'}),wasm=new DeformablePanel(samples,{...options,backend:'wasm'});
+    for(const p of [ts,wasm]){p.hit(impulse);p.profiling=true;}
+    for(let tick=0;tick<120;tick++){
+      const frame=new Matrix4().makeTranslation(tick*.0001,-.2,0);
+      for(const p of [ts,wasm]){p.setAnchorFrame(frame.elements);p.advance(1/240);}
+      assert.equal(wasm.profile.beamPasses,ts.profile.beamPasses);assert.ok(wasm.profile.beamPasses>=9);assert.equal(wasm.attached,ts.attached);
+      for(let i=0;i<ts.positions.length;i++)close(wasm.positions[i],ts.positions[i],`RoR position ${i} tick ${tick}`);
+      for(let i=0;i<ts.beams.length;i++)close(wasm.beams[i].rest,ts.beams[i].rest,`RoR plastic length ${i}`);
+    }
+    assert.ok(wasm.positions.every(Number.isFinite));
+    if(impulse===300)assert.ok(wasm.plasticBeams>0,'large impact must visibly change the cage rather than only release mounts');
   }
 });

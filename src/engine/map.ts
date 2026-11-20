@@ -24,6 +24,24 @@ export function groundRenderIsRoom(pack: RpkPack, renderId: number, model: ScxMo
   return !groundRenderHasChildren(pack, renderId) && model.meshes.some(mesh => mesh.indices.length > 0);
 }
 
+/** A room's floor and furnishings share a local render root; other rooms have separate roots. */
+export function groundRoomRenderIds(pack: RpkPack, renderId: number): number[] {
+  const render = pack.entries.find(entry => entry.typeId === renderId);
+  const parent = render && pack.entries.find(entry => entry.typeId === render.superId && entry.type === 14);
+  if (!parent) return [renderId];
+  const ids = mapRenderIds(pack).filter(id => {
+    let entry = pack.entries.find(entry => entry.typeId === id);
+    const visited = new Set<number>();
+    while (entry && !visited.has(entry.typeId)) {
+      if (entry.superId === parent.typeId) return true;
+      visited.add(entry.typeId);
+      entry = pack.entries.find(candidate => candidate.typeId === entry!.superId && candidate.type === 14);
+    }
+    return false;
+  });
+  return ids.includes(renderId) ? ids : [renderId, ...ids];
+}
+
 /** Ground instances retain their script payload in a length-prefixed trailing RSD chunk. */
 export function groundRenderDefinition(entry: RpkEntry): { gameType: number; renderId: number; pose: CfgPose } | undefined {
   if (entry.type !== 1) return;
@@ -31,12 +49,15 @@ export function groundRenderDefinition(entry: RpkEntry): { gameType: number; ren
   for (let offset = bytes.length - 8; offset >= 0; offset--) {
     if (bytes[offset] !== 82 || bytes[offset + 1] !== 83 || bytes[offset + 2] !== 68 || bytes[offset + 3] !== 0) continue;
     const size = new DataView(bytes.buffer, bytes.byteOffset + offset + 4, 4).getUint32(0, true);
-    if (offset + 8 + size !== bytes.length) continue;
-    const properties = parseProperties(new TextDecoder('windows-1252').decode(bytes.subarray(offset + 8)));
+      // City appends EXTP after RSD; the declared RSD length is its boundary,
+      // not the end of the GroundRef resource.
+      if (offset + 8 + size > bytes.length) continue;
+      const properties = parseProperties(new TextDecoder('windows-1252').decode(bytes.subarray(offset + 8, offset + 8 + size)));
     const gameType = properties.find(property => property.key === 'gametype')?.value;
     const params = properties.find(property => property.key === 'params')?.value.split(',').map(value => value.trim());
-    if (!gameType || !/^0x[0-9a-f]+$/i.test(gameType) || !params || ![1, 7].includes(params.length) || !/^0x[0-9a-f]+$/i.test(params[0])) return;
-    const pose = params.length === 1 ? [0, 0, 0, 0, 0, 0] : params.slice(1).map(Number);
+      if (!gameType || !/^0x[0-9a-f]+$/i.test(gameType) || !params || (params.length !== 1 && params.length < 7) || !/^0x[0-9a-f]+$/i.test(params[0])) return;
+      // The six pose values can be followed by SCM and traffic graph paths.
+      const pose = params.length === 1 ? [0, 0, 0, 0, 0, 0] : params.slice(1, 7).map(Number);
     if (!pose.every(Number.isFinite)) throw new Error('Ground RSD has a non-finite pose');
     return { gameType: Number(gameType), renderId: Number(params[0]),
       pose: { position: pose.slice(0, 3) as CfgPose['position'], rotation: pose.slice(3) as CfgPose['rotation'] } };

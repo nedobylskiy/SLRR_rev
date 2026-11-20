@@ -1,4 +1,4 @@
-import { Box3, Matrix4, Vector3 } from 'three';
+import { Box3, Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import type { CfgWheel } from '../formats/cfg';
 import type { DrivingInput } from './driving-demo';
 import type { Terrain } from './suspension-3d';
@@ -42,6 +42,7 @@ export class TrafficVehicle implements BotVehicle {
   readonly maxSteerAngle=.6;
   readonly physicalSteering=true;
   collisionVersion=0;
+  panelImpact?: (impulse:Vector3,point:Vector3,closing:number)=>void;
   private mode:BotMode='cruise';
   setMode(mode:BotMode){this.mode=mode;}
   travelled=0;
@@ -50,18 +51,26 @@ export class TrafficVehicle implements BotVehicle {
     this.wheels=wheels.map(w=>({mount:new Vector3(...w.position).add(new Vector3(0,.25,0)),center:new Vector3(...w.position),radius:w.radius??.36,length:.15,spin:0,steer:0,contact:false}));
     this.wheelbase=this.wheels.length?Math.max(1,Math.max(...this.wheels.map(w=>w.mount.z))-Math.min(...this.wheels.map(w=>w.mount.z))):3;
   }
-  place(position:Vector3,direction:Vector3,height:number){
+  place(position:Vector3,direction:Vector3,height:number,rotationBlend=1){
     const root=position.clone();const ground=this.terrain.height(root.x,root.z,root.y+.5);if(ground>-999)root.y=ground+height-.1;
-    this.body.setFrame(new Matrix4().makeRotationY(Math.atan2(-direction.x,-direction.z)).setPosition(root));
+    const yaw=Math.atan2(-direction.x,-direction.z);
+    const pitch=Math.atan2(direction.y,Math.hypot(direction.x,direction.z));
+    const frame=new Matrix4().makeRotationFromEuler(new Euler(pitch,yaw,0,'YXZ'));
+    if(rotationBlend<1){
+      const rotation=new Quaternion().setFromRotationMatrix(frame);
+      rotation.slerp(this.body.orientation,1-rotationBlend);
+      frame.makeRotationFromQuaternion(rotation);
+    }
+    this.body.setFrame(frame.setPosition(root));
   }
   impact(impulse:Vector3,point:Vector3,closing:number){
     this.mode='impact';
     const inverse=this.body.matrix().invert(),local=point.clone().applyMatrix4(inverse),direction=impulse.clone().applyQuaternion(this.body.orientation.clone().invert());
-    this.body.impulse(impulse,point);this.crush.hit(local,direction,closing,this.body.mass);if(closing>1.5)this.collisionVersion++;
+    this.body.impulse(impulse,point);if(this.panelImpact)this.panelImpact(direction,local,closing);else this.crush.hit(local,direction,closing,this.body.mass);if(closing>1.5)this.collisionVersion++;
   }
   private contact(point:Vector3,normal:Vector3,depth:number){
     const closing=Math.max(0,-this.body.pointVelocity(point).dot(normal)),j=this.body.contact(point,normal,depth,.08,.65);
-    if(closing>2&&j.length()>this.body.mass*.3){const local=point.clone().applyMatrix4(this.body.matrix().invert());this.crush.hit(local,j.clone().applyQuaternion(this.body.orientation.clone().invert()),closing,this.body.mass);this.collisionVersion++;}
+    if(closing>2&&j.length()>this.body.mass*.3){const local=point.clone().applyMatrix4(this.body.matrix().invert()),impulse=j.clone().applyQuaternion(this.body.orientation.clone().invert());if(this.panelImpact)this.panelImpact(impulse,local,closing);else this.crush.hit(local,impulse,closing,this.body.mass);this.collisionVersion++;}
   }
   step(dt:number,input:DrivingInput){
     const body=this.body,frame=body.matrix(),count=Math.max(1,this.wheels.length),spring=body.mass*9.81/count/.1,damping=2*Math.sqrt(spring*body.mass/count)*.65;

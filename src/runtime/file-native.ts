@@ -57,6 +57,13 @@ export class FileNative {
           stream.writeInt(0); return 4;
         }
         // A modified clone needs embedded resource serialization, not its source RPK ID.
+        const embedded = resource.embeddedBytes ?? this.resources.embeddedResource(resource.resourceId);
+        if(embedded){
+          const sdat=this.opened.get(this.object(receiver))!.sdat!,ordinal=sdat.unsaved.length+1;
+          if(ordinal>=0xffff)throw Error('SDAT embedded resource count overflow');
+          sdat.unsaved.push({ordinal,kind:resource.resourceType,bytes:embedded.slice()});
+          stream.writeInt((0xffff0000|ordinal)|0);return 4;
+        }
         if (resource.resourceReplacements.size || Object.values(resource.meshScale).some(scale => scale !== 1))
           throw new Error('File.write(ResourceRef) cannot yet embed a modified resource');
         const identity = this.resources.resolveRenderResource(resource);
@@ -83,8 +90,12 @@ export class FileNative {
         const file = this.opened.get(this.object(receiver));
         if (!id || !file?.sdat) return jv('int', id | 0);
         const ordinal = id >>> 16;
+        if(ordinal===0xffff){
+          const resource=file.sdat.unsaved.find(resource=>resource.ordinal===(id&0xffff));
+          if(resource?.kind===7&&resource.bytes.length)return this.resources.createEmbeddedResource(resource.kind,resource.bytes);
+        }
         const pack = file.sdat.packs.get(ordinal);
-        if (pack) return this.resources.remountSavedResource(pack, id & 0xffff);
+        if (pack) return this.resources.restoreTextureIdentity({pack,id:id & 0xffff});
         throw new Error(ordinal === 0xffff || ordinal === 0
           ? 'File.readResID() cannot yet restore embedded SDAT resources'
           : `SDAT resource references missing pack ordinal ${ordinal}`);

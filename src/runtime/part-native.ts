@@ -1,3 +1,5 @@
+import {encodePaintJob,decodePaintJob} from '../engine/paint-job';
+import type {PaintStroke,PaintTarget} from '../engine/paint-stroke';
 import { validateVehicleDamage, type VehicleDamageState } from '../engine/vehicle-damage';
 import type { Vehicle3D } from '../engine/vehicle-3d';
 import { jv, type JavaObject, type JavaValue, type SlrrJvm } from 'slrr-jvm';
@@ -24,6 +26,8 @@ export interface NativeInstalledPart {
   positions: ReadonlyMap<number, { position?: [number, number, number]; rotation?: [number, number, number] }>;
   renderType?: number;
   texture?: JavaValue;
+  paintColor?: number;
+  paintStrokes?:readonly PaintStroke[];
   wear: number;
   children: NativeInstalledPart[];
 }
@@ -35,17 +39,51 @@ export class PartNative {
   private readonly maxWear = new WeakMap<JavaObject, number>();
   private readonly wear = new WeakMap<JavaObject, number>();
   private readonly tear = new WeakMap<JavaObject, number>();
+  private readonly savedPaint=new WeakMap<JavaObject,{key:string;value:JavaValue}>();
+  private readonly strokes=new WeakMap<JavaObject,readonly PaintStroke[]>();
+  private paintListener?:(id:number,color:number|undefined,strokes:readonly PaintStroke[]|undefined)=>void;
+  setPaintListener(listener:PartNative['paintListener']){this.paintListener=listener;}
+  private publishPaint(ref:JavaValue){
+    const node=this.gameTypes.getResource(ref);if(!node)return;
+    const object=this.gameTypes.reference(node).value as JavaObject;
+    this.paintListener?.(node.resourceId,this.paintColors.get(object),this.strokes.get(object));
+    this.changed(ref);
+  }
+  private readonly previewParts=new Set<JavaValue>();
+  private paintTargets?:(hit:{id:number;local:number[];world:number[];normal?:number[]},size:number)=>readonly PaintTarget[];
+  setPaintTargetsReader(reader:PartNative['paintTargets']){this.paintTargets=reader;}
+  private paintBrushIdentity?:(id:number)=>{pack:string;id:number}|undefined;
+  setPaintBrushResolver(resolve:NonNullable<PartNative['paintBrushIdentity']>){this.paintBrushIdentity=resolve;}
+  private paintPick?:()=>{id:number;local:number[];world:number[];normal?:number[]}|undefined;
+  setPaintPickReader(reader:NonNullable<PartNative['paintPick']>){this.paintPick=reader;}
+  private readonly paintColors = new WeakMap<JavaObject,number>();
   private readonly texture = new WeakMap<JavaObject, JavaValue>();
   private readonly mesh = new WeakMap<JavaObject, JavaValue>();
   private readonly slotDamage = new WeakMap<JavaObject, Map<number, string>>();
   private readonly renderType = new WeakMap<JavaObject, number>();
   private readonly slots = new WeakMap<ResourceObject, PartSlots>();
+  private readonly openFlaps = new WeakSet<ResourceObject>();
+  flapOpen(id: number): boolean {
+    const node = this.gameTypes.getByResourceId(id);
+    return !!node && this.openFlaps.has(node);
+  }
+  private toggleFlap(receiver: JavaValue): number {
+    const node = this.gameTypes.getResource(receiver);
+    if (!node) return -1;
+    if (this.openFlaps.has(node)) this.openFlaps.delete(node); else this.openFlaps.add(node);
+    return this.openFlaps.has(node) ? 1 : 0;
+  }
   private readonly configs = new WeakMap<JavaObject, PartConfig | null>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly gameTypes: GameTypeNative,
     private readonly compatibleSlots?: (parent: ResourceObject, parentSlot: CfgSlot,
       child: ResourceObject, childSlot: CfgSlot) => Promise<boolean>) {
     const owner = 'java.game.parts.Part';
+    jvm.natives.register(owner, 'flap', ['int'], ({ receiver, args }) => {
+      if (Number(args[0].value) === 1) return jv('int', this.toggleFlap(receiver));
+      const node = gameTypes.getResource(receiver);
+      return jv('int', node ? this.openFlaps.has(node) ? 1 : 0 : -1);
+    });
     gameTypes.setCommandHandler((receiver, command) => this.command(receiver, command));
     gameTypes.setObjectCategoryReader(receiver => {
       const node = gameTypes.getResource(receiver);
@@ -194,7 +232,7 @@ export class PartNative {
       return jv('void', undefined);
     });
     jvm.natives.register(owner, 'getTexture', [], ({ receiver }) =>
-      this.texture.get(receiver.value as JavaObject) ?? jv('int', 0));
+      this.savedTexture(receiver));
     // The mesh binding is seeded from the CFG's mesh directive and may be
     // replaced per instance. It is distinct from the CFG render resource ID.
     jvm.natives.register(owner, 'getMesh', [], ({ receiver }) =>
@@ -237,11 +275,59 @@ export class PartNative {
       // Unknown legacy payloads remain opaque; our versioned cage payload is restored above.
       return jv('void', undefined);
     });
+    jvm.natives.register('java.game.Painter','paintPart',['GameRef','int'],({args})=>{
+      const picked=this.paintPick?.();
+      const node=this.paintPick?(picked&&gameTypes.getByResourceId(picked.id)):gameTypes.getResource(args[0]);if(!node)return jv('void',undefined);
+      const ref=gameTypes.reference(node),object=ref.value as JavaObject;
+      const config=this.configs.get(object);
+      // Only the picked paintable part changes; trim, glass and other parts keep their textures.
+      if(config?.texture!==undefined){this.strokes.delete(object);this.paintColors.set(object,Number(args[1].value)>>>0);this.publishPaint(ref);}
+      return jv('void',undefined);
+    });
+    jvm.natives.register('java.game.Painter','xPaint',['GameRef'],({args})=>{
+      this.clearPaintPreview();
+      if(args[0].value!=null&&gameTypes.getResource(args[0]))this.changed(args[0]);
+      return jv('void',undefined);
+    });
+    jvm.natives.register('java.game.Painter','doPaint',['GameRef','int','int','int','float','float','int'],({args})=>{
+      this.clearPaintPreview();
+      const hit=this.paintPick?.(),node=hit&&gameTypes.getByResourceId(hit.id);if(!node||!hit)return jv('void',undefined);
+      const ref=gameTypes.reference(node),object=ref.value as JavaObject;
+      if(this.configs.get(object)?.texture===undefined)return jv('void',undefined);
+      const brush=args[2].resource??this.paintBrushIdentity?.(Number(args[2].value));
+      const size=Number(args[5].value),rotation=Number(args[4].value);
+      if(!brush||!Number.isFinite(size)||size<=0||!Number.isFinite(rotation)||!hit.normal)return jv('void',undefined);
+      const temporary=Number(args[3].value)!==0;
+      const targets=this.paintTargets?.(hit,size)??[{id:hit.id,position:hit.local as [number,number,number],normal:hit.normal as [number,number,number]}];
+      for(const target of targets){
+        const panel=gameTypes.getByResourceId(target.id);if(!panel)continue;
+        const panelRef=gameTypes.reference(panel),panelObject=panelRef.value as JavaObject;
+        if(this.configs.get(panelObject)?.texture===undefined)continue;
+        const stroke:PaintStroke={position:[...target.position],normal:[...target.normal],tangent:target.tangent&&[...target.tangent],color:Number(args[1].value)>>>0,brush,size,rotation,flip:Number(args[6].value)!==0,temporary};
+        this.strokes.set(panelObject,[...(this.strokes.get(panelObject)??[]),stroke]);
+        if(temporary)this.previewParts.add(panelRef);
+        this.publishPaint(panelRef);
+      }
+      return jv('void',undefined);
+    });
     jvm.natives.register(owner, 'setTexture', ['int'], ({ receiver, args }) => {
       const id = Number(args[0].value);
       if (!Number.isInteger(id)) throw new Error('Invalid part texture resource ID');
-      this.texture.set(receiver.value as JavaObject, { ...args[0], type: 'int', value: id | 0 });
-      this.changed(receiver);
+      const embedded=gameTypes.embeddedResource(id);
+      const dynamic = embedded && gameTypes.restoreEmbeddedTexture(embedded);
+      const native=gameTypes.getResource(receiver);
+      const object=(native?gameTypes.reference(native):receiver).value as JavaObject;
+      if(embedded && !dynamic){
+        const job=decodePaintJob(embedded);
+        if(job.color===undefined)this.paintColors.delete(object);else this.paintColors.set(object,job.color);
+        this.strokes.set(object,job.strokes.map(stroke=>({...stroke,brush:gameTypes.resolveResourceIdentity(Number(gameTypes.restoreTextureIdentity(stroke.brush).value))!})));
+        if(job.baseTexture)this.texture.set(object,gameTypes.restoreTextureIdentity(job.baseTexture));else this.texture.delete(object);
+        this.savedPaint.delete(object);this.publishPaint(receiver);return jv('int',1);
+      }
+      this.strokes.delete(object);
+      this.paintColors.delete(object);
+      this.texture.set(object, { ...(dynamic || args[0]), type: 'int', value: Number(dynamic ? dynamic.value : id) | 0 });
+      this.publishPaint(receiver);
       // The original native reports success even when no render object is bound yet.
       return jv('int', 1);
     });
@@ -292,6 +378,27 @@ export class PartNative {
     return this.partSlots(receiver).positions;
   }
   renderTypeFor(receiver: JavaValue): number | undefined { return this.renderType.get(receiver.value as JavaObject); }
+  private clearPaintPreview(){
+    const refs=[...this.previewParts];this.previewParts.clear();
+    for(const ref of refs){
+      const object=ref.value as JavaObject;this.strokes.set(object,(this.strokes.get(object)??[]).filter(stroke=>!stroke.temporary));this.publishPaint(ref);
+    }
+  }
+  private savedTexture(receiver:JavaValue):JavaValue {
+    const node=this.gameTypes.getResource(receiver),ref=node?this.gameTypes.reference(node):receiver,object=ref.value as JavaObject;
+    const base=this.texture.get(object),color=this.paintColors.get(object),strokes=(this.strokes.get(object)??[]).filter(stroke=>!stroke.temporary);
+    if(color===undefined&&!strokes.length)return base??jv('int',0);
+    const baseTexture=base?.resource??(base?.value?this.gameTypes.resolveResourceIdentity(Number(base.value)):undefined);
+    const bytes=encodePaintJob({version:1,baseTexture:baseTexture&&this.gameTypes.savedTextureIdentity(baseTexture),color,
+      strokes:strokes.map(stroke=>({...stroke,brush:this.gameTypes.savedTextureIdentity(stroke.brush)}))}),key=new TextDecoder().decode(bytes),cached=this.savedPaint.get(object);
+    if(cached?.key===key)return cached.value;
+    if(cached&&this.gameTypes.updateEmbeddedResource(Number(cached.value.value),bytes)){
+      this.savedPaint.set(object,{key,value:cached.value});return cached.value;
+    }
+    const value=this.gameTypes.createEmbeddedResource(7,bytes);this.savedPaint.set(object,{key,value});return value;
+  }
+  paintStrokesFor(receiver:JavaValue){const node=this.gameTypes.getResource(receiver);return node?this.strokes.get(this.gameTypes.reference(node).value as JavaObject):undefined;}
+  paintColorFor(receiver:JavaValue):number|undefined {const node=this.gameTypes.getResource(receiver);return node?this.paintColors.get(this.gameTypes.reference(node).value as JavaObject):undefined;}
   textureFor(receiver: JavaValue): JavaValue | undefined { return this.texture.get(receiver.value as JavaObject); }
   wearFor(receiver:JavaValue):number { return this.wear.get(receiver.value as JavaObject)??1; }
 
@@ -416,7 +523,7 @@ export class PartNative {
         const handle = this.gameTypes.reference(child), object = handle.value as JavaObject;
         const childState = this.partSlots(handle);
         return { node: child, parentSlot, ownSlot: mate, positions: childState.positions,
-          renderType: this.renderType.get(object), texture: this.texture.get(object), wear: this.wear.get(object) ?? 1,
+          paintStrokes:this.strokes.get(object),paintColor:this.paintColors.get(object), renderType: this.renderType.get(object), texture: this.texture.get(object), wear: this.wear.get(object) ?? 1,
           children: children(child) };
       });
     };
@@ -526,6 +633,7 @@ export class PartNative {
 
   private async command(receiver: JavaValue, command: string): Promise<void> {
     const words = command.trim().split(/\s+/);
+    if (words[0] === 'flap_toggle') { this.toggleFlap(receiver); return; }
     if(words[0]==='repair'){this.repairDamage(receiver);return;}
     // Vehicle.wakeUp and the garage lift's reset follow inventory edits. Run
     // Java's recalculation here so disableSlot reflects the current assembly,

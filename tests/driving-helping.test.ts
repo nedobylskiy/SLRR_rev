@@ -163,3 +163,31 @@ for(const native of [false,true])test(`launch control reduces combustion demand 
   assert.ok(helped.system.rpm<raw.system.rpm,'torque reduction is applied to combustion, not just the displayed pedal');
   raw.world.dispose();helped.world.dispose();
 });
+
+
+for(const native of [false,true])for(const hz of [120,240])test(`first neutral-to-first shift reconnects without a stall before and after reset (${native?'native':'fallback'}, ${hz}Hz)`,()=>{
+  const {world,system}=drivetrain(native),dt=1/hz;
+  for(let run=0;run<2;run++){
+    system.reset();system.manual=true;const wheels=[0,0,0,0];
+    for(let i=0;i<hz;i++)system.advance(dt,{throttle:0,gearUp:i===0},wheels);
+    assert.equal(system.gear,1);assert.equal(system.running,true,'selecting first at idle must not require restarting');
+    for(let i=0;i<hz*3;i++){
+      const result=system.advance(dt,{throttle:.5,throttleMode:'pedal'},wheels,wheels,wheels[2]*.3);
+      for(let n=0;n<4;n++)wheels[n]+=result.torque[n]/1.6*dt;
+      assert.ok(system.running,`launch stalled at ${i}`);
+    }
+    assert.ok(wheels[2]>3,'the clutch really transmits torque, rather than holding the engine uncoupled');
+  }
+  system.reset();system.manual=true;system.gear=1;
+  for(let i=0;i<hz;i++)system.advance(dt,{throttle:0,clutch:i===0},[0,0,0,0]);
+  assert.equal(system.running,false,'an explicit manual clutch still permits a genuine stall');world.dispose();
+});
+
+for(const native of [false,true])test(`countdown rejects both gear directions, returns an already selected gear to neutral and delivers no wheel torque (${native?'native':'fallback'})`,()=>{
+  const {world,system}=drivetrain(native);system.reset();system.gear=1;
+  for(let i=0;i<360;i++){
+    const result=system.advance(1/120,{throttle:.5,transmissionLocked:true,gearUp:i%2===0,gearDown:i%2!==0},[0,0,0,0]);
+    assert.equal(system.gear,0);assert.ok(result.torque.every(t=>t===0));assert.equal(system.running,true);
+  }
+  system.advance(1/120,{throttle:.5,gearUp:true},[0,0,0,0]);assert.equal(system.gear,1);world.dispose();
+});

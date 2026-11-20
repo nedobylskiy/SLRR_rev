@@ -6,6 +6,12 @@ SCX layout research also consulted nonamesex/io_invo_scx, commit 7bcc34e51a3cb40
 
 Three.js and other npm packages retain their respective licenses in their packages. This file does not grant rights to the original game or assets.
 
+## Rigs of Rods beam physics
+
+The normal-beam force law, plastic rest-length yield and node integration in `native/soft-body/solver.cpp` (`ror_advance`) and its scalar reference `src/engine/ror-beam.ts` are adapted from [RigsOfRods/rigs-of-rods](https://github.com/RigsOfRods/rigs-of-rods), revision `ebf31a2187bbc31a38331a86b233dfa7e60c52fb`, `source/main/physics/ActorForcesEuler.cpp`.
+
+Copyright 2005–2012 Pierre-Michel Ricordel, 2007–2012 Thomas Fischer, and the Rigs of Rods contributors. These adapted implementations are GPL-3.0-only. The complete license is included in [native/soft-body/ror/COPYING](native/soft-body/ror/COPYING). Source and attribution accompany the generated WASM module. This is a port of the beam kernel, not the complete RoR vehicle engine.
+
 ## EliasFD3S/slrr-reverse license
 
 MIT License

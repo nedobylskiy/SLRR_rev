@@ -1,5 +1,5 @@
 import {ContactMaterial,Material,Box,Heightfield,Body,ConeTwistConstraint,Cylinder,GSSolver,Plane,Quaternion as PhysicsQuaternion,Sphere,Vec3,World} from 'cannon-es';
-import {Matrix3,Matrix4,Quaternion,Vector3,type Group,type Skeleton} from 'three';
+import {Box3,Matrix3,Matrix4,Quaternion,Vector3,type Group,type Skeleton} from 'three';
 import {PEDESTRIAN_CAR_REACTION,PEDESTRIAN_MASS,type RagdollCar} from '../engine/pedestrian-contact';
 export interface RagdollActivation {velocity?:Vector3;impulse?:Vector3;point?:Vector3;ground?:(point:Vector3)=>number}
 
@@ -18,6 +18,17 @@ export class CharacterRagdoll {
   private readonly limbMaterial=new Material('pedestrian limbs');
   private readonly carMaterial=new Material('yielding vehicle contact');
   private vehicles=new Map<object,{body:Body;car:RagdollCar}>();
+  private movingVehicle=false;
+  get sleeping(){return this.limbs.length>0&&this.limbs.every(limb=>limb.body.sleepState===Body.SLEEPING);}
+  /** Conservative physics bounds, independent of the rendered vertex count. */
+  get bounds(){
+    const bounds=new Box3(),point=new Vector3();
+    for(const limb of this.limbs){
+      const p=limb.body.position,r=limb.length*.5+limb.radius+.2;
+      bounds.expandByPoint(point.set(p.x-r,p.y-r,p.z-r));bounds.expandByPoint(point.set(p.x+r,p.y+r,p.z+r));
+    }
+    return bounds;
+  }
   private poses:Pose[];
   private owners:Limb[];
   private order:number[];
@@ -142,15 +153,17 @@ export class CharacterRagdoll {
     }
   }
   setVehicles(cars:readonly RagdollCar[],dt:number){
+    this.movingVehicle=false;
     const wanted=new Set<object>(),inverseRotation=this.root.getWorldQuaternion(new Quaternion()).invert();
     for(const car of cars){if(car.center.distanceTo(this.position)>25)continue;wanted.add(car.key);let vehicle=this.vehicles.get(car.key);
       if(!vehicle){const body=new Body({mass:0,type:Body.KINEMATIC,material:this.carMaterial,shape:new Box(vector(car.half)),collisionFilterGroup:4,collisionFilterMask:1});vehicle={body,car};this.vehicles.set(car.key,vehicle);this.world.addBody(body);}vehicle.car=car;
+      if(car.velocity.lengthSq()+car.angularVelocity.lengthSq()>.0001&&car.center.distanceTo(this.position)<car.half.length()+3+car.velocity.length()*Math.max(0,dt))this.movingVehicle=true;
       const velocity=this.localVector(car.velocity),center=this.root.worldToLocal(car.center.clone()).addScaledVector(velocity,-Math.max(0,dt));
       vehicle.body.position.copy(vector(center));vehicle.body.velocity.copy(vector(velocity));vehicle.body.angularVelocity.copy(vector(car.angularVelocity.clone().applyQuaternion(inverseRotation)));vehicle.body.quaternion.copy(rotation(inverseRotation.clone().multiply(car.rotation)));vehicle.body.aabbNeedsUpdate=true;
     }
     for(const [key,value] of this.vehicles)if(!wanted.has(key)){this.world.removeBody(value.body);this.vehicles.delete(key);}
   }
-  step(seconds:number){if(!Number.isFinite(seconds)||seconds<=0)return;this.world.step(1/120,Math.min(seconds,.1),12);this.applyPose();}
+  step(seconds:number){if(!Number.isFinite(seconds)||seconds<=0||this.sleeping&&!this.movingVehicle)return false;this.world.step(1/120,Math.min(seconds,.1),12);this.applyPose();return true;}
   applyPose(){
     const desired=this.poses.map((pose,i)=>{
       const limb=this.owners[i],q=new Quaternion(limb.body.quaternion.x,limb.body.quaternion.y,limb.body.quaternion.z,limb.body.quaternion.w);

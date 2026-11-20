@@ -21,6 +21,12 @@ export interface SlrrJvmOptions {
   allowNumericNarrowing?: boolean;
   /** Compatibility for game sources passing numbers to interpreted String parameters. */
   allowNumericStringArguments?: boolean;
+  /** Original SLRR scripts pass ResourceRef templates to GameRef source parameters.
+   * Both wrap the same native handle; this does not make arbitrary Java downcasts valid. */
+  allowResourceHandleArguments?: boolean;
+  /** Host-validated source reference views (e.g. a native car GameRef as Part).
+   * Called only after normal reference assignability fails; never for null or primitives. */
+  isSourceReferenceCompatible?(parameter: string, argument: JavaValue): boolean;
   /** Resolve a resource literal to the integer used by the source file's owning RPK. */
   resolveResourceId?(resource: ResourceIdentity, sourcePath: string): number | undefined;
   budget?: number;
@@ -646,7 +652,12 @@ export class SlrrJvm implements JavaHost {
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
     if (this.options.allowNumericNarrowing && parameter === 'int' && ['float', 'double'].includes(argument.type)) return 6;
     if (sourceCall && this.options.allowNumericStringArguments && (parameter === 'String' || parameter === 'java.lang.String')
-      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 8;
+      // Dialect compatibility is a fallback. It must not beat a valid Java
+      // overload such as (Object,int) for an OSD handler and command number.
+      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 1000;
+    if(sourceCall&&this.options.allowResourceHandleArguments
+      &&this.resolveName(parameter)==='java.util.resource.GameRef'
+      &&this.resolveName(argument.type)==='java.util.resource.ResourceRef')return 8;
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {
@@ -656,6 +667,7 @@ export class SlrrJvm implements JavaHost {
       const implementedAt = lineage.findIndex(cls => this.implementsInterface(cls, wanted));
       if (implementedAt >= 0) return implementedAt + 1;
     }
+    if(sourceCall&&object&&this.options.isSourceReferenceCompatible?.(this.resolveName(parameter),argument))return 8;
     return Infinity;
   }
 

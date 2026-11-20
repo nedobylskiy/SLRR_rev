@@ -5,7 +5,7 @@ import type {CameraNative} from './camera-native';
 import type {RenderObject} from './render-object';
 export type NavigatorMode='java'|'north'|'heading';
 export interface NavigatorMarker {symbol:RenderObject;x:number;z:number;yaw:number;dynamic:boolean}
-export interface NavigatorFrame {id:JavaObject;viewport:{left:number;top:number;width:number;height:number;priority:number};x:number;z:number;yaw:number;height:number;fov:number;tiles:RenderObject[];markers:NavigatorMarker[];route:[number,number,number][]}
+export interface NavigatorFrame {id:JavaObject;viewport:{left:number;top:number;width:number;height:number;priority:number};x:number;z:number;yaw:number;height:number;fov:number;tiles:RenderObject[];markers:NavigatorMarker[];route:[number,number,number][];routeStyle?:{color:number;width:number};pickTarget?:number}
 function object(value:unknown):JavaObject|undefined{const raw=value&&typeof value==='object'&&'value'in value?(value as JavaValue).value:value;return raw&&typeof raw==='object'&&'fields'in raw?raw as JavaObject:undefined;}
 function field(owner:JavaObject|undefined,name:string){return owner?.fields.get(name);}
 function number(owner:JavaObject|undefined,name:string,fallback=0){const n=Number(field(owner,name)?.value);return Number.isFinite(n)?n:fallback;}
@@ -49,8 +49,11 @@ export class NavigatorNative {
     const point=dynamic?this.pose(field(owner,'mover')):(()=>{const p=object(field(owner,'pos'));return p?{x:number(p,'x'),z:number(p,'z'),yaw:0}:undefined;})();
     if(point)markers.push({symbol,...point,dynamic});
    }
-   const route=array(field(key,'routeData')).map(v=>object(v)).filter((v):v is JavaObject=>!!v).map(v=>[number(v,'x')*.01,.002,number(v,'z')*.01] as [number,number,number]);
-   frames.push({id:key,viewport,x,z,yaw,height,fov,tiles,markers,route});
+   const routeRef=field(key,'route'),plotted=routeRef?.value?this.resources.getRender(routeRef):undefined;
+   const route=plotted?.resourceType&&plotted.route?plotted.route.points:array(field(key,'routeData')).map(v=>object(v)).filter((v):v is JavaObject=>!!v).map(v=>[number(v,'x')*.01,.002,number(v,'z')*.01] as [number,number,number]);
+   const localroot=field(key,'localroot'),root=localroot?.value?this.resources.getResource(localroot):undefined;
+   const pickTarget=root&&[...root.children].find(node=>node.alias==='navigator click-object')?.resourceId;
+   frames.push({id:key,viewport,x,z,yaw,height,fov,tiles,markers,route,routeStyle:plotted?.resourceType&&plotted.route?{color:plotted.route.color,width:plotted.route.width}:undefined,pickTarget:pickTarget||undefined});
   }
   return frames.sort((a,b)=>a.viewport.priority-b.viewport.priority);
  }

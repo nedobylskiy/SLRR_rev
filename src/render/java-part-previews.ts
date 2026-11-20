@@ -21,7 +21,7 @@ export class JavaPartPreviews {
   private stamp = '';
   private revision = 0;
   constructor(private readonly stage: HTMLElement, private readonly result: BootResult,
-    private readonly assets: Assets, private readonly viewer: Pick<Viewer, 'createPreviewWorld' | 'disposePreviewWorld'>,
+    private readonly assets: Assets, private readonly viewer: Pick<Viewer, 'createPreviewWorld' | 'createPreviewRender' | 'disposePreviewWorld'>,
     private readonly report: (message: string) => void) {
     this.factory = new PartFactory(assets);
     this.frame = requestAnimationFrame(this.tick);
@@ -58,18 +58,20 @@ export class JavaPartPreviews {
     renderer.domElement.style.zIndex = String(osdDepth(Math.max(...cameras.map(view => view.viewport.priority)), -1000) + 10);
     const stamps = [`${width}:${height}:${this.revision}`];
     for (const view of cameras) {
-      const ref = this.result.gameTypes.reference(view.part);
+      const ref = this.result.gameTypes.reference(view.part ?? view.model!);
       const tree = (nodes: ReturnType<BootResult['parts']['installedTree']>): string => nodes.map(part =>
         `${part.node.resourceId}:${part.parentSlot}:${part.ownSlot}:${part.renderType}:${part.texture?.value}[${tree(part.children)}]`).join(',');
-      const revision=this.result.parts.visualRevision?.(ref);
-      const signature = revision!==undefined?`${view.part.resourceId}:${revision}`:`${view.part.resourceId}:${this.result.parts.renderTypeFor(ref)}:${this.result.parts.textureFor(ref)?.value}[${tree(this.result.parts.installedTree(ref))}]`;
+      const revision=view.part ? this.result.parts.visualRevision?.(ref) : view.model!.visualRevision;
+      const item = view.part ?? view.model!;
+      const signature = revision!==undefined?`${item.resourceId}:${revision}`:`${item.resourceId}:${this.result.parts.renderTypeFor(ref)}:${this.result.parts.textureFor(ref)?.value}[${tree(this.result.parts.installedTree(ref))}]`;
       let preview = this.views.get(view.render);
       if (preview?.signature !== signature) {
         if (preview) this.release(preview);
         preview = { signature, scene: new THREE.Scene(), camera: new THREE.PerspectiveCamera() };
         this.views.set(view.render, preview);
         this.revision++; // Clear the old thumbnail immediately, including while its replacement loads.
-        void this.load(view.render, preview, ref);
+        if (view.model) void this.loadRender(view.render, preview, view.model);
+        else void this.load(view.render, preview, ref);
       }
       const { position: p, orientation: o } = view.render, vp = view.viewport;
       preview.camera.position.set(p.x, p.y, p.z);
@@ -109,6 +111,17 @@ export class JavaPartPreviews {
     } catch (error) {
       this.release(preview); preview.failed = true;
       if (!this.disposed && this.views.get(node) === preview) this.report(`Java preview part: ${String(error)}`);
+    }
+  }
+
+  private async loadRender(camera: RenderObject, preview: Preview, model: RenderObject) {
+    try {
+      const mesh = await this.viewer.createPreviewRender(model, this.assets);
+      if (this.disposed || this.views.get(camera) !== preview) { this.viewer.disposePreviewWorld(mesh); return; }
+      preview.mesh = mesh; preview.scene.add(mesh); this.revision++;
+    } catch (error) {
+      preview.failed = true;
+      if (!this.disposed && this.views.get(camera) === preview) this.report(`Java preview render: ${String(error)}`);
     }
   }
 

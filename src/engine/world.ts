@@ -1,3 +1,4 @@
+import type {PaintStroke} from './paint-stroke';
 import { applyAssemblyDamage, type VehicleDamageState, type PartDamageState } from './vehicle-damage';
 import {parseScxAsync} from '../formats/scx-worker-client';
 import { Matrix4, Quaternion, Vector3 } from 'three';
@@ -21,11 +22,15 @@ export { poseMatrix } from './transforms';
 export interface ResourceKey { pack: string; id: number }
 /** Resolved values of the chassis part arrays after its Java addStockParts ran. */
 export interface JavaStockSelection {
+  /** Single native CFG car (fake_racers), with inline meshes instead of Part scripts. */
+  nativeOnly?: boolean;
   damage?: VehicleDamageState;
   rootWear?: number;
   nativeId?: number;
   rootRender?: ResourceKey;
   rootTexture?: ResourceKey;
+  rootPaintColor?:number;
+  rootPaintStrokes?:readonly PaintStroke[];
   powertrain?: { curve?: DynoCurve; state?: ChassisUpdateState; cooling?: readonly [number,number,number] };
   body: ResourceKey[];
   mechanical: ResourceKey[];
@@ -42,6 +47,8 @@ export interface JavaInstalledPart {
   positions: ReadonlyMap<number, { position?: Triple; rotation?: Triple }>;
   render?: ResourceKey;
   texture?: ResourceKey;
+  paintColor?:number;
+  paintStrokes?:readonly PaintStroke[];
   wear: number;
   children: JavaInstalledPart[];
 }
@@ -65,8 +72,12 @@ export class EnginePart {
   savedVehicleDamage?: VehicleDamageState;
   renderVisible = true;
   paintTexture?: ResourceKey;
+  paintColor?:number;
+  paintStrokes?:readonly PaintStroke[];
   readonly children = new Map<number, EnginePart>();
   readonly local = new Matrix4();
+  /** Parent-space hinge motion; local retains the closed attachment pose. */
+  flapTransform?: Matrix4;
   /** Steering in parent axes, separate from suspension travel for linked arms. */
   readonly steeringTransform = new Matrix4();
   /** Experimental unsteered arm carrier, independent of hub tilt and wheel spin. */
@@ -82,7 +93,12 @@ export class EnginePart {
   get condition() { return this.health; }
   set condition(value: number) { if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error('Invalid part condition'); this.health = value; }
   constructor(readonly world: EngineWorld, readonly id: number, readonly definition: PartDefinition) {}
-  matrix(): Matrix4 { return this.parent ? this.parent.matrix().multiply(this.local) : this.local.clone(); }
+  matrix(): Matrix4 {
+    if (!this.parent) return this.local.clone();
+    const frame = this.parent.matrix();
+    if (this.flapTransform) frame.multiply(this.flapTransform);
+    return frame.multiply(this.local);
+  }
 }
 
 export class EngineWorld {
@@ -91,6 +107,8 @@ export class EngineWorld {
   private nextId = 1;
   disposed = false;
   mechanical = false;
+  /** Native fake cars use optical sprites, never dozens of scene projectors. */
+  spriteOnlyLights = false;
   /** Active CFG render channels: brake=1, reverse=2, running lights=4, indicators=16. */
   lightMask = 0;
   javaPowertrain?: JavaStockSelection['powertrain'];
@@ -184,11 +202,12 @@ export class PartFactory {
     };
     positions(root, selection.rootPositions);
     root.paintTexture = selection.rootTexture;
+    root.paintColor=selection.rootPaintColor;root.paintStrokes=selection.rootPaintStrokes;
     for (const { node } of desired) positions(existing.get(node.nativeId!)!, node.positions);
     for (const { node, parentId } of desired) {
       const part = existing.get(node.nativeId!)!, parent = parentId === undefined ? root : existing.get(parentId)!;
       part.condition = Math.max(0, Math.min(1, node.wear));
-      part.paintTexture = node.texture;
+      part.paintTexture = node.texture;part.paintColor=node.paintColor;part.paintStrokes=node.paintStrokes;
       if (part.parent) world.refreshAttachment(part);
       else world.install(parent, node.parentSlot, part, node.ownSlot);
     }
@@ -286,19 +305,44 @@ export class PartFactory {
   }
   /** Install the executed Java tree when provided; otherwise read CFG stock declarations. */
   async stock(key: ResourceKey, options: { mechanical?: boolean; javaSelection?: JavaStockSelection; suspensionMountOffsetY?: number; suspensionMountOffsets?: WheelFrameOffsets } = {}) {
+    if (options.javaSelection?.nativeOnly) options = { ...options, mechanical: false };
     const world = new EngineWorld(), warnings: string[] = [];
+    world.spriteOnlyLights=!!options.javaSelection?.nativeOnly;
     try {
       let definition = await this.definition(key);
       if (options.javaSelection?.rootRender) {
         const render = options.javaSelection.rootRender;
         definition = { ...definition, model: await this.assets.modelForResource(render.pack, render.id) };
       }
+      // Native cars describe their wheels inline, without Java Part instances.
+      // Adapt those supports to the same suspension interface as assembled cars;
+      // their visible wheel meshes already belong to the native CFG render list.
+      const inlineSlots: CfgSlot[] = [];
+      if (options.javaSelection?.nativeOnly) {
+        const slots = [...definition.config.slots];
+        definition.config.wheels.forEach((_, index) => {
+          if (slots.some(slot => slot.type === 101 + index)) return;
+          let id = 10001 + index;
+          while (slots.some(slot => slot.id === id)) id++;
+          const slot: CfgSlot = { id, type: 101 + index, position: [0,0,0], rotation: [0,0,0], attach: [], compatible: [] };
+          slots.push(slot); inlineSlots.push(slot);
+        });
+        definition = { ...definition, config: { ...definition.config, slots } };
+      }
       const root = world.create(definition);
       // User-measured placement correction, shared by installation, linked
       // anchors and the physical suspension. Debug sliders remain additional.
-      if (definition.config.wheels.length) {
+      if (definition.config.wheels.length && !options.javaSelection?.nativeOnly) {
         root.wheelFrameOffsetY = options.suspensionMountOffsetY ?? 0.140;
         root.wheelFrameOffsets = (options.suspensionMountOffsets ?? SUSPENSION_ATTACHMENT_OFFSETS).map(offset => [...offset] as Triple);
+      }
+      for (const slot of inlineSlots) {
+        const wheel = definition.config.wheels[slot.type! - 101];
+        const config = parsePartConfig('slot 0 0 0 0 0 0 1');
+        config.renderPose = wheel.render?.pose;
+        const support = world.create({ key, alias: `Native wheel ${slot.type! - 101}`, cfgPath: definition.cfgPath,
+          config, model: wheel.render ? await this.assets.modelForResource(key.pack, wheel.render.resource) : undefined });
+        world.install(root, slot.id, support, 1);
       }
       const source = new OriginalStock(this.assets);
       world.mechanical = !!options.mechanical;
@@ -306,6 +350,7 @@ export class PartFactory {
         root.nativeId = options.javaSelection.nativeId;
         root.condition=Math.max(0,Math.min(1,options.javaSelection.rootWear??1));
         root.paintTexture = options.javaSelection.rootTexture;
+        root.paintColor=options.javaSelection.rootPaintColor;root.paintStrokes=options.javaSelection.rootPaintStrokes;
         world.wheelRefs = [...options.javaSelection.wheelRefs];
         world.javaPowertrain = options.javaSelection.powertrain;
         for (const [slot, pose] of options.javaSelection.rootPositions ?? []) {
@@ -318,7 +363,7 @@ export class PartFactory {
           if (node.render) definition = { ...definition, model: await this.assets.modelForResource(node.render.pack, node.render.id) };
           const part = world.create(definition);
           part.nativeId = node.nativeId;
-          part.paintTexture = node.texture;
+          part.paintTexture = node.texture;part.paintColor=node.paintColor;part.paintStrokes=node.paintStrokes;
           part.condition = Math.max(0, Math.min(1, node.wear));
           for (const [slot, pose] of node.positions) {
             if (pose.position) part.slotPositions.set(slot, pose.position);

@@ -1,6 +1,8 @@
 /** Native ResourceRef handle and its place in the resource tree. */
 export class ResourceObject {
   readonly children = new Set<ResourceObject>();
+  /** Destroyed native instances stay identifiable through outstanding Java aliases. */
+  destroyed = false;
   /** Visual assembly changes propagate upward once, instead of polling every descendant. */
   visualRevision = 0;
   markVisualChanged(): void {
@@ -14,6 +16,8 @@ export class ResourceObject {
   resourceScript: string | null = null;
   /** ResourceRef.type(); zero until a host resource has been created. */
   resourceType = 0;
+  /** Host-authored resource data embedded in SDAT rather than referenced by RPK ID. */
+  embeddedBytes?:Uint8Array;
   /** setLight currently drives the existing scene sun/ambient bridge. */
   sceneLightManaged = false;
   /** Source resource ID when this binding was duplicated as an independent resource. */

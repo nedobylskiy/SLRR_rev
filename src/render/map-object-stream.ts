@@ -7,8 +7,9 @@ import { MapMaterialPool } from './map-material-pool';
 import { splitMapGeometry } from './map-geometry-chunks';
 import {mergeStaticMapParts} from './map-static-batches';
 import {MapAutoLod} from './map-auto-lod';
+import {useWholeObjectBounds} from './map-object-bounds';
 
-export interface StreamPlacement { matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+export interface StreamPlacement { movable?:boolean; matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
   const b = placement.bounds;
   if (b) return Math.hypot(Math.max(b.minX - camera.x, 0, camera.x - b.maxX), Math.max(b.minZ - camera.z, 0, camera.z - b.maxZ));
@@ -74,6 +75,7 @@ export class MapObjectStream {
   get hasPendingWork(){return this.scanQueue.size>0||this.drawQueue.size>0;}
   get queueInfo(){return `budget ${Number.isFinite(this.frameBudgetMs)?this.frameBudgetMs+' ms':'unlimited'} · scan queue ${this.scanQueue.size} · draw queue ${this.drawQueue.size}`;}
   private types: StreamType[] = [];
+  private placementTypes=new WeakMap<StreamPlacement,{type:StreamType;index:number}>();
   private ordered: StreamType[] = [];
   private lastCell = '';
   private dirty = true;
@@ -117,7 +119,7 @@ export class MapObjectStream {
     if(this.cellPreparation){await this.cellPreparation;if(!this.cachedCellsEnabled||this.disposed)return;}
     if(!this.cachedCellsEnabled||this.disposed)return;
     const generation=this.cellGeneration,size=this.cachedCellSize;
-    const queue=this.types.filter(t=>t.category&&!t.cachedCells);
+    const queue=this.types.filter(t=>t.category&&!t.cachedCells&&!t.placements.some(p=>p.movable));
     const prepare=async()=>{
       for(;;){const type=queue.shift();if(!type||this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
         if(!type.baseMeshes&&!type.failed)await (type.loadPromise??this.load(type,true));
@@ -133,6 +135,21 @@ export class MapObjectStream {
     await Promise.all(Array.from({length:4},async()=>{
       for(;;){const type=queue.shift();if(!type||this.disposed)return;await (type.loadPromise??this.load(type));}
     }));
+  }
+  /** Initial scene barrier; later movement keeps using the normal frame budget. */
+  async prepareNear(focus:Vector3){
+    const nearby=this.types.filter(type=>!type.globalCompiled&&type.placements.some(p=>distanceTo(p,focus)<=this.distance));
+    for(const type of nearby){this.scanType(type,focus);this.scanQueue.delete(type);}
+    this.ordered=this.types.filter(type=>!type.globalCompiled).sort((a,b)=>a.priority-b.priority);
+    const queue=nearby.filter(type=>!type.meshes&&!type.failed&&(type.preload||type.pending.length));
+    await Promise.all(Array.from({length:4},async()=>{
+      for(;;){const type=queue.shift();if(!type||this.disposed)return;await(type.loadPromise??this.load(type));}
+    }));
+    while(!this.disposed){
+      this.update(focus);
+      if(!nearby.some(type=>type.meshes&&!type.globalCompiled&&!this.useCached(type)&&type.pending.length))break;
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
   }
   private globalFacades?:GlobalFacadeBatches;
   compileGlobalFacades(){
@@ -189,9 +206,19 @@ export class MapObjectStream {
   }
 
   add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false) {
-    this.types.push({ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
-      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),farSlots:new Set() });
+    const type:StreamType={ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
+      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),farSlots:new Set() };
+    this.types.push(type);placements.forEach((placement,index)=>this.placementTypes.set(placement,{type,index}));
     this.dirty = true;
+  }
+
+  /** A moved prop invalidates its small model batch, not the city's static buffers. */
+  placementsMoved(placements:readonly StreamPlacement[]){
+    const affected=new Set<StreamType>();
+    for(const placement of placements){const entry=this.placementTypes.get(placement);if(entry){entry.type.instanceBounds.delete(entry.index);affected.add(entry.type);}}
+    for(const type of affected){type.meshDrawn.clear();type.chunkBounds.clear();type.boundsDirty=true;this.drawQueue.add(type);this.scanQueue.add(type);}
+    if([...affected].some(type=>!type.placements.every(p=>p.movable)))this.shadowRevision++;
+    this.viewDirty=true;
   }
 
   update(camera: Vector3, view?: Camera,continuation=false) {
@@ -211,7 +238,7 @@ export class MapObjectStream {
           mesh.userData={...part.userData};mesh.layers.mask=part.layers.mask;mesh.matrixAutoUpdate=false;mesh.count=0;mesh.visible=false;
           if(pending.placements.some(p=>p.paintColor!==undefined))mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));
           return mesh;
-        });this.selectMeshes(pending);
+        });if(pending.category==='trees')useWholeObjectBounds(pending.mergedMeshes);this.selectMeshes(pending);
       }
     }
     const next=this.prepareChunks.values().next().value;
@@ -353,13 +380,15 @@ export class MapObjectStream {
       const partStart=profile.start();profile.add("parts_selected_count");
       let selected=visible;
       let extra=auxiliary;
-      if(this.tightFrustum&&cull&&!this.inspectResident&&!this.geometryCutoff){
+      const terrain=mesh.userData.mapOcclusionRole==='terrain';
+      if((this.tightFrustum&&cull||terrain)&&!this.inspectResident&&!this.geometryCutoff){
         if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
         const cache=type.chunkBounds.get(mesh)??new Map<number,Box3>();type.chunkBounds.set(mesh,cache);
         selected=visible.filter(index=>{
           let box=cache.get(index);
           if(!box){box=mesh.geometry.boundingBox!.clone().applyMatrix4(type.placements[index].matrix);cache.set(index,box);}
-          return this.frustum.intersectsBox(box);
+          const distance=Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z));
+          return (!terrain||distance<=this.distance)&&(!cull||this.frustum.intersectsBox(box));
         });
       }
       if(this.geometryCutoff&&!this.inspectResident){
@@ -381,6 +410,10 @@ export class MapObjectStream {
         &&material&&!material.transparent&&!material.alphaTest?this.lod.get(mesh.geometry):undefined;
       let lodMesh=type.lodMeshes.get(mesh);
       if(lodGeometry&&!lodMesh){
+        if(type.category==='trees'){
+          lodGeometry.boundingBox=mesh.geometry.boundingBox!.clone();
+          lodGeometry.boundingSphere=mesh.geometry.boundingSphere!.clone();
+        }
         lodMesh=new InstancedMesh(lodGeometry,mesh.material,type.placements.length);
         lodMesh.name=`${mesh.name} / generated LOD`;lodMesh.renderOrder=mesh.renderOrder;lodMesh.castShadow=mesh.castShadow;lodMesh.receiveShadow=mesh.receiveShadow;
         lodMesh.userData.staticMapCaster=mesh.userData.staticMapCaster;lodMesh.userData.mapOcclusionRole=mesh.userData.mapOcclusionRole;lodMesh.matrixAutoUpdate=false;lodMesh.visible=false;lodMesh.count=0;
@@ -465,7 +498,18 @@ export class MapObjectStream {
         return;
       }
       if (!parts.length) { this.dirty = true; return; }
-      if(this.materialSharing)this.materials.acquire(parts);
+      const ground=parts.every(part=>part.userData.mapOcclusionRole==='terrain');
+      if(this.materialSharing||ground)this.materials.acquire(parts);
+      if(ground){
+        // Compiled ground sections repeat the same materials hundreds of times.
+        // This is the normal loading path, independent of experimental prop
+        // batching. Buffers remain resident; the renderer submits one compatible
+        // material batch instead of one draw for every original section.
+        const original=parts;parts=mergeStaticMapParts(original,Infinity);
+        const retained=new Set(parts.map(part=>part.geometry));
+        for(const geometry of new Set(original.map(part=>part.geometry)))if(!retained.has(geometry))geometry.dispose();
+      }
+      if(type.category==='trees')useWholeObjectBounds(parts);
       type.localBounds = new Sphere().makeEmpty();
       type.meshes = parts.map(part => {
         if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere();
@@ -505,6 +549,7 @@ export class MapObjectStream {
         if(base.instanceColor)mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));return mesh;
       });
     });
+    if(type.category==='trees'&&type.chunkMeshes)useWholeObjectBounds(type.chunkMeshes);
     const selected=this.geometryCutoff?type.chunkMeshes!:this.mergeStatic&&type.mergedMeshes?type.mergedMeshes:type.baseMeshes;
     const retained=new Set(selected);
     for(const mesh of type.meshes??[])if(!retained.has(mesh)){

@@ -22,12 +22,24 @@ export function normalizeResourcePackPath(pack: string) {
   return normalizePath(`${/[\\/]/.test(name) ? name : name.replaceAll('.', '/')}.rpk`);
 }
 
+/** Session textures are a registry, never a pack to read from the game folder. */
+export async function resourceTextureSource(assets: Assets, key: { pack: string; id: number }): Promise<string | undefined> {
+  if (normalizeResourcePackPath(key.pack) === '__runtime/legacy-textures.rpk') return;
+  if (normalizeResourcePackPath(key.pack) === '__runtime/textures.rpk')
+    return assets.runtimeTextureSource(key.id);
+  return entryProperties((await assets.resource(key.pack, key.id)).entry)
+    .find(property => property.key === 'sourcefile')?.value;
+}
+
 /** Browser-side virtual filesystem: source files are read lazily. */
 export class Assets {
   readonly byPath = new Map<string, Asset>();
   private packs = new Map<string, Promise<RpkPack>>();
   private readonly textureFiles = new Map<string, number>();
   private readonly texturePack: RpkPack = { version: 0x200, dependencies: [], entries: [], warnings: [] };
+  runtimeTextureSource(id: number): string | undefined {
+    return this.texturePack.entries.find(entry => entry.typeId === id)?.alias;
+  }
   /** Runtime textures share the ordinary resource/sourcefile path; pixels remain lazy. */
   registerTexture(path: string): { pack: string; id: number } {
     path = normalizePath(path);
@@ -91,7 +103,8 @@ export class Assets {
         const replacement = this.resourceOverride(resolved.packPath, sourceId, overrides);
         const texture = await this.resource(replacement?.pack ?? resolved.packPath, replacement?.id ?? sourceId);
         const file = entryProperties(texture.entry).find(p => p.key === 'sourcefile')?.value;
-        if (file) textures.push(file);
+        // Empty native texture resources still occupy an authored material slot.
+        textures.push(file ?? '');
       } catch { textures.push(''); } // Preserve material indices when one texture is missing.
     }
     if (source && /\.sc[xy]$/i.test(source)) {

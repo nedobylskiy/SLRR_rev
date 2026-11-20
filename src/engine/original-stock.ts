@@ -1,6 +1,7 @@
 import { Assets, normalizePath } from '../assets';
 import type { Triple } from '../formats/cfg';
 import type { PartDefinition, ResourceKey } from './world';
+import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
 
 export type WheelCorner = 'FL' | 'FR' | 'RL' | 'RR';
 export interface MechanicalProfile { kind: 'suspension' | 'spring' | 'shock' | 'brake' | 'sway' | 'engine'; source: string; values: Record<string, number>; hub?: number[]; arm?: number[]; drive?: string; transmissionType?: string; renderVariants?: Partial<Record<WheelCorner, ResourceKey>>; slotPositions?: { base: number; position: Triple }[] }
@@ -56,9 +57,19 @@ export class OriginalStock {
   constructor(readonly assets: Assets) {}
   async source(def: PartDefinition) {
     if (!def.script) return '';
-    const path = normalizePath(def.script).replace(/\/([^/]+)\.class$/, '/src/$1.java');
+    const compiled = normalizePath(def.script);
+    const source = compiled.replace(/\/([^/]+)\.class$/, '/src/$1.java');
+    const path = this.assets.byPath.has(source) ? source : compiled;
     if (!this.assets.byPath.has(path)) return '';
-    if (!this.cache.has(path)) this.cache.set(path, this.assets.read(path).then(b => clean(new TextDecoder('windows-1252').decode(b))));
+    if (!this.cache.has(path)) this.cache.set(path, this.assets.read(path).then(bytes => {
+      if (!path.endsWith('.class')) return clean(new TextDecoder('windows-1252').decode(bytes));
+      const name = path.split('/').at(-1)!.slice(0,-6);
+      const entry = parseTufa(bytes).find(entry => entry.name.split('.').at(-1)!.toLowerCase() === name);
+      if (!entry) throw new Error(`Stock TUFA class missing: ${path}`);
+      const result = decompileClass(entry);
+      if (result.diagnostics.length) throw new Error(`Cannot read stock tuning ${path}: ${result.diagnostics.join('; ')}`);
+      return clean(result.source);
+    }));
     return this.cache.get(path)!;
   }
   async environment(def: PartDefinition) {

@@ -40,7 +40,16 @@ test('SfxRef plays an RPK sound through the effects channel and returns a stoppa
     assert.ok(gainValue > 0 && gainValue <= 0.5);
     jvm.natives.invoke('java.util.resource.SfxRef', 'stop', receiver, [handle]);
     assert.equal(stops, 1);
+    const loopArgs=[jv('Object',null),jv('float',0),jv('float',1),jv('float',1),jv('int',1),jv('int',42)];
+    const loop=jvm.natives.invoke('java.util.resource.SfxRef','nplay',receiver,loopArgs)!;
+    const repeated=jvm.natives.invoke('java.util.resource.SfxRef','nplay',receiver,loopArgs)!;
+    assert.equal(repeated.value,loop.value,'control ticks reuse the pending cursor-owned spray loop');
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(starts,2,'one initial click plus one loop, not a new loop per tick');
+    assert.equal(jvm.natives.invoke('java.util.resource.SfxRef','nplay',receiver,loopArgs)!.value,loop.value);
+    jvm.natives.invoke('java.util.resource.SfxRef','stop',receiver,[loop]);assert.equal(stops,2);
     bridge.dispose();
+    assert.equal(stops,2,'release leaves no older spray loops running');
   } finally {
     globalThis.AudioContext = original;
   }

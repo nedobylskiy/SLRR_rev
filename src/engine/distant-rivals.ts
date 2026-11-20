@@ -8,16 +8,17 @@ export class DistantRivals {
  private states=new Map<number,{next:number;anchor:TrafficSpawn}>();
  constructor(private index:TrafficSpawnIndex,private random=Math.random){}
  forget(id:number){this.states.delete(id);}
- update(id:number,pose:TrafficPose,visible:boolean,focus:Vector3,near:number,now:number):boolean {
+ update(id:number,pose:TrafficPose,visible:boolean,focus:Vector3,near:number,now:number,unplaced=false):boolean {
   if(visible){this.forget(id);return false;}
   const position=new Vector3(pose.position.x,pose.position.y,pose.position.z);
   let state=this.states.get(id);
   if(state&&now<state.next)return false;
   const established=!!state;
-  const anchor=state&&state.anchor.position.distanceToSquared(position)<1?state.anchor:this.index.nearest(position);
+  const anchor=unplaced?this.index.any(sample=>Math.hypot(sample.position.x-focus.x,sample.position.z-focus.z)>near,this.random)
+   :state&&state.anchor.position.distanceToSquared(position)<1?state.anchor:this.index.nearest(position);
   if(!anchor)return false;
   this.states.set(id,state={next:now+DISTANT_RIVAL_INTERVAL,anchor});
-  if(Math.hypot(position.x-focus.x,position.z-focus.z)<=near)return false;
+  if(!unplaced&&Math.hypot(position.x-focus.x,position.z-focus.z)<=near)return false;
   // Initial off-graph Java placements must first be attached to a lane.
   let target=anchor;
   const speed=trafficCruiseSpeed(anchor.speedGroup,this.random);

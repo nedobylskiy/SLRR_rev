@@ -6,6 +6,7 @@ import type { ResourceCatalog } from './resource-catalog';
 import type { BootEvent } from './game-boot';
 import type { ResourceIdentity } from 'slrr-jvm';
 import { normalizeResourcePackPath } from '../assets';
+import { encodeTextureReference, decodeTextureReference, type SavedTextureIdentity } from './texture-reference';
 
 const zeroVector = (): Vector3State => ({ x: 0, y: 0, z: 0 });
 const zeroOrientation = (): OrientationState => ({ y: 0, p: 0, r: 0 });
@@ -19,6 +20,7 @@ interface PendingScriptEvent {
   arguments: JavaValue[];
   method?: string;
 }
+interface ScriptTimer {handle?:ReturnType<typeof setTimeout>;cancelled:boolean}
 
 interface Notification {
   handler: JavaValue;
@@ -31,6 +33,33 @@ interface Notification {
 
 /** Connects interpreted GameRef/GameType methods to one persistent host game object. */
 export class GameTypeNative {
+  private textureLoader?: (source: string) => ResourceIdentity;
+  private readonly textureSources = new Map<string, string>();
+  private readonly textureBytes = new Map<number, Uint8Array>();
+  setTextureLoader(load: (source: string) => ResourceIdentity) { this.textureLoader = load; }
+  savedTextureIdentity(identity: ResourceIdentity): SavedTextureIdentity {
+    const source = this.textureSources.get(`${normalizeResourcePackPath(identity.pack)}:${identity.id}`);
+    return source ? { ...identity, source } : identity;
+  }
+  restoreTextureIdentity(identity: SavedTextureIdentity): JavaValue {
+    if (!identity.source) {
+      // A session-local number from an old save cannot identify a texture in
+      // this session: that slot may already belong to an unrelated decal.
+      const pack = normalizeResourcePackPath(identity.pack) === '__runtime/textures.rpk'
+        ? '__runtime/legacy-textures.rpk' : identity.pack;
+      return this.remountSavedResource(pack, identity.id);
+    }
+    if (!this.textureLoader) throw Error('Saved texture loader is not connected');
+    const mounted = this.textureLoader(identity.source);
+    const ref = this.remountSavedResource(mounted.pack, mounted.id);
+    this.textureSources.set(`${normalizeResourcePackPath(mounted.pack)}:${mounted.id}`, identity.source);
+    this.textureBytes.set(Number(ref.value), encodeTextureReference(identity.source));
+    return ref;
+  }
+  restoreEmbeddedTexture(bytes: Uint8Array): JavaValue | undefined {
+    const source = decodeTextureReference(bytes);
+    return source ? this.restoreTextureIdentity({ pack: '__runtime/textures.rpk', id: 0, source }) : undefined;
+  }
   private readonly nodes = new WeakMap<JavaObject, ResourceObject>();
   private readonly objects = new Map<number, ResourceObject>();
   private readonly liveByResourceId = new Map<number, GameObject>();
@@ -39,14 +68,16 @@ export class GameTypeNative {
   private nextId = 1;
   private nextGameResourceId = 0x20000000;
   private nextClonedResourceId = 0x40000000;
+  private readonly clonedResources = new Map<number,ResourceObject>();
   private readonly trackPackSlots = new Map<string, number>();
   private readonly savedResources = new Map<number, ResourceIdentity>();
   private readonly savedResourceIds = new Map<string, number>();
   private readonly savedResourcePackSlots = new Map<string, number>();
   private readonly pendingEvents: PendingScriptEvent[] = [];
   private readonly notifications = new Map<JavaObject, Notification[]>();
-  private readonly triggerContacts = new Map<ResourceObject, boolean>();
-  private readonly timers = new Map<JavaObject, Set<ReturnType<typeof setTimeout>>>();
+  private readonly triggerContacts = new Map<ResourceObject, WeakMap<GameObject, boolean>>();
+  private readonly timers = new Map<JavaObject, Set<ScriptTimer>>();
+  private executionBlocked?:()=>boolean;
   private readonly callbacks = new Map<JavaObject, Set<number>>();
   private animatingCallbacks = false;
   private dispatchingEvents = false;
@@ -99,6 +130,12 @@ export class GameTypeNative {
       const object = this.object(receiver);
       const id = Number(args[0].value) | 0;
       const origin = args[0].resource ?? this.resolveResourceIdentity(id);
+      const clone=this.clonedResources.get(id);
+      if(clone&&!clone.destroyed){
+        const prior=this.nodes.get(object);
+        if(prior&&prior!==clone)this.objects.delete(prior.id);
+        this.nodes.set(object,clone);return voidValue();
+      }
       const live = this.liveByResourceId.get(id);
       // getInfo(GII_OWNER) yields a plain instance ID. It can numerically overlap
       // a loaded packed resource, so only an explicit resource literal outranks it.
@@ -170,6 +207,7 @@ export class GameTypeNative {
       target.sceneLightManaged = source.sceneLightManaged;
       target.resourcePack = source.resourcePack;
       target.resourceScript = source.resourceScript;
+      target.embeddedBytes=source.embeddedBytes?.slice();
       target.params = source.params;
       target.alias = source.alias;
       target.setParent(source.parent);
@@ -186,6 +224,7 @@ export class GameTypeNative {
         || source.resourceType === 0;
       target.resourceId = cloned ? this.nextClonedResourceId++ : source.resourceId;
       target.copiedFromResourceId = cloned ? source.resourceId : null;
+      if(cloned)this.clonedResources.set(target.resourceId,target);
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'scaleMesh', ['float', 'float', 'float'], ({ receiver, args }) => {
@@ -213,6 +252,7 @@ export class GameTypeNative {
         if (literal.pack) value.resource = { pack: literal.pack, id: Number(literal.id) | 0 };
         return value;
       }
+      if(this.nodes.get(this.object(receiver))?.destroyed)return jv('int',0);
       const node = this.requireResource(receiver), value = jv('int', node.resourceId);
       // Java stores mapStack[j].id() in an int. Keep its pack so a later
       // new GameRef(id) can resolve the right track script.
@@ -247,6 +287,7 @@ export class GameTypeNative {
       for (const listener of this.resourceDestroyListeners) listener(receiver);
       const node = this.getResource(receiver);
       if (!node) return voidValue();
+      this.clonedResources.delete(node.resourceId);
       this.notifications.delete(this.object(receiver));
       this.callbacks.delete(this.object(receiver));
       for (const [handler, subscriptions] of this.notifications) {
@@ -263,7 +304,7 @@ export class GameTypeNative {
       for (const child of [...node.children]) child.setParent(null);
       this.objects.delete(node.id);
       if (node instanceof GameObject) this.liveByResourceId.delete(node.resourceId);
-      this.nodes.delete(this.object(receiver));
+      node.destroyed=true;
       return voidValue();
     });
     jvm.natives.register(resourceRef, 'deleteNative', [], () => {
@@ -337,8 +378,15 @@ export class GameTypeNative {
       if (!Number.isFinite(delay) || delay < 0) throw new Error(`Invalid Java timer delay: ${delay}`);
       const object = this.object(receiver), timers = this.timers.get(object) ?? new Set();
       this.timers.set(object, timers);
-      const handle = setTimeout(() => {
-        timers.delete(handle);
+      const timer:ScriptTimer={cancelled:false};
+      let remaining=delay*1000,last=performance.now(),paused=this.executionBlocked?.()??false;
+      const tick=()=>{
+        if(timer.cancelled)return;
+        const now=performance.now(),blocked=this.executionBlocked?.()??false;
+        if(!paused&&!blocked)remaining-=Math.max(0,now-last);
+        last=now;paused=blocked;
+        if(blocked||remaining>0){schedule();return;}
+        timers.delete(timer);
         if (!this.get(receiver)) return;
         try {
           this.queueIntEvent(receiver, jv('GameRef', null), EVENT_TIME, Number(args[1].value));
@@ -347,8 +395,9 @@ export class GameTypeNative {
           this.report({ level: 'error', message: `Java timer: ${error instanceof Error ? error.message : String(error)}` });
         }
         if (!timers.size) this.timers.delete(object);
-      }, delay * 1000);
-      timers.add(handle);
+      };
+      const schedule=()=>{timer.handle=setTimeout(tick,this.executionBlocked?Math.max(1,Math.min(50,paused?50:remaining)):Math.max(0,remaining));};
+      timers.add(timer);schedule();
       return voidValue();
     });
     jvm.natives.register(gameType, 'removeAllTimers', [], ({ receiver }) => {
@@ -508,22 +557,36 @@ export class GameTypeNative {
         this.readVector(args[2]), this.readVector(args[3])); return voidValue();
     });
     jvm.natives.registerAsync(gameRef, 'queueEvent', ['ResourceRef', 'int', 'String'], async ({ receiver, args }) => {
+      // Track may hide an old renderer after its race target has been destroyed.
+      // Deleted native handles have ID zero and cannot receive further events.
+      if(this.nodes.get(this.object(receiver))?.destroyed)return voidValue();
       const type = Number(args[1].value) | 0;
       if (type === 16 && typeof args[2].value === 'string') {
         const node = this.getResource(receiver);
         if (node) {
           const commands = this.lastCommands.get(node) ?? new Map<string, string>();
-          commands.set(args[2].value.trim().split(/\s+/, 1)[0], args[2].value);
+          const commandName=args[2].value.trim().split(/\s+/, 1)[0];
+          commands.delete(commandName);commands.set(commandName,args[2].value);
           this.lastCommands.set(node, commands);
           if (node instanceof GameObject) {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
+            if (verb === 'corpse' || verb === 'renderinstance') {
+              const words = args[2].value.trim().split(/\s+/);
+              const id = Number(words[verb === 'corpse' ? 2 : 1]);
+              const driver = Number.isInteger(id) && id > 0 ? this.getByResourceId(id) : undefined;
+              if (driver instanceof RenderObject && !driver.nativeVehicleDriver) {
+                driver.nativeVehicleDriver = true;
+                this.notifyRenderChanged(driver);
+              }
+            }
             if (verb === 'render') node.cameraRendering = true;
             if (verb === 'hide') node.cameraRendering = false;
             if (verb === 'sethorn') {
               const words = args[2].value.trim().split(/\s+/);
               const value = Number(words[1]);
               if (words.length !== 2 || !Number.isFinite(value)) throw new Error(`Invalid horn command: ${args[2].value}`);
-              node.hornInput = value !== 0; node.hornCommandRevision++;
+              node.hornIndex = Math.trunc(value) & 3;
+              node.hornInput = node.hornIndex !== 0; node.hornCommandRevision++;
             }
             if (verb === 'setsteer') {
               const words = args[2].value.trim().split(/\s+/);
@@ -549,10 +612,17 @@ export class GameTypeNative {
   }
 
   get(receiver: JavaValue): GameObject | undefined {
-    const node = this.nodes.get(this.object(receiver));
+    const node = this.getResource(receiver);
     return node instanceof GameObject ? node : undefined;
   }
-  getResource(receiver: JavaValue): ResourceObject | undefined { return this.nodes.get(this.object(receiver)); }
+  getResource(receiver: JavaValue): ResourceObject | undefined {
+    // Optional Java fields (notably Player.car and Track.cameraTarget) remain
+    // typed null references while a scene is being assembled or released.
+    // Read-only lookup has no native object in that case; mutations still use
+    // object()/requireResource() and reject invalid receivers.
+    if(receiver.value==null)return undefined;
+    const node=this.nodes.get(this.object(receiver));return node?.destroyed?undefined:node;
+  }
   /** File-created texture handles retain a stable RID when Java passes only id(). */
   bindTexture(receiver: JavaValue, identity: ResourceIdentity): void {
     const node = this.allocate(receiver), id = 0x60000000 + identity.id;
@@ -560,6 +630,11 @@ export class GameTypeNative {
     node.resourceId = node.typeId = id;
     node.resourcePack = identity.pack;
     node.resourceType = 7;
+    // Decal(String) uses this native ID, whereas SDAT restoration uses a
+    // remounted ID. Both aliases must carry the same persistent source path.
+    const source = this.textureSources.get(`${normalizeResourcePackPath(identity.pack)}:${identity.id}`);
+    node.embeddedBytes = source ? encodeTextureReference(source) : undefined;
+    if (node.embeddedBytes) this.textureBytes.set(id, node.embeddedBytes);
   }
   resolveResourceIdentity(id: number): ResourceIdentity | undefined {
     return this.savedResources.get(id) ?? this.resolvePackedResource?.(id);
@@ -572,6 +647,17 @@ export class GameTypeNative {
     return this.catalog?.resolve(pack, local);
   }
   /** Remount a saved RPK entry independently of the current source dependency slots. */
+  createEmbeddedResource(kind:number,bytes:Uint8Array):JavaValue {
+    if (kind === 7) { const texture = this.restoreEmbeddedTexture(bytes); if (texture) return texture; }
+    const ref=jv('ResourceRef',{className:'java.util.resource.ResourceRef',fields:new Map()});
+    const node=this.allocate(ref);node.resourceId=this.nextClonedResourceId++;node.resourceType=kind;node.embeddedBytes=bytes.slice();
+    this.clonedResources.set(node.resourceId,node);return jv('int',node.resourceId);
+  }
+  embeddedResource(id:number){return this.clonedResources.get(id)?.embeddedBytes ?? this.textureBytes.get(id);}
+  updateEmbeddedResource(id:number,bytes:Uint8Array){
+    const node=this.clonedResources.get(id);if(!node||node.destroyed||!node.embeddedBytes)return false;
+    node.embeddedBytes=bytes.slice();return true;
+  }
   remountSavedResource(pack: string, localId: number): JavaValue {
     const identity = { pack: normalizeResourcePackPath(pack), id: localId & 0xffff };
     const key = `${identity.pack}:${identity.id}`;
@@ -615,6 +701,9 @@ export class GameTypeNative {
     const typeNode = type?.value == null ? null : this.requireResource(type);
     const node = new RenderObject(resource.id, object.className, typeNode,
       alias || '_renderinst');
+    // id() identifies this instance, not the shared RPK model. In particular,
+    // corpse/renderinstance must distinguish several drivers using one model.
+    node.resourceId = this.nextGameResourceId++;
     node.renderResource = typeNode ? this.resolveRenderResource(typeNode) : null;
     resource.setParent(null);
     node.setParent(parentNode);
@@ -668,18 +757,28 @@ export class GameTypeNative {
     return receiver.value != null && (this.callbacks.get(this.object(receiver))?.has(callback) ?? false);
   }
   /** Native animate hooks include OSDs, not just GameLogic.actualState. */
-  async animateCallbacks(onError: (error: Error) => void): Promise<void> {
+  setExecutionBlocked(reader:(()=>boolean)|undefined):void {this.executionBlocked=reader;}
+  private previousCallbackAt?:number;
+  async animateCallbacks(onError: (error: Error) => void,now=performance.now()): Promise<void> {
     if (this.animatingCallbacks) return;
+    const dt=this.previousCallbackAt===undefined?.05:Math.max(0,Math.min(.1,(now-this.previousCallbackAt)/1000));
+    this.previousCallbackAt=now;
+    if(this.executionBlocked?.())return;
     this.animatingCallbacks = true;
     try {
       for (const object of [...this.callbacks.keys()]) {
-        if (!this.callbacks.get(object)?.has(28)) continue;
-        try { await this.jvm.invokeAsync(jv(object.className, object), 'animate'); }
-        catch (reason) {
-          const callbacks = this.callbacks.get(object);
-          callbacks?.delete(28);
-          if (!callbacks?.size) this.callbacks.delete(object);
-          onError(new Error(`${object.className}.animate: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }));
+        if(this.executionBlocked?.())break;
+        // GII_CONTROL drives Painter's spray and other Java control hooks.
+        // It is independent of GII_ANIMATE and must stop as soon as unregistered.
+        for(const [callback,method,args]of [[8,'control',[jv('float',dt)]],[28,'animate',[]]] as const){
+          if(!this.callbacks.get(object)?.has(callback)||this.executionBlocked?.())continue;
+          try { await this.jvm.invokeAsync(jv(object.className, object),method,[...args]); }
+          catch (reason) {
+            const callbacks = this.callbacks.get(object);
+            callbacks?.delete(callback);
+            if (!callbacks?.size) this.callbacks.delete(object);
+            onError(new Error(`${object.className}.${method}: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }));
+          }
         }
       }
     } finally { this.animatingCallbacks = false; }
@@ -687,6 +786,11 @@ export class GameTypeNative {
   lastCommand(receiver: JavaValue, name: string): string | undefined {
     const node = receiver.value == null ? null : this.getResource(receiver);
     return node ? this.lastCommands.get(node)?.get(name) : undefined;
+  }
+  latestCommand(receiver:JavaValue,names:readonly string[]):string|undefined {
+    const node=receiver.value==null?undefined:this.getResource(receiver);let latest:string|undefined;
+    if(node)for(const [name,text]of this.lastCommands.get(node)??[])if(names.includes(name))latest=text;
+    return latest;
   }
   roots(): ResourceObject[] { return [...this.objects.values()].filter(node => node.parent === null); }
 
@@ -714,9 +818,11 @@ export class GameTypeNative {
         inside = extents.length === 3 && extents.every(Number.isFinite)
           && Math.abs(dx) <= extents[0] && Math.abs(dy) <= extents[1] && Math.abs(dz) <= extents[2];
       }
-      const previous = this.triggerContacts.get(trigger) ?? false;
+      let contacts=this.triggerContacts.get(trigger);
+      if(!contacts){contacts=new WeakMap();this.triggerContacts.set(trigger,contacts);}
+      const previous = contacts.get(car) ?? false;
       if (inside === previous) continue;
-      this.triggerContacts.set(trigger, inside);
+      contacts.set(car, inside);
       const handle = this.handles.get(trigger);
       if (handle) this.queueStringEvent(handle, vehicle, inside ? 32 : 64, jv('String', String(car.resourceId)));
     }
@@ -809,6 +915,7 @@ export class GameTypeNative {
   }
 
   dispose(): void {
+    this.clonedResources.clear();
     for (const object of this.timers.keys()) this.cancelTimers(object);
     this.pendingEvents.length = 0;
     this.notifications.clear();
@@ -822,7 +929,7 @@ export class GameTypeNative {
 
   private cancelTimers(object: JavaObject): void {
     const timers = this.timers.get(object);
-    for (const handle of timers ?? []) clearTimeout(handle);
+    for (const timer of timers ?? []) {timer.cancelled=true;if(timer.handle!==undefined)clearTimeout(timer.handle);}
     this.timers.delete(object);
   }
 
@@ -841,7 +948,7 @@ export class GameTypeNative {
   private allocate(receiver: JavaValue): ResourceObject {
     const object = this.object(receiver);
     const current = this.nodes.get(object);
-    if (current) return current;
+    if (current&&!current.destroyed) return current;
     const node = new ResourceObject(this.nextId++, object.className);
     this.nodes.set(object, node);
     this.objects.set(node.id, node);

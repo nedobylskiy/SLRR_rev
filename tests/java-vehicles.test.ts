@@ -6,10 +6,149 @@ import { GameTypeNative } from '../src/runtime/game-type-native';
 import { GameObject } from '../src/runtime/game-object';
 import type { BootResult } from '../src/runtime/game-boot';
 import type { Assets } from '../src/assets';
-import { EngineWorld, type PartFactory } from '../src/engine/world';
+import { EngineWorld, PartFactory } from '../src/engine/world';
 import { parsePartConfig } from '../src/formats/cfg';
 import { javaStockSelection } from '../src/runtime/java-scene';
 import { createWheelRefState } from '../src/runtime/wheel-ref-native';
+import type {JavaRaceControl} from '../src/engine/race-driver';
+import {Vector3} from 'three';
+
+test('native fake racers and ParkingCar.gr render once without scripted Part fields', async () => {
+  const jvm = new SlrrJvm({resolveImport: () => ({path:'GameLogic.java', source:
+    'package java.game; class GameLogic { static Object actualState; static Object player; }'})});
+  await jvm.loadClass('java.game.GameLogic'); await jvm.globalAsync('java.game.GameLogic');
+  const types = new GameTypeNative(jvm, () => {});
+  const ref = (name:string, fields:Record<string,JavaValue>={}) => jv(name,{className:name,fields:new Map(Object.entries(fields))});
+  const map = ref('GroundRef'); jvm.natives.invoke('java.lang.GameType','createNativeInstance',map,[]);
+  const fake = (id:number) => {
+    const car = ref('java.util.resource.GameRef');
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[jv('GameRef',map.value),jv('int',id),jv('String',null),jv('String','fake')]);
+    types.getResource(car)!.resourcePack='cars/fake_racers/Ninja.rpk'; return car;
+  };
+  const parked=fake(1), racer=fake(2), player=fake(3), traffic=fake(4);
+  types.catalogResource=(_pack,id)=>({nativeType:'car',id}) as ReturnType<GameTypeNative['catalogResource']>;
+  const vehicle=ref('java.game.Vehicle',{chassis:racer});
+  jvm.natives.invoke('java.util.resource.ResourceRef','set',vehicle,[jv('ResourceRef',racer.value)]);
+  const brain=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',brain,[]);
+  const driver=types.createRender(ref('RenderRef'),map,null,'botfigura')!;
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',`renderinstance ${driver.resourceId}`)]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String','AI_race 100,0,200 123')]);
+  const state=ref('City',{parkingCars:jv('ParkingCar[]',[ref('ParkingCar',{gr:parked}).value]),
+    nrBot1:ref('Bot',{car:vehicle,brain})});
+  jvm.set(jv('class','java.game.GameLogic'),'actualState',state);
+  jvm.set(jv('class','java.game.GameLogic'),'player',ref('Player',{car:player}));
+  const result={jvm,gameTypes:types,resolveResourceIdentity:()=>undefined,
+    parts:{visualRevision:()=>0,installedTree:()=>[],slotOverrides:()=>new Map()},
+    chassis:{wheelState:()=>undefined,updateState:()=>undefined}} as unknown as BootResult;
+  const selection=await javaStockSelection(result,{} as Assets,'cars/fake_racers/Ninja.rpk',vehicle);
+  assert.equal(selection.nativeOnly,true); assert.equal(selection.powertrain,undefined);
+  assert.deepEqual(selection.installed,[]);
+  const shown:EngineWorld[]=[];let control:JavaRaceControl|undefined;const bindings:JavaRaceControl[]=[];
+  const factory=new PartFactory({} as Assets);
+  factory.definition=async key=>({key,alias:'fake',cfgPath:'fake.cfg',config:parsePartConfig(`category 2
+type 10 sphere .33
+wheel -.67 -.634 -1.2 0 0 0 1 1 1 0
+wheel .67 -.634 -1.2 0 0 0 1 1 1 0
+wheel -.67 -.634 1.2 0 0 0 0 1 1 0
+wheel .67 -.634 1.2 0 0 0 0 1 1 0`)});
+  const renderer=new JavaSceneVehicles(result,{} as Assets,{
+    showWorld:async world=>{shown.push(world);return [];},removeWorld:()=>{},syncWorldVisuals:()=>{},
+    bindJavaDriver:async()=>assert.fail('native fake racer has no modular steering wheel for IK'),
+    bindJavaRaceCar:async(_root,commands)=>{control=commands;bindings.push(commands);return {dispose(){}};},
+  },message=>assert.fail(message),{syncJavaAssembly:async()=>assert.fail('unchanged native model'),stock:async(key,options)=>{
+    assert.equal(options?.javaSelection?.nativeOnly,true);
+    return factory.stock(key,options);
+  }});
+  const terrain={height:()=>10};
+  types.get(parked)!.setMatrix({x:0,y:14,z:0},{y:0,p:0,r:0});
+  await renderer.prepare(map,terrain,car=>[player,traffic].some(other=>types.get(other)===types.get(car)));
+  assert.equal(shown.length,2,'both parked car and bot car, without duplicate aliases or player/traffic');
+  for(const car of [parked,racer])assert.ok(Math.abs(types.get(car)!.position.y-10.964)<1e-6,'inline tires sit on the road');
+  assert.equal(control!.command(),'AI_race 100,0,200 123 AI_NightRace','background night racers also use straight-line drag control');
+  assert.equal(control!.active(),true);
+  assert.equal(bindings.length,2,'parked native car also receives a collision binding');
+  assert.equal(bindings.filter(binding=>binding.parked).length,1,'only the spectator car starts asleep without a driver');
+  renderer.update(map,terrain,car=>[player,traffic].some(other=>types.get(other)===types.get(car)));
+  assert.equal(shown.length,2,'unchanged models remain resident');
+  const stateFields=(state.value as JavaObject).fields;
+  const bot=stateFields.get('nrBot1')!;
+  stateFields.delete('nrBot1');
+  stateFields.set('alertedScouts',ref('Vector',{
+    elementCount:jv('int',1),elementData:jv('Object[]',[ref('PoliceScout',{bot}).value]),
+  }));
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',`AI_follow 0,0,10 ${types.get(player)!.resourceId}`)]);
+  await renderer.prepare(map,terrain,car=>[player,traffic].some(other=>types.get(other)===types.get(car)));
+  assert.equal(bindings.length,2,'a scout nested in City.alertedScouts retains its live AI binding');
+  assert.equal(control!.parked,false);
+  assert.match(control!.command()!,/^AI_follow /);
+  assert.ok(control!.target!(types.get(player)!.resourceId));
+  renderer.dispose(); types.dispose();
+});
+
+test('a Bot-owned race car is prepared before scene readiness without duplicating player or streamed traffic',async()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'GameLogic.java',source:'package java.game; class GameLogic { static Object actualState; static Object player; }'})});
+  await jvm.loadClass('java.game.GameLogic');await jvm.globalAsync('java.game.GameLogic');
+  const types=new GameTypeNative(jvm,()=>{}),ref=(name:string,fields:Record<string,JavaValue>={})=>jv(name,{className:name,fields:new Map(Object.entries(fields))});
+  const map=ref('GroundRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',map,[]);
+  const cars=[1,2,3].map(id=>{
+    const car=ref('java.game.Vehicle'),chassis=ref('Chassis');
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',car,[jv('GameRef',map.value),jv('int',0),jv('String',null),jv('String',null)]);
+    jvm.natives.invoke('java.lang.GameType','createNativeInstance',chassis,[jv('GameRef',car.value),jv('int',id),jv('String',null),jv('String',null)]);
+    types.getResource(chassis)!.resourcePack='cars/test.rpk';(car.value as JavaObject).fields.set('chassis',chassis);
+    for(const name of ['E','FL','FR','RL','RR','F','Rr','L','R','T'])(chassis.value as JavaObject).fields.set(`parts_list_${name}`,jv('int[]',[]));
+    for(const name of ['suspensions','shocks','springs','brakes','sways','wheels','others','tyres'])(chassis.value as JavaObject).fields.set(`parts_list_RGear_${name}`,jv('int[]',[]));
+    return {car,chassis};
+  });
+  const brain=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',brain,[]);
+  const driver=types.createRender(ref('RenderRef'),map,null,'botfigura')!;
+  const command=async(text:string)=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',text)]);
+  await command(`renderinstance ${driver.resourceId}`);await command('AI_suspend');
+  const state=ref('City',{unusedBot:ref('Bot',{car:jv('Vehicle',null)}),raceBot:ref('Bot',{car:cars[1].car,brain})});
+  jvm.set(jv('class','java.game.GameLogic'),'actualState',state);
+  jvm.set(jv('class','java.game.GameLogic'),'player',ref('Player',{car:cars[0].car}));
+  const reference=types.reference.bind(types);types.reference=node=>cars.find(c=>types.get(c.car)===node)?.chassis??reference(node);
+  const result={jvm,gameTypes:types,resolveResourceIdentity:()=>undefined,
+    parts:{visualRevision:()=>0,installedTree:()=>[],slotOverrides:()=>new Map(),engineDyno:()=>undefined},
+    chassis:{wheelState:()=>undefined,updateState:()=>undefined,coolingSettings:()=>[10,50,.01]}} as unknown as BootResult;
+  const shown:EngineWorld[]=[];let finish!:()=>void,ready=false,seated=false,released=false,sceneRevision=0,control:JavaRaceControl|undefined;
+  const renderer=new JavaSceneVehicles(result,{} as Assets,{
+    showWorld:async world=>{shown.push(world);await new Promise<void>(resolve=>{finish=resolve;});return [];},
+    removeWorld:()=>{},syncWorldVisuals:()=>{},
+    get vehicleSceneRevision(){return sceneRevision;},
+    bindJavaDriver:async(node,root)=>{assert.equal(node,driver);assert.equal(root.world,shown.at(-1));seated=true;},
+    bindJavaRaceCar:async(root,commands)=>{assert.equal(seated,true,'seat the original Java driver before releasing scene readiness');control=commands;return {dispose(){released=true;}};}
+  },message=>assert.fail(message),{syncJavaAssembly:async()=>assert.fail('unchanged race car must reuse its assembly'),stock:async key=>{
+    assert.equal(key.id,2,'select Bot.car rather than building another player/traffic car');
+    const world=new EngineWorld(),root=world.create({key,alias:'racer',cfgPath:'test.cfg',config:parsePartConfig('category 2')});return {world,root,warnings:[]};
+  }} as Pick<PartFactory,'stock'|'syncJavaAssembly'>);
+  const excluded=(car:JavaValue)=>cars.filter((_,i)=>i!==1).some(c=>types.get(c.car)===types.get(car));
+  const work=renderer.prepare(map,undefined,excluded).then(()=>{ready=true;});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(ready,false,'race readiness waits for the opponent mesh');assert.equal(shown.length,1);
+  finish();await work;assert.equal(ready,true);
+  assert.equal(seated,true);assert.equal(control!.command(),'AI_suspend');assert.equal(control!.active(),true);
+  assert.ok(control!.placement!());assert.equal(control!.placement!(),undefined);
+  await command('AI_race 100,0,200 123');assert.equal(control!.command(),'AI_race 100,0,200 123');
+  control!.motion(new Vector3(12,3,45),.7,new Vector3(1,0,2));assert.deepEqual(types.get(cars[1].car)!.position,{x:12,y:3,z:45});
+  assert.equal(control!.placement!(),undefined,'physics publication must not teleport itself every frame');
+  types.get(cars[1].car)!.setMatrix({x:300,y:4,z:500},{y:1,p:0,r:0});
+  assert.deepEqual(control!.placement!()!.position.toArray(),[300,4,500],'late Java start-line placement reaches the physics');
+  assert.equal(control!.placement!(),undefined);
+  renderer.update(map,undefined,excluded);assert.equal(shown.length,1,'unchanged opponent is reused');
+  const oldControl=control!;sceneRevision++;
+  const restart=renderer.prepare(map,undefined,excluded);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(shown.length,2,'second quick race recreates a model removed by viewer.clear even with the same Java car');
+  assert.equal(shown[0].disposed,true);assert.equal(oldControl.active(),false,'old physics cannot publish into the new race');
+  finish();await restart;
+  assert.notEqual(control,oldControl);assert.equal(control!.active(),true);assert.equal(shown[1].disposed,false);
+  const replacement=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',replacement,[]);
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',replacement,[jv('ResourceRef',null),jv('int',16),jv('String',`renderinstance ${driver.resourceId}`)]);
+  ((state.value as JavaObject).fields.get('raceBot')!.value as JavaObject).fields.set('brain',replacement);
+  const rebind=renderer.prepare(map,undefined,excluded);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(shown.length,3,'a replacement Java brain on the same car also replaces its physics binding');
+  finish();await rebind;assert.equal(shown[1].disposed,true);assert.equal(control!.active(),true);
+  (state.value as JavaObject).fields.set('raceBot',jv('Bot',null));renderer.update(map,undefined,excluded);
+  assert.equal(shown[2].disposed,true,'remove the opponent when Java releases the Bot');assert.equal(released,true);assert.equal(control!.active(),false);renderer.dispose();types.dispose();
+});
 
 test('scene vehicles use each Java chassis, follow poses and release removed or pending models', async () => {
   const jvm = new SlrrJvm({ resolveImport: () => ({ path: 'GameLogic.java',
@@ -175,6 +314,3 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.ok(built.every(model => model.world.disposed));
   renderer.dispose(); assert.equal(removed.length, 2);
 });
-
-
-

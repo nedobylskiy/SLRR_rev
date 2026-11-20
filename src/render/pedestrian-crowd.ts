@@ -1,22 +1,27 @@
 import {Box3,Group,Matrix4,Vector3,type Texture} from 'three';
 import type {RigidBody3D} from '../engine/rigid-body-3d';
-import {PEDESTRIAN_CAR_REACTION,pedestrianCarContact,ragdollCar} from '../engine/pedestrian-contact';
+import {PEDESTRIAN_CAR_REACTION,pedestrianCarContact,ragdollCar,ragdollUpdateNeeded} from '../engine/pedestrian-contact';
 import type {Assets} from '../assets';
 import type {PedestrianWalk} from '../formats/pedestrian';
-import type {WalkingPedestrian} from '../engine/pedestrian-walking';
+import {AreaWalker} from '../engine/pedestrian-areas';
+import type {CrowdWalker} from '../engine/pedestrian-stream';
 import {PedestrianSpawnIndex,type PedestrianObstacle} from '../engine/pedestrian-stream';
 import {loadCharacterCatalog,skeletonCompatibility} from './character-catalog';
 import {loadSkinnedCharacter,type SkinnedCharacter} from './skinned-character';
+import {AgentWorkerClient} from '../engine/agent-worker-client';
 
-interface CrowdActor {walker:WalkingPedestrian;character:SkinnedCharacter;mount:Group;height:number;duration:number;active:boolean;revision:number;state:'walking'|'starting'|'ragdoll'|'failed'}
+interface CrowdActor {walker:CrowdWalker;character:SkinnedCharacter;mount:Group;height:number;duration:number;active:boolean;revision:number;state:'walking'|'starting'|'ragdoll'|'failed'}
 export interface PedestrianStreamSettings {count:number;radius:number}
 export class PedestrianCrowd {
+  private movement?:AgentWorkerClient;private movementElapsed=0;
+  private walkerIds=new WeakMap<CrowdWalker,number>();private nextWalkerId=0;
+  get movementMode(){return this.movement?.available?`worker · 30 Hz · last CPU ${this.movement.workMs.toFixed(2)} ms · round trip ${this.movement.roundTripMs.toFixed(1)} ms`:`main thread${this.movement?.error?' · '+this.movement.error:''}`;}
   readonly root=new Group();private lastTime?:number;
   private disposed=false;private previousCars=new WeakMap<RigidBody3D,Matrix4>();
   private actors:CrowdActor[]=[];
   private ground?:(point:Vector3)=>number;
   private index!:PedestrianSpawnIndex;
-  private loadActor!:(walker:WalkingPedestrian)=>Promise<CrowdActor>;
+  private loadActor!:(walker:CrowdWalker)=>Promise<CrowdActor>;
   private spawning=false;private refillAt=0;private pruneAt=0;private focus=new Vector3();
   private focusSource?:Vector3;
   private settings:PedestrianStreamSettings={count:6,radius:100};
@@ -24,6 +29,16 @@ export class PedestrianCrowd {
   get ragdollCount(){return this.actors.filter(a=>a.active&&a.state==='ragdoll').length;}
   get count(){return this.actors.filter(a=>a.active).length;}
   get cachedCount(){return this.actors.length;}
+  /** A fallen body moves inside its old walking mount, so its bounds cannot be cached there. */
+  *visibilityObjects():Iterable<{object:Group;bounds:Box3}>{
+    for(const actor of this.actors){
+      if(!actor.active)continue;
+      const bounds=actor.character.ragdollBounds;
+      if(bounds){yield {object:actor.mount,bounds};continue;}
+      const point=actor.mount.getWorldPosition(new Vector3());point.y+=actor.height*.5;
+      yield {object:actor.mount,bounds:new Box3().setFromCenterAndSize(point,new Vector3(2,actor.height+.5,2))};
+    }
+  }
   get inspectionPoint(){const actor=this.actors.find(a=>a.active);return actor?.character.ragdollPosition??actor?.walker.position.clone();}
   configure(count:number,radius:number){
     if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');
@@ -50,6 +65,7 @@ export class PedestrianCrowd {
     try{
       await import('./character-ragdoll');
       crowd.index=new PedestrianSpawnIndex(walk);
+      crowd.movement=new AgentWorkerClient({kind:'pedestrian-init',rows:walk});
       const catalog=await loadCharacterCatalog(assets),models=catalog.models.filter(model=>model.path.replaceAll('\\','/').includes('/pedestrians/')&&catalog.animations.some(a=>a.family===model.family&&/_walk\.matrixdata$/i.test(a.path)&&!skeletonCompatibility(model.bones,a.bones)));
       if(!models.length)throw Error('No original pedestrian walking models/animations found');
       let nextModel=0;
@@ -72,7 +88,9 @@ export class PedestrianCrowd {
     ...cars.map(car=>({position:car.position,radius:car.bounds.getSize(new Vector3()).length()*.5+1,velocity:car.velocity})),
   ];}
 
-  update(now:number,cars:readonly RigidBody3D[],focus?:Vector3,offscreen?:(point:Vector3)=>boolean){
+  update(now:number,cars:readonly RigidBody3D[],focus?:Vector3,offscreen?:(point:Vector3,bounds?:Box3)=>boolean,timeScale=1,daytime=true){
+    this.root.visible=daytime;
+    if(!daytime){this.lastTime=undefined;return;}
     if(this.disposed)return;if(focus)this.focus.copy(focus);
     if(now>=this.pruneAt){
       const active=this.actors.filter(a=>a.active).sort((a,b)=>(b.character.ragdollPosition??b.walker.position).distanceToSquared(this.focus)-(a.character.ragdollPosition??a.walker.position).distanceToSquared(this.focus));
@@ -82,14 +100,31 @@ export class PedestrianCrowd {
       }this.pruneAt=now+500;
     }
     if(now>=this.refillAt){this.refillAt=now+250;void this.refill(this.obstacles(cars),offscreen).catch(error=>{this.lastError=String(error);console.error('Pedestrian stream load failed',error);});}
-    const dt=this.lastTime===undefined?0:Math.max(0,Math.min(.1,(now-this.lastTime)/1000));this.lastTime=now;
-    const positions=cars.map(car=>car.position),colliders=this.actors.some(a=>a.active&&a.state==='ragdoll')?cars.map(ragdollCar):[];
+    const dt=this.lastTime===undefined?0:Math.max(0,Math.min(.1,(now-this.lastTime)/1000*Math.max(0,timeScale)));this.lastTime=now;
+    this.movement?.ready(now);
+    const moved=this.movement?.take();
+    if(moved?.kind==='pedestrian')for(const result of moved.agents){
+      const actor=this.actors.find(a=>a.active&&a.state==='walking'&&this.walkerIds.get(a.walker)===result.id&&a.revision===result.revision);if(!actor)continue;
+      const walker=actor.walker;walker.position.fromArray(result.position);walker.direction.fromArray(result.direction);walker.speed=result.speed;
+      if(walker instanceof AreaWalker){walker.zone={id:result.zone};walker.heading.fromArray(result.heading??result.direction);walker.gait=result.gait;walker.ok=result.ok;}
+      else {const zone=this.index.zones.find(z=>z.id===result.zone);if(zone)walker.zone=zone;walker.t=result.t;walker.sign=result.sign;}
+    }
+    const positions=cars.map(car=>car.position),threats=cars.map(car=>({position:car.position,velocity:car.velocity})),walkers=this.actors.filter(a=>a.active&&a.state==='walking').map(a=>a.walker).filter((w):w is AreaWalker=>w instanceof AreaWalker),colliders=this.actors.some(a=>a.active&&a.state==='ragdoll')?cars.map(ragdollCar):[];
     for(const actor of this.actors){if(!actor.active)continue;const {walker,character,mount}=actor;
-      if(actor.state==='ragdoll'){character.setRagdollVehicles(colliders,dt);character.update(now,true);continue;}
+      if(actor.state==='ragdoll'){
+        const point=character.ragdollPosition??walker.position;
+        if(!ragdollUpdateNeeded(point,actor.height,!(offscreen?.(point,character.ragdollBounds)??false),cars,timeScale)){
+          character.pauseSimulation(now);continue;
+        }
+        character.setRagdollVehicles(colliders,dt);character.update(now,false);continue;
+      }
       if(actor.state!=='walking')continue;
-      walker.step(dt,positions);mount.position.copy(walker.position);
+      if(!this.movement?.available){if(walker instanceof AreaWalker)walker.step(dt,threats,walkers);else walker.step(dt,positions);}
+      if(walker instanceof AreaWalker&&!walker.ok){this.retire(actor);continue;}
+      // Keep the render pose smooth between worker snapshots; collision uses the latest simulation position.
+      if(this.movement?.available)mount.position.lerp(walker.position,1-Math.exp(-dt*25));else mount.position.copy(walker.position);
       const yaw=Math.atan2(walker.direction.x,walker.direction.z),delta=Math.atan2(Math.sin(yaw-mount.rotation.y),Math.cos(yaw-mount.rotation.y));mount.rotation.y+=Math.max(-dt*5,Math.min(dt*5,delta));
-      character.setPlaybackSpeed(walker.speed/1.2);character.update(now,false);
+      character.setPlaybackSpeed(dt>0?(walker instanceof AreaWalker?walker.gait:walker.speed)/1.2:0);character.update(now,false);
       const velocity=walker.direction.clone().multiplyScalar(walker.speed);
       for(const car of cars){
         const range=car.bounds.getSize(new Vector3()).length()*.5+actor.height+car.velocity.length()*dt+2;
@@ -107,6 +142,15 @@ export class PedestrianCrowd {
       }
     }
     for(const car of cars)this.previousCars.set(car,car.matrix());
+    this.movementElapsed=Math.min(.1,this.movementElapsed+dt);
+    if(this.movement?.ready(now)&&timeScale>0){
+      const agents=this.actors.filter(a=>a.active&&a.state==='walking').map(actor=>{
+        const walker=actor.walker;let id=this.walkerIds.get(walker);if(id===undefined){id=++this.nextWalkerId;this.walkerIds.set(walker,id);}
+        return {id,revision:actor.revision,zone:walker.zone.id,position:walker.position.toArray(),direction:walker.direction.toArray(),heading:walker instanceof AreaWalker?walker.heading.toArray():undefined,
+          t:walker instanceof AreaWalker?0:walker.t,sign:walker instanceof AreaWalker?1 as const:walker.sign,lateral:walker instanceof AreaWalker?.5:walker.lateral};
+      });
+      if(agents.length&&this.movement.request({kind:'pedestrian',dt:this.movementElapsed,agents,threats:threats.map(t=>({position:t.position.toArray(),velocity:t.velocity.toArray()}))},now))this.movementElapsed=0;
+    }
   }
-  dispose(){this.disposed=true;for(const actor of this.actors)actor.character.dispose();this.actors=[];this.root.removeFromParent();this.root.clear();}
+  dispose(){this.disposed=true;this.movement?.dispose();for(const actor of this.actors)actor.character.dispose();this.actors=[];this.root.removeFromParent();this.root.clear();}
 }

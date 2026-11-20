@@ -1,7 +1,9 @@
 import {BufferAttribute,BufferGeometry,Mesh,MeshStandardMaterial,RepeatWrapping,Texture,Vector2} from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 
-export function isBuildingAlias(alias:string){return /^krthaz\d+$/i.test(alias)||/^\d+(?:p\d+)?x\d+_/i.test(alias)||/^hotel_\d+_egyedi$/i.test(alias);}
+// These unique City blocks contain the skyscrapers; other area_* resources can be roads or props.
+export function isBuildingAlias(alias:string){return /^krthaz\d+$/i.test(alias)||/^\d+(?:p\d+)?x\d+_/i.test(alias)||/^hotel_\d+_egyedi$/i.test(alias)
+  ||/^area_(?:17|18|39|41|42|167)_egyedi(?:_[a-z])?$/i.test(alias);}
 /** Source identity is independent of UV transforms, which are baked per vertex. */
 export function buildingLayerKey(material:MeshStandardMaterial){
   const map=material.map;

@@ -33,6 +33,38 @@ test('a started Java thread waits until its caller configures THOR methods', asy
   bridge.dispose();
 });
 
+test('RaceSetup-style edge scroller stays stopped after exit resets the minimap offsets',async()=>{
+  const source=`package demo;
+    interface Runnable { void run(); }
+    class Thread {
+      Runnable target; Thread(Runnable value) { target=value; init("map scroller"); }
+      native void init(String name); native void start(); native void stop(); native int isAlive();
+      static native void sleep(float duration);
+    }
+    class Map { float offsetX; }
+    class RaceSetup implements Runnable {
+      Thread scrollerThread; Map map=new Map(); int updates;
+      void run() { while(true) { map.offsetX+=10; updates++; scrollerThread.sleep(20); } }
+      void enter() { scrollerThread=new Thread(this); scrollerThread.start(); }
+      void exit() { scrollerThread.stop(); map.offsetX=0; }
+    }`;
+  const jvm=new SlrrJvm({resolveImport:()=>({path:'RaceSetup.java',source})}),errors:string[]=[];
+  const bridge=new ThreadNative(jvm,message=>errors.push(message),'demo.Thread');
+  try{
+    await jvm.loadClass('demo.RaceSetup');const setup=await jvm.constructAsync('demo.RaceSetup',[]);
+    await jvm.invokeAsync(setup,'enter');
+    const deadline=Date.now()+1000;
+    while(Number(jvm.get(setup,'updates').value)===0&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,1));
+    assert.ok(Number(jvm.get(setup,'updates').value)>0,'selection mode scrolls while active');
+    await jvm.invokeAsync(setup,'exit');const updates=jvm.get(setup,'updates').value;
+    assert.equal((await jvm.invokeAsync(jvm.get(setup,'scrollerThread'),'isAlive')).value,0);
+    await new Promise(resolve=>setTimeout(resolve,80));
+    assert.equal(jvm.get(setup,'updates').value,updates,'sleep must not resume the exited scroller');
+    assert.equal(jvm.get(jvm.get(setup,'map'),'offsetX').value,0,'driving minimap retains the reset offset');
+    assert.deepEqual(errors,[],'intentional thread stop is not reported as a script error');
+  }finally{bridge.dispose();}
+});
+
 test('a Java thread yields at wait while the caller continues, then notify resumes it', async () => {
   const source = `package demo;
     interface Runnable { void run(); }

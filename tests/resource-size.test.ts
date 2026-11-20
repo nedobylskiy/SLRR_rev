@@ -60,3 +60,20 @@ test('light-only bounds retain the size fallback while actual missing geometry s
   type = 14;
   await assert.rejects(resourceBoundsReader(assets,()=>host)(jv('Part',{})),/Missing real mesh/);
 });
+
+test('CarInfo skips stock shadow-only steering-wheel render placeholders',async()=>{
+  const assets=new Assets([{path:'chassis.cfg',size:0}],async()=>new TextEncoder().encode('render 0x1\nrender 0x2001c'));
+  const shadow=new TextEncoder().encode('shd_center 0.000 0.000 0.000\nshd_diru 0.000 0.000 0.000\nshd_dirv 0.000 0.000 0.000\nshd_vbase 0.000 0.000 0.000\nshd_vup 0.000 0.000 0.000\n');
+  assets.resource=async(pack,id)=>({packPath:pack,entry:{type:14,data:id===0x2001c?shadow:new TextEncoder().encode('mesh 0x2')} as RpkEntry});
+  // Reuse the valid visual fixture from a real primary mesh; the placeholder
+  // must never reach SCX resolution, even when declared far from the chassis.
+  const bytes=new Uint8Array(216),view=new DataView(bytes.buffer);bytes.set(new TextEncoder().encode('INVO'));
+  view.setUint32(4,3,true);view.setUint32(8,56,true);view.setUint32(64,3,true);
+  view.setFloat32(112,250,true);view.setFloat32(164,100,true);
+  view.setUint32(200,1,true);view.setUint32(208,1,true);view.setUint32(212,2,true);
+  const originalRead=assets.read.bind(assets);assets.read=async path=>path==='mesh.scx'?bytes:originalRead(path);
+  assets.modelForResource=async(_pack,id)=>{assert.equal(id,1,'shadow-only render has no SCX');return{path:'mesh.scx',textures:[]};};
+  const host={getResource:()=>({resourcePack:'cars.rpk',typeId:1}),catalogResource:()=>({cfgPath:'chassis.cfg'})} as unknown as GameTypeNative;
+  const read=resourceBoundsReader(assets,()=>host),box=await read(jv('Part',{}));
+  assert.ok(box);assert.equal(box.max.x,2.5);assert.equal(box.max.z,1);
+});

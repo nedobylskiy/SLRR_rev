@@ -3,8 +3,9 @@ import type { Assets } from '../assets';
 import type { BootResult } from './game-boot';
 import type { JavaInstalledPart, JavaStockSelection, ResourceKey } from '../engine/world';
 import { previewScope } from './preview-scope';
+import { RenderObject } from './render-object';
 
-/** Enumerate only Java-created cameras whose isolated world contains a Part. */
+/** Enumerate Java-created inventory cameras containing a Part or a standalone render model. */
 export function javaPartPreviewCameras(result: BootResult) {
   // Native cameras at the same viewport/priority replace one another. During an
   // async Java page update both handles can briefly remain alive.
@@ -15,11 +16,13 @@ export function javaPartPreviewCameras(result: BootResult) {
     const viewport = result.viewports.get(camera.viewport);
     if (!render || !scope || !viewport?.active) continue;
     const part = [...scope.children].find(node => result.jvm.isInstance(result.gameTypes.reference(node), 'java.game.parts.Part'));
-    if (part) {
+    const model = part ? undefined : [...scope.children].find(node => node instanceof RenderObject
+      && node !== render && node.renderResource && node.renderType?.resourceType !== 13) as RenderObject | undefined;
+    if (part || model) {
       let slots = latest.get(viewport);
       if (!slots) { slots = new Map(); latest.set(viewport, slots); }
       slots.set(camera.priority, views.length);
-      views.push({ ref, camera, render, viewport, part });
+      views.push({ ref, camera, render, viewport, part, model });
     }
   }
   return views.filter((view, index) => latest.get(view.viewport)?.get(view.camera.priority) === index)
@@ -38,6 +41,7 @@ export async function javaPartPreviewSelection(result: BootResult, assets: Asset
   const project = async (part: ReturnType<BootResult['parts']['installedTree']>[number]): Promise<JavaInstalledPart> => ({
     nativeId: part.node.resourceId, key: await resolve(part.node.typeId, part.node.resourcePack ?? native.resourcePack!),
     parentSlot: part.parentSlot, ownSlot: part.ownSlot, positions: part.positions, wear: part.wear,
+    paintColor:part.paintColor,paintStrokes:part.paintStrokes,
     render: part.renderType ? await resolve(part.renderType, part.node.resourcePack ?? native.resourcePack!) : undefined,
     texture: part.texture?.value ? part.texture.resource ?? await resolve(Number(part.texture.value), part.node.resourcePack ?? native.resourcePack!) : undefined,
     children: await Promise.all(part.children.map(project)),
@@ -45,6 +49,7 @@ export async function javaPartPreviewSelection(result: BootResult, assets: Asset
   const render = result.parts.renderTypeFor(ref);
   const texture = result.parts.textureFor(ref);
   const selection: JavaStockSelection = {
+    rootPaintColor:result.parts.paintColorFor?.(ref),rootPaintStrokes:result.parts.paintStrokesFor?.(ref),
     rootWear: result.parts.wearFor?.(ref), damage: result.parts.damageFor?.(ref), nativeId: native.resourceId, rootRender: render ? await resolve(render, native.resourcePack) : undefined,
     rootTexture: texture?.value ? texture.resource ?? await resolve(Number(texture.value), native.resourcePack) : undefined,
     body: [], mechanical: [], tyres: [], wheelRefs: [], rootPositions: result.parts.slotOverrides(ref),

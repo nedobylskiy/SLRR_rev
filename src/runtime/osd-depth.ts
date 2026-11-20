@@ -20,7 +20,9 @@ export function osdDepth(priority: number, localDepth: number): number {
 export function osdViewport(group: JavaValue, viewports: ViewportNative): OsdViewport {
   const groupObject = group.value as JavaObject | null;
   const osd = groupObject?.fields?.get('osd')?.value as JavaObject | null | undefined;
-  const viewport = osd?.fields?.get('vp');
+  // Tooltip Text is attached directly to Input.cursor, which owns its viewport
+  // rather than an OSD Group. It must share the background's cursor layer.
+  const viewport = osd?.fields?.get('vp') ?? groupObject?.fields?.get('vp');
   const state = viewport ? viewports.get(viewport) : undefined;
   return state ? { priority: state.priority, left: state.left, top: state.top,
     width: state.width, height: state.height } : FULL_OSD_VIEWPORT;

@@ -11,6 +11,9 @@ export class PanelActivity {
   readonly frame = new Matrix4();
   freeBody?: RigidBody3D;
   resting = false;
+  sleepReason: 'minimum_active_time'|'internal_motion'|'mount_load'|'quiet_window'|'sleeping' = 'sleeping';
+  internalSpeed = 0;
+  threatReason: 'ground'|'obstacle' = 'ground';
   private restTicks = 0;
   constructor(readonly panel: DeformablePanel) {}
   reset(frame: Matrix4) { this.frame.copy(frame); this.deforming = false; this.quietTicks = this.activeTicks = this.restTicks = 0; this.resting = false; this.freeBody = undefined; this.impulseVersion = this.panel.impulseVersion; }
@@ -29,14 +32,14 @@ export class PanelActivity {
     for (let i = 0; i < p.length; i += 3) {
       point.fromArray(p, i); box.expandByPoint(point); box.expandByPoint(point.applyMatrix4(delta));
     }
-    if (box.intersectsBox(obstacle)) return true;
+    if (box.intersectsBox(obstacle)) {this.threatReason='obstacle';return true;}
     if (groundMayReach && !groundMayReach(box)) return false;
     // Solver contacts settle at +15 mm. A +25 mm wake shell immediately woke
     // those same quiet nodes again. Allow 1 mm of resting jitter, then wake on
     // new penetration; impulses, shocks and obstacle tests remain independent.
     for (let i = 0; i < p.length; i += 3) {
       point.fromArray(p, i).applyMatrix4(delta);
-      if (Math.min(p[i + 1], point.y) < this.panel.groundHeight(point.x, point.z, p[i + 1]) + PANEL_GROUND_CLEARANCE - 0.001) return true;
+      if (Math.min(p[i + 1], point.y) < this.panel.groundHeight(point.x, point.z, p[i + 1]) + PANEL_GROUND_CLEARANCE - 0.001) {this.threatReason='ground';return true;}
     }
     return false;
   }
@@ -65,20 +68,30 @@ export class PanelActivity {
     }
     return { center, velocity, omega, internalSpeed: Math.sqrt(internal / count) };
   }
+  /** Freeze the current dented shape and retain only its fitted rigid motion. */
+  makeRigid(frame:Matrix4) {
+    const motion=this.motion(),inverse=frame.clone().invert(),bounds=new Box3(),point=new Vector3();
+    for(let i=0;i<this.panel.positions.length;i+=3)bounds.expandByPoint(point.fromArray(this.panel.positions,i).applyMatrix4(inverse));
+    const body=new RigidBody3D(this.panel.options.mass,bounds,motion.center.clone().applyMatrix4(inverse));
+    body.setFrame(frame);body.velocity.copy(motion.velocity);body.setAngularVelocity(motion.omega);
+    this.freeBody=body;this.frame.copy(frame);this.deforming=false;this.resting=false;this.restTicks=0;
+    this.impulseVersion=this.panel.impulseVersion;this.sleepReason='sleeping';
+  }
   settle(dt: number, frame: Matrix4, attached: boolean) {
+    if(!attached){this.makeRigid(frame);return;}
     this.impulseVersion = this.panel.impulseVersion;
     this.frame.copy(frame); this.activeTicks++;
-    if (this.activeTicks * dt < (attached ? 0.5 : 0.25)) return;
+    if (this.activeTicks * dt < (attached ? 0.5 : 0.25)) { this.sleepReason='minimum_active_time';this.internalSpeed=0; return; }
     const motion = this.motion();
+    this.internalSpeed=motion.internalSpeed;
     const overloaded = this.panel.mounts.some(m => !m.broken && m.force > this.panel.mountStrength * 0.5);
-    this.quietTicks = motion.internalSpeed < (attached ? 0.03 : 0.12) && !overloaded ? this.quietTicks + 1 : 0;
+    this.sleepReason=overloaded?'mount_load':motion.internalSpeed >= (attached ? 0.03 : 0.12)?'internal_motion':'quiet_window';
+    // Brief small vibrations spend quiet credit instead of restarting the full
+    // window. A real impact or overloaded mount still clears it immediately.
+    this.quietTicks = overloaded || motion.internalSpeed >= 0.3 ? 0
+      : motion.internalSpeed < 0.03 ? this.quietTicks + 1 : Math.max(0,this.quietTicks-2);
     if (this.quietTicks * dt < 0.2) return;
     this.deforming = false;
-    if (!attached) {
-      const inverse = frame.clone().invert(), bounds = new Box3(), point = new Vector3();
-      for (let i = 0; i < this.panel.positions.length; i += 3) bounds.expandByPoint(point.fromArray(this.panel.positions, i).applyMatrix4(inverse));
-      const body = new RigidBody3D(this.panel.options.mass, bounds, motion.center.clone().applyMatrix4(inverse));
-      body.setFrame(frame); body.velocity.copy(motion.velocity); body.setAngularVelocity(motion.omega); this.freeBody = body;
-    }
+    this.sleepReason='sleeping';
   }
 }

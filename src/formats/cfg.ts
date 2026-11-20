@@ -1,7 +1,8 @@
 export type Triple = [number, number, number];
 export interface CfgPose { position: Triple; rotation: Triple }
 export interface SlotReference { resource: number; slot: number }
-export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple }
+export interface CfgFlap { pivot: Triple; axis: Triple; direction: Triple; low: number; high: number }
+export interface CfgSlot extends CfgPose { id: number; attach: SlotReference[]; compatible: SlotReference[]; type?: number; bonePosition?: Triple; flap?: CfgFlap }
 export interface CfgWheel extends CfgPose { radius?: number; parameters: number[]; spring?: Triple; render?: { resource: number; pose?: CfgPose } }
 export interface CfgCamera extends CfgPose { fov?: number }
 /** Original car config defaults; enginepower only overwrites supplied fields (00443f90). */
@@ -13,7 +14,7 @@ export interface PartConfig {
   slots: CfgSlot[]; stock: number[]; render?: number; mesh?: number; texture?: number;
   bodies: (CfgPose & { mass: number; shape: string[]; collision?: boolean })[];
   seat?:CfgPose; pedals?:Triple;
-  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; links?: number[]; linkRules?: number[][]; lod?: [number, number]; variants?: number[]; colors?: number[] }[]; maxSteer?: number; ackermann?: number; links: number[][];
+  wheels: CfgWheel[]; cameras: CfgCamera[]; steering?: CfgPose; renderPose?: CfgPose; renders: { resource: number; flags?: number; pose?: CfgPose; links?: number[]; linkRules?: number[][]; lod?: [number, number]; variants?: number[]; colors?: number[]; wheelIndex?: number }[]; maxSteer?: number; ackermann?: number; links: number[][];
   unknown: { line: number; command: string; args: string[] }[];
 }
 
@@ -59,6 +60,10 @@ export function parsePartConfig(source: string): PartConfig {
       case 'bonepos':
         if (!slot) throw new Error(`CFG line ${line}: bonepos before slot`);
         slot.bonePosition = [number(0), number(1), number(2)]; break;
+      case 'flap':
+        if (!slot) throw new Error(`CFG line ${line}: flap before slot`);
+        slot.flap = { pivot: [number(0), number(1), number(2)], axis: [number(3), number(4), number(5)],
+          direction: [number(6), number(7), number(8)], low: number(9), high: number(10) }; break;
       case 'linked': {
         const links = args.map((_, i) => integer(i));
         result.links.push(links);
@@ -71,7 +76,7 @@ export function parsePartConfig(source: string): PartConfig {
       case 'stockpart': result.stock.push(rid()); break;
       case 'render': {
         const resource = rid(), poseValue = args.length === 4 ? { position: [number(1), number(2), number(3)] as Triple, rotation: [0, 0, 0] as Triple } : args.length > 1 ? pose(1) : undefined;
-        result.renders.push({ resource, pose: poseValue });
+        result.renders.push({ resource, pose: poseValue, ...(inlineWheel ? { wheelIndex: result.wheels.length - 1 } : {}) });
         if (inlineWheel && !inlineWheel.render) inlineWheel.render = { resource, pose: poseValue };
         if (render === undefined) { render = resource; renderPose = poseValue; }
         break;
@@ -110,7 +115,15 @@ export function parsePartConfig(source: string): PartConfig {
         });
         break;
       }
-      case 'deformable': deformable = rid(); deformablePose = args.length > 1 ? pose(1) : undefined; break;
+      case 'deformable': {
+        deformable = rid();
+        // Fake racers such as Ninja provide translation only, just like render.
+        deformablePose = args.length === 4 ? { position: [number(1), number(2), number(3)], rotation: [0, 0, 0] }
+          : args.length > 1 ? pose(1) : undefined;
+        // Following colors/flags belong to this body, not a preceding accessory.
+        result.renders.push({ resource: deformable, pose: deformablePose });
+        break;
+      }
       case 'mesh': result.mesh = rid(); break;
       case 'texture': result.texture = rid(); break;
       case 'body': {
@@ -151,5 +164,5 @@ export function parsePartConfig(source: string): PartConfig {
 /** Only ungrouped render entries are simultaneous models; LOD entries replace one another. */
 export function secondaryRenders(config: PartConfig) {
   return config.render === config.renders[0]?.resource
-    ? config.renders.slice(1).filter(render => render.lod === undefined) : [];
+    ? config.renders.slice(1).filter(render => render.lod === undefined && render.wheelIndex === undefined) : [];
 }

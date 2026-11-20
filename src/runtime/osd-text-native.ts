@@ -195,7 +195,7 @@ export class OsdTextNative {
       if (osd?.fields instanceof Map) {
         const active = Number(state.group?.fields.get('active')?.value ?? 1);
         if (active && osd.fields.get('cam')?.value != null) state.element.show();
-        else state.element.hide();
+        else { state.element.hide(); continue; }
       }
       if (!state.labelAdjusted && this.isImageButtonLabel(state)) {
         state.element.node.classList?.add('osd-image-button-label');

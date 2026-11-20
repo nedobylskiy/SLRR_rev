@@ -13,18 +13,21 @@ export interface EngineSfxSample extends EngineSfxItem { path: string; refDistan
 export function parseEngineSfx(source: string): { items: EngineSfxItem[]; exhaustMinVolume: number } {
   const items: EngineSfxItem[] = [];
   let table = -1;
+  const tables=new Map<string,number>();
   const statements = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '').split(';');
   for (const statement of statements) {
-    const selected = /\bgetSfxTable\s*\(\s*(\d+)\s*\)/.exec(statement);
-    if (selected) table = Number(selected[1]);
-    if (/\btab\.clear\s*\(\s*\)/.test(statement)) items.splice(0, items.length, ...items.filter(item => item.table !== table));
-    const call = /\btab\.addItem\s*\(\s*new\s+ResourceRef\s*\(\s*([\w.]+):0x([\da-f]+)r\s*\)\s*,([\s\S]+)\)/i.exec(statement);
-    if (!call || table < 0) continue;
-    const values = call[3].split(',').map(originalNumber);
+    const selected = /\b([\w$]+)\s*=\s*[\w$.]+\.getSfxTable\s*\(\s*(\d+)\s*\)/.exec(statement);
+    if (selected) {table=Number(selected[2]);tables.set(selected[1],table);}
+    const cleared=/\b([\w$]+)\.clear\s*\(\s*\)/.exec(statement);
+    if(cleared&&tables.has(cleared[1])){const id=tables.get(cleared[1])!;items.splice(0,items.length,...items.filter(item=>item.table!==id));}
+    const call = /\b([\w$]+)\.addItem\s*\(\s*new\s+ResourceRef\s*\(\s*([\w.]+):0x([\da-f]+)r\s*\)\s*,([\s\S]+)\)/i.exec(statement);
+    if (!call || !tables.has(call[1])) continue;
+    table=tables.get(call[1])!;
+    const values = call[4].split(',').map(originalNumber);
     if (values.length !== 5 || values.some(value => value === undefined)) continue;
     const [referenceRpm, minRpm, maxRpm, minVolume, maxVolume] = values as number[];
     if (referenceRpm <= 0 || minRpm < 0 || maxRpm <= minRpm) continue;
-    items.push({ table, pack: `${call[1].replaceAll('.', '/')}.rpk`, id: Number.parseInt(call[2], 16), referenceRpm, minRpm, maxRpm, minVolume, maxVolume });
+    items.push({ table, pack: `${call[2].replaceAll('.', '/')}.rpk`, id: Number.parseInt(call[3], 16), referenceRpm, minRpm, maxRpm, minVolume, maxVolume });
   }
   const exhaust = /\bsetSfxExhaustMinVol\s*\(\s*([^)]+)\)/.exec(source);
   return { items, exhaustMinVolume: exhaust ? originalNumber(exhaust[1]) ?? 0 : 0 };

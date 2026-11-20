@@ -44,6 +44,16 @@ test('paging keeps only the newest camera in a preview slot and ignores inactive
   assert.deepEqual(javaPartPreviewCameras(result).map(view => view.ref), [entries[0][0]]);
   viewport.active = false;
   assert.deepEqual(javaPartPreviewCameras(result), []);
+  viewport.active = true;
+  const camera = renders.get(entries[0][0])!;
+  const root = camera.parent!;
+  for (const child of [...root.children]) if (!(child instanceof RenderObject)) child.setParent(null);
+  const can = new RenderObject(99,'java.util.resource.RenderRef',null,'paint can');
+  can.renderResource = {pack:'frontend',id:0x21};can.color=0xff00ff00;can.setParent(root);
+  const previews = javaPartPreviewCameras(result);
+  assert.equal(previews.length,1);
+  assert.equal(previews[0].part,undefined);
+  assert.equal(previews[0].model,can);
 });
 
 test('inventory render worlds isolate lights and meshes at the nearest world root', () => {

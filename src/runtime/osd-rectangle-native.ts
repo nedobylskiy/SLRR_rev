@@ -1,4 +1,4 @@
-import type { JavaObject, JavaValue, ResourceIdentity } from 'slrr-jvm';
+import {jv,type JavaObject,type JavaValue,type ResourceIdentity} from 'slrr-jvm';
 import type { OsdElement, OsdLayer } from '../osd/osd-layer';
 import type { GameTypeNative } from './game-type-native';
 import type { RenderObject } from './render-object';
@@ -17,15 +17,22 @@ export class OsdRectangleNative {
     private readonly stageAspect: () => number = () => 16 / 9) {}
 
   sync(render: RenderObject): boolean {
-    if (render.alias !== 'Rectangle' || render.parent?.className !== 'java.render.Group') return false;
+    const cursorOwned=render.parent?.className==='java.io.MouseCursor'||render.parent?.parent?.className==='java.io.MouseCursor';
+    if (render.alias !== 'Rectangle' || (!cursorOwned&&render.parent?.className !== 'java.render.Group')) return false;
     if (!this.layer) return true;
-    const groupRef = this.resources.reference(render.parent);
+    const cursorGroup:JavaObject|undefined=cursorOwned?{className:'java.render.Group',fields:new Map([
+      ['active',jv('int',1)],['osd',jv('Osd',{className:'java.render.Osd',fields:new Map([
+        ['vpAspect',jv('float',this.stageAspect())],['vpWidth',jv('float',1)],['vpHeight',jv('float',1)],['cam',jv('Camera',{})]
+      ])})]
+    ])}:undefined;
+    const groupRef = cursorGroup?jv('Group',cursorGroup):this.resources.reference(render.parent!);
     const group = this.object(groupRef);
     const osd = this.object(group?.fields.get('osd'));
     const type = render.renderType;
     if (!group || !osd || !type) return true;
     const texture = [...type.resourceReplacements]
       .map(([slot, id]) => {
+        if (this.resources.getByResourceId(id)?.copiedFromResourceId != null) return undefined;
         const pack = type.resourceReplacementPacks.get(slot);
         return pack ? { pack, id: id & 0xffff } : this.resourceIdentity?.(id);
       }).find((identity): identity is ResourceIdentity => Boolean(identity));
@@ -42,7 +49,7 @@ export class OsdRectangleNative {
     const height = mesh.meshScale.y / (1.47 * vpHeight);
     const x = mode === 'normalized' ? render.position.x / aspect : render.position.x / scaleX;
     const y = -render.position.y / scaleY;
-    const viewport = this.viewportLayout(groupRef);
+    const viewport = cursorOwned?{...FULL_OSD_VIEWPORT,priority:127}:this.viewportLayout(groupRef);
     const projected = projectOsdBounds(viewport, x, y, width, height);
     // The original event list uses this 1366px frame as a full-width lower panel.
     // Keep its Java vertical placement while spanning the active viewport.
@@ -61,7 +68,9 @@ export class OsdRectangleNative {
     }
     // The normalized overload divides Z by 0.001 before RenderRef.setMatrix;
     // the ordinary overload retains its metre-scale Z value.
-    const depth = osdDepth(viewport.priority, Math.round(render.position.z * (mode === 'normalized' ? 1 : 1000)));
+    // Legacy Gadget puts the backlight half a layer behind its icon. Rounding
+    // -0.49999997 to zero erased that separation, so the newer DOM node covered it.
+    const depth = osdDepth(viewport.priority, Math.floor(render.position.z * (mode === 'normalized' ? 1 : 1000)));
     if (![projected.x, projected.y, projected.width, projected.height, depth].every(Number.isFinite)) return true;
     let view = this.views.get(render);
     if (!view) {
@@ -74,7 +83,15 @@ export class OsdRectangleNative {
     return true;
   }
 
-  syncVisibility(): void { for (const view of this.views.values()) this.sync(view.render); }
+  syncVisibility(): void {
+    for (const view of this.views.values()) {
+      // Garage/catalog windows retain their Java rectangles after being hidden.
+      // Do not resolve resources, scan rectangle vectors or lay out those pages
+      // on every loading-screen tick. Recompute when their group opens again.
+      if (this.isVisible(view)) this.sync(view.render);
+      else view.element.hide();
+    }
+  }
 
   remove(render: RenderObject): void {
     const view = this.views.get(render);
@@ -87,10 +104,14 @@ export class OsdRectangleNative {
   }
 
   private syncView(view: RectangleView): void {
-    const osd = this.object(view.group.fields.get('osd'));
-    if (Number(view.group.fields.get('active')?.value ?? 0) && osd?.fields.get('cam')?.value != null)
+    if (this.isVisible(view))
       view.element.show();
     else view.element.hide();
+  }
+
+  private isVisible(view: RectangleView): boolean {
+    if (!Number(view.group.fields.get('active')?.value ?? 0)) return false;
+    return this.object(view.group.fields.get('osd'))?.fields.get('cam')?.value != null;
   }
 
   private positionMode(render: RenderObject, osd: JavaObject): 'normal' | 'normalized' | 'style' {

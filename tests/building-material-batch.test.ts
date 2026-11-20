@@ -6,6 +6,13 @@ import {SceneLighting} from '../src/render/scene-lighting';
 
 function part(name:string){const map=new Texture();map.wrapS=map.wrapT=RepeatWrapping;const material=new MeshStandardMaterial({map});const mesh=new Mesh(new BoxGeometry(),material);mesh.name=name;mesh.geometry.clearGroups();return mesh;}
 
+test('City skyscraper blocks use building batching without classifying all area resources as buildings',()=>{
+  for(const id of [17,18,39,41,42,167]){
+    assert.ok(isBuildingAlias(`area_${id}_egyedi`));assert.ok(isBuildingAlias(`area_${id}_egyedi_b`));
+  }
+  for(const alias of ['area_218_egyedi','roadtest26_egyedi','lamp_base'])assert.equal(isBuildingAlias(alias),false);
+});
+
 test('opaque building parts become a single geometry with per-face material selection, tiled UVs and paint flags',()=>{
   const wall=part('wall'),windows=part('windows');windows.geometry.translate(4,0,0);
   wall.material.map!.repeat.set(4,2);wall.material.map!.offset.set(.25,-.5);wall.material.userData.slrrPaintMask=true;

@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { RoadNetwork, RoadNode, RoadOther } from '../formats/trc';
 import type { CfgPose } from '../formats/cfg';
+import type {TrafficHalts} from './traffic-models';
 
 export type SignalState='red'|'yellow'|'green';
 export interface TrafficFixture { kind:'signal'|'stop'|'yield'; position:Vector3;pose?:CfgPose }
@@ -10,9 +11,17 @@ export const TRAFFIC_GREEN_SECONDS=10;
 export const TRAFFIC_YELLOW_SECONDS=3;
 const PHASE_SECONDS=TRAFFIC_GREEN_SECONDS+TRAFFIC_YELLOW_SECONDS;
 export interface SignalBinding { fixture:TrafficFixture; crossing:number; branch:number }
+export interface TrafficControlState {rules:[number,TrafficRule][];cycles:[number,CrossingCycle][];time:number;halts?:TrafficHalts}
 
 /** One shared intersection state, consumed by lamps and all drivers. Timings are shared gameplay settings. */
 export class TrafficControl {
+  private haltState:TrafficHalts={revision:-1,roads:[],crossings:[]};private haltedRoads=new Set<number>();private haltedCrossings=new Set<number>();
+  get halts(){return this.haltState;}
+  setHalts(state:TrafficHalts){if(state.revision===this.haltState.revision)return;this.haltState=state;this.haltedRoads=new Set(state.roads);this.haltedCrossings=new Set(state.crossings);}
+  roadHalted(road:number){return this.haltedRoads.has(road);}
+  halted(road:number,crossing:number){return this.roadHalted(road)||this.haltedCrossings.has(crossing);}
+  snapshot():TrafficControlState{return {rules:[...this.rules],cycles:[...this.cycles],time:this.time,halts:this.haltState};}
+  restore(state:TrafficControlState){this.rules.clear();for(const [id,rule] of state.rules)this.rules.set(id,rule);this.cycles=new Map(state.cycles);this.time=state.time;if(state.halts)this.setHalts(state.halts);}
   time=0;
   readonly rules=new Map<number,TrafficRule>();
   readonly signals:SignalBinding[]=[];
