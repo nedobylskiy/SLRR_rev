@@ -389,7 +389,7 @@ export class Viewer {
     for(const car of this.trafficCars)if(car.active)yield {object:car.group,bounds:car.vehicle.body.bounds.clone().applyMatrix4(car.vehicle.body.matrix()).expandByScalar(.5)};
     for(const [id,object]of this.javaRenderNodes)if(!this.javaSkyDomeNodes.has(id))yield {object};
     for(const binding of this.javaDrivers.values())if(binding.driver)yield {object:binding.driver.root};
-    for(const object of [...this.pedestrianCrowd?.root.children??[]])yield {object};
+    if(this.pedestrianCrowd)yield* this.pedestrianCrowd.visibilityObjects();
     for(const object of [...this.staticMapRoot?.children??[]]){
       if(object.userData.globalFacadeBatch||object.userData.mergedStatic)continue;
       yield {object,exclude:!!object.userData.streamAuxiliary};
@@ -495,7 +495,10 @@ export class Viewer {
   private pedestrianCrowdRevision=0;
   private pedestrianCount=25;private pedestrianRadius=100;
   private pedestrianSpawnFrustum=new THREE.Frustum();private pedestrianSpawnProjection=new THREE.Matrix4();private pedestrianSpawnSphere=new THREE.Sphere(new THREE.Vector3(),1.5);
-  private pedestrianOffscreen=(point:THREE.Vector3)=>{this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);};
+  private pedestrianOffscreen=(point:THREE.Vector3,bounds?:THREE.Box3)=>{
+    if(bounds)return !this.pedestrianSpawnFrustum.intersectsBox(bounds);
+    this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);
+  };
   private updatePedestrianSpawnView(){this.camera.updateMatrixWorld();this.pedestrianSpawnFrustum.setFromProjectionMatrix(this.pedestrianSpawnProjection.multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));}
   setPedestrianCount(count:number){if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');this.pedestrianCount=count;this.pedestrianCrowd?.configure(count,this.pedestrianRadius);}
   setPedestrianRadius(radius:number){if(!Number.isFinite(radius)||radius<50||radius>300)throw Error('Pedestrian radius must be 50–300 m');this.pedestrianRadius=radius;this.pedestrianCrowd?.configure(this.pedestrianCount,radius);}

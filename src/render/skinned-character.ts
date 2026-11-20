@@ -1,4 +1,4 @@
-import {AnimationClip,AnimationMixer,Bone,BufferAttribute,BufferGeometry,Color,FrontSide,Group,LoopOnce,LoopRepeat,Matrix4,MeshStandardMaterial,Quaternion,QuaternionKeyframeTrack,Skeleton,SkeletonHelper,SkinnedMesh,SRGBColorSpace,Vector3,VectorKeyframeTrack,type AnimationAction,type Texture} from 'three';
+import {AnimationClip,AnimationMixer,Bone,BufferAttribute,BufferGeometry,Color,FrontSide,Group,LoopOnce,LoopRepeat,Matrix4,MeshStandardMaterial,Quaternion,QuaternionKeyframeTrack,Skeleton,SkeletonHelper,SkinnedMesh,Sphere,SRGBColorSpace,Vector3,VectorKeyframeTrack,type AnimationAction,type Texture} from 'three';
 import {parseMatrixData,type MatrixAnimation} from '../formats/matrixdata';
 import type {Assets} from '../assets';
 import {entryProperties} from '../formats/rpk';
@@ -82,7 +82,13 @@ export class SkinnedCharacter {
     const direction=new Vector3(axis==='X'?1:0,axis==='Y'?1:0,axis==='Z'?1:0);
     this.skeleton.bones[bone].quaternion.multiply(new Quaternion().setFromAxisAngle(direction,this.angle*Math.PI/180));this.refresh();
   }
-  refresh(bounds=true){this.root.updateWorldMatrix(true,false);this.root.updateMatrixWorld(true);this.skeleton.update();if(bounds)for(const mesh of this.meshes){mesh.computeBoundingBox();mesh.computeBoundingSphere();}}
+  refresh(bounds=true){
+    this.root.updateWorldMatrix(true,false);this.root.updateMatrixWorld(true);this.skeleton.update();
+    if(this.ragdoll){
+      const box=this.ragdoll.bounds.applyMatrix4(this.root.matrixWorld);
+      for(const mesh of this.meshes){mesh.boundingBox=box.clone().applyMatrix4(mesh.matrixWorld.clone().invert());mesh.boundingSphere=mesh.boundingBox.getBoundingSphere(mesh.boundingSphere??new Sphere());}
+    }else if(bounds)for(const mesh of this.meshes){mesh.computeBoundingBox();mesh.computeBoundingSphere();}
+  }
   testClip(){
     const rest=this.rest[this.bone],direction=new Vector3(this.axis==='X'?1:0,this.axis==='Y'?1:0,this.axis==='Z'?1:0);
     const turned=rest.clone().multiply(new Quaternion().setFromAxisAngle(direction,(this.angle||45)*Math.PI/180));
@@ -92,6 +98,11 @@ export class SkinnedCharacter {
   setRagdollFloor(y:number){this.ragdollFloor=y;}
   get isRagdoll(){return !!this.ragdoll;}
   get ragdollPosition(){return this.ragdoll?.position;}
+  get ragdollBounds(){
+    if(!this.ragdoll)return;
+    this.root.updateWorldMatrix(true,false);
+    return this.ragdoll.bounds.applyMatrix4(this.root.matrixWorld);
+  }
   setRagdollVehicles(cars:readonly RagdollCar[],dt:number){this.ragdoll?.setVehicles(cars,dt);}
   async startRagdoll(activation:RagdollActivation={}){
     if(this.ragdoll||this.disposed)return;
@@ -132,7 +143,8 @@ export class SkinnedCharacter {
     const clip=createOriginalClip(animation,this.skeleton,fitToModel?this.definitions:reference,resolved.entry.alias);
     return {path,animation,clip};
   }
-  update(now:number,bounds=true){if(!this.playing&&!this.ragdoll)return;if(this.lastTime!==undefined){const dt=Math.max(0,Math.min(.1,(now-this.lastTime)/1000));if(this.ragdoll)this.ragdoll.step(dt);else this.mixer.update(dt);this.refresh(bounds);}this.lastTime=now;}
+  pauseSimulation(now:number){this.lastTime=now;}
+  update(now:number,bounds=true){if(!this.playing&&!this.ragdoll)return;if(this.lastTime!==undefined){const dt=Math.max(0,Math.min(.1,(now-this.lastTime)/1000));if(this.ragdoll){if(this.ragdoll.step(dt))this.refresh(bounds);}else{this.mixer.update(dt);this.refresh(bounds);}}this.lastTime=now;}
   deformation(){
     this.refresh();let moved=0,total=0,max=0;const point=new Vector3(),base=new Vector3();
     for(const mesh of this.meshes){const attribute=mesh.geometry.getAttribute('position');for(let i=0;i<attribute.count;i++){mesh.getVertexPosition(i,point);base.fromBufferAttribute(attribute,i);const distance=point.distanceTo(base);if(distance>1e-5)moved++;max=Math.max(max,distance);total++;}}
