@@ -15,10 +15,20 @@ export function mapRenderResource(render: PartConfig['renders'][number], variant
   return render.variants?.length ? render.variants[variant % render.variants.length] : render.resource;
 }
 
-/** Stock daytime-only map mode: exclude explicit alternate night resources.
- * Do not blanket-filter CFG flags=4: flags also control unrelated components. */
+/** Explicit alternate night resources (krthaz02_night, night_vreklam3n…). */
 export function isNightMapRenderResource(alias:string):boolean {
   return /(?:^|[\\/ _-])night(?:$|[\\/ _.-])/i.test(alias);
+}
+
+/**
+ * Day/night pairs inside one object CFG, e.g. a house: `render <day> … flags 68` and `render <night> … flags 4`.
+ * Flag 4 marks a time-of-day render and 64 its daytime member. Only a CFG holding both members is a pair:
+ * flag 4 alone also appears on components that must always draw.
+ */
+export function mapRenderDaypart(renders:readonly {flags?:number}[],render:{flags?:number}):'day'|'night'|undefined {
+  const day=(flags=0)=>(flags&68)===68,night=(flags=0)=>(flags&4)!==0&&(flags&64)===0;
+  if(!renders.some(r=>day(r.flags))||!renders.some(r=>night(r.flags)))return;
+  return day(render.flags)?'day':night(render.flags)?'night':undefined;
 }
 
 /** Object instances exist in the map's source RDB even when omitted from its compiled RPK. */

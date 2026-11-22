@@ -610,3 +610,32 @@ for(const cachedCells of [false,true])test(`static shadow revision ignores camer
   const shown=stream.shadowRevision;stream.update(new Vector3(300,0,0),camera);assert.ok(stream.shadowRevision>shown,'moving the reserve changes real caster membership');
   stream.dispose();
 });
+
+test('a loaded model draws only after its shader warmup completes, and loads wait for it',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4);
+  let warm!:()=>void,warmed:InstancedMesh[]=[];
+  stream.setShaderWarmup(meshes=>{warmed=meshes;return new Promise<void>(resolve=>{warm=resolve;});});
+  stream.add([0,1,2].map(i=>({matrix:new Matrix4().makeTranslation(i,0,0),position:new Vector3(i,0,0)})),async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);
+  let ready=false;const loading=stream.prepareNear(new Vector3()).then(()=>{ready=true;});
+  for(let i=0;i<5;i++){await Promise.resolve();stream.update(new Vector3());}
+  const mesh=parent.children[0] as InstancedMesh;
+  assert.equal(warmed.length,1);assert.equal(warmed[0],mesh,'the warmup sees the real instanced batch');
+  assert.equal(ready,false,'prepareNear waits for compiled programs');assert.equal(mesh.count,0,'nothing draws while programs compile');
+  warm();await loading;stream.update(new Vector3());
+  assert.equal(ready,true);assert.equal(mesh.count,3);
+  stream.dispose();
+});
+
+test('day and night variants swap with the time of day without reloading',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4),placement=()=>[{matrix:new Matrix4(),position:new Vector3()}];
+  const model=async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  stream.add(placement(),model,false,false,'day');stream.add(placement(),model,false,false,'night');stream.add(placement(),model);
+  await stream.prepareNear(new Vector3());stream.update(new Vector3());
+  const [day,night,always]=parent.children as InstancedMesh[];
+  assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
+  stream.setNight(true);stream.update(new Vector3());
+  assert.deepEqual([day.count,night.count,always.count],[0,1,1]);
+  stream.setNight(false);stream.update(new Vector3());
+  assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
+  stream.dispose();
+});

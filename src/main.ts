@@ -788,8 +788,8 @@ rayOcclusionCheck.type='checkbox';rayOcclusionLabel.prepend(rayOcclusionCheck);m
 rayOcclusionLabel.title='Experimental CPU rays against opaque visual triangles. Only proven convex coverage hides a box. Shadows and reflections retain full geometry.';
 rayOcclusionCheck.onchange=()=>viewer?.setRaycastOcclusionEnabled(rayOcclusionCheck.checked);
 const gpuOcclusionLabel=textElement('label','GPU Hi-Z occlusion'),gpuOcclusionCheck=document.createElement('input');
-gpuOcclusionCheck.type='checkbox';gpuOcclusionCheck.checked=true;gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
-gpuOcclusionLabel.title='Experimental GPU bounding-box visibility flags with asynchronous readback. Preserves shadows. Always tests primary-camera visibility, including in the observer view. Bypassed with Inspect all resident instances, distance cutoff or CPU rays. Last completed GPU verdicts remain applied through camera movement and streaming until the next GPU result.';
+gpuOcclusionCheck.type='checkbox';gpuOcclusionCheck.checked=false;gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
+gpuOcclusionLabel.title='Experimental, off by default: the readback can stall the main thread 20–45 ms on Chrome/ANGLE. GPU bounding-box visibility flags with asynchronous readback. Preserves shadows. Always tests primary-camera visibility, including in the observer view. Bypassed with Inspect all resident instances, distance cutoff or CPU rays. Last completed GPU verdicts remain applied through camera movement and streaming until the next GPU result.';
 gpuOcclusionCheck.onchange=()=>{viewer?.setGpuOcclusionEnabled(gpuOcclusionCheck.checked);if(gpuOcclusionCheck.checked)rayOcclusionCheck.checked=false;};
 const gpuIntervalLabel=textElement('label','GPU occlusion interval (frames)'),gpuInterval=document.createElement('select');
 for(const frames of [1,2,3,4,6,8,12]){const option=document.createElement('option');option.value=String(frames);option.textContent=String(frames);gpuInterval.append(option);}gpuInterval.value='12';

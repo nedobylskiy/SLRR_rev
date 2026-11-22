@@ -82,7 +82,7 @@ import { parsePackedGround, type PackedGround } from '../formats/ground';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
-import { mapObjectPlacements, mapObjectSeed, mapRenderResource, isNightMapRenderResource, parseIcfg } from '../engine/map-objects';
+import { mapObjectPlacements, mapObjectSeed, mapRenderResource, mapRenderDaypart, isNightMapRenderResource, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
 import { stockContainerTexture } from './stock-container-texture';
 import {mapObjectCategory,type MapObjectCategory} from './map-object-category';
@@ -224,8 +224,9 @@ export class Viewer {
   private inspectionManualOverride=false;
   private mapPackPath?:string;
   private collisionOnlyMapMeshes=0;
-  private excludedNightMapVariants=0;
-  private excludedNightMapInstances=0;
+  private lastNight=false;
+  private nightMapVariants=0;
+  private nightMapInstances=0;
   private geometryCutoff=false;
   private staticBatching=false;
   private autoMapLod=true;
@@ -235,6 +236,40 @@ export class Viewer {
   private readonly vehicleLodRefresh=this.lodLibrary.onChange(()=>this.vehicleLod.refresh());
   get lodInfo(){return `Vehicle LOD: ${this.vehicleLod.enabled?'on':'off'} · ${this.vehicleLod.size} tracked · ${this.lodLibrary.info}`;}
   setVehicleLodEnabled(enabled:boolean){this.vehicleLod.enabled=enabled;}
+  /**
+   * Compile programs for objects about to appear, against the live scene lights, without blocking: with
+   * KHR_parallel_shader_compile the driver links in the background and the promise resolves when ready.
+   */
+  private warmShaders(objects:THREE.Object3D[]):Promise<unknown> {
+    // A detached holder: traversal sees the objects without reparenting them out of the stream.
+    const holder=new THREE.Object3D();holder.children=objects;
+    // The other part of the day first, in the background; the current state last, so its programs are what
+    // the returned promise waits for (compileAsync polls each material's current program).
+    void this.compileDaypart(holder,!this.lastNight);
+    return this.compileDaypart(holder,this.lastNight);
+  }
+  /**
+   * Compile programs as they will be needed by day or night. Night swaps the sun to hard shadows and turns on
+   * the player's headlight spots; both are part of every lit program's key, so a dusk switch would otherwise
+   * recompile every material on the spot. Only the synchronous program creation sees the temporary state.
+   */
+  private compileDaypart(objects:THREE.Object3D,night:boolean):Promise<unknown> {
+    const renderer=this.renderer,shadowType=renderer.shadowMap.type,added:THREE.SpotLight[]=[],hidden:THREE.SpotLight[]=[];
+    const spots:THREE.SpotLight[]=[];this.scene.traverse(object=>{if((object as THREE.SpotLight).isSpotLight)spots.push(object as THREE.SpotLight);});
+    const visible=(light:THREE.Object3D)=>{for(let o:THREE.Object3D|null=light;o;o=o.parent)if(!o.visible)return false;return true;};
+    try{
+      if(night!==this.lastNight){
+        renderer.shadowMap.type=night?THREE.BasicShadowMap:THREE.PCFSoftShadowMap;
+        if(night){const lit=spots.filter(visible).length;for(let i=lit;i<Math.max(2,spots.length);i++){const spot=new THREE.SpotLight();spot.castShadow=false;this.scene.add(spot);added.push(spot);}}
+        else for(const spot of spots)if(spot.visible&&visible(spot)){spot.visible=false;hidden.push(spot);}
+      }
+      return renderer.compileAsync(objects,this.camera,this.scene).catch(()=>undefined);
+    }catch{return Promise.resolve();}
+    finally{
+      for(const spot of added){spot.removeFromParent();spot.dispose();}for(const spot of hidden)spot.visible=true;
+      renderer.shadowMap.type=shadowType;
+    }
+  }
   private lodStrength=1;
   get lodReachDistance(){return lodReach(this.mapStreamRange,this.lodStrength);}
   /** Shared by map objects and vehicles: higher strength reaches the coarsest level closer to the camera. */
@@ -351,7 +386,7 @@ export class Viewer {
     `Static environment: ${this.environmentPath??'none'}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · brake helping ${this.drivingHelping.brake.toFixed(2)} · steer helping ${this.drivingHelping.steer.toFixed(2)} · clutch helping ${this.drivingHelping.clutch.toFixed(2)} · acceleration helping ${this.drivingHelping.acceleration.toFixed(2)} · ABS ${this.drivingHelping.abs.toFixed(2)} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
-    `Map variants: daytime only · excluded night batches ${this.excludedNightMapVariants} · component instances ${this.excludedNightMapInstances}`,
+    `Map variants: day/night swap (${this.mapStream&&this.lastNight?'night':'day'}) · night batches ${this.nightMapVariants} · component instances ${this.nightMapInstances}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Map render preparation: shared materials ${this.sharedMapMaterials?'on':'off'} · early main-pass culling ${this.earlyMapCulling?'on':'off'}`,
@@ -543,6 +578,8 @@ export class Viewer {
   async prepareJavaScene(){
     const generation=this.generation,focus=this.trafficFocus().clone();
     await this.mapStream?.prepareNear(focus);
+    // Behind the loading screen: vehicles, ground and props outside the stream warm for both parts of the day.
+    if(generation===this.generation)await Promise.all([this.compileDaypart(this.scene,!this.lastNight),this.compileDaypart(this.scene,this.lastNight)]);
     if(generation===this.generation&&this.trafficTestEnabled)await this.restartTrafficTest(true);
   }
   get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
@@ -660,6 +697,10 @@ export class Viewer {
     this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
     this.rayOcclusion=new MapRaycastOcclusion(this.renderer);
     this.gpuOcclusion=new MapGpuOcclusion(this.renderer);
+    // Off by default: on Chrome/ANGLE (D3D11) getBufferSubData is a synchronous round trip to the GPU process
+    // even after both fences signal. It measured 20–45 ms whenever that process was busy presenting, once per
+    // interval, while the city route drew no faster with the verdicts applied.
+    this.gpuOcclusion.setEnabled(false);
     this.mapBackfaces.setEnabled(true);
     this.setBakedLightmapsEnabled(true);
     this.setShadowMapsEnabled(true);
@@ -741,6 +782,7 @@ export class Viewer {
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
       const night = isNightTime(timeOfDay);
+      this.lastNight=night;this.mapStream?.setNight(night);
       this.profiler.measure('Pedestrians CPU',()=>{
       if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
       if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1,!night);}
@@ -860,7 +902,7 @@ export class Viewer {
     this.frameCapture?.reject(Error('Scene cleared'));this.frameCapture=undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapPackPath=undefined;
-    this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
+    this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
     this.vehicleTextures = new AssetTextureSources();
@@ -1276,6 +1318,8 @@ export class Viewer {
           }
         }
         const lamps=await trafficLampDefinitions(built.world,assets);
+        // Cars stay hidden until they wake; compile their programs meanwhile instead of on the first visible frame.
+        void this.warmShaders([group]);
         const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps,panels};group=undefined;return result;
       }finally{built.world.dispose();if(group)this.disposeGroup(group);}
     })();
@@ -1961,7 +2005,7 @@ export class Viewer {
       this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     }
     let loaded = 0, triangles = 0;
-    this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
+    this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
     this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     cacheUnchangedTransform(this.staticMapRoot,()=>this.stableTransforms);
@@ -1971,6 +2015,7 @@ export class Viewer {
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setStaticBatching(this.staticBatching);
     stream.setLodLibrary(this.lodLibrary);stream.setAutoLod(this.autoMapLod);stream.setLodStrength(this.lodStrength);
+    stream.setShaderWarmup(meshes=>this.warmShaders(meshes));
     stream.setTightFrustum(this.tightMapFrustum);
     for(const category of this.hiddenMapCategories)stream.setCategoryHidden(category,true);
     stream.setMaterialSharing(this.sharedMapMaterials);
@@ -2029,7 +2074,7 @@ export class Viewer {
     let objects = 0;
     const unifyBuildings=this.unifiedBuildingMaterials||this.globalFacadeBatching;this.mapUnifiedBuildingMaterials=unifyBuildings;
     const globalFacades=this.globalFacadeBatching;this.mapGlobalFacadeBatching=globalFacades;
-    const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; placements: StreamPlacement[] }>();
+    const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; daypart?:'day'|'night'; placements: StreamPlacement[] }>();
     for (const source of room ? [] : mapSources) try {
       const placements = source.packedGround ? source.packedGround.placements
         : mapObjectPlacements(new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb'))),source.pack);
@@ -2099,11 +2144,11 @@ export class Viewer {
               const seed = mapObjectSeed(instance), id = mapRenderResource(render, seed);
               if (!id) continue;
               const color = render.colors?.length ? render.colors[seed % render.colors.length] : undefined;
-              const category=mapObjectCategory(resource.entry.alias);
-              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}:${movable?'movable':'static'}`;
+              const category=mapObjectCategory(resource.entry.alias),daypart=mapRenderDaypart(cfg.renders,render);
+              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}:${movable?'movable':'static'}:${daypart??'always'}`;
               let batch = objectBatches.get(key);
               if (!batch) {
-                batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, placements: [] };
+                batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, daypart, placements: [] };
                 objectBatches.set(key, batch);
               }
               const matrix = propFrames.get(instance.id)?.clone()??poseMatrix(instance.pose);
@@ -2129,28 +2174,29 @@ export class Viewer {
       // Filter before SCX/textures/cached cells are loaded, including night signs.
       try{
         const {entry}=await assets.resource(batch.pack,batch.id);
-        if(isNightMapRenderResource(entry.alias)){
-          this.excludedNightMapVariants++;this.excludedNightMapInstances+=batch.placements.length;continue;
-        }
+        // A night resource without a CFG day partner still only belongs to the night.
+        if(isNightMapRenderResource(entry.alias))batch.daypart='night';
+        if(batch.daypart==='night'){this.nightMapVariants++;this.nightMapInstances+=batch.placements.length;}
       }catch(error){warnings.push(`Map render metadata ${batch.pack}:0x${batch.id.toString(16)}: ${String(error)}`);continue;}
       stream.add(batch.placements, async wanted => {
       const model = await assets.modelForResource(batch.pack, batch.id);
       if (!wanted()) return [];
       const parsed = await parseScxAsync(await assets.read(model.path)), component = new THREE.Group();
       if (!wanted()) return [];
-      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted));
+      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted, undefined, undefined, false, THREE.DoubleSide, batch.daypart==='night'));
       for (const part of component.children) if (part instanceof THREE.Mesh) {
         part.geometry.scale(0.01, 0.01, 0.01);
         part.name = `map object ${batch.alias}: ${part.name}`;
       }
       const parts=component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
-      const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
+      // Night variants keep per-part materials: the shared texture-array material has no self-illumination slot.
+      const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&batch.daypart!=='night'&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
       for(const part of outputs){
         part.userData.mapOcclusionRole=batch.movable||batch.category?'prop':'structure';
         if(batch.movable){part.userData.staticMapCaster=false;const materials=Array.isArray(part.material)?part.material:[part.material];part.castShadow=materials.some(m=>!m.transparent);}
       }
       return outputs;
-    },batch.category,unifyBuildings&&isBuildingAlias(batch.alias));
+    },batch.category,unifyBuildings&&isBuildingAlias(batch.alias),batch.daypart);
     }
     if (generation === this.generation) {
       await stream.preparePinnedModels();
@@ -2916,7 +2962,8 @@ export class Viewer {
     material.dispose();
     return sky;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide): Promise<string[]> {
+  /** `selfIllumination`: v4 self-illumination slots become emissive maps (lit windows of night variants only). */
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide, selfIllumination = false): Promise<string[]> {
     const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
@@ -2973,6 +3020,27 @@ export class Viewer {
           // foliage cutouts above and explicit material opacity still apply.
           else if (alphaEnabled && alpha === 'blend' && (!mapSurface || opacity < 1)) { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
+      }
+      // Daytime objects also author this slot (walls, pubs), with meanings that are not plain emission there.
+      const glowIndex = selfIllumination && model.version !== 3 ? part.selfIllumIndex : undefined;
+      const glowFile = glowIndex === undefined || glowIndex === 0xffff ? undefined : textures[glowIndex];
+      // Night signs carry no glow slot: their lit artwork is the diffuse texture itself.
+      if (selfIllumination && !glowFile && material.map && !model.meshes.some(m => m.selfIllumIndex !== undefined && m.selfIllumIndex !== 0xffff)) {
+        material.emissiveMap = material.map; material.emissive.set(0xffffff); material.needsUpdate = true;
+      }
+      if (glowFile) {
+        try {
+          const texture = await loadTexture(await read(glowFile), glowFile);
+          if (generation !== this.generation) { texture.dispose(); return warnings; }
+          const glow = part.selfIllumMap, channel = glow?.channel ?? 0;
+          if (channel !== primaryChannel) {
+            const source = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (source) { geometry.setAttribute('uv1', new THREE.BufferAttribute(source, 2)); texture.channel = 1; }
+          }
+          if (glow) { texture.repeat.set(glow.scaleU, glow.scaleV); texture.offset.set(glow.offsetU, glow.offsetV); }
+          texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+          material.emissiveMap = texture; material.emissive.set(0xffffff); material.needsUpdate = true;
+        } catch (e) { warnings.push(`Self-illumination ${glowFile}: ${e}`); }
       }
       let secondLayer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];

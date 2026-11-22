@@ -50,6 +50,8 @@ interface StreamType {
   cachedCells?:MapCachedCells;
   loadPromise?:Promise<void>;
   category?:MapObjectCategory;
+  /** Alternate day or night render of the same object (lit windows): drawn only in its part of the day. */
+  daypart?:'day'|'night';
   placements: StreamPlacement[];
   placementIds:number[];
   shadowSelection?:Set<number>;
@@ -70,6 +72,9 @@ interface StreamType {
   auxiliary:Map<InstancedMesh,InstancedMesh>;
   chunkBounds:Map<InstancedMesh,Map<number,Box3>>;
   loading: boolean;
+  /** Meshes exist but their shader programs are still compiling in the background. */
+  warming?: boolean;
+  warmPromise?: Promise<void>;
   failed: boolean;
   active: number[];
   slots: Map<number, number>;
@@ -125,6 +130,10 @@ export class MapObjectStream {
   private tightFrustum=true;
   private materialSharing=true;
   private readonly hiddenCategories=new Set<MapObjectCategory>();
+  private night=false;
+  /** Swap day and night variants; both stay resident, so the switch needs no loading. */
+  setNight(night:boolean){if(this.night===night)return;this.night=night;this.viewDirty=this.dirty=true;}
+  private daypartHidden(type:StreamType){return !!type.daypart&&(type.daypart==='night')!==this.night;}
   setCategoryHidden(category:MapObjectCategory,hidden:boolean){
     if(hidden)this.hiddenCategories.add(category);else this.hiddenCategories.delete(category);
     this.viewDirty=true;
@@ -183,7 +192,8 @@ export class MapObjectStream {
   private globalFacades?:GlobalFacadeBatches;
   compileGlobalFacades(){
     if(this.disposed||this.globalFacades)return;
-    this.globalFacades=new GlobalFacadeBatches(this.parent,this.types.filter(t=>t.preload).flatMap(t=>(t.baseMeshes??[]).map(mesh=>({mesh,placements:t.placements}))));
+    // Day/night variants must stay switchable, so they never join the static all-day facade batches.
+    this.globalFacades=new GlobalFacadeBatches(this.parent,this.types.filter(t=>t.preload&&!t.daypart).flatMap(t=>(t.baseMeshes??[]).map(mesh=>({mesh,placements:t.placements}))));
     for(const type of this.types){
       type.globalCompiled=!!type.baseMeshes?.length&&type.baseMeshes.every(m=>m.userData.globalFacadeSource);
       for(const mesh of type.baseMeshes??[])if(mesh.userData.globalFacadeSource){
@@ -220,6 +230,12 @@ export class MapObjectStream {
   private lodListener=this.lod.onChange(()=>{this.viewDirty=true;});
   private lodRequested=new WeakSet<StreamType>();
   /** Share generated chains (and workers) with vehicles. */
+  private shaderWarmup?:(meshes:InstancedMesh[])=>Promise<unknown>;
+  /**
+   * Compile a freshly loaded model's programs off the main thread before its placements draw. A first draw
+   * otherwise blocks on the driver for every new program (~30 ms each on ANGLE), which stutters while driving.
+   */
+  setShaderWarmup(warmup:((meshes:InstancedMesh[])=>Promise<unknown>)|undefined){this.shaderWarmup=warmup;}
   setLodLibrary(library:LodLibrary){if(this.ownsLod)this.lod.dispose();this.lodListener();this.lod=library;this.ownsLod=false;this.lodListener=library.onChange(()=>{this.viewDirty=true;});this.viewDirty=true;}
   setStaticBatching(enabled:boolean){
     this.mergeStatic=enabled;
@@ -256,8 +272,8 @@ export class MapObjectStream {
     this.shadowRange = value; this.viewDirty = true;
   }
 
-  add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false) {
-    const type:StreamType={ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
+  add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false,daypart?:'day'|'night') {
+    const type:StreamType={ placementIds:allocateMapPlacementIds(placements.length),preload,daypart, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
       drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),lodLevels:new Map() };
     this.types.push(type);placements.forEach((placement,index)=>this.placementTypes.set(placement,{type,index}));
     this.dirty = true;
@@ -328,7 +344,7 @@ export class MapObjectStream {
     profile.end("dispatch_disposal_ms",stamp);stamp=profile.start();
     let remaining = this.budget;
     for (const type of ordered) {
-      if (!type.meshes||type.globalCompiled||this.useCached(type)) continue;
+      if (!type.meshes||type.warming||type.globalCompiled||this.useCached(type)) continue;
       while (remaining && type.pending.length) {
         const index = type.pending.shift()!;
         if (type.slots.has(index)) continue;
@@ -353,11 +369,11 @@ export class MapObjectStream {
     profile.end("view_frustum_ms",stamp);stamp=profile.start();
     // Residency and rendering are independent: keep nearby off-screen instances
     // in RAM, but submit only the visible ones, even for a city-wide model type.
-    for(const type of this.types)if(type.meshes&&(!continuation&&viewChanged||type.boundsDirty))this.drawQueue.add(type);
+    for(const type of this.types)if(type.meshes&&!type.warming&&(!continuation&&viewChanged||type.boundsDirty))this.drawQueue.add(type);
     let drawn=0;
     for(const type of this.drawQueue){
       if(drawn&&this.clock()>=deadline)break;
-      this.drawQueue.delete(type);if(!type.meshes)continue;
+      this.drawQueue.delete(type);if(!type.meshes||type.warming)continue;
       this.draw(type,camera,!!view);drawn++;
     }
     profile.add('draw_groups_processed_count',drawn);
@@ -397,7 +413,7 @@ export class MapObjectStream {
       for(const mesh of [...type.meshes!,...this.lodBatches(type),...type.auxiliary.values()])mesh.visible=false;
       const cache=type.cachedCells!;
       const cachedStart=profile.start();
-      if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category),this.markOcclusion))this.revision++;
+      if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category)||this.daypartHidden(type),this.markOcclusion))this.revision++;
       profile.end("cached_cells_ms",cachedStart);
       if(type.cachedShadowRevision!==cache.shadowRevision){type.cachedShadowRevision=cache.shadowRevision;this.shadowRevision++;profile.add('shadow_invalidations_count');}
       type.primaryVisible=cache.visibleInstances;type.boundsDirty=false;return;
@@ -409,7 +425,7 @@ export class MapObjectStream {
     profile.add("visibility_placements_count",type.active.length);
     const lodParts=this.autoLod&&!this.geometryCutoff&&!this.inspectResident?this.lodPartsOf(type):undefined,lodTypes=!!lodParts?.parts.size;
     for (const index of type.active) {
-      if(type.category&&this.hiddenCategories.has(type.category))continue;
+      if(type.category&&this.hiddenCategories.has(type.category)||this.daypartHidden(type))continue;
       let primary=distanceTo(type.placements[index], focus)<=this.distance;
       if (primary && cull) {
         let bounds = type.instanceBounds.get(index);
@@ -594,9 +610,15 @@ export class MapObjectStream {
       if(this.mergeStatic)this.prepareBatches.add(type);
       if(this.geometryCutoff)this.prepareChunks.add(type);
       type.loading = false;
+      if(this.shaderWarmup){
+        const meshes=type.meshes;type.warming=true;
+        const ready=()=>{if(type.meshes!==meshes&&type.baseMeshes!==meshes)return;type.warming=false;type.warmPromise=undefined;type.boundsDirty=true;this.dirty=this.viewDirty=true;};
+        // Loads (and prepareNear behind loading screens) complete only once the programs are ready.
+        type.warmPromise=this.shaderWarmup(meshes).then(ready,ready);
+      }
       // Pending placements already describe the current focus. Completing one
       // model must not rescan the entire city index on the next frame.
-    })).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); }).finally(()=>{type.loadPromise=undefined;});
+    })).then(()=>type.warmPromise).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); }).finally(()=>{type.loadPromise=undefined;});
     type.loadPromise=work;return work;
   }
 
@@ -649,7 +671,7 @@ export class MapObjectStream {
     for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
     for (const texture of textures) texture.dispose();
     type.meshes = undefined; type.unusedSince = undefined; type.localBounds = undefined;
-    type.baseMeshes=type.chunkMeshes=type.mergedMeshes=undefined;type.shadowSelection=undefined;type.cachedShadowRevision=undefined;type.meshDrawn.clear();type.chunkBounds.clear();type.lodLevels.clear();
+    type.baseMeshes=type.chunkMeshes=type.mergedMeshes=undefined;type.warming=false;type.warmPromise=undefined;type.shadowSelection=undefined;type.cachedShadowRevision=undefined;type.meshDrawn.clear();type.chunkBounds.clear();type.lodLevels.clear();
     type.drawn.length = type.candidates.length = 0; type.instanceBounds.clear();
   }
   dispose() { this.disposed = true;this.occlusionDirty.clear();this.scanQueue.clear();this.drawQueue.clear(); this.globalFacades?.dispose();this.globalFacades=undefined;for (const type of this.types) this.release(type);this.lodListener();if(this.ownsLod)this.lod.dispose(); this.types = []; this.ordered = []; }

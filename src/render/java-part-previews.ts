@@ -6,6 +6,7 @@ import { javaPartPreviewCameras, javaPartPreviewSelection } from '../runtime/jav
 import { osdDepth } from '../runtime/osd-depth';
 import type { RenderObject } from '../runtime/render-object';
 import type { Viewer } from './viewer';
+import { elementSize } from './element-size';
 
 interface Preview { signature: string; scene: THREE.Scene; camera: THREE.PerspectiveCamera;
   world?: EngineWorld; mesh?: THREE.Group; failed?: boolean }
@@ -53,7 +54,7 @@ export class JavaPartPreviews {
       this.renderer.domElement.className = 'java-part-previews';
       this.stage.append(this.renderer.domElement);
     }
-    const renderer = this.renderer, width = this.stage.clientWidth, height = this.stage.clientHeight;
+    const renderer = this.renderer, { width, height } = elementSize(this.stage);
     renderer.domElement.hidden = false;
     renderer.domElement.style.zIndex = String(osdDepth(Math.max(...cameras.map(view => view.viewport.priority)), -1000) + 10);
     const stamps = [`${width}:${height}:${this.revision}`];
