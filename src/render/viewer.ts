@@ -438,6 +438,23 @@ export class Viewer {
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
   private readonly vehiclePhysics=new VehiclePhysicsClient();
+  private readonly registerTrafficTickContacts=this.vehiclePhysics.setTickContacts(()=>this.trafficPeerContacts());
+  /**
+   * Player against road traffic on every 120 Hz player physics tick. In the 60 Hz traffic loop the player had
+   * already moved a whole rendered frame (≈1.9 m at 200 km/h and 30 fps), so a check per frame could skip a
+   * 1.8 m wide car or find it so deep that the push-out sent the player through. Distant LOD cars are tested
+   * too: an overlap makes them physical, so a car outside the physics radius still stops a fast player.
+   */
+  private trafficPeerContacts(){
+    const peer=this.trafficPeer;if(!peer||!this.trafficTestEnabled)return;
+    for(const test of this.trafficCars)if(test.active)this.trafficPeerContact(peer,test);
+  }
+  private trafficPeerContact(peer:Vehicle3D,test:TrafficTestCar){
+    const hit=vehiclePairContact(peer.body,test.vehicle.body);if(!hit)return;
+    if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+    const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+    peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+  }
   private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;publish():void;pause():void;dispose():void}>();
   private sceneVisibility=new SceneVisibility();
   readonly framePacer=new FramePacer();
@@ -1500,14 +1517,8 @@ export class Viewer {
         for(const {car:racer} of this.javaRaces.values()){
           raceTrafficContact(racer,{body:test.vehicle.body,hit:(impulse,point,closing)=>test.bot.hit(impulse,point,closing)});
         }
-        if(peer&&test.lod.physical){
-          const hit=vehiclePairContact(peer.body,test.vehicle.body);
-          if(hit){
-            if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
-            const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
-            peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
-          }
-        }
+        // The player's own physics tick tests traffic when it can (trafficPeerContacts); this is the fallback.
+        if(peer&&test.lod.physical&&!this.vehiclePhysics.runsTickContacts)this.trafficPeerContact(peer,test);
         for(const other of cars.slice(i+1)){
           if(!test.lod.physical&&!other.lod.physical)continue;
           const a=test.vehicle.body,b=other.vehicle.body,hit=vehiclePairContact(a,b);if(!hit)continue;
