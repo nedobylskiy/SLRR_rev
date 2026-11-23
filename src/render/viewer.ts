@@ -94,7 +94,7 @@ import {loadMapPedestrians} from '../engine/map-pedestrians';
 import {PedestrianCrowd} from './pedestrian-crowd';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
-import { Bot } from '../engine/bot';
+import { Bot, cruisePedals } from '../engine/bot';
 import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
@@ -121,6 +121,16 @@ import { skyMaterial } from './sky-material';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 import { FixedClock } from '../runtime/fixed-clock';
+import { extrapolationMatrix } from './render-extrapolation';
+import { FramePacer, type FramePacing } from './frame-pacer';
+const trafficCarry = new THREE.Matrix4();
+const trafficForward = new THREE.Vector3();
+/** Re-derive a background driver's pedals from its planned speed each tick (see cruisePedals). */
+function trackCruiseSpeed(test:{bot:Bot;vehicle:{body:{velocity:THREE.Vector3;orientation:THREE.Quaternion}}}){
+  const body=test.vehicle.body,speed=body.velocity.dot(trafficForward.set(0,0,-1).applyQuaternion(body.orientation));
+  const {throttle,brakeAxis}=cruisePedals(test.bot.desiredSpeed,speed);
+  test.bot.input={...test.bot.input,throttle,throttleMode:'directional',brake:brakeAxis>.1,brakeAxis};
+}
 import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
 import {createTrafficSignals} from './traffic-signals';
 import {LodLibrary} from './lod-library';
@@ -430,6 +440,8 @@ export class Viewer {
   private readonly vehiclePhysics=new VehiclePhysicsClient();
   private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;publish():void;pause():void;dispose():void}>();
   private sceneVisibility=new SceneVisibility();
+  readonly framePacer=new FramePacer();
+  setFramePacing(mode:FramePacing){this.framePacer.setMode(mode);}
   private *visibilityObjects():Iterable<VisibilityObject>{
     const cars=[...this.javaRaces.values()].map(r=>r.car);
     if(this.trafficPeer)cars.push(this.trafficPeer);
@@ -450,6 +462,8 @@ export class Viewer {
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
   private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
+  /** Per physics world: parent of its part proxies and drivers, carrying them from the last tick to render time. */
+  private renderCarriers = new Map<EngineWorld, THREE.Group>();
   private internalView = false;
   private readonly vehicleReflections = new VehicleReflections();
   private readonly reflectionUniforms: VehicleReflectionUniforms = {
@@ -731,6 +745,9 @@ export class Viewer {
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      // Skipped refreshes do nothing at all: the display keeps the last frame and simulations see one longer step.
+      if(!this.framePacer.shouldRender(now))return;
+      const callbackStart=performance.now();
       this.profiler.captureCpuFrame=!!this.renderRecorder?.status.recording;
       this.mapStream?.workProfile.setEnabled(this.profiler.captureCpuFrame);
       this.gpuOcclusion.workProfile.setEnabled(this.profiler.captureCpuFrame);
@@ -885,6 +902,7 @@ export class Viewer {
             if(work)for(const [key,value] of Object.entries(work.drain()))workFields[prefix+key]=value;
           this.renderRecorder.recordPerformanceFrame(now,timings,document.hidden,workFields);}
         this.afterFrame?.();
+        this.framePacer.recordWork(performance.now()-callbackStart);
         const capture=this.frameCapture;if(capture){this.frameCapture=undefined;
           this.renderer.domElement.toBlob(blob=>blob?capture.resolve(blob):capture.reject(Error('Frame capture failed')),'image/png');}
       }
@@ -919,7 +937,7 @@ export class Viewer {
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
-    this.stopDriving?.(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.stopDriving?.(); this.carryVehicleRenders(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapAmbience?.dispose();this.mapAmbience=undefined;this.ambientAudio=undefined;
     this.mapProps?.dispose();this.mapProps=undefined;this.previousPropFrame=undefined;
     this.mapStream?.dispose(); this.mapStream = undefined;
@@ -1472,7 +1490,7 @@ export class Viewer {
     if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
       this.trafficControl?.advance(this.trafficClock.dt);
       for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);
-        if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
+        if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};else if(test.bot.mode==='cruise'||test.bot.mode==='recover')trackCruiseSpeed(test);test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
       }
       for(const [i,test] of cars.entries()){
         for(const {car:racer} of this.javaRaces.values()){
@@ -1506,10 +1524,12 @@ export class Viewer {
     }
     this.trafficSignals?.update();
     let rivalPanelCpu=0;
+    // Traffic ticks at 60 Hz: draw each car where it is now, not at its last tick (see extrapolationMatrix).
+    const trafficLead=Math.min(this.trafficClock.pendingSeconds,this.trafficClock.dt);
     for(const test of cars){
       const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
       test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time),test.vehicle.wheels[0]?.steer??0,test.vehicle.body.velocity.dot(forward),now/1000);
-      test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+      test.group.matrix.multiplyMatrices(extrapolationMatrix(test.vehicle.body,trafficLead,trafficCarry),test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
       test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin*(test.wheels[i].mount.userData.spinSign??1),wheel.steer,0,'YXZ');});
       test.java?.sync({position:test.vehicle.body.position,yaw:Math.atan2(-forward.x,-forward.z),velocity:test.vehicle.body.velocity});
       if(test.damage instanceof RivalPanelView){const started=performance.now();test.damage.update(panelDt,now);rivalPanelCpu+=performance.now()-started;}else test.damage.update();
@@ -2220,6 +2240,38 @@ export class Viewer {
     const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
     return part.renderVisible && (!this.internalView || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200);
   }
+  /**
+   * Show full-physics vehicles where they are at render time, not at their last fixed tick (see
+   * extrapolationMatrix). Each world's proxies and drivers move under one carrier group, so world-space panel
+   * skins, lamps and wheels shift together; physics state is untouched. Worlds that left the shared physics
+   * clock hand their objects back to the model.
+   */
+  private carryVehicleRenders() {
+    const pending = this.vehiclePhysics.pendingSeconds, active = new Set<EngineWorld>();
+    for (const car of this.vehiclePhysics.cars()) {
+      const world = car.root.world; active.add(world);
+      let carrier = this.renderCarriers.get(world);
+      if (!carrier) {
+        carrier = new THREE.Group(); carrier.name = 'Vehicle render time'; carrier.matrixAutoUpdate = false;
+        carrier.userData.vehicleCarrier = true; this.model.add(carrier); this.renderCarriers.set(world, carrier);
+      }
+      extrapolationMatrix(car.body, Math.min(pending, car.physicsDt), carrier.matrix); carrier.matrixWorldNeedsUpdate = true;
+    }
+    for (const [world, carrier] of this.renderCarriers) if (!active.has(world)) {
+      // Culling detaches off-screen objects and re-adds them to their recorded parent; reattach them first so
+      // none return to this carrier after it leaves the scene.
+      this.sceneVisibility.restore();
+      while (carrier.children.length) this.model.add(carrier.children[0]);
+      carrier.removeFromParent(); this.renderCarriers.delete(world);
+    }
+    if (!this.renderCarriers.size) return;
+    const place = (object: THREE.Object3D, world: EngineWorld) => {
+      const parent = object.parent; if (parent !== this.model && !parent?.userData.vehicleCarrier) return;
+      const wanted = this.renderCarriers.get(world) ?? this.model; if (parent !== wanted) wanted.add(object);
+    };
+    for (const [part, group] of this.proxies) place(group, part.world);
+    for (const binding of this.javaDrivers.values()) if (binding.driver) place(binding.driver.root, binding.chassis.world);
+  }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
       applyCfgRenderChannels(group, part.world.lightMask);
@@ -2685,6 +2737,8 @@ export class Viewer {
         crash instanceof Vehicle3D && !!crash.suspension.mechanics?.running,
         timeOfDay);
       this.profiler.measure('Vehicle world sync CPU',()=>this.syncWorld(softParts));
+      this.carryVehicleRenders();
+      const carried = this.renderCarriers.get(root.world)?.matrix;
       if(chassisBounds.visible && crash instanceof Vehicle3D){
         crash.body.bounds.getCenter(chassisCenter);crash.body.bounds.getSize(chassisSize);
         chassisLocal.makeScale(chassisSize.x,chassisSize.y,chassisSize.z).setPosition(chassisCenter);
@@ -2709,6 +2763,7 @@ export class Viewer {
           followCamera.reset();
           inertialCamera.reset();
           const frame = root.matrix().multiply(poseMatrix(internalPose));
+          if (carried) frame.premultiply(carried);
           frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
           this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
           // CFG camera's optional value is a game-specific zoom parameter, not
@@ -2741,7 +2796,9 @@ export class Viewer {
             offset.add(new THREE.Vector3(0, 1.1, 0));
           }
           offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-          const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+          const target = demo.position.clone();
+          if (carried) target.applyMatrix4(carried);
+          target.y += 1.1;
           offset.y -= 1.1;
           if(mode===3)
             pathChaseCamera.update(this.camera.position,this.controls.target,target,offset,seconds,firstFrame||cameraWasInternal);
@@ -2790,7 +2847,7 @@ export class Viewer {
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
       root.world.lightMask &= ~7;
-      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); if(crash instanceof Vehicle3D)this.vehiclePhysics.forget(crash);crash?.dispose();
+      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); if(crash instanceof Vehicle3D)this.vehiclePhysics.forget(crash);this.carryVehicleRenders();crash?.dispose();
       chassisBounds.removeFromParent();chassisBounds.geometry.dispose();chassisBounds.material.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }

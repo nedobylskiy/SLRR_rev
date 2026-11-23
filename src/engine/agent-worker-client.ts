@@ -6,8 +6,12 @@ export class AgentWorkerClient {
   private worker?:Worker;private busy=false;private result?:AgentResult;private sent=0;private sequence=0;private pending=0;
   error='';
   workMs=0;roundTripMs=0;
-  private responseAt=performance.now();
-  get stale(){return performance.now()-this.responseAt>250;}
+  private responseAt=0;
+  /**
+   * The worker itself is behind, not the page. A long rendered frame delays reading a reply that is already
+   * waiting, so time since the last reply would brake every car after each frame-rate dip.
+   */
+  get stale(){return this.busy&&performance.now()-this.sent>500;}
   get available(){return !!this.worker;}
   ready(now:number){if(this.busy&&now-this.sent>2000)this.fail('Agent worker response timed out');return !!this.worker&&!this.busy&&now-this.sent>=1000/30;}
   constructor(init:AgentRequest,create=()=>typeof Worker==='undefined'?undefined:new Worker(new URL('../workers/agent-worker.ts',import.meta.url),{type:'module',name:init.kind==='traffic-init'?'Traffic drivers':'Pedestrian movement'})){

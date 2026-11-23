@@ -19,6 +19,7 @@ import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
 import { LOD_STRENGTH_MAX } from './render/lod-distance';
+import { autoPacingLevels, pacingLevels, parseFramePacing, type FramePacing } from './render/frame-pacer';
 import { defaultSuspensionDebug, type SuspensionDebugSettings } from './render/suspension-debug';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
@@ -765,6 +766,33 @@ lodStrengthSlider.oninput=()=>{
   try{localStorage.setItem(lodStrengthStorageKey,lodStrengthSlider.value);}catch{ /* The live setting still works when storage is unavailable. */ }
   viewer?.setLodStrength(Number(lodStrengthSlider.value));showLodStrength();
 };
+const framePacingStorageKey='slrr.graphics.framePacing.v1';
+const framePacingLabel=textElement('label','Frame pacing '),framePacingSelect=document.createElement('select');
+let framePacing:FramePacing='auto';
+try{framePacing=parseFramePacing(localStorage.getItem(framePacingStorageKey))??'auto';}catch{ /* Keep the default when browser storage is unavailable. */ }
+let framePacingRefreshHz=0;
+/** Even cadences exist only at the refresh rate divided by whole numbers, so the menu follows the current screen. */
+const buildFramePacingOptions=(refreshMs:number)=>{
+  const hz=Math.round(1000/refreshMs);if(hz===framePacingRefreshHz)return;framePacingRefreshHz=hz;
+  const fixed=pacingLevels(refreshMs),auto=autoPacingLevels(refreshMs).map(fps=>Math.round(fps)).join(' / ');
+  const entries:[string,string][]=[['auto',`Auto · even ${auto} fps`],['vsync',`Every refresh · up to ${hz} fps (uneven when slower)`],
+    ...fixed.map(({divisor,fps})=>[`fps:${Math.round(fps)}`,`Fixed ${Math.round(fps)} fps · every ${divisor} refreshes`] as [string,string])];
+  framePacingSelect.replaceChildren(...entries.map(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;return option;}));
+  let selected:string=framePacing;
+  if(framePacing.startsWith('fps:')&&fixed.length){const wanted=Number(framePacing.slice(4));selected=`fps:${Math.round(fixed.reduce((a,b)=>Math.abs(b.fps-wanted)<Math.abs(a.fps-wanted)?b:a).fps)}`;}
+  if(!entries.some(([value])=>value===selected))selected='auto';
+  framePacingSelect.value=selected;viewer?.setFramePacing(selected as FramePacing);
+  framePacingLabel.title=`This screen refreshes at ${hz} Hz and the browser draws at most once per refresh, so motion is even only at ${hz} fps divided by a whole number. Anything in between arrives as an uneven mix of one- and two-refresh gaps. Auto renders every refresh while frames fit, otherwise the next even level. Saved in this browser.`;
+};
+buildFramePacingOptions(1000/60);
+framePacingLabel.append(framePacingSelect);mapDebugOptions.append(framePacingLabel);
+framePacingSelect.onchange=()=>{
+  framePacing=framePacingSelect.value as FramePacing;
+  try{localStorage.setItem(framePacingStorageKey,framePacing);}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setFramePacing(framePacing);
+};
+// Moving the window to another screen changes the measured refresh and so the even levels on offer.
+setInterval(()=>{if(viewer)buildFramePacingOptions(viewer.framePacer.refreshInterval);},1000);
 const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
 const tightFrustumLabel=textElement('label','Per-part frustum culling'),tightFrustumCheck=document.createElement('input');
 tightFrustumCheck.type='checkbox';tightFrustumCheck.checked=true;tightFrustumLabel.prepend(tightFrustumCheck);mapDebugOptions.append(tightFrustumLabel);
@@ -1151,6 +1179,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
+      ...(viewer ? [viewer.framePacer.info] : []),
       ...(viewer?.profiler.lines() ?? []),
       ...(viewer?.streamInfo ? [viewer.streamInfo] : []),
       ...(viewer?.physicsWork ? [viewer.physicsWork] : []),
@@ -1645,7 +1674,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); viewer.setLodStrength(Number(lodStrengthSlider.value)); showLodStrength(); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); viewer.setLodStrength(Number(lodStrengthSlider.value)); showLodStrength(); viewer.setFramePacing(framePacingSelect.value as FramePacing); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

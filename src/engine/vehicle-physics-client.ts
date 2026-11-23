@@ -15,6 +15,9 @@ export class VehiclePhysicsClient {
   private worker?:Worker;private busy=false;private sequence=0;private nextId=1;private pending=0;
   private immediate=false;private stepped=false;
   beginFrame(){this.immediate=true;this.stepped=false;}
+  /** Simulated time the shared clock holds short of a whole tick; 0 while a worker owns the clock. */
+  get pendingSeconds(){return this.local?.clock.pendingSeconds??0;}
+  cars(){return this.entries.keys();}
   /** Hidden time is a pause, never work to catch up on after restoring the tab. */
   pause(){
     this.pending=this.pendingMs=0;
