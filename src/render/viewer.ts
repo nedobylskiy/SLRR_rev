@@ -536,6 +536,9 @@ export class Viewer {
     }
   }
   private mapStreamRange = 500;
+  private mapFarCullPixels = 4;
+  /** Map objects beyond 40 m that would span fewer pixels than this are not drawn (0 = off). */
+  setMapFarCullPixels(value:number){if(!Number.isFinite(value)||value<0)return;this.mapFarCullPixels=value;this.mapStream?.setFarCullPixels(value);}
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
@@ -742,6 +745,7 @@ export class Viewer {
     this.observer = new ResizeObserver(() => {
       const { clientWidth: w, clientHeight: h } = container;
       this.viewportSize={width:Math.max(1,w),height:Math.max(1,h)};
+      if(this.mapStream)this.mapStream.screenHeight=this.viewportSize.height;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
@@ -2040,6 +2044,7 @@ export class Viewer {
     for(const category of this.hiddenMapCategories)stream.setCategoryHidden(category,true);
     stream.setMaterialSharing(this.sharedMapMaterials);
     stream.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
+    stream.screenHeight=this.viewportSize.height;stream.setFarCullPixels(this.mapFarCullPixels);
     this.mapStream = stream;
     this.updateFarPlane();
     this.nextStreamUpdate=-Infinity;
@@ -3152,6 +3157,10 @@ export class Viewer {
       if(mapSurface&&!material.userData.bakedLightmapTexture){
         this.staticMapShadows.configure(material);
         if(secondLayer)this.staticMapShadows.configure(secondLayer.material);
+      }else if(!mapSurface){
+        // Vehicles receive building, tree and bridge shadows from the same cache (map objects cast no dynamic shadows).
+        if(material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(material);
+        if(secondLayer?.material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(secondLayer.material);
       }
       if (!mapSurface) {
         const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {

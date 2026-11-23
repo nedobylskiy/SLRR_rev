@@ -766,6 +766,17 @@ lodStrengthSlider.oninput=()=>{
   try{localStorage.setItem(lodStrengthStorageKey,lodStrengthSlider.value);}catch{ /* The live setting still works when storage is unavailable. */ }
   viewer?.setLodStrength(Number(lodStrengthSlider.value));showLodStrength();
 };
+const farCullStorageKey='slrr.graphics.farCullPixels.v1';
+const farCullLabel=textElement('label','Far size cull (px) '),farCullInput=document.createElement('input');
+farCullInput.type='number';farCullInput.min='0';farCullInput.max='16';farCullInput.step='1';farCullInput.value='4';farCullInput.style.width='4em';
+try{const saved=localStorage.getItem(farCullStorageKey);if(saved!==null&&Number(saved)>=0&&Number(saved)<=16)farCullInput.value=saved;}catch{ /* Keep the default when browser storage is unavailable. */ }
+farCullLabel.append(farCullInput);mapDebugOptions.append(farCullLabel);
+farCullLabel.title='Map objects farther than 40 m whose bounding sphere would span fewer pixels than this on screen are not drawn (OpenSLRR uses 4). 0 draws everything. Saved in this browser.';
+farCullInput.onchange=()=>{
+  const value=Math.max(0,Math.min(16,Number(farCullInput.value)||0));farCullInput.value=String(value);
+  try{localStorage.setItem(farCullStorageKey,String(value));}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setMapFarCullPixels(value);
+};
 const framePacingStorageKey='slrr.graphics.framePacing.v1';
 const framePacingLabel=textElement('label','Frame pacing '),framePacingSelect=document.createElement('select');
 let framePacing:FramePacing='auto';
@@ -1674,7 +1685,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); viewer.setLodStrength(Number(lodStrengthSlider.value)); showLodStrength(); viewer.setFramePacing(framePacingSelect.value as FramePacing); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); viewer.setLodStrength(Number(lodStrengthSlider.value)); showLodStrength(); viewer.setFramePacing(framePacingSelect.value as FramePacing); viewer.setMapFarCullPixels(Number(farCullInput.value)); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }

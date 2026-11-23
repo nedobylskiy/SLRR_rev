@@ -31,7 +31,17 @@ export class StaticMapShadows {
   private updated = -Infinity;
   private depths = new Map<Material,{material:MeshDepthMaterial;release:()=>void}>();
 
+  /** Materials already sampling the cache: shared vehicle materials must not chain the patch twice. */
+  private configured = new WeakSet<Material>();
+  /**
+   * Make a surface darken where the cached static scene blocks the sun. Ground uses it for building, tree and
+   * bridge shadows; vehicles use it too, because map objects are not dynamic shadow casters (that pass costs a
+   * draw per object), so without it a car drives through those shadows fully lit. A car is never in the cache,
+   * so it cannot shadow itself here.
+   */
   configure(material: MeshStandardMaterial) {
+    if (this.configured.has(material)) return;
+    this.configured.add(material);
     const previous = material.onBeforeCompile, key = material.customProgramCacheKey();
     material.onBeforeCompile = (shader,renderer) => {
       previous.call(material,shader,renderer);

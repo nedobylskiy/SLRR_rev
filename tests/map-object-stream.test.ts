@@ -639,3 +639,18 @@ test('day and night variants swap with the time of day without reloading',async(
   assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
   stream.dispose();
 });
+
+test('far size cull drops objects under 4 px beyond 40 m and keeps near or larger ones',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,1000),focus=new Vector3();
+  const camera=new PerspectiveCamera(60,1,.1,2000);camera.lookAt(0,0,-1);camera.updateMatrixWorld();
+  stream.screenHeight=1000; // projected diameter = radius × cot(30°) × 1000 / distance = radius × 1732 / distance
+  const at=(z:number)=>({matrix:new Matrix4().makeTranslation(0,0,-z),position:new Vector3(0,0,-z)});
+  // A 0.5 m box has a 0.43 m bounding radius: 2.5 px at 300 m, 25 px at 30 m.
+  stream.add([at(30),at(300)],async()=>[new Mesh(new BoxGeometry(.5,.5,.5),new MeshBasicMaterial())]);
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  assert.equal(stream.visible,1,'the box at 300 m is under 4 px and dropped');
+  stream.setFarCullPixels(2);stream.update(focus,camera);assert.equal(stream.visible,2,'a 2 px threshold keeps it');
+  stream.setFarCullPixels(0);stream.update(focus,camera);assert.equal(stream.visible,2,'0 disables the cull');
+  stream.setFarCullPixels(4);stream.screenHeight=3000;stream.update(focus,camera);assert.equal(stream.visible,2,'a taller screen draws it larger');
+  stream.dispose();
+});

@@ -35,6 +35,8 @@ const lodPart=(mesh:InstancedMesh)=>{
 import {useWholeObjectBounds} from './map-object-bounds';
 
 export interface StreamPlacement { movable?:boolean; matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+/** Objects nearer than this are never size-culled, however small. */
+export const FAR_CULL_NEAR_M=40;
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
   const b = placement.bounds;
   if (b) return Math.hypot(Math.max(b.minX - camera.x, 0, camera.x - b.maxX), Math.max(b.minZ - camera.z, 0, camera.z - b.maxZ));
@@ -288,8 +290,28 @@ export class MapObjectStream {
     this.viewDirty=true;
   }
 
+  /**
+   * Far size cull, after OpenSLRR #252: beyond FAR_CULL_NEAR_M, an object whose bounding sphere spans fewer than
+   * this many pixels on screen is not drawn. Such objects are sub-pixel detail that still costs vertices and a
+   * place in an instanced draw. 0 disables it.
+   */
+  farCullPixels=4;
+  /** Viewport height in CSS pixels, set by the owner on resize. */
+  screenHeight=0;
+  /** cot(fov / 2) × viewport height: projected diameter in pixels = radius × this / distance. */
+  private pixelScale=0;
+  setFarCullPixels(value:number){if(Number.isFinite(value)&&value>=0&&value!==this.farCullPixels){this.farCullPixels=value;this.viewDirty=true;}}
+  /** True when the sphere is far enough and small enough on screen to skip. */
+  private tooSmall(bounds:Sphere,focus:Vector3){
+    if(!(this.farCullPixels>0&&this.pixelScale>0))return false;
+    const distance=bounds.center.distanceTo(focus);
+    return distance-bounds.radius>=FAR_CULL_NEAR_M&&bounds.radius*this.pixelScale/distance<this.farCullPixels;
+  }
   update(camera: Vector3, view?: Camera,continuation=false) {
     if (this.disposed) return;
+    const projection=(view as {projectionMatrix?:Matrix4}|undefined)?.projectionMatrix;
+    const scale=projection?Math.abs(projection.elements[5])*this.screenHeight:0;
+    if(scale!==this.pixelScale){this.pixelScale=scale;this.viewDirty=true;}
     const started=this.clock(),deadline=started+this.frameBudgetMs;
     const profile=this.workProfile;let stamp=profile.start();profile.add("updates_count");
     if(continuation)profile.add("continuation_updates_count");
@@ -380,7 +402,7 @@ export class MapObjectStream {
     profile.add('scan_queue_remaining_count',this.scanQueue.size);profile.add('draw_queue_remaining_count',this.drawQueue.size);
     if(this.hasPendingWork)profile.add('budget_yields_count');
     profile.end("draw_batches_ms",stamp);stamp=profile.start();
-    if(!continuation&&this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange,this.markOcclusion))this.revision++;
+    if(!continuation&&this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange,this.markOcclusion,this.inspectResident?Infinity:this.distance))this.revision++;
     profile.end("global_facades_ms",stamp);
   }
 
@@ -430,7 +452,7 @@ export class MapObjectStream {
       if (primary && cull) {
         let bounds = type.instanceBounds.get(index);
         if (!bounds) { bounds = type.localBounds!.clone().applyMatrix4(type.placements[index].matrix); type.instanceBounds.set(index, bounds); }
-        if (!this.frustum.intersectsSphere(bounds)) primary=false;
+        if (!this.frustum.intersectsSphere(bounds)||this.tooSmall(bounds,focus)) primary=false;
       }
       if(primary)type.primaryVisible++;
       if(lodTypes)type.lodLevels.set(index,lodLevel(distanceTo(type.placements[index],focus),lodReach(this.distance,this.lodStrength),type.lodLevels.get(index)??0));
