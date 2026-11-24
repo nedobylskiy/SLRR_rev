@@ -101,6 +101,6 @@ export default defineConfig({
   optimizeDeps: { include: ['meshoptimizer/simplifier'] },
   // index.html is the development playground; game.html is the player page
   // (16:9 viewport, diagnostics hidden) used by the standalone client.
-  build: { rollupOptions: { input: { main: path.resolve('index.html'), game: path.resolve('game.html') } } },
+  build: { rollupOptions: { input: { main: path.resolve('index.html'), game: path.resolve('game.html'), splash: path.resolve('splash.html') } } },
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
 });

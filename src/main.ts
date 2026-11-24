@@ -96,6 +96,8 @@ function appendJavaEvent(event: BootEvent) {
   line.textContent = `[${time}] ${event.level.toUpperCase()}  ${event.message}`;
   el('java-log').append(line);
   el('java-log').scrollTop = el('java-log').scrollHeight;
+  // On the player page the console is normally closed; surface Java failures.
+  if (gameMode && event.level === 'error') document.body.classList.add('java-console-open');
 }
 let gameBootReady:Promise<void>|undefined;
 function runGameBoot(){return gameBootReady=runGameBootNow();}

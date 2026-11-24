@@ -6,9 +6,13 @@
 mod game;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use game::{is_game_root, GameProvider};
 use tauri::http::{header, Request, Response, StatusCode};
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const SCHEME: &str = "slrr";
@@ -16,65 +20,105 @@ const SCHEME: &str = "slrr";
 const DEFAULT_ROOT: &str = "C:/Program Files (x86)/Steam/steamapps/common/Street Legal Racing Redline";
 
 /// Windows (WebView2) and Android expose custom schemes as `http://<scheme>.localhost`.
-fn start_url() -> &'static str {
+fn page_url(page: &str) -> String {
     if cfg!(any(windows, target_os = "android")) {
-        "http://slrr.localhost/game.html"
+        format!("http://slrr.localhost/{page}")
     } else {
-        "slrr://localhost/game.html"
+        format!("slrr://localhost/{page}")
     }
 }
+
+/// How long the logo stays up at minimum once painted; the game window also waits for its page to load.
+const SPLASH_MIN: Duration = Duration::from_secs(3);
+/// Never keep the game window hidden longer than this, even if its load event is missed.
+const SPLASH_MAX: Duration = Duration::from_secs(15);
 
 fn saved_root_file(app: &AppHandle) -> Option<PathBuf> {
     Some(app.path().app_config_dir().ok()?.join("game-root.txt"))
 }
 
-/// `--game <dir>` / `--game=<dir>`, then SLRR_GAME_ROOT (as the dev server),
-/// then the last chosen folder, the Steam default, and finally a folder picker.
-fn locate_game_root(app: &AppHandle) -> Option<PathBuf> {
+/// A folder given explicitly: `--game <dir>` / `--game=<dir>`, else SLRR_GAME_ROOT.
+fn requested_game_root() -> Option<(PathBuf, &'static str)> {
     let mut args = std::env::args().skip(1);
-    let mut candidates: Vec<PathBuf> = Vec::new();
     while let Some(arg) = args.next() {
         if let Some(value) = arg.strip_prefix("--game=") {
-            candidates.push(value.into());
+            return Some((value.into(), "--game"));
         } else if arg == "--game" {
-            candidates.extend(args.next().map(PathBuf::from));
+            return args.next().map(|value| (value.into(), "--game"));
         }
     }
-    candidates.extend(std::env::var_os("SLRR_GAME_ROOT").map(PathBuf::from));
-    if let Some(saved) = saved_root_file(app).and_then(|file| std::fs::read_to_string(file).ok()) {
-        candidates.push(saved.trim().into());
-    }
-    if cfg!(target_os = "android") {
-        // Copy the installation into the app's own storage (no picker on Android yet).
-        candidates.extend(app.path().app_data_dir().ok().map(|dir| dir.join("game")));
-    } else {
-        candidates.push(DEFAULT_ROOT.into());
-    }
-    if let Some(found) = candidates.into_iter().find(|dir| is_game_root(dir)) {
-        return Some(found);
-    }
-    pick_game_root(app)
+    std::env::var_os("SLRR_GAME_ROOT").map(|value| (value.into(), "SLRR_GAME_ROOT"))
 }
 
+/// An explicitly requested folder must be valid: a wrong one is reported and
+/// the player is asked for the right one, rather than silently using another
+/// installation. Otherwise the last chosen folder, then the Steam default; if
+/// neither is an installation, ask too.
+fn locate_game_root(app: &AppHandle) -> Option<PathBuf> {
+    if let Some((dir, source)) = requested_game_root() {
+        if is_game_root(&dir) {
+            return Some(dir);
+        }
+        let problem = if dir.is_dir() { "is not a Street Legal Racing Redline installation" } else { "does not exist" };
+        return pick_game_root(app, &format!("The game folder given by {source}\n{}\n{problem}.", dir.display()));
+    }
+    let saved = saved_root_file(app)
+        .and_then(|file| std::fs::read_to_string(file).ok())
+        .map(|text| PathBuf::from(text.trim()))
+        .filter(|dir| !dir.as_os_str().is_empty());
+    if let Some(dir) = saved.as_ref().filter(|dir| is_game_root(dir)) {
+        return Some(dir.clone());
+    }
+    let fallback = if cfg!(target_os = "android") {
+        // Copy the installation into the app's own storage (no picker on Android yet).
+        app.path().app_data_dir().ok().map(|dir| dir.join("game"))
+    } else {
+        Some(PathBuf::from(DEFAULT_ROOT))
+    };
+    if let Some(dir) = fallback.filter(|dir| is_game_root(dir)) {
+        return Some(dir);
+    }
+    let reason = match saved {
+        Some(dir) => format!("The previously selected game folder\n{}\nis no longer a Street Legal Racing Redline installation.", dir.display()),
+        None => "Street Legal Racing Redline was not found.".to_string(),
+    };
+    pick_game_root(app, &reason)
+}
+
+/// Explain why, then let the player choose the installation folder until a
+/// valid one is chosen or they cancel (the page then offers "Open game folder").
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn pick_game_root(app: &AppHandle) -> Option<PathBuf> {
-    let chosen = rfd::FileDialog::new().set_title("Select the Street Legal Racing Redline folder").pick_folder()?;
-    if !is_game_root(&chosen) {
-        rfd::MessageDialog::new()
+fn pick_game_root(app: &AppHandle, reason: &str) -> Option<PathBuf> {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+    let ask = |text: String| {
+        MessageDialog::new()
             .set_title("SLRR Standalone")
-            .set_description("This folder has no SLRR installation (system and sl folders).")
-            .show();
-        return None;
+            .set_level(MessageLevel::Warning)
+            .set_description(text)
+            // Native dialogs show localized OK/Cancel; custom labels are not reliable.
+            .set_buttons(MessageButtons::OkCancel)
+            .show()
+    };
+    let mut prompt = format!("{reason}\n\nPress OK to choose the folder where the game is installed (it contains the system and sl folders).");
+    loop {
+        if !matches!(ask(prompt), MessageDialogResult::Ok | MessageDialogResult::Yes) {
+            return None;
+        }
+        let chosen = rfd::FileDialog::new().set_title("Select the Street Legal Racing Redline folder").pick_folder()?;
+        // Picking a folder inside the installation (e.g. its sl folder) is close enough.
+        if let Some(root) = chosen.ancestors().take(2).find(|dir| is_game_root(dir)) {
+            if let Some(file) = saved_root_file(app) {
+                let _ = file.parent().map(std::fs::create_dir_all);
+                let _ = std::fs::write(file, root.to_string_lossy().as_bytes());
+            }
+            return Some(root.to_path_buf());
+        }
+        prompt = format!("{}\nhas no system and sl folders, so it is not a Street Legal Racing Redline installation.\n\nChoose another folder.", chosen.display());
     }
-    if let Some(file) = saved_root_file(app) {
-        let _ = file.parent().map(std::fs::create_dir_all);
-        let _ = std::fs::write(file, chosen.to_string_lossy().as_bytes());
-    }
-    Some(chosen)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn pick_game_root(_: &AppHandle) -> Option<PathBuf> {
+fn pick_game_root(_: &AppHandle, _: &str) -> Option<PathBuf> {
     None
 }
 
@@ -115,10 +159,55 @@ pub fn run() {
                 Some(root) => format!("SLRR Standalone - {}", root.display()),
                 None => "SLRR Standalone - no game folder".to_string(),
             };
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(start_url().parse()?))
+            // Splash: the project logo in a transparent, borderless window. The game window loads hidden behind it and
+            // replaces it once the logo has been on screen for SPLASH_MIN and game.html has loaded.
+            let started = Instant::now();
+            // The webview paints the logo only once splash.html has loaded; count from then.
+            let splash_ready: Arc<Mutex<Option<Instant>>> = Arc::default();
+            let splash_mark = splash_ready.clone();
+            let splash = WebviewWindowBuilder::new(app, "splash", WebviewUrl::CustomProtocol(page_url("splash.html").parse()?))
+                .title("SLRR REV")
+                // docs/media/slrr-rev-logo.png is 1403x1121 with transparency.
+                .inner_size(600.0, 480.0)
+                .center()
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .resizable(false)
+                .skip_taskbar(true)
+                .always_on_top(true)
+                .focused(false)
+                .on_page_load(move |_, payload| {
+                    if payload.event() == PageLoadEvent::Finished {
+                        splash_mark.lock().unwrap().get_or_insert_with(Instant::now);
+                    }
+                })
+                .build()?;
+            let loaded = Arc::new(AtomicBool::new(false));
+            let page_loaded = loaded.clone();
+            let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(page_url("game.html").parse()?))
                 .title(title)
                 .inner_size(1600.0, 900.0)
+                .center()
+                .visible(false)
+                .on_page_load(move |_, payload| {
+                    if payload.event() == PageLoadEvent::Finished {
+                        page_loaded.store(true, Ordering::Release);
+                    }
+                })
                 .build()?;
+            std::thread::spawn(move || {
+                loop {
+                    let logo_done = splash_ready.lock().unwrap().is_some_and(|at| at.elapsed() >= SPLASH_MIN);
+                    if logo_done && loaded.load(Ordering::Acquire) || started.elapsed() >= SPLASH_MAX {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                let _ = main.show();
+                let _ = main.set_focus();
+                let _ = splash.close();
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

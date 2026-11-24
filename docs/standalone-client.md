@@ -27,11 +27,28 @@ local HTTP port. It lives in `src-tauri/`.
 
 ## Game folder
 
-Checked in this order: `--game <dir>` (or `--game=<dir>`), `SLRR_GAME_ROOT`
-(same variable as the dev server), the last folder picked, the Steam default,
-then a native folder picker. The picked folder is remembered in the app config
-directory (`game-root.txt`). A folder counts as an installation when it has
-`system/` and `sl/`.
+A folder counts as an installation when it has `system/` and `sl/`.
+
+- A folder given explicitly (`--game <dir>`, `--game=<dir>`, or
+  `SLRR_GAME_ROOT`, the same variable as the dev server) must be valid. If it
+  does not exist or is not an installation, a dialog says so and asks for the
+  right folder; another installation is never used silently.
+- Otherwise the last picked folder is used, then the Steam default. If neither
+  is an installation, the same dialog explains why and asks.
+- The folder picker repeats until a valid folder is chosen (a folder inside the
+  installation, such as its `sl`, is accepted as its parent) or the player
+  cancels. After a cancel the window opens without a game folder and the page
+  offers "Open game folder".
+- The picked folder is remembered in the app config directory
+  (`%APPDATA%\dev.slrr.standalone\game-root.txt` on Windows).
+
+## Splash
+
+After the game folder is settled, `splash.html` shows the project logo
+(`docs/media/slrr-rev-logo.png`) in a transparent, borderless, always-on-top
+window. The game window loads hidden meanwhile and replaces the splash once the
+logo has been on screen for three seconds and `game.html` has loaded (at most fifteen
+seconds in total).
 
 ## Video
 
