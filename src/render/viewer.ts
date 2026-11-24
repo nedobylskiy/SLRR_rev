@@ -3,7 +3,7 @@ import { advancePartFlap } from '../engine/part-flap';
 import {paintTargets} from './paint-targets';
 import {hasPaintSurface,isPaintSurface,paintSurfaceGeometry} from './paint-surface';
 import {projectPaintGeometry,maskPaintProjection} from './paint-projection';
-import {bakePaintLayer,configurePaintLayer,disposePaintLayer,paintLayerOf,paintLayerSize,paintUvInfo,type PaintDecal} from './paint-layer';
+import {bakePaintLayer,configurePaintLayer,copyPaintLayer,disposePaintLayer,paintLayerOf,paintLayerSize,paintUvInfo,type PaintDecal} from './paint-layer';
 import {isOsdRender} from '../runtime/osd-render-scope';
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {LodPlayground} from './lod-playground';
@@ -47,6 +47,7 @@ import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, solidPartPaint, type PartPaint } from './part-paint';
 import { applyRenderColor } from './render-color';
+import { StaticMapDuplicates } from './static-map-duplicates';
 import { normalizePath, resourceTextureSource } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
@@ -430,6 +431,9 @@ export class Viewer {
   private javaRenderRoot = new THREE.Group();
   private javaRenderNodes = new Map<number, THREE.Group>();
   private javaRenderModels = new Map<number, THREE.Group>();
+  /** SCX path of script models drawn unmodified (no texture swaps or colour), for static-map duplicate checks. */
+  private javaRenderPaths = new Map<number, string>();
+  private readonly staticDuplicates = new StaticMapDuplicates();
   private javaSkyDomeNodes = new Map<number, { group: THREE.Group; offset: THREE.Vector3 }>();
   private javaRenderTypes = new Map<number, string>();
   private javaRenderRequests = new Map<number, number>();
@@ -985,7 +989,7 @@ export class Viewer {
     if (node.resourceType !== 3||isOsdRender(node)) {
       this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
-      this.javaRenderModels.delete(node.id);
+      this.javaRenderModels.delete(node.id); this.javaRenderPaths?.delete(node.id);
       this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       this.javaSkyDomeNodes.delete(node.id);
       this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
@@ -1079,7 +1083,8 @@ export class Viewer {
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
     const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}|color:${node.color}` : '';
-    if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
+    if (this.javaRenderTypes.get(node.id) === key) {this.hideStaticDuplicate?.(node.id);await this.syncJavaCharacter(node,assets);return;}
+    this.javaRenderPaths?.delete(node.id); modelGroup.visible = true;
     this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
     modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
     this.javaRenderTypes.set(node.id, key);
@@ -1112,7 +1117,7 @@ export class Viewer {
           sourcePacks: overrides.resourceReplacementSourcePacks,
         } : undefined);
         const parsed = await parseScxAsync(await assets.read(model.path));
-        const template = new THREE.Group();
+        const template = new THREE.Group(); template.userData.modelPath = model.path;
         const warnings = await this.append(parsed, assets, model.textures, template, generation);
         if (isSkyDome) template.traverse(object => {
           if (!(object instanceof THREE.Mesh)) return;
@@ -1137,7 +1142,23 @@ export class Viewer {
     const instance = template.clone(true);
     applyRenderColor(instance, node.color);
     modelGroup.add(instance);
+    if (!overrides && node.color === null && !isSkyDome && template.userData.modelPath) {
+      this.javaRenderPaths?.set(node.id, template.userData.modelPath); this.hideStaticDuplicate?.(node.id);
+    }
   }
+  /** A script copy of a model the static map already draws at the same pose is not drawn (see StaticMapDuplicates). */
+  private hideStaticDuplicate(id: number) {
+    const path = this.javaRenderPaths.get(id), modelGroup = this.javaRenderModels.get(id);
+    if (!path || !modelGroup) return;
+    const root = this.staticMapRoot;
+    let duplicate = false;
+    if (root?.parent && this.staticDuplicates.size) {
+      modelGroup.updateWorldMatrix(true, false); root.updateWorldMatrix(true, false);
+      duplicate = this.staticDuplicates.covers(path, modelGroup.matrixWorld, root.matrixWorld);
+    }
+    modelGroup.visible = !duplicate;
+  }
+  private refreshStaticDuplicates() { for (const id of this.javaRenderPaths.keys()) this.hideStaticDuplicate(id); }
   private releaseJavaDriver(id:number){
     const binding=this.javaDrivers.get(id);this.javaDrivers.delete(id);binding?.driver?.dispose();
   }
@@ -1737,12 +1758,23 @@ export class Viewer {
           configureCfgLampEmission(sub, flags);
         }
         syncLinkedRenders(part, group);
+        // Decals and spray strokes are part of the paint, in thumbnails too.
+        if (part.paintStrokes?.length) {
+          group.updateWorldMatrix(true, true);
+          const surfaces: THREE.Mesh[] = [];
+          group.traverse(object => { if (object instanceof THREE.Mesh && hasPaintSurface(object)) surfaces.push(object); });
+          await Viewer.prototype.bakePartPaintLayers.call(this, part, assets, surfaces, part.paintStrokes, () => true);
+        }
       }
       root.traverse(object => {
         if (!(object instanceof THREE.Mesh)) return;
         if (!unlitPreview) { object.castShadow = object.receiveShadow = true; return; }
         const unlit = (source: THREE.MeshStandardMaterial) => {
-            const material = previewMaterial(source);
+          const material = previewMaterial(source), layer = paintLayerOf(source);
+          // Thumbnails are drawn by another renderer, which cannot sample this renderer's render target.
+          const copy = layer && copyPaintLayer(this.renderer, layer);
+          if (copy) { configurePaintLayer(material, object.geometry); const own = paintLayerOf(material)!; own.copy = copy; own.map.value = copy; }
+          disposePaintLayer(source);
           source.userData.reflectionTexture?.dispose();
           source.dispose(); return material;
         };
@@ -2108,7 +2140,7 @@ export class Viewer {
     }
     let loaded = 0, triangles = 0;
     this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
-    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
+    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();this.staticDuplicates.clear();this.refreshStaticDuplicates();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     cacheUnchangedTransform(this.staticMapRoot,()=>this.stableTransforms);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
@@ -2147,6 +2179,7 @@ export class Viewer {
         if(!compiled?.collision.meshes.length)collision.add(parsed);
         const collisionOnly=isStockMapCollisionShell(source.path,resource.path,source.pack.entries.find(entry=>entry.typeId===id)?.alias??'',parsed);
         if(collisionOnly)this.collisionOnlyMapMeshes++;
+        if(!compiled&&!collisionOnly)this.staticDuplicates.add(resource.path,room?poseMatrix(room.pose):new THREE.Matrix4());
         const bounds = new THREE.Box3();
         const vertex = new THREE.Vector3();
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
@@ -2174,6 +2207,7 @@ export class Viewer {
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
+    if (generation === this.generation) this.refreshStaticDuplicates();
     let objects = 0;
     const unifyBuildings=this.unifiedBuildingMaterials||this.globalFacadeBatching;this.mapUnifiedBuildingMaterials=unifyBuildings;
     const globalFacades=this.globalFacadeBatching;this.mapGlobalFacadeBatching=globalFacades;
@@ -3236,8 +3270,11 @@ export class Viewer {
       if(mapSurface&&!material.userData.bakedLightmapTexture){
         this.staticMapShadows.configure(material);
         if(secondLayer)this.staticMapShadows.configure(secondLayer.material);
-      }else if(!mapSurface){
+      }else if(!mapSurface&&!material.userData.bakedLightmapTexture){
         // Vehicles receive building, tree and bridge shadows from the same cache (map objects cast no dynamic shadows).
+        // Script-placed props with a baked garage lightmap already carry their shadows. The garage script also
+        // places the room props that the room map draws, so both copies are coplanar: shading them differently
+        // turns the depth tie between them into flickering stripes.
         if(material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(material);
         if(secondLayer?.material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(secondLayer.material);
       }

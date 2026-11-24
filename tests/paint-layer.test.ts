@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {BufferGeometry,Float32BufferAttribute,Matrix4,MeshStandardMaterial,ShaderLib} from 'three';
+import {BufferGeometry,Float32BufferAttribute,Matrix4,MeshBasicMaterial,MeshStandardMaterial,ShaderLib} from 'three';
 import {PAINT_UV,configurePaintLayer,paintLayerOf,paintLayerSize,paintUvInfo} from '../src/render/paint-layer';
 
 function quads(uvs:number[][]){
@@ -37,6 +37,10 @@ test('the layer reaches the fragment shader even when an earlier hook consumed c
   const shader={uniforms:{} as Record<string,unknown>,vertexShader:ShaderLib.physical.vertexShader,fragmentShader:ShaderLib.physical.fragmentShader};
   material.onBeforeCompile(shader as never,undefined as never);
   assert.ok(shader.fragmentShader.includes('texture2D(slrrPaintLayer, vSlrrPaintUv)'),'fragment samples the layer');
+  const basic=new MeshBasicMaterial();configurePaintLayer(basic,g);
+  const unlit={uniforms:{} as Record<string,unknown>,vertexShader:ShaderLib.basic.vertexShader,fragmentShader:ShaderLib.basic.fragmentShader};
+  basic.onBeforeCompile(unlit as never,undefined as never);
+  assert.ok(unlit.fragmentShader.includes('texture2D(slrrPaintLayer, vSlrrPaintUv)'),'unlit previews sample it too');
   assert.ok(shader.vertexShader.includes('vSlrrPaintUv = slrrPaintUv'));
   assert.equal(shader.uniforms.slrrPaintLayer,paintLayerOf(material)!.map);
 });

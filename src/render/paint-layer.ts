@@ -1,7 +1,7 @@
 import {
   BufferGeometry, Color, CustomBlending, DataTexture, DoubleSide, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4,
   Mesh, OneFactor, OneMinusSrcAlphaFactor, OrthographicCamera, Scene, ShaderMaterial, SRGBColorSpace, Vector3, Vector4,
-  WebGLRenderTarget, type Material, type MeshStandardMaterial, type Texture, type WebGLRenderer,
+  WebGLRenderTarget, type Material, type MeshBasicMaterial, type MeshStandardMaterial, type Texture, type WebGLRenderer,
 } from 'three';
 
 /**
@@ -9,7 +9,9 @@ import {
  * the car material mixes it into the base colour before lighting, so they take the sun, shadows, reflections and
  * dents exactly like the paint around them. A projected overlay mesh with an unlit material did none of that.
  */
-export interface PaintLayer {map:{value:Texture};target?:WebGLRenderTarget;owner?:Mesh}
+export interface PaintLayer {map:{value:Texture};target?:WebGLRenderTarget;owner?:Mesh;
+  /** A context-independent copy (see `copyPaintLayer`), disposed with the layer. */
+  copy?:Texture}
 
 const EMPTY=new DataTexture(new Uint8Array(4),1,1);EMPTY.needsUpdate=true;
 
@@ -19,7 +21,7 @@ export const PAINT_UV='slrrPaintUv';
 export function paintLayerOf(material:Material):PaintLayer|undefined{return material.userData.paintLayer as PaintLayer|undefined;}
 
 /** Prepare a paint material once, so adding the first decal later swaps a texture instead of recompiling. */
-export function configurePaintLayer(material:MeshStandardMaterial,geometry:BufferGeometry){
+export function configurePaintLayer(material:MeshStandardMaterial|MeshBasicMaterial,geometry:BufferGeometry){
   const uv=geometry.getAttribute('uv');if(!uv)return;
   if(!geometry.getAttribute(PAINT_UV))geometry.setAttribute(PAINT_UV,uv);
   if(paintLayerOf(material))return;
@@ -31,14 +33,14 @@ export function configurePaintLayer(material:MeshStandardMaterial,geometry:Buffe
     shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>\nattribute vec2 ${PAINT_UV}; varying vec2 vSlrrPaintUv;`)
       .replace('#include <begin_vertex>',`#include <begin_vertex>\nvSlrrPaintUv = ${PAINT_UV};`);
     // After the authored colour mix: the layer is premultiplied paint on top of the finished base colour.
-    // Anchored on roughnessmap_fragment, not color_fragment: the scene lighting hook consumes color_fragment
-    // (it substitutes its own paint-mask mix) before this hook runs, so that anchor no longer exists here.
-    const anchor='#include <roughnessmap_fragment>';
+    // Anchored on alphamap_fragment, the chunk right after color_fragment in lit and unlit shaders alike:
+    // the scene lighting hook consumes color_fragment itself (it substitutes its own paint-mask mix).
+    const anchor='#include <alphamap_fragment>';
     if(!shader.fragmentShader.includes(anchor)){console.warn('Paint layer: fragment anchor missing; decals will not show');return;}
     shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D slrrPaintLayer; varying vec2 vSlrrPaintUv;')
       .replace(anchor,`vec4 slrrLayer = texture2D(slrrPaintLayer, vSlrrPaintUv);\ndiffuseColor.rgb = diffuseColor.rgb * (1.0 - slrrLayer.a) + slrrLayer.rgb;\n${anchor}`);
   };
-  material.customProgramCacheKey=()=>`${key}|paint-layer-v2`;
+  material.customProgramCacheKey=()=>`${key}|paint-layer-v3`;
   material.needsUpdate=true;
 }
 
@@ -160,5 +162,20 @@ export function bakePaintLayer(renderer:WebGLRenderer,layer:PaintLayer,size:numb
 
 export function disposePaintLayer(material:Material){
   const layer=paintLayerOf(material);if(!layer)return;
-  layer.target?.dispose();layer.target=undefined;layer.map.value=EMPTY;
+  layer.target?.dispose();layer.target=undefined;layer.copy?.dispose();layer.copy=undefined;layer.map.value=EMPTY;
+}
+
+/**
+ * Pixels of a baked layer as an ordinary texture. A render target exists only in the context of the renderer
+ * that drew it, so surfaces drawn by another renderer (OSD part thumbnails) need this copy. Returns undefined
+ * for a layer without decals.
+ */
+export function copyPaintLayer(renderer:WebGLRenderer,layer:PaintLayer):Texture|undefined{
+  const target=layer.target;if(!target)return;
+  const {width,height}=target,pixels=new Uint8Array(width*height*4);
+  renderer.readRenderTargetPixels(target,0,0,width,height,pixels);
+  // Render target rows start at v = 0, as DataTexture rows do without flipY.
+  const texture=new DataTexture(pixels,width,height);
+  texture.colorSpace=SRGBColorSpace;texture.generateMipmaps=true;texture.minFilter=LinearMipmapLinearFilter;texture.magFilter=LinearFilter;
+  texture.needsUpdate=true;return texture;
 }
