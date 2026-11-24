@@ -7,7 +7,8 @@ export function hasPaintSurface(mesh:Mesh){return (Array.isArray(mesh.material)?
 
 /** Restrict a projector to actual paint faces. A part's texture slot alone does
  * not make its glass, trim, or inward-facing triangles valid decal receivers. */
-export function paintSurfaceGeometry(mesh:Mesh,direction:Vector3,wantedMaterial?:number):BufferGeometry|undefined {
+/** Without `direction`, every paint face of the material is kept (whole-surface UV checks). */
+export function paintSurfaceGeometry(mesh:Mesh,direction:Vector3|undefined,wantedMaterial?:number):BufferGeometry|undefined {
   const source=mesh.geometry,positions=source.getAttribute('position'),index=source.index;
   const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];
   const count=index?.count??positions.count,indices:number[]=[];
@@ -24,7 +25,7 @@ export function paintSurfaceGeometry(mesh:Mesh,direction:Vector3,wantedMaterial?
     b.fromBufferAttribute(positions,ib).applyMatrix4(mesh.matrixWorld);
     c.fromBufferAttribute(positions,ic).applyMatrix4(mesh.matrixWorld);
     normal.subVectors(b,a).cross(c.sub(a)).normalize();
-    if(normal.dot(direction)<=.05)continue;
+    if(direction&&normal.dot(direction)<=.05)continue;
     indices.push(ia,ib,ic);
   }
   if(!indices.length)return;

@@ -3,6 +3,7 @@ import { advancePartFlap } from '../engine/part-flap';
 import {paintTargets} from './paint-targets';
 import {hasPaintSurface,isPaintSurface,paintSurfaceGeometry} from './paint-surface';
 import {projectPaintGeometry,maskPaintProjection} from './paint-projection';
+import {bakePaintLayer,configurePaintLayer,disposePaintLayer,paintLayerOf,paintLayerSize,paintUvInfo,type PaintDecal} from './paint-layer';
 import {isOsdRender} from '../runtime/osd-render-scope';
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {LodPlayground} from './lod-playground';
@@ -974,7 +975,7 @@ export class Viewer {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); disposePaintLayer(material); material.dispose(); });
     });
     this.model.clear();
   }
@@ -1778,6 +1779,67 @@ export class Viewer {
     }
     group.userData.paintKey = key;
   }
+  /**
+   * Bake a part's decals into the paint layer of every paint surface whose UVs allow it (see paint-layer.ts).
+   * Returns the meshes that still need projected overlays, or undefined when a newer request replaced this one.
+   * Placement follows the overlay path exactly: the stroke frame, face filter and non-paintable mask.
+   */
+  private async bakePartPaintLayers(part:EnginePart,assets:Assets,meshes:THREE.Mesh[],strokes:readonly PaintStroke[],current:()=>boolean):Promise<THREE.Mesh[]|undefined>{
+    const overlay:THREE.Mesh[]=[],targets:{mesh:THREE.Mesh;full:THREE.BufferGeometry;index:number;material:THREE.MeshStandardMaterial}[]=[];
+    for(const mesh of meshes){
+      const full=(mesh.geometry.userData.lodFull as THREE.BufferGeometry|undefined)??mesh.geometry;
+      const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];let baked=false,needsOverlay=false;
+      for(let index=0;index<materials.length;index++){
+        const material=materials[index];if(!isPaintSurface(material))continue;
+        const layer=paintLayerOf(material);
+        const faces=layer&&(!layer.owner||layer.owner===mesh)?paintSurfaceGeometry(Object.assign(Object.create(mesh),{geometry:full}) as THREE.Mesh,undefined,index):undefined;
+        const usable=faces?paintUvInfo(full,faces).usable:false;faces?.dispose();
+        if(layer&&usable&&material instanceof THREE.MeshStandardMaterial){layer.owner=mesh;targets.push({mesh,full,index,material});baked=true;}else needsOverlay=true;
+      }
+      if(needsOverlay||!baked)overlay.push(mesh);
+    }
+    if(!targets.length)return overlay;
+    const loaded:{stroke:PaintStroke;texture:THREE.Texture}[]=[];
+    const release=()=>{for(const {texture} of loaded)texture.dispose();};
+    for(const stroke of strokes){
+      const source=await resourceTextureSource(assets,stroke.brush);if(!source)continue;
+      const texture=await this.vehicleTextures.acquire(assets,source,()=>this.textureFromPaintBrush(assets,source));
+      loaded.push({stroke,texture});
+      if(part.world.disposed||!current()){release();return undefined;}
+      texture.colorSpace=THREE.SRGBColorSpace;
+    }
+    try{
+      const frame=part.matrix(),normalMatrix=new THREE.Matrix3().getNormalMatrix(frame);
+      for(const {mesh,full,index,material} of targets){
+        const proxy=Object.assign(Object.create(mesh),{geometry:full}) as THREE.Mesh,decals:PaintDecal[]=[];
+        const detail=material.userData.detailTexture as THREE.Texture|undefined,diffuse=material.map;
+        const coverageAttribute=detail&&full.hasAttribute('slrrDetailUv')?'slrrDetailUv':material.userData.slrrPaintMask&&diffuse?'uv':undefined;
+        const mask=coverageAttribute==='slrrDetailUv'?detail:coverageAttribute?diffuse:undefined;
+        if(coverageAttribute==='uv')diffuse?.updateMatrix();
+        for(const {stroke,texture} of loaded){
+          const point=new THREE.Vector3(...stroke.position).applyMatrix4(frame);
+          const normal=new THREE.Vector3(...stroke.normal).applyNormalMatrix(normalMatrix);
+          const orientation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+          if(stroke.tangent){
+            const x=new THREE.Vector3(...stroke.tangent).transformDirection(frame);
+            x.addScaledVector(normal,-x.dot(normal)).normalize();
+            const y=new THREE.Vector3().crossVectors(normal,x).normalize();
+            orientation.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,normal));
+          }
+          orientation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stroke.rotation));
+          const faces=paintSurfaceGeometry(proxy,normal,index);if(!faces)continue;
+          decals.push({faces,world:mesh.matrixWorld.clone(),inverse:new THREE.Matrix4().makeRotationFromQuaternion(orientation).setPosition(point).invert(),
+            size:new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5),normal,texture,color:new THREE.Color(stroke.color&0xffffff),
+            opacity:(stroke.color>>>24)/255,flip:!!stroke.flip,
+            coverage:mask&&coverageAttribute?{attribute:coverageAttribute,mask,matrix:coverageAttribute==='uv'?diffuse?.matrix:undefined}:undefined});
+        }
+        const info=paintUvInfo(full);
+        bakePaintLayer(this.renderer,paintLayerOf(material)!,paintLayerSize(full,mesh.matrixWorld,Math.max(info.coverage,.05)),decals);
+        for(const decal of decals)decal.faces.dispose();
+      }
+    }finally{release();}
+    return overlay;
+  }
   private async updatePartPaintStrokes(part:EnginePart,assets:Assets,group:THREE.Group){
     const strokes=part.paintStrokes;
     if(group.userData.paintStrokes===strokes)return;
@@ -1795,8 +1857,13 @@ export class Viewer {
     for (const child of group.children) child.traverseVisible(object=>{
       if(object instanceof THREE.Mesh&&!object.userData.paintStroke&&hasPaintSurface(object))meshes.push(object);
     });
+    // Surfaces with a clean UV layout get the decals baked into their paint; the rest keep projected overlays.
+    // Called through the prototype: lightweight hosts (tests, previews) reuse this method without defining it.
+    const overlayMeshes=await Viewer.prototype.bakePartPaintLayers.call(this,part,assets,meshes,strokes??[],()=>group.userData.paintStrokeRequest===request);
+    if(overlayMeshes===undefined)return;
+    meshes.length=0;meshes.push(...overlayMeshes);
     for(const stroke of strokes??[]){
-      if(existing.has(stroke))continue;
+      if(existing.has(stroke)||!meshes.length)continue;
       const addition=new THREE.Group();
       try{
         const source=await resourceTextureSource(assets,stroke.brush);
@@ -3023,7 +3090,7 @@ export class Viewer {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); disposePaintLayer(material); material.dispose(); });
     });
     group.clear();
   }
@@ -3069,7 +3136,8 @@ export class Viewer {
       const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
       const file = boundTextures[diffuseIndex];
       if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
-        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
+        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24;
+          if (material instanceof THREE.MeshStandardMaterial) configurePaintLayer(material, geometry); }
       if(paint?.color!==undefined&&material.userData.paintDefault){
         material.map=solidPartPaint(paint.color);material.color.set(0xffffff);material.needsUpdate=true;
       }else if (file) {
