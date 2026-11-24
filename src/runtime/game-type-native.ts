@@ -92,6 +92,7 @@ export class GameTypeNative {
   private trafficInfoReader?: (receiver:JavaValue,query:number)=>JavaValue|undefined;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
   private readonly resourceDestroyListeners = new Set<(receiver: JavaValue) => void>();
+  private readonly commandHooks = new Map<string, (receiver: JavaValue, command: string) => void>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
@@ -568,6 +569,7 @@ export class GameTypeNative {
           const commandName=args[2].value.trim().split(/\s+/, 1)[0];
           commands.delete(commandName);commands.set(commandName,args[2].value);
           this.lastCommands.set(node, commands);
+          this.commandHooks.get(commandName)?.(receiver, args[2].value);
           if (node instanceof GameObject) {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
             if (verb === 'corpse' || verb === 'renderinstance') {
@@ -751,6 +753,8 @@ export class GameTypeNative {
   setTrafficInfoReader(reader:(receiver:JavaValue,query:number)=>JavaValue|undefined):void {this.trafficInfoReader=reader;}
   setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
   addResourceDestroyListener(listener: (receiver: JavaValue) => void): void { this.resourceDestroyListeners.add(listener); }
+  /** Native AI brains act on some EVENT_COMMAND verbs (e.g. AI_GoToTraffic). */
+  onCommand(verb: string, hook: (receiver: JavaValue, command: string) => void): void { this.commandHooks.set(verb, hook); }
   setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
   setRemovalReader(reader: (receiver: JavaValue) => number): void { this.removalReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {
@@ -925,6 +929,7 @@ export class GameTypeNative {
     this.savedResourceIds.clear();
     this.savedResourcePackSlots.clear();
     this.resourceDestroyListeners.clear();
+    this.commandHooks.clear();
   }
 
   private cancelTimers(object: JavaObject): void {

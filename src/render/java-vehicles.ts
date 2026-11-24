@@ -11,7 +11,7 @@ import type { BootResult } from '../runtime/game-boot';
 import { GameObject } from '../runtime/game-object';
 import { RenderObject } from '../runtime/render-object';
 import {raceCommand} from '../engine/race-driver';
-import { javaStockSelection, javaVehicleChassis } from '../runtime/java-scene';
+import { isUnscriptedJavaChassis, javaStockSelection, javaVehicleChassis } from '../runtime/java-scene';
 import type { Viewer } from './viewer';
 
 type BuiltVehicle = Awaited<ReturnType<PartFactory['stock']>>;
@@ -162,6 +162,8 @@ export class JavaSceneVehicles {
     const epoch=this.epoch;
     try {
       const signature = this.signature(ref);
+      // An unscripted dummycar keeps its CFG stock parts; an empty Java tree would strip them.
+      if (isUnscriptedJavaChassis(this.result, javaVehicleChassis(this.result, ref))) { this.assemblies.set(built, signature); return; }
       const selection = await javaStockSelection(this.result, this.assets, built.root.definition.key.pack, ref);
       if (this.disposed || epoch!==this.epoch || !this.wanted.has(node) || built.world.disposed) return;
       await this.factory.syncJavaAssembly(built.root, selection);
@@ -301,16 +303,26 @@ export class JavaSceneVehicles {
       const pack = normalizeResourcePackPath(identity?.pack ?? native.resourcePack ?? '');
       if (!pack) throw new Error('Java chassis has no resource pack');
       const key = { pack, id: identity?.id ?? native.typeId };
-      const selection = await javaStockSelection(this.result, this.assets, pack, ref);
+      // A traffic dummycar has no Java parts to project: build its CFG stock
+      // car, as the traffic stream does, instead of an empty assembly (a bare shell).
+      const stockOnly = isUnscriptedJavaChassis(this.result, chassis);
+      const selection = stockOnly ? undefined : await javaStockSelection(this.result, this.assets, pack, ref);
       const signature = this.signature(ref);
       built = await this.factory.stock(key, { mechanical: true, javaSelection: selection });
+      if (stockOnly) {
+        const command = this.result.gameTypes.lastCommand(chassis, 'texture');
+        const textureId = command ? Number(command.trim().split(/\s+/)[1]) : NaN;
+        const paint = Number.isSafeInteger(textureId) && textureId > 0 ? this.result.resolveResourceIdentity(textureId) : undefined;
+        if (paint) for (const part of built.world.parts.values())
+          if (part.definition.config.texture !== undefined && !part.paintTexture) part.paintTexture = paint;
+      }
       this.assemblies.set(built, signature);
       if (!current()) { built.world.dispose(); return; }
       this.sync(node, built, ref);
       await this.viewer.showWorld(built.world, this.assets, true, true);
       if (!current()) { this.release(built); return; }
       const brain=this.brains.get(node);
-      if(brain||selection.nativeOnly){
+      if(brain||selection?.nativeOnly){
         const brainNode=brain?this.result.gameTypes.getResource(brain):undefined;
         this.boundBrains.set(built,brainNode);
         const renderCommand=brain&&this.result.gameTypes.lastCommand(brain,'renderinstance');
@@ -318,13 +330,13 @@ export class JavaSceneVehicles {
         const driver=driverId?this.result.gameTypes.getByResourceId(driverId):undefined;
         // fake_racers have no skeletal driver. Keep Java's render reference
         // unbound (the viewer suppresses it), and bind only the car's AI/physics.
-        if(!selection.nativeOnly&&driver instanceof RenderObject)await this.viewer.bindJavaDriver?.(driver,built.root,this.assets);
+        if(!selection?.nativeOnly&&driver instanceof RenderObject)await this.viewer.bindJavaDriver?.(driver,built.root,this.assets);
         if(!current()){this.release(built);return;}
         const chassis=this.result.gameTypes.get(javaVehicleChassis(this.result,ref));
         let publishedRevision=-1;
         const racer=await this.viewer.bindJavaRaceCar?.(built.root,{
           parked:!brain,
-          randomize:!!selection.nativeOnly,
+          randomize:!!selection?.nativeOnly,
           target:id=>{
             const target=this.result.gameTypes.getByResourceId(id);
             return target instanceof GameObject && !target.destroyed

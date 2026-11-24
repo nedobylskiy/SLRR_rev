@@ -102,3 +102,42 @@ test('traffic selection uses Java density proportions, supports five hundred slo
  assert.equal(pickTrafficModel([],()=>0),undefined);assert.equal(pickTrafficModel([{...models[0],weight:0}]),undefined);
  assert.equal(pickTrafficModel(models,()=>1)?.pack,'bus.rpk');
 });
+
+test('BOTBRAIN AI_GoToTraffic returns the race rival to traffic and reports ai_info_entertraffic to its Bot',async()=>{
+ // After City.cleanupRace the rival's dummycar is driven by a fresh BOTBRAIN and Bot.reJoinTraffic
+ // queues AI_GoToTraffic; the original Bot.handleEvent then releases its brain and car.
+ const sources:Record<string,string>={
+  'java.game.GameLogic':'package java.game; class GameLogic { static Object[] speedymen; }',
+  'java.game.Bot':`package java.game; class Bot { java.util.resource.GameRef dummycar; int traffic_id; String last; int calls;
+    void handleEvent(Object source,int event,String text){calls++;last=text;} }`,
+ };
+ const jvm=new SlrrJvm({resolveImport:({className})=>sources[className]?{path:`${className}.java`,source:sources[className]}:null});
+ for(const name of Object.keys(sources))await jvm.loadClass(name);
+ await jvm.globalAsync('java.game.GameLogic');
+ const types=new GameTypeNative(jvm,()=>{});
+ const object=(name:string)=>jv(name,{className:name,fields:new Map()});
+ const map=object('GameRef'),brain=object('GameRef'),listener=object('GameRef'),dummycar=object('GameRef');
+ for(const ref of [map,brain,listener])jvm.natives.invoke('java.lang.GameType','createNativeInstance',ref,[]);
+ jvm.natives.invoke('java.lang.GameType','createNativeInstance',dummycar,[jv('GameRef',map.value),jv('int',0x700006),jv('String',null),jv('String','dummycar')]);
+ types.getResource(dummycar)!.resourcePack='cars/racers/einvagen.rpk';
+ const bot=await jvm.constructAsync('java.game.Bot',[]);jvm.set(bot,'dummycar',dummycar);
+ jvm.natives.invoke('java.lang.GameType','createNativeInstance',bot,[]);
+ jvm.natives.invoke('java.lang.GameType','setEventMask',bot,[jv('int',16)]);
+ jvm.set(jv('class','java.game.GameLogic'),'speedymen',jv('Object[]',[bot.value]));
+ const traffic=new TrafficNative(jvm,ref=>types.getResource(ref),ref=>{const node=types.getResource(ref);return node?.resourcePack?{pack:node.resourcePack,id:node.typeId&0xffff}:undefined;},types);
+ const command=(text:string)=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',text)]);
+ try{
+  traffic.bridge(map,listener,async()=>undefined);
+  await command(`controllable ${types.getResource(dummycar)!.resourceId}`);
+  assert.equal(traffic.ownsCar(dummycar),false,'the race detached the rival from traffic');
+  await command('AI_GoToTraffic');
+  assert.equal(traffic.ownsCar(dummycar),true,'the car re-enters the traffic stream');
+  const model=traffic.models(map)!.find(model=>model.registrationId!==undefined)!;
+  assert.equal(types.getResource(traffic.registeredCar(model.registrationId!)!),types.getResource(dummycar));
+  types.dispatchQueuedEvents();
+  assert.equal(jvm.get(bot,'calls').value,1);
+  assert.equal(jvm.get(bot,'last').value,`ai_info_entertraffic ${model.registrationId}`);
+  await command('AI_GoToTraffic');types.dispatchQueuedEvents();
+  assert.equal(traffic.models(map)!.filter(model=>model.registrationId!==undefined).length,1,'a repeated request keeps one registration');
+ }finally{traffic.dispose();types.dispose();}
+});

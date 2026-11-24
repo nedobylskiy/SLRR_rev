@@ -49,6 +49,24 @@ export class PartNative {
     this.paintListener?.(node.resourceId,this.paintColors.get(object),this.strokes.get(object));
     this.changed(ref);
   }
+  /** The GameLogic.speedymen descriptor (botVd/nightVd) a bare native car was built from. */
+  private nativeCarDescriptor(receiver: JavaValue): JavaValue | undefined {
+    const node = this.gameTypes.getResource(receiver);
+    if (!node) return;
+    let men: JavaValue;
+    try { men = this.jvm.get(jv('class', 'java.game.GameLogic'), 'speedymen'); } catch { return; }
+    const field = (object: JavaObject | null | undefined, name: string) => object?.fields?.get(name);
+    const same = (ref: JavaValue | undefined) => ref?.value != null && this.gameTypes.getResource(ref) === node;
+    const typeId = this.gameTypes.get(receiver)?.typeId ?? node.typeId;
+    for (const item of Array.isArray(men.value) ? men.value as unknown[] : []) {
+      const bot = (item && typeof item === 'object' && 'value' in item ? (item as JavaValue).value : item) as JavaObject | null;
+      const car = field(bot, 'car')?.value as JavaObject | null | undefined;
+      if (!same(field(bot, 'dummycar')) && !same(field(car, 'chassis')) ) continue;
+      // Valocity builds dummycars from botVd; night races build cars from nightVd.
+      const candidates = ['botVd', 'nightVd'].map(name => field(bot, name)).filter((vd): vd is JavaValue => vd?.value != null);
+      return candidates.find(vd => Number(field(vd.value as JavaObject, 'id')?.value) === typeId) ?? candidates[0];
+    }
+  }
   private readonly previewParts=new Set<JavaValue>();
   private paintTargets?:(hit:{id:number;local:number[];world:number[];normal?:number[]},size:number)=>readonly PaintTarget[];
   setPaintTargetsReader(reader:PartNative['paintTargets']){this.paintTargets=reader;}
@@ -225,6 +243,14 @@ export class PartNative {
         return jv('float',value);
       });
     }
+    // Vehicle.getPrestige calls chassis.currentPrestige(). Part implements it in
+    // Java from its installed parts, but a rival's create_native dummycar (or a
+    // night-race fake car) is a bare GameRef without a Part tree. Its parts come
+    // from the Bot's VehicleDescriptor, so use that descriptor's own estimate.
+    jvm.natives.registerAsync('java.util.resource.GameRef', 'currentPrestige', [], async ({ receiver }) => {
+      const descriptor = this.nativeCarDescriptor(receiver);
+      return descriptor ? jv('float', Number((await jvm.invokeAsync(descriptor, 'estimatePrestige')).value) || 0) : jv('float', 0);
+    });
     jvm.natives.register(owner, 'setMaxWear', ['float'], ({ receiver, args }) => {
       const limit = Number(args[0].value);
       if (!Number.isFinite(limit) || limit < 0) throw new Error('Invalid part maximum wear');

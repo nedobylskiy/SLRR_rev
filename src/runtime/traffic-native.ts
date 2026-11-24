@@ -28,14 +28,11 @@ export class TrafficNative {
     jvm.natives.register('java.util.resource.GroundRef','delTraffic',[],({receiver})=>{const ground=this.ground(receiver);if(ground){for(const entry of [...this.registrations.values()])if(entry.ground===ground)this.remove(entry,true);this.catalogs.set(ground,[]);}return jv('void',undefined);});
     if(this.gameTypes){
       jvm.natives.register('java.util.resource.GroundRef','addTrafficCar',['GameRef','Vector3'],({receiver,args})=>{
-        const ground=this.ground(receiver),node=this.gameTypes!.get(args[0]),identity=this.resolve(args[0]);
-        if(!ground||!node||!identity)return jv('int',0);
-        const existing=[...this.registrations.values()].find(r=>r.valid&&r.ground===ground&&this.gameTypes!.getResource(r.car)===node);if(existing)return jv('int',existing.id);
-        if(args[1].value!=null){const coords=['x','y','z'].map(axis=>Number(this.jvm.get(args[1],axis).value));if(coords.every(Number.isFinite))Object.assign(node.position,{x:coords[0],y:coords[1],z:coords[2]});}
-        const id=this.nextId++,model:TrafficModel={pack:normalizeResourcePackPath(identity.pack),id:identity.id&0xffff,weight:1,registrationId:id,javaTypeId:node.typeId};
-        const record:Registration={id,ground,map:receiver,car:this.gameTypes!.reference(node),model,individual:true,visible:false,notify:false,valid:true,unplaced:args[1].value==null};this.registrations.set(id,record);this.byCar.set(node,record);
-        this.catalogs.set(ground,[...(this.catalogs.get(ground)??[]),model]);return jv('int',id);
+        let position:{x:number;y:number;z:number}|undefined;
+        if(args[1].value!=null){const coords=['x','y','z'].map(axis=>Number(this.jvm.get(args[1],axis).value));if(coords.every(Number.isFinite))position={x:coords[0],y:coords[1],z:coords[2]};}
+        return jv('int',this.register(receiver,args[0],args[1].value!=null,position)?.id??0);
       });
+      this.gameTypes.onCommand('AI_GoToTraffic',brain=>this.goToTraffic(brain));
       jvm.natives.register('java.util.resource.GroundRef','notifyTrafficCar',['int','int'],({receiver,args})=>{
         const entry=this.registrations.get(Number(args[0].value));if(!entry||entry.ground!==this.ground(receiver))return jv('int',0);
         const enabled=!!args[1].value;if(entry.visible&&entry.notify!==enabled)this.event(entry,enabled?'car_add':'car_rem');entry.notify=enabled;return jv('int',1);
@@ -53,6 +50,42 @@ export class TrafficNative {
         if(query===7)return jv('int',5);
       });
       this.gameTypes.addResourceDestroyListener(receiver=>{const node=this.gameTypes!.getResource(receiver);for(const r of [...this.registrations.values()])if(this.gameTypes!.getResource(r.car)===node||r.ground===node)this.remove(r,true);});
+    }
+  }
+  private register(map:JavaValue,car:JavaValue,placed:boolean,position?:{x:number;y:number;z:number},notify=false):Registration|undefined{
+    const ground=this.ground(map),node=this.gameTypes!.get(car),identity=this.resolve(car);
+    if(!ground||!node||!identity)return;
+    const existing=[...this.registrations.values()].find(r=>r.valid&&r.ground===ground&&this.gameTypes!.getResource(r.car)===node);if(existing)return existing;
+    if(position)Object.assign(node.position,position);
+    const id=this.nextId++,model:TrafficModel={pack:normalizeResourcePackPath(identity.pack),id:identity.id&0xffff,weight:1,registrationId:id,javaTypeId:node.typeId};
+    const record:Registration={id,ground,map,car:this.gameTypes!.reference(node),model,individual:true,visible:false,notify,valid:true,unplaced:!placed};this.registrations.set(id,record);this.byCar.set(node,record);
+    this.catalogs.set(ground,[...(this.catalogs.get(ground)??[]),model]);return record;
+  }
+  /** BOTBRAIN "AI_GoToTraffic" (Bot.reJoinTraffic, after City.cleanupRace or a
+   * police scout's chase). The original brain drives its controllable car back
+   * into the flow and reports "ai_info_entertraffic <traffic id>" on that car;
+   * Bot.handleEvent then drops the brain and releases the car to traffic. Here
+   * the car re-enters the stream where it stands (the flow resumes from its pose). */
+  private goToTraffic(brain:JavaValue){
+    const types=this.gameTypes!,command=types.lastCommand(brain,'controllable');
+    const id=command?Number(command.trim().split(/\s+/)[1]):NaN;
+    const node=Number.isSafeInteger(id)&&id>0?types.getByResourceId(id):undefined;
+    if(!node?.parent||node.destroyed)return;
+    const car=types.reference(node),map=types.reference(node.parent);
+    // Valocity registers rivals with notifyTrafficCar(id,1); keep City's markers working.
+    const record=this.register(map,car,true,undefined,true);if(!record)return;
+    record.notify=true;
+    const bot=this.rivalBot(node);
+    // City drops the rival's notification on car_rem when the race detaches it.
+    if(bot)this.jvm.natives.invoke('java.lang.GameType','addNotification',bot,[car,jv('int',16),jv('int',0),jv('String',null)]);
+    types.queueStringEvent(car,jv('GameRef',null),16,jv('String',`ai_info_entertraffic ${record.id}`));
+  }
+  private rivalBot(node:object):JavaValue|undefined{
+    let men:JavaValue;try{men=this.jvm.get(jv('class','java.game.GameLogic'),'speedymen');}catch{return;}
+    for(const item of Array.isArray(men.value)?men.value as unknown[]:[]){
+      const bot=(item&&typeof item==='object'&&'value' in item?(item as JavaValue).value:item) as {className:string;fields:Map<string,JavaValue>}|null;
+      const dummycar=bot?.fields?.get('dummycar');
+      if(dummycar?.value!=null&&this.gameTypes!.getResource(dummycar)===node)return jv(bot!.className,bot);
     }
   }
   private event(entry:Registration,command:'car_add'|'car_rem'){

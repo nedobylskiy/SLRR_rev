@@ -273,3 +273,55 @@ test('OSD drops call Java Button overloads only on enabled visible drop targets'
     assert.equal(jvm.get(osd,'gadgetDrops').value,1);
   } finally { bridge.dispose(); resources.dispose(); }
 });
+
+test('mouse focus on a disabled button keeps its label tinted Osd.COLOR_DISABLED', async () => {
+  // Mirrors the original Gadget: focus/unfocus recolour the label even when disabled.
+  const source = `package java.render;
+    class Text { int color; void changeColor(int c) { color = c; } }
+    class Label { Text txt; }
+    class Gadget { int disabled; Label label;
+      void focus() { label.txt.changeColor(-1); }
+      void unfocus() { label.txt.changeColor(-4144960); }
+      void disable() { disabled = 1; label.txt.changeColor(1891680448); }
+    }
+    class Button extends Gadget { int clicks; void click() { clicks++; } }
+    class Group {}
+    class Osd { Gadget pointedGadget;
+      void activateText(Group group, Gadget gadget) { pointedGadget = gadget; gadget.focus(); }
+      void deactivateText() { pointedGadget.unfocus(); pointedGadget = null; }
+    }
+    class Vector { Object[] elementData; int elementCount;
+      int size() { return elementCount; }
+      Object elementAt(int index) { return elementData[index]; }
+    }`;
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className.startsWith('java.render.')
+    ? { path: 'Button.java', source } : null });
+  for (const name of ['Text', 'Label', 'Button', 'Vector', 'Osd']) await jvm.loadClass(`java.render.${name}`);
+  const resources = new GameTypeNative(jvm, () => {}), physics = new PhysicsRefNative(jvm, resources);
+  const bridge = new OsdButtonNative(jvm); bridge.setWorldPhysics(physics);
+  const osd = object('java.render.Osd', { cam: object('java.render.Camera'), pointedGadget: jv('Gadget', null) });
+  const text = object('java.render.Text', { color: jv('int', -4144960) });
+  const phy = object('java.util.resource.PhysicsRef');
+  const button = object('java.render.Button', { phy, disabled: jv('int', 0), clicks: jv('int', 0),
+    label: object('java.render.Label', { txt: text }) });
+  const group = object('java.render.Group', { osd, active: jv('int', 1),
+    gadget: object('java.render.Vector', { elementData: jv('Object[]', [button]), elementCount: jv('int', 1) }) });
+  jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', group, []);
+  jvm.natives.invoke('java.util.resource.PhysicsRef', 'createBox', phy,
+    [jv('ResourceRef', group.value), jv('float', 1), jv('float', 1), jv('float', .001), jv('String', 'x')]);
+  const color = () => Number(jvm.get(text, 'color').value) >>> 0;
+  try {
+    await bridge.hover(phy);
+    assert.equal(color(), 0xffffffff, 'an enabled button still highlights on hover');
+    await bridge.leave(phy);
+    assert.equal(color(), 0xffc0c0c0);
+    // NrOpponentDialog disables opponents whose stake exceeds the player's money.
+    await jvm.invokeAsync(button, 'disable');
+    await bridge.hover(phy);
+    assert.equal(color(), 0x70c0c0c0, 'hovering must not make a disabled opponent look selectable');
+    await bridge.activate(phy);
+    assert.equal(jvm.get(button, 'clicks').value, 0, 'disabled buttons still ignore clicks');
+    await bridge.leave(phy);
+    assert.equal(color(), 0x70c0c0c0, 'leaving must not reset the label to the enabled grey');
+  } finally { bridge.dispose(); resources.dispose(); }
+});
