@@ -17,6 +17,10 @@ export class SystemNative {
   /** Pending host assets extend the original Java LoadingScreen wait. */
   setLoadingReader(reader:(()=>boolean)|undefined):void {this.loadingReader=reader;}
   private distanceMeasure = 1000;
+  private exitRequested = false;
+  private exitHandler?: () => void;
+  /** The host's response to System.exit(): close the app, or stop the game in a browser. */
+  setExitHandler(handler: (() => void) | undefined): void { this.exitHandler = handler; }
 
   constructor(jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly now: () => number = () => performance.now(),
@@ -30,6 +34,16 @@ export class SystemNative {
     const owner = 'java.lang.System';
     jvm.natives.register(owner,'exit',['String'],({args})=>{
       this.showAlert(String(args[0].value??''));
+      return jv('void',undefined);
+    });
+    // MainMenu's "Exit game" (Gates.run) fades to black and calls System.exit().
+    // Its loop keeps running afterwards, so only the first call reaches the host.
+    jvm.natives.register(owner,'exit',[],()=>{
+      if(!this.exitRequested){
+        this.exitRequested=true;
+        this.report({level:'info',message:'System.exit(): the game asked to quit'});
+        this.exitHandler?.();
+      }
       return jv('void',undefined);
     });
     jvm.natives.register(owner, 'currentTime', [], () => jv('float', Math.fround((this.now() - this.startedAt) / 1000)));

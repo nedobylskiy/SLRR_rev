@@ -140,6 +140,7 @@ async function runGameBootNow() {
     void viewer.updateJavaPaint(id,color,strokes,source).catch(reason=>appendJavaEvent({level:'error',message:`Paint overlay: ${reason instanceof Error?reason.message:String(reason)}`}));
   });
   result.parts.setPaintTargetsReader((hit,size)=>viewer?.javaPaintTargets(hit,size)??[]);
+  result.system.setExitHandler(() => { if (source === assets && run === sequence) void exitGame(); });
   viewer?.setJavaFlapReader(id => result.parts.flapOpen(id));
   activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
   const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler,(code,hit)=>result.input.cursorEvent(code,hit,true));
@@ -1740,6 +1741,28 @@ async function connect() {
     el('details').textContent = `Game catalog unavailable. Select an installed game with Open game folder. ${e}`;
     status('No catalog', true);
   }
+}
+
+/** Java System.exit() ("Exit game" in the main menu). The standalone client
+ * answers /api/app/exit by closing the application; a browser tab cannot be
+ * closed by script, so stop the game there and offer to start it again. */
+async function exitGame() {
+  try {
+    const response = await fetch('/api/app/exit', { method: 'POST' });
+    if (response.ok && response.headers.get('x-slrr-exit') === '1') return;
+  } catch { /* No host exit endpoint (dev server). */ }
+  disposeJavaScene?.(); disposeJavaScene = undefined;
+  disposeJavaInput?.(); disposeJavaInput = undefined;
+  disposeGameBoot?.(); disposeGameBoot = undefined;
+  disposeGameOsd?.(); disposeGameOsd = undefined;
+  stopDrive(); viewer?.clear(); sequence++;
+  disconnectMusic?.(); disconnectMusic = undefined; music?.dispose(); music = undefined;
+  const screen = textElement('div', '', 'game-exited');
+  const restart = textElement('button', 'Start again');
+  restart.onclick = () => location.reload();
+  screen.append(textElement('strong', 'The game has exited'), restart);
+  document.body.append(screen);
+  restart.focus();
 }
 
 function attach(source: Assets, label: string, local = false) {

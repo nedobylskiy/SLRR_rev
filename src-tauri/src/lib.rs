@@ -125,6 +125,15 @@ fn pick_game_root(_: &AppHandle, _: &str) -> Option<PathBuf> {
 fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
     let path = percent_encoding::percent_decode_str(uri.path()).decode_utf8_lossy().into_owned();
+    // Java System.exit() ("Exit game"): answer first, then quit once the reply is out.
+    if path == "/api/app/exit" {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            app.exit(0);
+        });
+        return Response::builder().status(StatusCode::OK).header("x-slrr-exit", "1").body(Vec::new()).unwrap();
+    }
     if let Some(api) = path.strip_prefix("/api/game") {
         let range = request.headers().get(header::RANGE).and_then(|v| v.to_str().ok());
         return app.state::<GameProvider>().handle(api, uri.query(), range);
