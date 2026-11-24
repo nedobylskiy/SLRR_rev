@@ -6,6 +6,7 @@ import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection, javaTrackIsCurrent } from './runtime/java-scene';
 import { javaPlacementWatcher } from './runtime/java-placement';
+import { JavaCarBrake } from './runtime/java-car-brake';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaPartPreviews } from './render/java-part-previews';
@@ -246,6 +247,7 @@ async function runGameBootNow() {
       let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
       let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
       let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
+      let finishBrake: JavaCarBrake | undefined;
       let persistPhysics: (() => void) | undefined;
       try {
         status('Loading Java track…');
@@ -301,9 +303,14 @@ async function runGameBootNow() {
             const car = result.jvm.get(player, 'car');
             const javaVehicle = result.gameTypes.get(car);
             const javaPlacement = javaPlacementWatcher(javaVehicle);
+            finishBrake = new JavaCarBrake(result.gameTypes, car);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync()); return javaControls.sample(); },
+              { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => {
+                viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync());
+                const v = javaVehicle?.velocity, input = javaControls.sample();
+                return finishBrake ? finishBrake.apply(input, v ? Math.hypot(v.x, v.y, v.z) : 0) : input;
+              },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
@@ -332,7 +339,7 @@ async function runGameBootNow() {
           }
         }
         activeTrackCleanup = () => {
-          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); gauges?.dispose();
+          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); finishBrake?.dispose(); gauges?.dispose();
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose();
         };
@@ -347,7 +354,7 @@ async function runGameBootNow() {
         if(source===assets&&run===sequence&&javaTrackIsCurrent(result,selected))trackReady=true;
       } catch (reason) {
         session?.();gauges?.dispose();
-        physicsBinding?.dispose();
+        physicsBinding?.dispose(); finishBrake?.dispose();
         if (built) viewer?.removeWorld(built.world);
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });

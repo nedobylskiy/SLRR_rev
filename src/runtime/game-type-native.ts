@@ -92,7 +92,7 @@ export class GameTypeNative {
   private trafficInfoReader?: (receiver:JavaValue,query:number)=>JavaValue|undefined;
   private readonly lastCommands = new WeakMap<ResourceObject, Map<string, string>>();
   private readonly resourceDestroyListeners = new Set<(receiver: JavaValue) => void>();
-  private readonly commandHooks = new Map<string, (receiver: JavaValue, command: string) => void>();
+  private readonly commandHooks = new Map<string, Set<(receiver: JavaValue, command: string) => void>>();
 
   constructor(private readonly jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly renderChanged?: (node: RenderObject) => void,
@@ -569,7 +569,7 @@ export class GameTypeNative {
           const commandName=args[2].value.trim().split(/\s+/, 1)[0];
           commands.delete(commandName);commands.set(commandName,args[2].value);
           this.lastCommands.set(node, commands);
-          this.commandHooks.get(commandName)?.(receiver, args[2].value);
+          for (const hook of [...this.commandHooks.get(commandName) ?? []]) hook(receiver, args[2].value);
           if (node instanceof GameObject) {
             const verb = args[2].value.trim().split(/\s+/, 1)[0];
             if (verb === 'corpse' || verb === 'renderinstance') {
@@ -754,7 +754,11 @@ export class GameTypeNative {
   setPartCategoryReader(reader: (receiver: JavaValue) => number): void { this.partCategoryReader = reader; }
   addResourceDestroyListener(listener: (receiver: JavaValue) => void): void { this.resourceDestroyListeners.add(listener); }
   /** Native AI brains act on some EVENT_COMMAND verbs (e.g. AI_GoToTraffic). */
-  onCommand(verb: string, hook: (receiver: JavaValue, command: string) => void): void { this.commandHooks.set(verb, hook); }
+  onCommand(verb: string, hook: (receiver: JavaValue, command: string) => void): () => void {
+    const hooks = this.commandHooks.get(verb) ?? new Set();
+    hooks.add(hook); this.commandHooks.set(verb, hooks);
+    return () => { hooks.delete(hook); };
+  }
   setDriveTypeReader(reader: (receiver: JavaValue) => number): void { this.driveTypeReader = reader; }
   setRemovalReader(reader: (receiver: JavaValue) => number): void { this.removalReader = reader; }
   hasCallback(receiver: JavaValue, callback: number): boolean {
