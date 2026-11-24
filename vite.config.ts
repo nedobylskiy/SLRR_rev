@@ -97,5 +97,7 @@ export default defineConfig({
     { find: /^slrr-jvm$/, replacement: path.resolve('packages/slrr-jvm/src/index.ts') },
     { find: /^slrr-jvm-compiler$/, replacement: path.resolve('src/runtime/jvm-compiler-browser.ts') },
   ] },
+  // Imported only from the LOD worker; prebundle it so the first worker start does not reload the page.
+  optimizeDeps: { include: ['meshoptimizer/simplifier'] },
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
 });

@@ -1,4 +1,5 @@
 import { BufferAttribute, Group, Matrix4, Mesh, Triangle, Vector3, type BufferGeometry, type Object3D } from 'three';
+import { fullGeometry } from './lod-library';
 
 interface SurfaceTriangle {
   position: BufferAttribute; ids: [number,number,number]; triangle: Triangle;
@@ -30,7 +31,7 @@ export class PanelPaintSkin {
     if (!overlays.length) return;
     const triangles: SurfaceTriangle[] = [];
     for (const mesh of surfaces) {
-      const position = mesh.geometry.getAttribute('position') as BufferAttribute, indices = mesh.geometry.index;
+      const full = fullGeometry(mesh), position = full.getAttribute('position') as BufferAttribute, indices = full.index;
       const matrix = relativeMatrix(mesh, group), count = indices?.count ?? position.count;
       for (let i = 0; i + 2 < count; i += 3) {
         const ids = [0,1,2].map(j => indices ? indices.getX(i+j) : i+j) as [number,number,number];

@@ -3,6 +3,7 @@ import { advancePartFlap } from '../engine/part-flap';
 import {paintTargets} from './paint-targets';
 import {hasPaintSurface,isPaintSurface,paintSurfaceGeometry} from './paint-surface';
 import {projectPaintGeometry,maskPaintProjection} from './paint-projection';
+import {bakePaintLayer,configurePaintLayer,copyPaintLayer,disposePaintLayer,paintLayerOf,paintLayerSize,paintUvInfo,type PaintDecal} from './paint-layer';
 import {isOsdRender} from '../runtime/osd-render-scope';
 import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
 import {LodPlayground} from './lod-playground';
@@ -46,6 +47,7 @@ import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
 import { partPaint, partPaintTextures, solidPartPaint, type PartPaint } from './part-paint';
 import { applyRenderColor } from './render-color';
+import { StaticMapDuplicates } from './static-map-duplicates';
 import { normalizePath, resourceTextureSource } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
@@ -82,7 +84,7 @@ import { parsePackedGround, type PackedGround } from '../formats/ground';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
-import { mapObjectPlacements, mapObjectSeed, mapRenderResource, isNightMapRenderResource, parseIcfg } from '../engine/map-objects';
+import { mapObjectPlacements, mapObjectSeed, mapRenderResource, mapRenderDaypart, isNightMapRenderResource, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
 import { stockContainerTexture } from './stock-container-texture';
 import {mapObjectCategory,type MapObjectCategory} from './map-object-category';
@@ -94,7 +96,7 @@ import {loadMapPedestrians} from '../engine/map-pedestrians';
 import {PedestrianCrowd} from './pedestrian-crowd';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
-import { Bot } from '../engine/bot';
+import { Bot, cruisePedals } from '../engine/bot';
 import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
 import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
@@ -121,8 +123,21 @@ import { skyMaterial } from './sky-material';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 import { FixedClock } from '../runtime/fixed-clock';
+import { extrapolationMatrix } from './render-extrapolation';
+import { FramePacer, type FramePacing } from './frame-pacer';
+const trafficCarry = new THREE.Matrix4();
+const trafficForward = new THREE.Vector3();
+/** Re-derive a background driver's pedals from its planned speed each tick (see cruisePedals). */
+function trackCruiseSpeed(test:{bot:Bot;vehicle:{body:{velocity:THREE.Vector3;orientation:THREE.Quaternion}}}){
+  const body=test.vehicle.body,speed=body.velocity.dot(trafficForward.set(0,0,-1).applyQuaternion(body.orientation));
+  const {throttle,brakeAxis}=cruisePedals(test.bot.desiredSpeed,speed);
+  test.bot.input={...test.bot.input,throttle,throttleMode:'directional',brake:brakeAxis>.1,brakeAxis};
+}
 import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
 import {createTrafficSignals} from './traffic-signals';
+import {LodLibrary} from './lod-library';
+import {ObjectLod} from './object-lod';
+import {lodReach} from './lod-distance';
 
 type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[];panels:RivalPanelDefinition[]};
 type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;placed?:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView|RivalPanelView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
@@ -221,11 +236,56 @@ export class Viewer {
   private inspectionManualOverride=false;
   private mapPackPath?:string;
   private collisionOnlyMapMeshes=0;
-  private excludedNightMapVariants=0;
-  private excludedNightMapInstances=0;
+  private lastNight=false;
+  private nightMapVariants=0;
+  private nightMapInstances=0;
   private geometryCutoff=false;
   private staticBatching=false;
-  private autoMapLod=false;
+  private autoMapLod=true;
+  /** Generated meshoptimizer LOD chains shared by map objects and vehicles. */
+  private readonly lodLibrary=new LodLibrary();
+  readonly vehicleLod=new ObjectLod(this.lodLibrary);
+  private readonly vehicleLodRefresh=this.lodLibrary.onChange(()=>this.vehicleLod.refresh());
+  get lodInfo(){return `Vehicle LOD: ${this.vehicleLod.enabled?'on':'off'} · ${this.vehicleLod.size} tracked · ${this.lodLibrary.info}`;}
+  setVehicleLodEnabled(enabled:boolean){this.vehicleLod.enabled=enabled;}
+  /**
+   * Compile programs for objects about to appear, against the live scene lights, without blocking: with
+   * KHR_parallel_shader_compile the driver links in the background and the promise resolves when ready.
+   */
+  private warmShaders(objects:THREE.Object3D[]):Promise<unknown> {
+    // A detached holder: traversal sees the objects without reparenting them out of the stream.
+    const holder=new THREE.Object3D();holder.children=objects;
+    // The other part of the day first, in the background; the current state last, so its programs are what
+    // the returned promise waits for (compileAsync polls each material's current program).
+    void this.compileDaypart(holder,!this.lastNight);
+    return this.compileDaypart(holder,this.lastNight);
+  }
+  /**
+   * Compile programs as they will be needed by day or night. Night swaps the sun to hard shadows and turns on
+   * the player's headlight spots; both are part of every lit program's key, so a dusk switch would otherwise
+   * recompile every material on the spot. Only the synchronous program creation sees the temporary state.
+   */
+  private compileDaypart(objects:THREE.Object3D,night:boolean):Promise<unknown> {
+    const renderer=this.renderer,shadowType=renderer.shadowMap.type,added:THREE.SpotLight[]=[],hidden:THREE.SpotLight[]=[];
+    const spots:THREE.SpotLight[]=[];this.scene.traverse(object=>{if((object as THREE.SpotLight).isSpotLight)spots.push(object as THREE.SpotLight);});
+    const visible=(light:THREE.Object3D)=>{for(let o:THREE.Object3D|null=light;o;o=o.parent)if(!o.visible)return false;return true;};
+    try{
+      if(night!==this.lastNight){
+        renderer.shadowMap.type=night?THREE.BasicShadowMap:THREE.PCFSoftShadowMap;
+        if(night){const lit=spots.filter(visible).length;for(let i=lit;i<Math.max(2,spots.length);i++){const spot=new THREE.SpotLight();spot.castShadow=false;this.scene.add(spot);added.push(spot);}}
+        else for(const spot of spots)if(spot.visible&&visible(spot)){spot.visible=false;hidden.push(spot);}
+      }
+      return renderer.compileAsync(objects,this.camera,this.scene).catch(()=>undefined);
+    }catch{return Promise.resolve();}
+    finally{
+      for(const spot of added){spot.removeFromParent();spot.dispose();}for(const spot of hidden)spot.visible=true;
+      renderer.shadowMap.type=shadowType;
+    }
+  }
+  private lodStrength=1;
+  get lodReachDistance(){return lodReach(this.mapStreamRange,this.lodStrength);}
+  /** Shared by map objects and vehicles: higher strength reaches the coarsest level closer to the camera. */
+  setLodStrength(strength:number){this.lodStrength=strength;this.mapStream?.setLodStrength(strength);this.nextStreamUpdate=-Infinity;}
   private tightMapFrustum=true;
   private globalFacadeBatching=false;
   private mapGlobalFacadeBatching=false;
@@ -338,7 +398,7 @@ export class Viewer {
     `Static environment: ${this.environmentPath??'none'}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · brake helping ${this.drivingHelping.brake.toFixed(2)} · steer helping ${this.drivingHelping.steer.toFixed(2)} · clutch helping ${this.drivingHelping.clutch.toFixed(2)} · acceleration helping ${this.drivingHelping.acceleration.toFixed(2)} · ABS ${this.drivingHelping.abs.toFixed(2)} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
-    `Map variants: daytime only · excluded night batches ${this.excludedNightMapVariants} · component instances ${this.excludedNightMapInstances}`,
+    `Map variants: day/night swap (${this.mapStream&&this.lastNight?'night':'day'}) · night batches ${this.nightMapVariants} · component instances ${this.nightMapInstances}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Map render preparation: shared materials ${this.sharedMapMaterials?'on':'off'} · early main-pass culling ${this.earlyMapCulling?'on':'off'}`,
@@ -348,6 +408,7 @@ export class Viewer {
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
     `Auxiliary map caster instances (excluded from main color): ${this.mapStream?.auxiliaryVisible??0}`,
+    this.lodInfo,
     ...(this.mapStream?[this.mapStream.chunkInfo,this.mapStream.optimizationInfo,this.mapStream.treeInfo,this.mapStream.cachedCellInfo,this.mapStream.globalFacadeInfo]:[]),
     ...this.rayOcclusion.lines(),...this.gpuOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
@@ -370,6 +431,9 @@ export class Viewer {
   private javaRenderRoot = new THREE.Group();
   private javaRenderNodes = new Map<number, THREE.Group>();
   private javaRenderModels = new Map<number, THREE.Group>();
+  /** SCX path of script models drawn unmodified (no texture swaps or colour), for static-map duplicate checks. */
+  private javaRenderPaths = new Map<number, string>();
+  private readonly staticDuplicates = new StaticMapDuplicates();
   private javaSkyDomeNodes = new Map<number, { group: THREE.Group; offset: THREE.Vector3 }>();
   private javaRenderTypes = new Map<number, string>();
   private javaRenderRequests = new Map<number, number>();
@@ -379,8 +443,27 @@ export class Viewer {
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
   private readonly vehiclePhysics=new VehiclePhysicsClient();
+  private readonly registerTrafficTickContacts=this.vehiclePhysics.setTickContacts(()=>this.trafficPeerContacts());
+  /**
+   * Player against road traffic on every 120 Hz player physics tick. In the 60 Hz traffic loop the player had
+   * already moved a whole rendered frame (≈1.9 m at 200 km/h and 30 fps), so a check per frame could skip a
+   * 1.8 m wide car or find it so deep that the push-out sent the player through. Distant LOD cars are tested
+   * too: an overlap makes them physical, so a car outside the physics radius still stops a fast player.
+   */
+  private trafficPeerContacts(){
+    const peer=this.trafficPeer;if(!peer||!this.trafficTestEnabled)return;
+    for(const test of this.trafficCars)if(test.active)this.trafficPeerContact(peer,test);
+  }
+  private trafficPeerContact(peer:Vehicle3D,test:TrafficTestCar){
+    const hit=vehiclePairContact(peer.body,test.vehicle.body);if(!hit)return;
+    if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+    const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+    peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+  }
   private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;publish():void;pause():void;dispose():void}>();
   private sceneVisibility=new SceneVisibility();
+  readonly framePacer=new FramePacer();
+  setFramePacing(mode:FramePacing){this.framePacer.setMode(mode);}
   private *visibilityObjects():Iterable<VisibilityObject>{
     const cars=[...this.javaRaces.values()].map(r=>r.car);
     if(this.trafficPeer)cars.push(this.trafficPeer);
@@ -401,6 +484,8 @@ export class Viewer {
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
   private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
+  /** Per physics world: parent of its part proxies and drivers, carrying them from the last tick to render time. */
+  private renderCarriers = new Map<EngineWorld, THREE.Group>();
   private internalView = false;
   private readonly vehicleReflections = new VehicleReflections();
   private readonly reflectionUniforms: VehicleReflectionUniforms = {
@@ -473,6 +558,9 @@ export class Viewer {
     }
   }
   private mapStreamRange = 500;
+  private mapFarCullPixels = 4;
+  /** Map objects beyond 40 m that would span fewer pixels than this are not drawn (0 = off). */
+  setMapFarCullPixels(value:number){if(!Number.isFinite(value)||value<0)return;this.mapFarCullPixels=value;this.mapStream?.setFarCullPixels(value);}
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
@@ -529,6 +617,8 @@ export class Viewer {
   async prepareJavaScene(){
     const generation=this.generation,focus=this.trafficFocus().clone();
     await this.mapStream?.prepareNear(focus);
+    // Behind the loading screen: vehicles, ground and props outside the stream warm for both parts of the day.
+    if(generation===this.generation)await Promise.all([this.compileDaypart(this.scene,!this.lastNight),this.compileDaypart(this.scene,this.lastNight)]);
     if(generation===this.generation&&this.trafficTestEnabled)await this.restartTrafficTest(true);
   }
   get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
@@ -536,7 +626,7 @@ export class Viewer {
   async setTrafficCount(count:number){
     if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error(`Traffic count must be an integer from 0 to ${MAX_TRAFFIC_CARS}`);
     this.trafficCount=count;this.trafficTestEnabled=true;
-    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;car.group.visible=false;car.voice?.setActive(false);}});
+    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;this.showTrafficCar(car,false);car.voice?.setActive(false);}});
     if(this.mapRoadSource&&(!this.trafficControl||this.trafficCars.length<count))await this.restartTrafficTest(true);
   }
   private trafficFocus(){return this.trafficPeer?.body.position??this.mapStreamFocus??this.camera.position;}
@@ -646,6 +736,10 @@ export class Viewer {
     this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
     this.rayOcclusion=new MapRaycastOcclusion(this.renderer);
     this.gpuOcclusion=new MapGpuOcclusion(this.renderer);
+    // Off by default: on Chrome/ANGLE (D3D11) getBufferSubData is a synchronous round trip to the GPU process
+    // even after both fences signal. It measured 20–45 ms whenever that process was busy presenting, once per
+    // interval, while the city route drew no faster with the verdicts applied.
+    this.gpuOcclusion.setEnabled(false);
     this.mapBackfaces.setEnabled(true);
     this.setBakedLightmapsEnabled(true);
     this.setShadowMapsEnabled(true);
@@ -673,9 +767,13 @@ export class Viewer {
     this.observer = new ResizeObserver(() => {
       const { clientWidth: w, clientHeight: h } = container;
       this.viewportSize={width:Math.max(1,w),height:Math.max(1,h)};
+      if(this.mapStream)this.mapStream.screenHeight=this.viewportSize.height;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      // Skipped refreshes do nothing at all: the display keeps the last frame and simulations see one longer step.
+      if(!this.framePacer.shouldRender(now))return;
+      const callbackStart=performance.now();
       this.profiler.captureCpuFrame=!!this.renderRecorder?.status.recording;
       this.mapStream?.workProfile.setEnabled(this.profiler.captureCpuFrame);
       this.gpuOcclusion.workProfile.setEnabled(this.profiler.captureCpuFrame);
@@ -727,6 +825,7 @@ export class Viewer {
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
       const night = isNightTime(timeOfDay);
+      this.lastNight=night;this.mapStream?.setNight(night);
       this.profiler.measure('Pedestrians CPU',()=>{
       if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
       if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1,!night);}
@@ -792,6 +891,9 @@ export class Viewer {
       // inspection switch bypasses it. Keep the filter active for ALL passes.
       if(!(this.inspection.enabled&&this.inspectResident))
         this.profiler.measure('Scene visibility CPU',()=>this.sceneVisibility.apply(this.camera,this.mapStream?this.mapStreamRange:Infinity,this.visibilityObjects()));
+      // Pedestrians load lazily; tracking an already tracked mount is a map lookup.
+      if(this.pedestrianCrowd)for(const mount of this.pedestrianCrowd.mounts)this.vehicleLod.track(mount,1,{skinned:true});
+      this.profiler.measure('Vehicle LOD CPU',()=>this.vehicleLod.update(this.camera.position,this.lodReachDistance));
       this.profiler.beginGpu();
       this.inspection.helpers.visible=false;
       if(this.mapRoadDebug)this.mapRoadDebug.root.visible=false;
@@ -826,6 +928,7 @@ export class Viewer {
             if(work)for(const [key,value] of Object.entries(work.drain()))workFields[prefix+key]=value;
           this.renderRecorder.recordPerformanceFrame(now,timings,document.hidden,workFields);}
         this.afterFrame?.();
+        this.framePacer.recordWork(performance.now()-callbackStart);
         const capture=this.frameCapture;if(capture){this.frameCapture=undefined;
           this.renderer.domElement.toBlob(blob=>blob?capture.resolve(blob):capture.reject(Error('Frame capture failed')),'image/png');}
       }
@@ -843,7 +946,7 @@ export class Viewer {
     this.frameCapture?.reject(Error('Scene cleared'));this.frameCapture=undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapPackPath=undefined;
-    this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
+    this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
     this.vehicleTextures = new AssetTextureSources();
@@ -860,7 +963,7 @@ export class Viewer {
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
-    this.stopDriving?.(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.stopDriving?.(); this.carryVehicleRenders(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
     this.mapAmbience?.dispose();this.mapAmbience=undefined;this.ambientAudio=undefined;
     this.mapProps?.dispose();this.mapProps=undefined;this.previousPropFrame=undefined;
     this.mapStream?.dispose(); this.mapStream = undefined;
@@ -876,7 +979,7 @@ export class Viewer {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); disposePaintLayer(material); material.dispose(); });
     });
     this.model.clear();
   }
@@ -886,7 +989,7 @@ export class Viewer {
     if (node.resourceType !== 3||isOsdRender(node)) {
       this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
-      this.javaRenderModels.delete(node.id);
+      this.javaRenderModels.delete(node.id); this.javaRenderPaths?.delete(node.id);
       this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       this.javaSkyDomeNodes.delete(node.id);
       this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
@@ -980,7 +1083,8 @@ export class Viewer {
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
     const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}|color:${node.color}` : '';
-    if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
+    if (this.javaRenderTypes.get(node.id) === key) {this.hideStaticDuplicate?.(node.id);await this.syncJavaCharacter(node,assets);return;}
+    this.javaRenderPaths?.delete(node.id); modelGroup.visible = true;
     this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
     modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
     this.javaRenderTypes.set(node.id, key);
@@ -1013,7 +1117,7 @@ export class Viewer {
           sourcePacks: overrides.resourceReplacementSourcePacks,
         } : undefined);
         const parsed = await parseScxAsync(await assets.read(model.path));
-        const template = new THREE.Group();
+        const template = new THREE.Group(); template.userData.modelPath = model.path;
         const warnings = await this.append(parsed, assets, model.textures, template, generation);
         if (isSkyDome) template.traverse(object => {
           if (!(object instanceof THREE.Mesh)) return;
@@ -1038,7 +1142,23 @@ export class Viewer {
     const instance = template.clone(true);
     applyRenderColor(instance, node.color);
     modelGroup.add(instance);
+    if (!overrides && node.color === null && !isSkyDome && template.userData.modelPath) {
+      this.javaRenderPaths?.set(node.id, template.userData.modelPath); this.hideStaticDuplicate?.(node.id);
+    }
   }
+  /** A script copy of a model the static map already draws at the same pose is not drawn (see StaticMapDuplicates). */
+  private hideStaticDuplicate(id: number) {
+    const path = this.javaRenderPaths.get(id), modelGroup = this.javaRenderModels.get(id);
+    if (!path || !modelGroup) return;
+    const root = this.staticMapRoot;
+    let duplicate = false;
+    if (root?.parent && this.staticDuplicates.size) {
+      modelGroup.updateWorldMatrix(true, false); root.updateWorldMatrix(true, false);
+      duplicate = this.staticDuplicates.covers(path, modelGroup.matrixWorld, root.matrixWorld);
+    }
+    modelGroup.visible = !duplicate;
+  }
+  private refreshStaticDuplicates() { for (const id of this.javaRenderPaths.keys()) this.hideStaticDuplicate(id); }
   private releaseJavaDriver(id:number){
     const binding=this.javaDrivers.get(id);this.javaDrivers.delete(id);binding?.driver?.dispose();
   }
@@ -1204,7 +1324,15 @@ export class Viewer {
     this.trafficSignalError=undefined;
     this.trafficModelErrors.clear();this.trafficTestStatus='Traffic test off';
   }
-  private disposeTrafficCar(test:TrafficTestCar){test.java?.remove();test.java=undefined;test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
+  /**
+   * Hidden residents leave the scene graph: three.js recomputes world matrices of invisible objects too, and a
+   * few hundred parked cars of ~50 nodes each otherwise cost more per frame than the whole visible city.
+   */
+  private showTrafficCar(test:TrafficTestCar,shown:boolean){
+    test.group.visible=shown;
+    if(!shown)test.group.removeFromParent();else if(!test.group.parent)this.scene.add(test.group);
+  }
+  private disposeTrafficCar(test:TrafficTestCar){this.vehicleLod.untrack(test.group);test.java?.remove();test.java=undefined;test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
   async setTrafficPairEnabled(enabled:boolean){await this.setTrafficCount(enabled?2:1);}
   private trafficTemplate(assets:Assets,key:TrafficModel=DEFAULT_TRAFFIC_MODELS[0]):Promise<TrafficTemplate>{
     let cache=this.trafficTemplates.get(assets);if(!cache){cache=new Map();this.trafficTemplates.set(assets,cache);}
@@ -1251,6 +1379,8 @@ export class Viewer {
           }
         }
         const lamps=await trafficLampDefinitions(built.world,assets);
+        // Cars stay hidden until they wake; compile their programs meanwhile instead of on the first visible frame.
+        void this.warmShaders([group]);
         const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps,panels};group=undefined;return result;
       }finally{built.world.dispose();if(group)this.disposeGroup(group);}
     })();
@@ -1298,7 +1428,8 @@ export class Viewer {
         const route=new RoadTrafficCar(roads.network,this.trafficFocus());
         const lamps=await createTrafficLamps(template.lamps,source.assets);
         if(!current()){lamps.dispose();return;}
-        const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
+        // Track before lamps join the car: lamp glows are not surfaces to simplify.
+        const group=template.group.clone(true);this.vehicleLod.track(group);group.matrixAutoUpdate=false;group.add(lamps.group);
         const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
         vehicle.place(route.position,route.direction,template.height);
         const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
@@ -1311,7 +1442,6 @@ export class Viewer {
       this.trafficCars.push(...staged);
       this.trafficControl=control;
       const cars=staged.splice(0);for(const test of cars){
-        this.scene.add(test.group);
         const occupied=this.trafficCars.filter(car=>car.placed).map(car=>this.trafficOccupant(car.vehicle.body));
         const bounds=test.vehicle.body.bounds,bodyRadius=Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5;
         const spawn=test.model.registrationId?this.registeredTrafficSpawn(test.model):worldTrafficSpawn(this.trafficSpawns!,occupied,bodyRadius,this.trafficFocus());
@@ -1341,7 +1471,7 @@ export class Viewer {
     test.bot=initializeTrafficMotion(route,test.lod,this.trafficControl,peers);
     test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
     test.java?.remove();test.java=undefined;test.placed=true;
-    test.active=false;test.group.visible=false;
+    test.active=false;this.showTrafficCar(test,false);
   }
   private wakeTrafficResident(test:TrafficTestCar){
     if(this.javaTrafficBridge){
@@ -1377,11 +1507,11 @@ export class Viewer {
       }
       const wanted=i<this.trafficCount&&test.placed&&available&&trafficResidentActive(test.vehicle.body.position,center,activation,test.active)&&!this.trafficControl.roadHalted(test.car.roadId);
       if(!wanted||test.java&&!test.java.active()){
-        test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;
+        test.java?.remove();test.java=undefined;test.active=false;this.showTrafficCar(test,false);
       }else{
         if(!test.active)this.wakeTrafficResident(test);
         const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
-        test.group.visible=test.active&&distance<=this.mapStreamRange;
+        this.showTrafficCar(test,test.active&&distance<=this.mapStreamRange);
       }
       test.voice?.setActive(test.active&&test.group.visible);
     }
@@ -1403,20 +1533,14 @@ export class Viewer {
     if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
       this.trafficControl?.advance(this.trafficClock.dt);
       for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);
-        if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
+        if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};else if(test.bot.mode==='cruise'||test.bot.mode==='recover')trackCruiseSpeed(test);test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
       }
       for(const [i,test] of cars.entries()){
         for(const {car:racer} of this.javaRaces.values()){
           raceTrafficContact(racer,{body:test.vehicle.body,hit:(impulse,point,closing)=>test.bot.hit(impulse,point,closing)});
         }
-        if(peer&&test.lod.physical){
-          const hit=vehiclePairContact(peer.body,test.vehicle.body);
-          if(hit){
-            if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
-            const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
-            peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
-          }
-        }
+        // The player's own physics tick tests traffic when it can (trafficPeerContacts); this is the fallback.
+        if(peer&&test.lod.physical&&!this.vehiclePhysics.runsTickContacts)this.trafficPeerContact(peer,test);
         for(const other of cars.slice(i+1)){
           if(!test.lod.physical&&!other.lod.physical)continue;
           const a=test.vehicle.body,b=other.vehicle.body,hit=vehiclePairContact(a,b);if(!hit)continue;
@@ -1437,10 +1561,12 @@ export class Viewer {
     }
     this.trafficSignals?.update();
     let rivalPanelCpu=0;
+    // Traffic ticks at 60 Hz: draw each car where it is now, not at its last tick (see extrapolationMatrix).
+    const trafficLead=Math.min(this.trafficClock.pendingSeconds,this.trafficClock.dt);
     for(const test of cars){
       const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
       test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time),test.vehicle.wheels[0]?.steer??0,test.vehicle.body.velocity.dot(forward),now/1000);
-      test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+      test.group.matrix.multiplyMatrices(extrapolationMatrix(test.vehicle.body,trafficLead,trafficCarry),test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
       test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin*(test.wheels[i].mount.userData.spinSign??1),wheel.steer,0,'YXZ');});
       test.java?.sync({position:test.vehicle.body.position,yaw:Math.atan2(-forward.x,-forward.z),velocity:test.vehicle.body.velocity});
       if(test.damage instanceof RivalPanelView){const started=performance.now();test.damage.update(panelDt,now);rivalPanelCpu+=performance.now()-started;}else test.damage.update();
@@ -1449,7 +1575,7 @@ export class Viewer {
     this.profiler.record('Rival panels CPU',rivalPanelCpu);
   }
   private resetRoadDebug() {
-    this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
+    this.pedestrianCrowdRevision++;if(this.pedestrianCrowd)this.vehicleLod.untrackWithin(this.pedestrianCrowd.root);this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
     this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
     this.stopTrafficTest();this.javaTrafficBridge=undefined;this.javaTrafficTypes=undefined;this.javaTrafficEligible=undefined;
     this.mapTrafficFixtures=[];
@@ -1486,7 +1612,7 @@ export class Viewer {
   async showWalkingPedestrians(enabled:boolean){
     this.walkingPedestriansEnabled=enabled;
     const revision=++this.pedestrianCrowdRevision,source=this.mapRoadSource,mapRevision=this.mapRoadRevision;
-    this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
+    if(this.pedestrianCrowd)this.vehicleLod.untrackWithin(this.pedestrianCrowd.root);this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
     this.pedestrianCrowdStatus=enabled?'Loading walking pedestrians…':'Walking pedestrians off';
     if(!enabled)return;
     if(!source){this.pedestrianCrowdStatus='No map loaded';return;}
@@ -1524,6 +1650,7 @@ export class Viewer {
   dispose() {
     this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);document.removeEventListener('keydown',this.trafficAudioStart,true);document.removeEventListener('visibilitychange',this.ambienceVisibility);this.stopTrafficTest();this.trafficAudio?.dispose();
     for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
+    this.vehicleLod.dispose();this.vehicleLodRefresh();this.lodLibrary.dispose();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
@@ -1631,12 +1758,23 @@ export class Viewer {
           configureCfgLampEmission(sub, flags);
         }
         syncLinkedRenders(part, group);
+        // Decals and spray strokes are part of the paint, in thumbnails too.
+        if (part.paintStrokes?.length) {
+          group.updateWorldMatrix(true, true);
+          const surfaces: THREE.Mesh[] = [];
+          group.traverse(object => { if (object instanceof THREE.Mesh && hasPaintSurface(object)) surfaces.push(object); });
+          await Viewer.prototype.bakePartPaintLayers.call(this, part, assets, surfaces, part.paintStrokes, () => true);
+        }
       }
       root.traverse(object => {
         if (!(object instanceof THREE.Mesh)) return;
         if (!unlitPreview) { object.castShadow = object.receiveShadow = true; return; }
         const unlit = (source: THREE.MeshStandardMaterial) => {
-            const material = previewMaterial(source);
+          const material = previewMaterial(source), layer = paintLayerOf(source);
+          // Thumbnails are drawn by another renderer, which cannot sample this renderer's render target.
+          const copy = layer && copyPaintLayer(this.renderer, layer);
+          if (copy) { configurePaintLayer(material, object.geometry); const own = paintLayerOf(material)!; own.copy = copy; own.map.value = copy; }
+          disposePaintLayer(source);
           source.userData.reflectionTexture?.dispose();
           source.dispose(); return material;
         };
@@ -1673,6 +1811,67 @@ export class Viewer {
     }
     group.userData.paintKey = key;
   }
+  /**
+   * Bake a part's decals into the paint layer of every paint surface whose UVs allow it (see paint-layer.ts).
+   * Returns the meshes that still need projected overlays, or undefined when a newer request replaced this one.
+   * Placement follows the overlay path exactly: the stroke frame, face filter and non-paintable mask.
+   */
+  private async bakePartPaintLayers(part:EnginePart,assets:Assets,meshes:THREE.Mesh[],strokes:readonly PaintStroke[],current:()=>boolean):Promise<THREE.Mesh[]|undefined>{
+    const overlay:THREE.Mesh[]=[],targets:{mesh:THREE.Mesh;full:THREE.BufferGeometry;index:number;material:THREE.MeshStandardMaterial}[]=[];
+    for(const mesh of meshes){
+      const full=(mesh.geometry.userData.lodFull as THREE.BufferGeometry|undefined)??mesh.geometry;
+      const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];let baked=false,needsOverlay=false;
+      for(let index=0;index<materials.length;index++){
+        const material=materials[index];if(!isPaintSurface(material))continue;
+        const layer=paintLayerOf(material);
+        const faces=layer&&(!layer.owner||layer.owner===mesh)?paintSurfaceGeometry(Object.assign(Object.create(mesh),{geometry:full}) as THREE.Mesh,undefined,index):undefined;
+        const usable=faces?paintUvInfo(full,faces).usable:false;faces?.dispose();
+        if(layer&&usable&&material instanceof THREE.MeshStandardMaterial){layer.owner=mesh;targets.push({mesh,full,index,material});baked=true;}else needsOverlay=true;
+      }
+      if(needsOverlay||!baked)overlay.push(mesh);
+    }
+    if(!targets.length)return overlay;
+    const loaded:{stroke:PaintStroke;texture:THREE.Texture}[]=[];
+    const release=()=>{for(const {texture} of loaded)texture.dispose();};
+    for(const stroke of strokes){
+      const source=await resourceTextureSource(assets,stroke.brush);if(!source)continue;
+      const texture=await this.vehicleTextures.acquire(assets,source,()=>this.textureFromPaintBrush(assets,source));
+      loaded.push({stroke,texture});
+      if(part.world.disposed||!current()){release();return undefined;}
+      texture.colorSpace=THREE.SRGBColorSpace;
+    }
+    try{
+      const frame=part.matrix(),normalMatrix=new THREE.Matrix3().getNormalMatrix(frame);
+      for(const {mesh,full,index,material} of targets){
+        const proxy=Object.assign(Object.create(mesh),{geometry:full}) as THREE.Mesh,decals:PaintDecal[]=[];
+        const detail=material.userData.detailTexture as THREE.Texture|undefined,diffuse=material.map;
+        const coverageAttribute=detail&&full.hasAttribute('slrrDetailUv')?'slrrDetailUv':material.userData.slrrPaintMask&&diffuse?'uv':undefined;
+        const mask=coverageAttribute==='slrrDetailUv'?detail:coverageAttribute?diffuse:undefined;
+        if(coverageAttribute==='uv')diffuse?.updateMatrix();
+        for(const {stroke,texture} of loaded){
+          const point=new THREE.Vector3(...stroke.position).applyMatrix4(frame);
+          const normal=new THREE.Vector3(...stroke.normal).applyNormalMatrix(normalMatrix);
+          const orientation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+          if(stroke.tangent){
+            const x=new THREE.Vector3(...stroke.tangent).transformDirection(frame);
+            x.addScaledVector(normal,-x.dot(normal)).normalize();
+            const y=new THREE.Vector3().crossVectors(normal,x).normalize();
+            orientation.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,normal));
+          }
+          orientation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stroke.rotation));
+          const faces=paintSurfaceGeometry(proxy,normal,index);if(!faces)continue;
+          decals.push({faces,world:mesh.matrixWorld.clone(),inverse:new THREE.Matrix4().makeRotationFromQuaternion(orientation).setPosition(point).invert(),
+            size:new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5),normal,texture,color:new THREE.Color(stroke.color&0xffffff),
+            opacity:(stroke.color>>>24)/255,flip:!!stroke.flip,
+            coverage:mask&&coverageAttribute?{attribute:coverageAttribute,mask,matrix:coverageAttribute==='uv'?diffuse?.matrix:undefined}:undefined});
+        }
+        const info=paintUvInfo(full);
+        bakePaintLayer(this.renderer,paintLayerOf(material)!,paintLayerSize(full,mesh.matrixWorld,Math.max(info.coverage,.05)),decals);
+        for(const decal of decals)decal.faces.dispose();
+      }
+    }finally{release();}
+    return overlay;
+  }
   private async updatePartPaintStrokes(part:EnginePart,assets:Assets,group:THREE.Group){
     const strokes=part.paintStrokes;
     if(group.userData.paintStrokes===strokes)return;
@@ -1690,8 +1889,13 @@ export class Viewer {
     for (const child of group.children) child.traverseVisible(object=>{
       if(object instanceof THREE.Mesh&&!object.userData.paintStroke&&hasPaintSurface(object))meshes.push(object);
     });
+    // Surfaces with a clean UV layout get the decals baked into their paint; the rest keep projected overlays.
+    // Called through the prototype: lightweight hosts (tests, previews) reuse this method without defining it.
+    const overlayMeshes=await Viewer.prototype.bakePartPaintLayers.call(this,part,assets,meshes,strokes??[],()=>group.userData.paintStrokeRequest===request);
+    if(overlayMeshes===undefined)return;
+    meshes.length=0;meshes.push(...overlayMeshes);
     for(const stroke of strokes??[]){
-      if(existing.has(stroke))continue;
+      if(existing.has(stroke)||!meshes.length)continue;
       const addition=new THREE.Group();
       try{
         const source=await resourceTextureSource(assets,stroke.brush);
@@ -1847,6 +2051,7 @@ export class Viewer {
         }catch(error){warnings.push(`Suspension skin ${part.definition.alias}: ${String(error)}`);}
       }
       for (const group of staged) delete group.userData.partLoading;
+      for(const [part,group] of this.proxies)if(part.world===world)this.vehicleLod?.track(group);
       this.syncWorldVisuals(world);
     }
     if (generation === this.generation && !keepScene) this.fit();
@@ -1934,8 +2139,8 @@ export class Viewer {
       this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     }
     let loaded = 0, triangles = 0;
-    this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
-    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
+    this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
+    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();this.staticDuplicates.clear();this.refreshStaticDuplicates();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
     cacheUnchangedTransform(this.staticMapRoot,()=>this.stableTransforms);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
@@ -1943,11 +2148,13 @@ export class Viewer {
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setStaticBatching(this.staticBatching);
-    stream.setAutoLod(this.autoMapLod);
+    stream.setLodLibrary(this.lodLibrary);stream.setAutoLod(this.autoMapLod);stream.setLodStrength(this.lodStrength);
+    stream.setShaderWarmup(meshes=>this.warmShaders(meshes));
     stream.setTightFrustum(this.tightMapFrustum);
     for(const category of this.hiddenMapCategories)stream.setCategoryHidden(category,true);
     stream.setMaterialSharing(this.sharedMapMaterials);
     stream.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
+    stream.screenHeight=this.viewportSize.height;stream.setFarCullPixels(this.mapFarCullPixels);
     this.mapStream = stream;
     this.updateFarPlane();
     this.nextStreamUpdate=-Infinity;
@@ -1972,6 +2179,7 @@ export class Viewer {
         if(!compiled?.collision.meshes.length)collision.add(parsed);
         const collisionOnly=isStockMapCollisionShell(source.path,resource.path,source.pack.entries.find(entry=>entry.typeId===id)?.alias??'',parsed);
         if(collisionOnly)this.collisionOnlyMapMeshes++;
+        if(!compiled&&!collisionOnly)this.staticDuplicates.add(resource.path,room?poseMatrix(room.pose):new THREE.Matrix4());
         const bounds = new THREE.Box3();
         const vertex = new THREE.Vector3();
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
@@ -1999,10 +2207,11 @@ export class Viewer {
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
+    if (generation === this.generation) this.refreshStaticDuplicates();
     let objects = 0;
     const unifyBuildings=this.unifiedBuildingMaterials||this.globalFacadeBatching;this.mapUnifiedBuildingMaterials=unifyBuildings;
     const globalFacades=this.globalFacadeBatching;this.mapGlobalFacadeBatching=globalFacades;
-    const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; placements: StreamPlacement[] }>();
+    const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; daypart?:'day'|'night'; placements: StreamPlacement[] }>();
     for (const source of room ? [] : mapSources) try {
       const placements = source.packedGround ? source.packedGround.placements
         : mapObjectPlacements(new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb'))),source.pack);
@@ -2072,11 +2281,11 @@ export class Viewer {
               const seed = mapObjectSeed(instance), id = mapRenderResource(render, seed);
               if (!id) continue;
               const color = render.colors?.length ? render.colors[seed % render.colors.length] : undefined;
-              const category=mapObjectCategory(resource.entry.alias);
-              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}:${movable?'movable':'static'}`;
+              const category=mapObjectCategory(resource.entry.alias),daypart=mapRenderDaypart(cfg.renders,render);
+              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}:${movable?'movable':'static'}:${daypart??'always'}`;
               let batch = objectBatches.get(key);
               if (!batch) {
-                batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, placements: [] };
+                batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, daypart, placements: [] };
                 objectBatches.set(key, batch);
               }
               const matrix = propFrames.get(instance.id)?.clone()??poseMatrix(instance.pose);
@@ -2102,28 +2311,29 @@ export class Viewer {
       // Filter before SCX/textures/cached cells are loaded, including night signs.
       try{
         const {entry}=await assets.resource(batch.pack,batch.id);
-        if(isNightMapRenderResource(entry.alias)){
-          this.excludedNightMapVariants++;this.excludedNightMapInstances+=batch.placements.length;continue;
-        }
+        // A night resource without a CFG day partner still only belongs to the night.
+        if(isNightMapRenderResource(entry.alias))batch.daypart='night';
+        if(batch.daypart==='night'){this.nightMapVariants++;this.nightMapInstances+=batch.placements.length;}
       }catch(error){warnings.push(`Map render metadata ${batch.pack}:0x${batch.id.toString(16)}: ${String(error)}`);continue;}
       stream.add(batch.placements, async wanted => {
       const model = await assets.modelForResource(batch.pack, batch.id);
       if (!wanted()) return [];
       const parsed = await parseScxAsync(await assets.read(model.path)), component = new THREE.Group();
       if (!wanted()) return [];
-      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted));
+      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted, undefined, undefined, false, THREE.DoubleSide, batch.daypart==='night'));
       for (const part of component.children) if (part instanceof THREE.Mesh) {
         part.geometry.scale(0.01, 0.01, 0.01);
         part.name = `map object ${batch.alias}: ${part.name}`;
       }
       const parts=component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
-      const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
+      // Night variants keep per-part materials: the shared texture-array material has no self-illumination slot.
+      const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&batch.daypart!=='night'&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
       for(const part of outputs){
         part.userData.mapOcclusionRole=batch.movable||batch.category?'prop':'structure';
         if(batch.movable){part.userData.staticMapCaster=false;const materials=Array.isArray(part.material)?part.material:[part.material];part.castShadow=materials.some(m=>!m.transparent);}
       }
       return outputs;
-    },batch.category,unifyBuildings&&isBuildingAlias(batch.alias));
+    },batch.category,unifyBuildings&&isBuildingAlias(batch.alias),batch.daypart);
     }
     if (generation === this.generation) {
       await stream.preparePinnedModels();
@@ -2146,6 +2356,38 @@ export class Viewer {
   private partVisible(part: EnginePart): boolean {
     const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
     return part.renderVisible && (!this.internalView || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200);
+  }
+  /**
+   * Show full-physics vehicles where they are at render time, not at their last fixed tick (see
+   * extrapolationMatrix). Each world's proxies and drivers move under one carrier group, so world-space panel
+   * skins, lamps and wheels shift together; physics state is untouched. Worlds that left the shared physics
+   * clock hand their objects back to the model.
+   */
+  private carryVehicleRenders() {
+    const pending = this.vehiclePhysics.pendingSeconds, active = new Set<EngineWorld>();
+    for (const car of this.vehiclePhysics.cars()) {
+      const world = car.root.world; active.add(world);
+      let carrier = this.renderCarriers.get(world);
+      if (!carrier) {
+        carrier = new THREE.Group(); carrier.name = 'Vehicle render time'; carrier.matrixAutoUpdate = false;
+        carrier.userData.vehicleCarrier = true; this.model.add(carrier); this.renderCarriers.set(world, carrier);
+      }
+      extrapolationMatrix(car.body, Math.min(pending, car.physicsDt), carrier.matrix); carrier.matrixWorldNeedsUpdate = true;
+    }
+    for (const [world, carrier] of this.renderCarriers) if (!active.has(world)) {
+      // Culling detaches off-screen objects and re-adds them to their recorded parent; reattach them first so
+      // none return to this carrier after it leaves the scene.
+      this.sceneVisibility.restore();
+      while (carrier.children.length) this.model.add(carrier.children[0]);
+      carrier.removeFromParent(); this.renderCarriers.delete(world);
+    }
+    if (!this.renderCarriers.size) return;
+    const place = (object: THREE.Object3D, world: EngineWorld) => {
+      const parent = object.parent; if (parent !== this.model && !parent?.userData.vehicleCarrier) return;
+      const wanted = this.renderCarriers.get(world) ?? this.model; if (parent !== wanted) wanted.add(object);
+    };
+    for (const [part, group] of this.proxies) place(group, part.world);
+    for (const binding of this.javaDrivers.values()) if (binding.driver) place(binding.driver.root, binding.chassis.world);
   }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
@@ -2444,7 +2686,7 @@ export class Viewer {
     return Object.assign(stop,{reset:()=>{pair.reset();last=undefined;lastText=-Infinity;},pause:(value:boolean)=>{paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},
       wireframe:(value:boolean)=>views.forEach(({view})=>view.wireframe(value)),chassisCrumple:(value:number)=>built.forEach(({car})=>car.setChassisCrumple(value)),pair});
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; blocked?():boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; blocked?():boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void; placement?(): { position: THREE.Vector3; yaw: number } | undefined }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -2591,6 +2833,9 @@ export class Viewer {
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
+      // Java scripts reposition the player's car (e.g. City.startNightRace puts it on the start line).
+      const placement = crash instanceof Vehicle3D ? java?.placement?.() : undefined;
+      if (placement && crash instanceof Vehicle3D) { crash.placeAt(placement.position, placement.yaw); crash.settleSpawn(); }
       const javaInput=java?.sample();
       let input = this.playerTrafficDriver?.input ?? javaInput ?? keyboardDrivingInput(keys);
       if(javaInput?.transmissionLocked)input={...input,...javaInput};
@@ -2612,6 +2857,8 @@ export class Viewer {
         crash instanceof Vehicle3D && !!crash.suspension.mechanics?.running,
         timeOfDay);
       this.profiler.measure('Vehicle world sync CPU',()=>this.syncWorld(softParts));
+      this.carryVehicleRenders();
+      const carried = this.renderCarriers.get(root.world)?.matrix;
       if(chassisBounds.visible && crash instanceof Vehicle3D){
         crash.body.bounds.getCenter(chassisCenter);crash.body.bounds.getSize(chassisSize);
         chassisLocal.makeScale(chassisSize.x,chassisSize.y,chassisSize.z).setPosition(chassisCenter);
@@ -2636,6 +2883,7 @@ export class Viewer {
           followCamera.reset();
           inertialCamera.reset();
           const frame = root.matrix().multiply(poseMatrix(internalPose));
+          if (carried) frame.premultiply(carried);
           frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
           this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
           // CFG camera's optional value is a game-specific zoom parameter, not
@@ -2668,7 +2916,9 @@ export class Viewer {
             offset.add(new THREE.Vector3(0, 1.1, 0));
           }
           offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-          const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+          const target = demo.position.clone();
+          if (carried) target.applyMatrix4(carried);
+          target.y += 1.1;
           offset.y -= 1.1;
           if(mode===3)
             pathChaseCamera.update(this.camera.position,this.controls.target,target,offset,seconds,firstFrame||cameraWasInternal);
@@ -2717,7 +2967,7 @@ export class Viewer {
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
       root.world.lightMask &= ~7;
-      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); if(crash instanceof Vehicle3D)this.vehiclePhysics.forget(crash);crash?.dispose();
+      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); if(crash instanceof Vehicle3D)this.vehiclePhysics.forget(crash);this.carryVehicleRenders();crash?.dispose();
       chassisBounds.removeFromParent();chassisBounds.geometry.dispose();chassisBounds.material.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
@@ -2868,6 +3118,8 @@ export class Viewer {
     }});
   }
   private disposeGroup(group: THREE.Group): void {
+    // Generated level views share vertex buffers; restore the owned geometry before disposing it.
+    this.vehicleLod?.untrackWithin(group);
     group.traverse(object => {
       object.userData.disposeVehicleLight?.();
       if (object instanceof Lensflare) return;
@@ -2875,7 +3127,7 @@ export class Viewer {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); disposePaintLayer(material); material.dispose(); });
     });
     group.clear();
   }
@@ -2887,7 +3139,8 @@ export class Viewer {
     material.dispose();
     return sky;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide): Promise<string[]> {
+  /** `selfIllumination`: v4 self-illumination slots become emissive maps (lit windows of night variants only). */
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide, selfIllumination = false): Promise<string[]> {
     const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
@@ -2920,7 +3173,8 @@ export class Viewer {
       const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
       const file = boundTextures[diffuseIndex];
       if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
-        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
+        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24;
+          if (material instanceof THREE.MeshStandardMaterial) configurePaintLayer(material, geometry); }
       if(paint?.color!==undefined&&material.userData.paintDefault){
         material.map=solidPartPaint(paint.color);material.color.set(0xffffff);material.needsUpdate=true;
       }else if (file) {
@@ -2944,6 +3198,27 @@ export class Viewer {
           // foliage cutouts above and explicit material opacity still apply.
           else if (alphaEnabled && alpha === 'blend' && (!mapSurface || opacity < 1)) { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
+      }
+      // Daytime objects also author this slot (walls, pubs), with meanings that are not plain emission there.
+      const glowIndex = selfIllumination && model.version !== 3 ? part.selfIllumIndex : undefined;
+      const glowFile = glowIndex === undefined || glowIndex === 0xffff ? undefined : textures[glowIndex];
+      // Night signs carry no glow slot: their lit artwork is the diffuse texture itself.
+      if (selfIllumination && !glowFile && material.map && !model.meshes.some(m => m.selfIllumIndex !== undefined && m.selfIllumIndex !== 0xffff)) {
+        material.emissiveMap = material.map; material.emissive.set(0xffffff); material.needsUpdate = true;
+      }
+      if (glowFile) {
+        try {
+          const texture = await loadTexture(await read(glowFile), glowFile);
+          if (generation !== this.generation) { texture.dispose(); return warnings; }
+          const glow = part.selfIllumMap, channel = glow?.channel ?? 0;
+          if (channel !== primaryChannel) {
+            const source = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (source) { geometry.setAttribute('uv1', new THREE.BufferAttribute(source, 2)); texture.channel = 1; }
+          }
+          if (glow) { texture.repeat.set(glow.scaleU, glow.scaleV); texture.offset.set(glow.offsetU, glow.offsetV); }
+          texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+          material.emissiveMap = texture; material.emissive.set(0xffffff); material.needsUpdate = true;
+        } catch (e) { warnings.push(`Self-illumination ${glowFile}: ${e}`); }
       }
       let secondLayer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
@@ -2998,6 +3273,13 @@ export class Viewer {
       if(mapSurface&&!material.userData.bakedLightmapTexture){
         this.staticMapShadows.configure(material);
         if(secondLayer)this.staticMapShadows.configure(secondLayer.material);
+      }else if(!mapSurface&&!material.userData.bakedLightmapTexture){
+        // Vehicles receive building, tree and bridge shadows from the same cache (map objects cast no dynamic shadows).
+        // Script-placed props with a baked garage lightmap already carry their shadows. The garage script also
+        // places the room props that the room map draws, so both copies are coplanar: shading them differently
+        // turns the depth tie between them into flickering stripes.
+        if(material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(material);
+        if(secondLayer?.material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(secondLayer.material);
       }
       if (!mapSurface) {
         const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {

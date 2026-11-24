@@ -1,13 +1,8 @@
-import {BufferGeometryLoader,type BufferGeometry} from 'three';
-import {simplifyPlaygroundGeometry} from './playground-simplify';
-self.onmessage=(event:MessageEvent<{ratio:number;geometries:ReturnType<BufferGeometry['toJSON']>[]}>)=>{
+import {simplifyLod,type LodOptions,type LodSection} from './lod-simplify';
+
+self.onmessage=async(event:MessageEvent<{sections:LodSection[];options:LodOptions}>)=>{
   try{
-    const loader=new BufferGeometryLoader();let kept=0;
-    const geometries=event.data.geometries.map(json=>{
-      const source=loader.parse(json),result=simplifyPlaygroundGeometry(source,event.data.ratio);
-      if((result.index?.count??result.getAttribute('position').count)===(source.index?.count??source.getAttribute('position').count))kept++;
-      const output=result.toJSON();result.dispose();source.dispose();return output;
-    });
-    self.postMessage({geometries,kept});
+    const result=await simplifyLod(event.data.sections,event.data.options);
+    self.postMessage({result},{transfer:result.indices.map(index=>index.buffer as ArrayBuffer)});
   }catch(error){self.postMessage({error:String(error)});}
 };

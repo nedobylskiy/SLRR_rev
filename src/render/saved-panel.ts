@@ -1,3 +1,4 @@
+import {fullGeometry} from './lod-library';
 import {deformationNormals} from './deformation-normals';
 import { Matrix4, Mesh, Vector3, type Group, type BufferGeometry } from 'three';
 import type { EnginePart } from '../engine/world';
@@ -9,7 +10,7 @@ import { skinSavedPanel } from '../engine/vehicle-damage';
 export function restoreReferenceGeometry(group:Group) {
   group.userData.savedPanelApplied=false;
   for(const mesh of group.children) if(mesh instanceof Mesh){
-    const geometry=mesh.geometry as BufferGeometry, original=geometry.userData.damageReference as Float32Array|undefined;
+    const geometry=fullGeometry(mesh), original=geometry.userData.damageReference as Float32Array|undefined;
     if(original){geometry.getAttribute('position').array.set(original);geometry.getAttribute('position').needsUpdate=true;
       deformationNormals(geometry).restore();geometry.computeBoundingBox();geometry.computeBoundingSphere();}
   }
@@ -26,7 +27,7 @@ export function applySavedPanel(group:Group,part:EnginePart) {
   const frame=modelMatrix(new Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose));
   const inverse=frame.clone().invert();
   for(const mesh of group.children) if(mesh instanceof Mesh){
-    const geometry=mesh.geometry as BufferGeometry,attribute=geometry.getAttribute('position');
+    const geometry=fullGeometry(mesh),attribute=geometry.getAttribute('position');
     deformationNormals(geometry);
     if(!geometry.userData.damageReference)geometry.userData.damageReference=new Float32Array(attribute.array);
     for(let i=0;i<attribute.count;i++){

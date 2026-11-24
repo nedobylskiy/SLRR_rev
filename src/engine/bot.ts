@@ -32,6 +32,16 @@ export class FullVehicleBotAdapter implements BotVehicle {
 }
 
 /** Steering/behavior only. Changing modes never replaces a body or resets its damage/momentum. */
+/**
+ * Speed-tracking pedals for a cruising driver. Background drivers plan at 30 Hz and their reply lands one or
+ * more rendered frames later, so the main thread re-applies this every physics tick from the planned target
+ * speed and the car's current speed: a pedal held from a stale speed would overshoot during frame drops.
+ */
+export function cruisePedals(desired:number,speed:number){
+  const throttle=Math.max(0,Math.min(1,(desired-speed)*.8+desired*.01));
+  const brakeAxis=desired===0&&Math.abs(speed)<.3?.6:Math.max(0,Math.min(1,(speed-desired)*.6));
+  return {throttle,brakeAxis};
+}
 export class Bot {
   impactRevision=0;
   mode:BotMode='cruise';
@@ -221,8 +231,7 @@ export class Bot {
     }
     if(this.holdingBrake)desired=0;
     this.desiredSpeed=desired;
-    const throttle=Math.max(0,Math.min(1,(desired-speed)*.8+desired*.01));
-    const brake=desired===0&&Math.abs(speed)<.3?.6:Math.max(0,Math.min(1,(speed-desired)*.6));
+    const {throttle,brakeAxis:brake}=cruisePedals(desired,speed);
     const moved=body.position.distanceTo(this.lastPosition);this.lastPosition.copy(body.position);
     this.blockedFor=throttle>.45&&Math.abs(speed)<.5&&moved<dt*.5?this.blockedFor+dt:0;
     const exit=this.route.junctionExitDistance,inJunction=this.route.insideCrossing||(exit!==undefined&&exit<body.bounds.getSize(new Vector3()).z);

@@ -1,6 +1,7 @@
 import { Color, Group, Matrix4, Material, Mesh, MeshDepthMaterial, MeshStandardMaterial, NearestFilter,
   OrthographicCamera, RGBADepthPacking, Scene, Vector3, Vector4, WebGLRenderer, WebGLRenderTarget } from 'three';
-
+/** Minimum time between re-bakes caused only by streamed objects (moving 40 m or a sun turn re-bakes at once). */
+export const STREAM_REBAKE_MS=4000;
 /** Cached static-scene projection for ground without authored lightmap textures. */
 export class StaticMapShadows {
   readonly enabled = {value:0};
@@ -30,7 +31,17 @@ export class StaticMapShadows {
   private updated = -Infinity;
   private depths = new Map<Material,{material:MeshDepthMaterial;release:()=>void}>();
 
+  /** Materials already sampling the cache: shared vehicle materials must not chain the patch twice. */
+  private configured = new WeakSet<Material>();
+  /**
+   * Make a surface darken where the cached static scene blocks the sun. Ground uses it for building, tree and
+   * bridge shadows; vehicles use it too, because map objects are not dynamic shadow casters (that pass costs a
+   * draw per object), so without it a car drives through those shadows fully lit. A car is never in the cache,
+   * so it cannot shadow itself here.
+   */
   configure(material: MeshStandardMaterial) {
+    if (this.configured.has(material)) return;
+    this.configured.add(material);
     const previous = material.onBeforeCompile, key = material.customProgramCacheKey();
     material.onBeforeCompile = (shader,renderer) => {
       previous.call(material,shader,renderer);
@@ -97,7 +108,9 @@ if (slrrStaticEnabled > 0.5 && slrrStaticAvailable > 0.5) {
     const resized = !!this.target && this.target.width !== (this.nightResolution?3072:2048);
     const turned = this.direction.distanceToSquared(direction)>1e-5;
     if (!moved && !turned && !resized && this.revision===revision) return;
-    if (this.available.value && now-this.updated<1000 && !moved && !turned && !resized) return;
+    // Streaming changes the revision almost every second while driving; each re-bake draws the whole static map
+    // into the 2048² target (+3–6 ms GPU on that frame). Newly streamed casters can wait a few seconds.
+    if (this.available.value && now-this.updated<STREAM_REBAKE_MS && !moved && !turned && !resized) return;
     const resolution=this.nightResolution?3072:2048;
     this.target ??= new WebGLRenderTarget(resolution,resolution,{minFilter:NearestFilter,magFilter:NearestFilter});
     if(resized){this.target.setSize(resolution,resolution);this.available.value=0;}

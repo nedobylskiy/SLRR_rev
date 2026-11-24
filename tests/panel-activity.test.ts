@@ -53,3 +53,19 @@ test('settled ground-contact clearance does not wake XPBD again, but penetration
   const wall=new Box3(new Vector3(-2,0,-2),new Vector3(2,.2,2));
   assert.equal(activity.threatened(frame,wall),true,'obstacles remain independent of ground hysteresis');
 });
+
+test('a body-shock wake sleeps after a brief check unless the panel strains or is hit',()=>{
+  const panel=new DeformablePanel([-1,1,-1,1,1,-1,-1,1,1,1,1,1],{mass:10,mount:[0,1,0]});
+  const activity=new PanelActivity(panel),frame=new Matrix4();activity.reset(frame);
+  const velocities=(amplitude:number)=>{panel.velocities.fill(0);for(let i=0;i<panel.velocities.length;i+=3)panel.velocities[i]=(i/3%2?1:-1)*amplitude;};
+  const ticksAwake=()=>{let n=0;while(activity.deforming&&n<600){activity.settle(1/120,frame,true);n++;}return n;};
+  activity.wake(true);velocities(.01);
+  const brief=ticksAwake();
+  assert.ok(brief<=14,`quiet shock-woken panel sleeps within ~0.1 s (took ${brief} ticks)`);
+  activity.wake();velocities(.01);
+  {const n=ticksAwake();assert.ok(n>=80,`impact wakes keep the full 0.5 s + 0.2 s windows (took ${n})`);}
+  activity.wake(true);velocities(.5);for(let i=0;i<10;i++)activity.settle(1/120,frame,true);velocities(.01);
+  assert.ok(ticksAwake()>=60,'a panel that strains during the check escalates to the full windows');
+  activity.wake(true);velocities(.01);activity.settle(1/120,frame,true);panel.impulseVersion++;
+  assert.ok(ticksAwake()>=60,'a direct impulse during the check escalates to the full windows');
+});

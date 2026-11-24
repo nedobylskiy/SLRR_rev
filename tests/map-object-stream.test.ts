@@ -610,3 +610,47 @@ for(const cachedCells of [false,true])test(`static shadow revision ignores camer
   const shown=stream.shadowRevision;stream.update(new Vector3(300,0,0),camera);assert.ok(stream.shadowRevision>shown,'moving the reserve changes real caster membership');
   stream.dispose();
 });
+
+test('a loaded model draws only after its shader warmup completes, and loads wait for it',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4);
+  let warm!:()=>void,warmed:InstancedMesh[]=[];
+  stream.setShaderWarmup(meshes=>{warmed=meshes;return new Promise<void>(resolve=>{warm=resolve;});});
+  stream.add([0,1,2].map(i=>({matrix:new Matrix4().makeTranslation(i,0,0),position:new Vector3(i,0,0)})),async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);
+  let ready=false;const loading=stream.prepareNear(new Vector3()).then(()=>{ready=true;});
+  for(let i=0;i<5;i++){await Promise.resolve();stream.update(new Vector3());}
+  const mesh=parent.children[0] as InstancedMesh;
+  assert.equal(warmed.length,1);assert.equal(warmed[0],mesh,'the warmup sees the real instanced batch');
+  assert.equal(ready,false,'prepareNear waits for compiled programs');assert.equal(mesh.count,0,'nothing draws while programs compile');
+  warm();await loading;stream.update(new Vector3());
+  assert.equal(ready,true);assert.equal(mesh.count,3);
+  stream.dispose();
+});
+
+test('day and night variants swap with the time of day without reloading',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4),placement=()=>[{matrix:new Matrix4(),position:new Vector3()}];
+  const model=async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  stream.add(placement(),model,false,false,'day');stream.add(placement(),model,false,false,'night');stream.add(placement(),model);
+  await stream.prepareNear(new Vector3());stream.update(new Vector3());
+  const [day,night,always]=parent.children as InstancedMesh[];
+  assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
+  stream.setNight(true);stream.update(new Vector3());
+  assert.deepEqual([day.count,night.count,always.count],[0,1,1]);
+  stream.setNight(false);stream.update(new Vector3());
+  assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
+  stream.dispose();
+});
+
+test('far size cull drops objects under 4 px beyond 40 m and keeps near or larger ones',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,1000),focus=new Vector3();
+  const camera=new PerspectiveCamera(60,1,.1,2000);camera.lookAt(0,0,-1);camera.updateMatrixWorld();
+  stream.screenHeight=1000; // projected diameter = radius × cot(30°) × 1000 / distance = radius × 1732 / distance
+  const at=(z:number)=>({matrix:new Matrix4().makeTranslation(0,0,-z),position:new Vector3(0,0,-z)});
+  // A 0.5 m box has a 0.43 m bounding radius: 2.5 px at 300 m, 25 px at 30 m.
+  stream.add([at(30),at(300)],async()=>[new Mesh(new BoxGeometry(.5,.5,.5),new MeshBasicMaterial())]);
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  assert.equal(stream.visible,1,'the box at 300 m is under 4 px and dropped');
+  stream.setFarCullPixels(2);stream.update(focus,camera);assert.equal(stream.visible,2,'a 2 px threshold keeps it');
+  stream.setFarCullPixels(0);stream.update(focus,camera);assert.equal(stream.visible,2,'0 disables the cull');
+  stream.setFarCullPixels(4);stream.screenHeight=3000;stream.update(focus,camera);assert.equal(stream.visible,2,'a taller screen draws it larger');
+  stream.dispose();
+});

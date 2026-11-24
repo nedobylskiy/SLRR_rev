@@ -8,6 +8,7 @@ import {TGALoader} from 'three/addons/loaders/TGALoader.js';
 import {TextureLoader} from 'three';
 import {ptxTexture} from './ptx-texture';
 import type {FrameProfiler} from './frame-profiler';
+import {elementSize} from './element-size';
 /** Projected symbol clamp preserves its direction instead of independently clamping X/Y. */
 export function clampNavigatorMarker(x:number,y:number){const scale=Math.min(1,.9/Math.max(Math.abs(x),1e-12),.85/Math.max(Math.abs(y),1e-12));return {x:x*scale,y:y*scale};}
 /** Unproject into the smallmap's XZ plane, using the same perspective and yaw as its rendered camera. */
@@ -68,7 +69,7 @@ export class NavigatorView {
   this.enqueue(async()=>{const template=await this.model(node,key);if(this.disposed||this.instances.get(node.id)!==adopted)return;adopted.group=template.clone(true);this.scene.add(adopted.group);});return;
  }
  private draw(){
-  const stageW=this.stage.clientWidth,stageH=this.stage.clientHeight;if(!stageW||!stageH)return;
+  const {width:stageW,height:stageH}=elementSize(this.stage);if(!stageW||!stageH)return;
   const frame=this.source().at(-1);this.canvas.hidden=!frame;this.canvas.style.display=frame?'block':'none';if(!frame){if(this.current){this.instances.forEach(v=>v.group?.removeFromParent());this.instances.clear();this.current=undefined;}return;}
   if(!this.renderer){this.renderer=new WebGLRenderer({canvas:this.canvas,alpha:true,antialias:false,powerPreference:'low-power'});this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setClearColor(0x233024,1);}
   const {viewport:vp}=frame,w=Math.max(1,Math.round(stageW*vp.width)),h=Math.max(1,Math.round(stageH*vp.height));

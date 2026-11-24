@@ -70,6 +70,20 @@ export function isNativeJavaCar(result: BootResult, ref: JavaValue): boolean {
   return !!node?.resourcePack && result.gameTypes.catalogResource(node.resourcePack, node.typeId)?.nativeType === 'car';
 }
 
+/** Valocity creates rival `dummycar`s with create_native from a scripted chassis
+ * type (`native car` plus `script` in the RPK), and City.cleanupRace / Bot's
+ * leave-traffic handler wrap them in `new Vehicle(dummycar)`. Unlike a fake
+ * racer, that CFG is only the body shell: its stock parts come from the
+ * chassis' stock declarations, and the bare GameRef has no Java Part tree. */
+export function isUnscriptedJavaChassis(result: BootResult, chassis: JavaValue): boolean {
+  const object = chassis?.value;
+  if (!object || typeof object !== 'object' || !('className' in object)) return false;
+  if (!['GameRef', 'java.util.resource.GameRef'].includes(String(object.className))) return false;
+  const node = result.gameTypes.get(chassis);
+  if (!node?.resourcePack || result.jvm.isInstance(chassis, 'java.game.parts.Part')) return false;
+  return !!result.gameTypes.catalogResource(node.resourcePack, node.typeId)?.script;
+}
+
 /** Accept both Vehicle wrappers and ParkingCar.gr without creating another native car. */
 export function javaVehicleChassis(result: BootResult, ref: JavaValue): JavaValue {
   return isNativeJavaCar(result, ref) ? ref : result.jvm.get(ref, 'chassis');

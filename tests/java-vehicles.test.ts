@@ -314,3 +314,52 @@ test('scene vehicles use each Java chassis, follow poses and release removed or 
   assert.ok(built.every(model => model.world.disposed));
   renderer.dispose(); assert.equal(removed.length, 2);
 });
+
+test('a traffic dummycar returned to the street after a race renders its CFG stock car, not a bare shell', async () => {
+  // City.cleanupRace: raceBot.car = new Vehicle(raceBot.dummycar), driven by a BOTBRAIN.
+  const jvm = new SlrrJvm({resolveImport: () => ({path:'GameLogic.java', source:
+    'package java.game; class GameLogic { static Object actualState; static Object player; }'})});
+  await jvm.loadClass('java.game.GameLogic'); await jvm.globalAsync('java.game.GameLogic');
+  const types = new GameTypeNative(jvm, () => {});
+  const ref = (name:string, fields:Record<string,JavaValue>={}) => jv(name,{className:name,fields:new Map(Object.entries(fields))});
+  const map = ref('GroundRef'); jvm.natives.invoke('java.lang.GameType','createNativeInstance',map,[]);
+  const dummycar = ref('java.util.resource.GameRef');
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',dummycar,[jv('GameRef',map.value),jv('int',7),jv('String',null),jv('String','dummycar')]);
+  types.getResource(dummycar)!.resourcePack='cars/traffic/Hatch.rpk';
+  // RPK chassis entries are `native car <cfg>` plus a Java `script`; fake racers have no script.
+  types.catalogResource=(_pack,id)=>({nativeType:'car',script:'cars/traffic/Hatch_data/scripts/Hatch.class',id}) as ReturnType<GameTypeNative['catalogResource']>;
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',dummycar,[jv('ResourceRef',null),jv('int',16),jv('String','texture 42 1')]);
+  const vehicle=ref('java.game.Vehicle',{chassis:dummycar});
+  jvm.natives.invoke('java.util.resource.ResourceRef','set',vehicle,[jv('ResourceRef',dummycar.value)]);
+  const brain=ref('GameRef');jvm.natives.invoke('java.lang.GameType','createNativeInstance',brain,[]);
+  const driver=types.createRender(ref('RenderRef'),map,null,'botfigura-afterrace')!;
+  await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',brain,[jv('ResourceRef',null),jv('int',16),jv('String',`renderinstance ${driver.resourceId}`)]);
+  jvm.set(jv('class','java.game.GameLogic'),'actualState',ref('City',{raceBot:ref('Bot',{car:vehicle,brain})}));
+  jvm.set(jv('class','java.game.GameLogic'),'player',ref('Player',{car:jv('Vehicle',null)}));
+  let visualRevision=0;
+  const result={jvm,gameTypes:types,resolveResourceIdentity:(id:number)=>id===42?{pack:'cars/traffic/Hatch.rpk',id:42}:undefined,
+    parts:{visualRevision:()=>visualRevision,installedTree:()=>[],slotOverrides:()=>new Map()},
+    chassis:{wheelState:()=>undefined,updateState:()=>undefined}} as unknown as BootResult;
+  const shown:EngineWorld[]=[];let seated=false,stockCalls=0;
+  const renderer=new JavaSceneVehicles(result,{} as Assets,{
+    showWorld:async world=>{shown.push(world);return [];},removeWorld:()=>{},syncWorldVisuals:()=>{},
+    bindJavaDriver:async node=>{assert.equal(node,driver);seated=true;},
+    bindJavaRaceCar:async()=>({dispose(){}}),
+  },message=>assert.fail(message),{
+    syncJavaAssembly:async()=>assert.fail('an empty Java tree must not strip the stock parts'),
+    stock:async(key,options)=>{
+      stockCalls++;
+      assert.equal(options?.javaSelection,undefined,'no Java parts exist: install the CFG stock declarations');
+      const world=new EngineWorld();
+      const root=world.create({key,alias:'hatch',cfgPath:'hatch.cfg',config:parsePartConfig('category 2\ntexture 0x00000001')});
+      return {world,root,warnings:[]};
+    }} as Pick<PartFactory,'stock'|'syncJavaAssembly'>);
+  await renderer.prepare(map,undefined,()=>false);
+  assert.equal(stockCalls,1); assert.equal(shown.length,1);
+  assert.deepEqual([...shown[0].parts.values()][0].paintTexture,{pack:'cars/traffic/Hatch.rpk',id:42},
+    "the dummycar's Java texture command paints the stock body");
+  assert.equal(seated,true,'the after-race driver figure stays in the car');
+  visualRevision++; // e.g. the dummycar's reset command
+  renderer.update(map,undefined,()=>false); await new Promise(resolve=>setImmediate(resolve));
+  renderer.dispose(); types.dispose();
+});

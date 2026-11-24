@@ -2,6 +2,9 @@ import { Box3, Matrix3, Matrix4, Vector3 } from 'three';
 import { DeformablePanel, PANEL_GROUND_CLEARANCE, type Triple } from './deformable-panel';
 import { RigidBody3D } from './rigid-body-3d';
 
+/** Brief body-shock wake: settle time before judging, then consecutive quiet time needed to sleep. */
+export const BRIEF_CHECK_S = 0.05, BRIEF_QUIET_S = 0.05;
+
 /** A rigid, dent-preserving shape between impacts; XPBD wakes for contacts and attachment loads. */
 export class PanelActivity {
   deforming = false;
@@ -15,10 +18,16 @@ export class PanelActivity {
   internalSpeed = 0;
   threatReason: 'ground'|'obstacle' = 'ground';
   private restTicks = 0;
+  /**
+   * Woken only by the carrier body's acceleration, not by a touch on this panel. Most such wakes (a kerb, a
+   * steering flick) strain nothing, and the full impact windows made each one cost every panel 0.7 s of
+   * solving. A brief panel sleeps after a short check unless it actually moves or loads its mounts.
+   */
+  private brief = false;
   constructor(readonly panel: DeformablePanel) {}
   reset(frame: Matrix4) { this.frame.copy(frame); this.deforming = false; this.quietTicks = this.activeTicks = this.restTicks = 0; this.resting = false; this.freeBody = undefined; this.impulseVersion = this.panel.impulseVersion; }
   get forced() { return this.impulseVersion !== this.panel.impulseVersion; }
-  wake() { this.deforming = true; this.activeTicks = this.quietTicks = this.restTicks = 0; this.resting = false; this.freeBody = undefined; }
+  wake(brief = false) { this.deforming = true; this.brief = brief; this.activeTicks = this.quietTicks = this.restTicks = 0; this.resting = false; this.freeBody = undefined; }
   /** A supported, still rigid fragment needs no repeated gravity/contact solve. */
   rest(dt: number, supported: boolean) {
     const body = this.freeBody;
@@ -79,12 +88,25 @@ export class PanelActivity {
   }
   settle(dt: number, frame: Matrix4, attached: boolean) {
     if(!attached){this.makeRigid(frame);return;}
+    // A direct hit during the brief check is an impact on this panel: give it the full windows.
+    if (this.brief && (this.forced || this.panel.collisionImpact)) this.brief = false;
     this.impulseVersion = this.panel.impulseVersion;
     this.frame.copy(frame); this.activeTicks++;
+    const overloaded = this.panel.mounts.some(m => !m.broken && m.force > this.panel.mountStrength * 0.5);
+    if (this.brief) {
+      const motion = this.motion();
+      if (overloaded || motion.internalSpeed >= 0.3) this.brief = false;
+      else {
+        this.internalSpeed = motion.internalSpeed;
+        if (this.activeTicks * dt < BRIEF_CHECK_S) { this.sleepReason = 'minimum_active_time'; return; }
+        this.quietTicks = motion.internalSpeed < 0.03 ? this.quietTicks + 1 : 0;
+        if (this.quietTicks * dt < BRIEF_QUIET_S) { this.sleepReason = motion.internalSpeed < 0.03 ? 'quiet_window' : 'internal_motion'; return; }
+        this.deforming = false; this.brief = false; this.sleepReason = 'sleeping'; return;
+      }
+    }
     if (this.activeTicks * dt < (attached ? 0.5 : 0.25)) { this.sleepReason='minimum_active_time';this.internalSpeed=0; return; }
     const motion = this.motion();
     this.internalSpeed=motion.internalSpeed;
-    const overloaded = this.panel.mounts.some(m => !m.broken && m.force > this.panel.mountStrength * 0.5);
     this.sleepReason=overloaded?'mount_load':motion.internalSpeed >= (attached ? 0.03 : 0.12)?'internal_motion':'quiet_window';
     // Brief small vibrations spend quiet credit instead of restarting the full
     // window. A real impact or overloaded mount still clears it immediately.

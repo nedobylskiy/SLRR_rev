@@ -51,6 +51,8 @@ export const vehicleAssemblyCenter = (root: EnginePart) => {
 export const DEFAULT_CHASSIS_CRUMPLE = 0.6;
 // A modest increase in attachment failure load, independent of panel elasticity.
 const PANEL_MOUNT_STRENGTH_SCALE = 1.1;
+/** Wake reasons from the chassis' own motion; impacts, impulses and contacts keep full panel windows. */
+const BODY_SHOCK_WAKES = new Set(['linear_acceleration', 'angular_acceleration', 'centrifugal_load']);
 const boundsOf = (samples: ArrayLike<number>) => { const box = new Box3(); for (let i = 0; i < samples.length; i += 3) box.expandByPoint(new Vector3().fromArray(samples, i)); return box; };
 const centerOf = (p: ArrayLike<number>) => { const out = new Vector3(); for (let i = 0; i < p.length; i += 3) out.add(new Vector3().fromArray(p, i)); return out.multiplyScalar(3 / p.length); };
 // Attachment frames are reconstructed through matrix products/inverses. Ignore
@@ -117,7 +119,8 @@ export class Vehicle3D extends CarCrashDemo {
     return row;
   }
   private wakePanel(s:SoftBodyPart,reason:string,work:PanelWork|undefined){
-    s.activity.wake();if(work)work.wakes[reason]=(work.wakes[reason]??0)+1;
+    // Whole-body accelerations reach every panel at once; only panels that then strain stay awake.
+    s.activity.wake(BODY_SHOCK_WAKES.has(reason));if(work)work.wakes[reason]=(work.wakes[reason]??0)+1;
   }
   readonly contactProfile=createContactProfile();
   readonly timings = { panelSurfaceContacts:0,panelGround:0,nodeSteps:0,beamIterations:0,panelConstraints:0,panelContacts:0,panelUpload:0,panelIntegration:0,looseContacts:0,suspension: 0, contacts: 0, panels: 0, other: 0, panelSolve: 0, panelSurface: 0, panelSleep: 0, ticks: 0, activePanels: 0, surfaceTriangles:0,surfaceParts:0,surfaceVertices:0,surfaceBuilds:0,surfaceRefits:0,surfaceUpdates: 0 };

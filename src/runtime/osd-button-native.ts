@@ -7,6 +7,9 @@ interface HitBox { physics: JavaValue; group: JavaValue; width: number; height: 
   position?: { x: number; y: number; z: number }; element?: OsdElement;
   bounds?: { x: number; y: number; width: number; height: number; depth: number }; background?: OsdElement }
 
+/** Osd.COLOR_DISABLED (0x70C0C0C0), the label tint Gadget.disable applies. */
+const OSD_COLOR_DISABLED = 0x70c0c0c0;
+
 /** At equal Java depth, a small control wins over a broad dialog shield or ghost area. */
 export function osdHitDepth(z: number, width: number, height: number): number {
   const plane = Math.round(z * 1000);
@@ -268,6 +271,7 @@ export class OsdButtonNative {
     if (osd.fields.get('pointedGadget')?.value)
       await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
     await this.jvm.invokeAsync(jv('Osd', osd), 'activateText', [jv('Group', group), jv('Gadget', gadget)]);
+    await this.keepDisabledLabel(gadget);
     this.cursorEvent?.(15, physics);
     this.clearFocus();
     const panel = this.object(osd.fields.get('globalHandler'));
@@ -296,6 +300,18 @@ export class OsdButtonNative {
     const osd = this.object(this.requireObject(box.group).fields.get('osd'));
     if (gadget && osd?.fields.get('pointedGadget')?.value === gadget)
       await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
+    if (gadget) await this.keepDisabledLabel(gadget);
+  }
+
+  /** Gadget.focus/unfocus recolour the label to SELECTED/UNSELECTED even when
+   * the gadget is disabled, which erased the grey that Gadget.disable set
+   * (e.g. night-race opponents whose stake exceeds the player's money looked
+   * clickable). Restore Osd.COLOR_DISABLED after a mouse focus change. */
+  private async keepDisabledLabel(gadget: JavaObject): Promise<void> {
+    if (!Number(gadget.fields.get('disabled')?.value ?? 0)) return;
+    const label = this.object(gadget.fields.get('label'));
+    const text = label?.fields.get('txt');
+    if (text?.value) await this.jvm.invokeAsync(text, 'changeColor', [jv('int', OSD_COLOR_DISABLED)]);
   }
 
   private async findGadget(box: HitBox, physics: JavaValue): Promise<JavaObject | undefined> {

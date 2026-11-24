@@ -9,6 +9,11 @@ export interface VehicleWorldEntry {car:Vehicle3D;input:DrivingInput;impact?:(sp
 export class VehiclePhysicsWorld {
   readonly entries=new Map<number,VehicleWorldEntry>();
   readonly clock:FixedClock;
+  /**
+   * Contacts with bodies outside this world (road traffic), run on every shared tick before the cars integrate.
+   * Testing them once per rendered frame let a fast car cross a 1.8 m wide car between two checks.
+   */
+  onTick?:()=>void;
   constructor(frequency=120){this.clock=new FixedClock(frequency,physicsTickBudget(frequency));}
   pause(){
     this.clock.restore(this.clock.tick);
@@ -34,6 +39,7 @@ export class VehiclePhysicsWorld {
         a.car.body.position.addScaledVector(hit.normal,depth/a.car.body.mass/inverse);
         b.car.body.position.addScaledVector(hit.normal,-depth/b.car.body.mass/inverse);
       }
+      this.onTick?.();
       for(const {car,input}of entries){
         if(car.sleeping)continue;
         car.advance(this.clock.dt,input,true);car.updatePhysicsSleep(this.clock.dt);

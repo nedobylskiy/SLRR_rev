@@ -1,3 +1,4 @@
+import {fullGeometry} from './lod-library';
 import {BufferGeometry,Group,Matrix4,Mesh,Vector3} from 'three';
 import {RivalPanels,type RivalPanelDefinition} from '../engine/rival-panels';
 import type {PanelBinding} from '../engine/deformable-panel';
@@ -16,7 +17,7 @@ export class RivalPanelView {
     for(const [id,panel] of this.physics.panels)if(!this.skins.some(s=>s.id===id)){
       const root=this.group.getObjectByName(id);if(!root)continue;
       root.traverse(object=>{if(!(object instanceof Mesh))return;
-        const original=object.geometry,geometry=original.clone(),source=new Float32Array(geometry.getAttribute('position').array),toRoot=inverse.clone().multiply(object.matrixWorld);
+        const original=fullGeometry(object),geometry=original.clone(),source=new Float32Array(geometry.getAttribute('position').array),toRoot=inverse.clone().multiply(object.matrixWorld);
         const bindings:PanelBinding[]=[],reference=new Float64Array(source.length);
         // Bind against the undeformed cage, even when another panel was hit on a later frame.
         for(let i=0;i<source.length;i+=3){point.fromArray(source,i).applyMatrix4(toRoot);const binding=panel.bind(point.toArray());bindings.push(binding);

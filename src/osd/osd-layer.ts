@@ -111,8 +111,9 @@ export class OsdLayer {
         node.style.height = intrinsicText&&height===0?'auto':`${bounds.height}%`;
         node.style.zIndex = String(depth + 10);
       },
-      show: () => { node.hidden = false; },
-      hide: () => { node.hidden = true; },
+      // Java OSD syncs visibility every frame; an unchanged write still invalidates style for the next layout read.
+      show: () => { if (node.hidden) node.hidden = false; },
+      hide: () => { if (!node.hidden) node.hidden = true; },
     };
   }
 
@@ -205,10 +206,10 @@ export class OsdLayer {
   }
 
   endGroup() { return this.nextGroup++; }
-  hideGroup(group: number) { for (const node of this.groups.get(group) ?? []) node.hidden = true; }
-  showGroup(group: number) { for (const node of this.groups.get(group) ?? []) node.hidden = false; }
-  show() { this.root.hidden = false; }
-  hide() { this.root.hidden = true; }
+  hideGroup(group: number) { for (const node of this.groups.get(group) ?? []) if (!node.hidden) node.hidden = true; }
+  showGroup(group: number) { for (const node of this.groups.get(group) ?? []) if (node.hidden) node.hidden = false; }
+  show() { if (this.root.hidden) this.root.hidden = false; }
+  hide() { if (!this.root.hidden) this.root.hidden = true; }
   focus() { this.stage.focus(); }
   dispose() {
     this.disposed = true;

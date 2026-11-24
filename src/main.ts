@@ -5,6 +5,8 @@ import {parseScxAsync} from './formats/scx-worker-client';
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection, javaTrackIsCurrent } from './runtime/java-scene';
+import { javaPlacementWatcher } from './runtime/java-placement';
+import { JavaCarBrake } from './runtime/java-car-brake';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaPartPreviews } from './render/java-part-previews';
@@ -18,6 +20,8 @@ import { parseRpk, entryProperties } from './formats/rpk';
 import { parseTufa } from './formats/tufa';
 import { inspectSavedVehicle, serializeSdat } from './formats/sdat';
 import { Viewer } from './render/viewer';
+import { LOD_STRENGTH_MAX } from './render/lod-distance';
+import { autoPacingLevels, pacingLevels, parseFramePacing, type FramePacing } from './render/frame-pacer';
 import { defaultSuspensionDebug, type SuspensionDebugSettings } from './render/suspension-debug';
 import { PartFactory, type EnginePart, type EngineWorld } from './engine/world';
 import { DEFAULT_CHASSIS_CRUMPLE } from './engine/vehicle-3d';
@@ -243,6 +247,7 @@ async function runGameBootNow() {
       let built: Awaited<ReturnType<PartFactory['stock']>> | undefined;
       let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
       let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
+      let finishBrake: JavaCarBrake | undefined;
       let persistPhysics: (() => void) | undefined;
       try {
         status('Loading Java track…');
@@ -297,15 +302,26 @@ async function runGameBootNow() {
             const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
             const car = result.jvm.get(player, 'car');
             const javaVehicle = result.gameTypes.get(car);
+            const javaPlacement = javaPlacementWatcher(javaVehicle);
+            finishBrake = new JavaCarBrake(result.gameTypes, car);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
-              { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync()); return javaControls.sample(); },
+              { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => {
+                viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync());
+                const v = javaVehicle?.velocity, input = javaControls.sample();
+                return finishBrake ? finishBrake.apply(input, v ? Math.hypot(v.x, v.y, v.z) : 0) : input;
+              },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
                 motion: (position, yaw, velocity) => {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
+                  javaPlacement.published();
                   viewer!.profiler.measure('Java triggers CPU',()=>result.gameTypes.updateTriggerContacts(car));
+                },
+                placement: () => {
+                  const placed = javaPlacement.placement();
+                  return placed && { position: new Vector3(placed.position.x, placed.position.y, placed.position.z), yaw: placed.yaw };
                 } });
             const driverRender=result.gameTypes.getResource(result.jvm.get(player,'render'));
             if(driverRender instanceof RenderObject){
@@ -323,7 +339,7 @@ async function runGameBootNow() {
           }
         }
         activeTrackCleanup = () => {
-          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); gauges?.dispose();
+          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); finishBrake?.dispose(); gauges?.dispose();
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose();
         };
@@ -338,7 +354,7 @@ async function runGameBootNow() {
         if(source===assets&&run===sequence&&javaTrackIsCurrent(result,selected))trackReady=true;
       } catch (reason) {
         session?.();gauges?.dispose();
-        physicsBinding?.dispose();
+        physicsBinding?.dispose(); finishBrake?.dispose();
         if (built) viewer?.removeWorld(built.world);
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
@@ -517,13 +533,18 @@ lodButton.onclick=()=>{
   const label=textElement('label','Detail '),slider=document.createElement('input'),value=document.createElement('output'),info=document.createElement('output');
   slider.type='range';slider.min='1';slider.max='100';slider.step='1';slider.value='100';slider.setAttribute('aria-label','LOD remaining detail');label.append(slider,value);
   const wireLabel=textElement('label','Wireframe'),wire=document.createElement('input');wire.type='checkbox';wireLabel.prepend(wire);
-  const reset=textElement('button','Original');row.append(search,models,label,wireLabel,reset);vinControls.append(row,info);
+  const choice=(name:string,options:[string,string][])=>{const select=document.createElement('select');select.setAttribute('aria-label',name);for(const [v,text] of options){const option=document.createElement('option');option.value=v;option.textContent=text;select.append(option);}return select;};
+  const mode=choice('LOD simplification mode',[['quality','Quality (attribute-aware)'],['aggressive','Aggressive (sloppy)']]);
+  const textureLevels=choice('LOD texture size',[['auto','Textures: auto'],['0','Textures: full'],['1','Textures: 1/2'],['2','Textures: 1/4'],['3','Textures: 1/8'],['4','Textures: 1/16']]);
+  const reset=textElement('button','Original');row.append(search,models,label,mode,textureLevels,wireLabel,reset);vinControls.append(row,info);
   let lab:Awaited<ReturnType<NonNullable<typeof viewer>['showLodPlayground']>>|undefined,loadRevision=0;
-  const update=()=>{value.textContent=`${slider.value}%`;lab?.setRatio(Number(slider.value)/100,message=>{if(sequence===opening)info.textContent=message;});};
+  const update=()=>{value.textContent=`${slider.value}%`;lab?.apply({ratio:Number(slider.value)/100,mode:mode.value as 'quality'|'aggressive',textureLevels:textureLevels.value==='auto'?'auto':Number(textureLevels.value)},message=>{if(sequence===opening)info.textContent=message;});};
   const load=async()=>{
     const path=models.value;if(!path)return;const revision=++loadRevision;lab=undefined;slider.disabled=true;status('Loading LOD model…');
     try{
-      const [model,textures]=await Promise.all([assets.read(path).then(parseScxAsync),companionTextures(path)]);
+      const [model,companion]=await Promise.all([assets.read(path).then(parseScxAsync),companionTextures(path)]);
+      // Vehicle and part meshes have no .tex file; their texture slots live on the RPK render resource.
+      const textures=companion.length?companion:await assets.texturesForModelSource(path)??[];
       if(sequence!==opening||revision!==loadRevision)return;
       const next=await viewer!.showLodPlayground(model,assets,textures);
       if(sequence!==opening||revision!==loadRevision)return;
@@ -534,8 +555,8 @@ lodButton.onclick=()=>{
   const files=assets.files.filter(file=>/\.scx$/i.test(file.path)).sort((a,b)=>a.path.localeCompare(b.path));
   const filter=()=>{const previous=models.value,query=search.value.toLowerCase();models.replaceChildren();for(const file of files.filter(file=>file.path.toLowerCase().includes(query))){const option=document.createElement('option');option.value=option.textContent=file.path;models.append(option);}if([...models.options].some(option=>option.value===previous))models.value=previous;};
   filter();const initial=files.find(file=>/baiern.*(hood|chassis).*\.scx$/i.test(file.path));if(initial)models.value=initial.path;
-  search.oninput=filter;models.onchange=()=>{void load();};slider.oninput=update;wire.onchange=()=>lab?.wireframe(wire.checked);reset.onclick=()=>{slider.value='100';update();};
-  el('format').textContent='LOD / MODEL SIMPLIFICATION';el('details').textContent='Experimental edge-collapse simplification in a worker. Detail controls the remaining vertex budget per material section; actual triangle reduction is shown above. UVs, normals and vertex colors are retained where supported. Extra attribute channels and grouped geometry keep their original shape. This preview does not change world LOD settings.';
+  search.oninput=filter;models.onchange=()=>{void load();};slider.oninput=update;mode.onchange=textureLevels.onchange=update;wire.onchange=()=>lab?.wireframe(wire.checked);reset.onclick=()=>{slider.value='100';update();};
+  el('format').textContent='LOD / MODEL SIMPLIFICATION';el('details').textContent='meshoptimizer edge-collapse simplification in a worker. Detail is the whole-model triangle budget: one geometric error threshold is searched across all material sections, so small parts collapse or disappear before large surfaces lose their outline. Quality mode weighs normals, UVs and vertex colours and keeps UV seams intact; Aggressive clusters vertices without preserving topology, for distant LODs. Vertices are never moved, so every channel (lightmap, detail and reflection UVs) stays exact. Textures drop whole DDS mip levels; auto removes one level per 4× fewer triangles. This preview does not change world LOD settings.';
   el('scene-help').textContent='Left drag: orbit · Wheel: zoom · Right drag: pan · Detail 100% restores the original';void load();
 };
 const suspensionButton=textElement('button','Suspension playground');suspensionButton.className='hood-button';lodButton.after(suspensionButton);
@@ -741,9 +762,62 @@ staticBatchCheck.type='checkbox';staticBatchLabel.prepend(staticBatchCheck);mapD
 staticBatchLabel.title='Experimental: combine compatible opaque parts by material and 128 m cell within each streamed model. Original geometry stays cached for comparison.';
 staticBatchCheck.onchange=()=>viewer?.setStaticBatchingEnabled(staticBatchCheck.checked);
 const autoLodLabel=textElement('label','Generated map LOD'),autoLodCheck=document.createElement('input');
-autoLodCheck.type='checkbox';autoLodLabel.prepend(autoLodCheck);mapDebugOptions.append(autoLodLabel);
-autoLodLabel.title='Experimental: quality-checked closed opaque surfaces only, far at 200 m / near 160 m. Open facades, cutout foliage and unsupported extra UV channels stay original.';
+autoLodCheck.type='checkbox';autoLodCheck.checked=true;autoLodLabel.prepend(autoLodCheck);mapDebugOptions.append(autoLodLabel);
+autoLodLabel.title='meshoptimizer levels per placement: 100% to 40 m, then 90% … 20% at the view distance (finer steps near the camera). Opaque parts and their layer passes; cutout leaf/fence cards and blended parts stay original.';
 autoLodCheck.onchange=()=>viewer?.setAutoMapLodEnabled(autoLodCheck.checked);
+const vehicleLodLabel=textElement('label','Generated vehicle LOD'),vehicleLodCheck=document.createElement('input');
+vehicleLodCheck.type='checkbox';vehicleLodCheck.checked=true;vehicleLodLabel.prepend(vehicleLodCheck);mapDebugOptions.append(vehicleLodLabel);
+vehicleLodLabel.title='Traffic and world vehicles switch whole-car meshoptimizer levels by camera distance with the same 40 m → view-distance scale. Dents keep showing at every level.';
+vehicleLodCheck.onchange=()=>viewer?.setVehicleLodEnabled(vehicleLodCheck.checked);
+const lodStrengthStorageKey='slrr.graphics.lodStrength.v1';
+const lodStrengthLabel=textElement('label',''),lodStrengthValue=textElement('span',''),lodStrengthSlider=document.createElement('input');
+lodStrengthSlider.type='range';lodStrengthSlider.min='1';lodStrengthSlider.max=String(LOD_STRENGTH_MAX);lodStrengthSlider.step='0.25';lodStrengthSlider.value='1';
+try{const saved=Number(localStorage.getItem(lodStrengthStorageKey));if(saved>=1&&saved<=LOD_STRENGTH_MAX)lodStrengthSlider.value=String(saved);}catch{ /* Keep the default when browser storage is unavailable. */ }
+lodStrengthSlider.setAttribute('aria-label','LOD strength');lodStrengthLabel.append(lodStrengthValue,lodStrengthSlider);mapDebugOptions.append(lodStrengthLabel);
+lodStrengthLabel.title='Brings the coarsest level (20%) closer: the view distance divided by this strength, never inside 60 m. Full detail stays within 40 m. Applies to map objects, vehicles and pedestrians. Saved in this browser.';
+const showLodStrength=()=>{const strength=Number(lodStrengthSlider.value);lodStrengthValue.textContent=`LOD strength: ${strength.toFixed(2)}× · 20% from ${Math.round(viewer?.lodReachDistance??0)} m`;};
+lodStrengthSlider.oninput=()=>{
+  try{localStorage.setItem(lodStrengthStorageKey,lodStrengthSlider.value);}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setLodStrength(Number(lodStrengthSlider.value));showLodStrength();
+};
+const farCullStorageKey='slrr.graphics.farCullPixels.v1';
+const farCullLabel=textElement('label','Far size cull (px) '),farCullInput=document.createElement('input');
+farCullInput.type='number';farCullInput.min='0';farCullInput.max='16';farCullInput.step='1';farCullInput.value='4';farCullInput.style.width='4em';
+try{const saved=localStorage.getItem(farCullStorageKey);if(saved!==null&&Number(saved)>=0&&Number(saved)<=16)farCullInput.value=saved;}catch{ /* Keep the default when browser storage is unavailable. */ }
+farCullLabel.append(farCullInput);mapDebugOptions.append(farCullLabel);
+farCullLabel.title='Map objects farther than 40 m whose bounding sphere would span fewer pixels than this on screen are not drawn (OpenSLRR uses 4). 0 draws everything. Saved in this browser.';
+farCullInput.onchange=()=>{
+  const value=Math.max(0,Math.min(16,Number(farCullInput.value)||0));farCullInput.value=String(value);
+  try{localStorage.setItem(farCullStorageKey,String(value));}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setMapFarCullPixels(value);
+};
+const framePacingStorageKey='slrr.graphics.framePacing.v1';
+const framePacingLabel=textElement('label','Frame pacing '),framePacingSelect=document.createElement('select');
+let framePacing:FramePacing='auto';
+try{framePacing=parseFramePacing(localStorage.getItem(framePacingStorageKey))??'auto';}catch{ /* Keep the default when browser storage is unavailable. */ }
+let framePacingRefreshHz=0;
+/** Even cadences exist only at the refresh rate divided by whole numbers, so the menu follows the current screen. */
+const buildFramePacingOptions=(refreshMs:number)=>{
+  const hz=Math.round(1000/refreshMs);if(hz===framePacingRefreshHz)return;framePacingRefreshHz=hz;
+  const fixed=pacingLevels(refreshMs),auto=autoPacingLevels(refreshMs).map(fps=>Math.round(fps)).join(' / ');
+  const entries:[string,string][]=[['auto',`Auto · even ${auto} fps`],['vsync',`Every refresh · up to ${hz} fps (uneven when slower)`],
+    ...fixed.map(({divisor,fps})=>[`fps:${Math.round(fps)}`,`Fixed ${Math.round(fps)} fps · every ${divisor} refreshes`] as [string,string])];
+  framePacingSelect.replaceChildren(...entries.map(([value,text])=>{const option=document.createElement('option');option.value=value;option.textContent=text;return option;}));
+  let selected:string=framePacing;
+  if(framePacing.startsWith('fps:')&&fixed.length){const wanted=Number(framePacing.slice(4));selected=`fps:${Math.round(fixed.reduce((a,b)=>Math.abs(b.fps-wanted)<Math.abs(a.fps-wanted)?b:a).fps)}`;}
+  if(!entries.some(([value])=>value===selected))selected='auto';
+  framePacingSelect.value=selected;viewer?.setFramePacing(selected as FramePacing);
+  framePacingLabel.title=`This screen refreshes at ${hz} Hz and the browser draws at most once per refresh, so motion is even only at ${hz} fps divided by a whole number. Anything in between arrives as an uneven mix of one- and two-refresh gaps. Auto renders every refresh while frames fit, otherwise the next even level. Saved in this browser.`;
+};
+buildFramePacingOptions(1000/60);
+framePacingLabel.append(framePacingSelect);mapDebugOptions.append(framePacingLabel);
+framePacingSelect.onchange=()=>{
+  framePacing=framePacingSelect.value as FramePacing;
+  try{localStorage.setItem(framePacingStorageKey,framePacing);}catch{ /* The live setting still works when storage is unavailable. */ }
+  viewer?.setFramePacing(framePacing);
+};
+// Moving the window to another screen changes the measured refresh and so the even levels on offer.
+setInterval(()=>{if(viewer)buildFramePacingOptions(viewer.framePacer.refreshInterval);},1000);
 const farPlaneLabel=textElement('label','Far plane'),farPlaneCheck=document.createElement('input');
 const tightFrustumLabel=textElement('label','Per-part frustum culling'),tightFrustumCheck=document.createElement('input');
 tightFrustumCheck.type='checkbox';tightFrustumCheck.checked=true;tightFrustumLabel.prepend(tightFrustumCheck);mapDebugOptions.append(tightFrustumLabel);
@@ -767,8 +841,8 @@ rayOcclusionCheck.type='checkbox';rayOcclusionLabel.prepend(rayOcclusionCheck);m
 rayOcclusionLabel.title='Experimental CPU rays against opaque visual triangles. Only proven convex coverage hides a box. Shadows and reflections retain full geometry.';
 rayOcclusionCheck.onchange=()=>viewer?.setRaycastOcclusionEnabled(rayOcclusionCheck.checked);
 const gpuOcclusionLabel=textElement('label','GPU Hi-Z occlusion'),gpuOcclusionCheck=document.createElement('input');
-gpuOcclusionCheck.type='checkbox';gpuOcclusionCheck.checked=true;gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
-gpuOcclusionLabel.title='Experimental GPU bounding-box visibility flags with asynchronous readback. Preserves shadows. Always tests primary-camera visibility, including in the observer view. Bypassed with Inspect all resident instances, distance cutoff or CPU rays. Last completed GPU verdicts remain applied through camera movement and streaming until the next GPU result.';
+gpuOcclusionCheck.type='checkbox';gpuOcclusionCheck.checked=false;gpuOcclusionLabel.prepend(gpuOcclusionCheck);mapDebugOptions.append(gpuOcclusionLabel);
+gpuOcclusionLabel.title='Experimental, off by default: the readback can stall the main thread 20–45 ms on Chrome/ANGLE. GPU bounding-box visibility flags with asynchronous readback. Preserves shadows. Always tests primary-camera visibility, including in the observer view. Bypassed with Inspect all resident instances, distance cutoff or CPU rays. Last completed GPU verdicts remain applied through camera movement and streaming until the next GPU result.';
 gpuOcclusionCheck.onchange=()=>{viewer?.setGpuOcclusionEnabled(gpuOcclusionCheck.checked);if(gpuOcclusionCheck.checked)rayOcclusionCheck.checked=false;};
 const gpuIntervalLabel=textElement('label','GPU occlusion interval (frames)'),gpuInterval=document.createElement('select');
 for(const frames of [1,2,3,4,6,8,12]){const option=document.createElement('option');option.value=String(frames);option.textContent=String(frames);gpuInterval.append(option);}gpuInterval.value='12';
@@ -941,7 +1015,7 @@ streamRangeInput.setAttribute('aria-label', 'Streaming radius in meters');
 const updateStreamRange = () => {
   const value = Number(streamRangeInput.value);
   streamRangeValue.textContent = `Streaming radius: ${value} m`;
-  viewer?.setMapStreamRange(value);
+  viewer?.setMapStreamRange(value);showLodStrength();
 };
 streamRangeInput.oninput = updateStreamRange;
 streamRangeLabel.append(streamRangeValue, streamRangeInput); mapDebugPanel.append(streamRangeLabel);
@@ -1130,6 +1204,7 @@ function showVehicleDebug(root: EnginePart, session: ReturnType<Viewer['drive']>
     const state = session.diagnostics();
     vehicleDebugTelemetry.textContent = [
       `FPS ${viewer?.fps ?? 0}`,
+      ...(viewer ? [viewer.framePacer.info] : []),
       ...(viewer?.profiler.lines() ?? []),
       ...(viewer?.streamInfo ? [viewer.streamInfo] : []),
       ...(viewer?.physicsWork ? [viewer.physicsWork] : []),
@@ -1624,7 +1699,7 @@ async function openWorld(pack: string, id: number) {
   } catch (error) { if (request === sequence) { engineWorld?.dispose(); engineWorld = undefined; viewer?.clear(); status('Assembly error', true); el('details').textContent = String(error); } }
   finally { if (request === sequence) driveButton.disabled = false; }
 }
-try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); }
+try { viewer = new Viewer(el('viewport')); viewer.setDrivingHelping(drivingHelping); viewer.setUnifiedBuildingMaterials(unifiedBuildingsCheck.checked); viewer.setGlobalFacadeBatching(globalFacadesCheck.checked); viewer.setTrafficPhysicsRadius(Number(trafficRadiusSlider.value)); viewer.setTrafficSpawnRadius(Number(trafficSpawnSlider.value)); void viewer.setTrafficCount(Number(trafficCountSlider.value)); viewer.setLodStrength(Number(lodStrengthSlider.value)); showLodStrength(); viewer.setFramePacing(framePacingSelect.value as FramePacing); viewer.setMapFarCullPixels(Number(farCullInput.value)); }
 catch (e) { el('details').textContent = `WebGL unavailable: ${e}`; }
 
 function status(text: string, error = false) { el('state').textContent = text; el('state').classList.toggle('error', error); }
