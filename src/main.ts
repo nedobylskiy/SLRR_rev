@@ -5,6 +5,7 @@ import {parseScxAsync} from './formats/scx-worker-client';
 import './style.css';
 import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection, javaTrackIsCurrent } from './runtime/java-scene';
+import { javaPlacementWatcher } from './runtime/java-placement';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaPartPreviews } from './render/java-part-previews';
@@ -299,6 +300,7 @@ async function runGameBootNow() {
             const player = result.jvm.get(jv('class', 'java.game.GameLogic'), 'player');
             const car = result.jvm.get(player, 'car');
             const javaVehicle = result.gameTypes.get(car);
+            const javaPlacement = javaPlacementWatcher(javaVehicle);
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
               { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => { viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync()); return javaControls.sample(); },
@@ -307,7 +309,12 @@ async function runGameBootNow() {
                   javaVehicle?.setState(
                     { x: position.x, y: position.y, z: position.z }, { y: yaw, p: 0, r: 0 },
                     { x: velocity.x, y: velocity.y, z: velocity.z }, { x: 0, y: 0, z: 0 });
+                  javaPlacement.published();
                   viewer!.profiler.measure('Java triggers CPU',()=>result.gameTypes.updateTriggerContacts(car));
+                },
+                placement: () => {
+                  const placed = javaPlacement.placement();
+                  return placed && { position: new Vector3(placed.position.x, placed.position.y, placed.position.z), yaw: placed.yaw };
                 } });
             const driverRender=result.gameTypes.getResource(result.jvm.get(player,'render'));
             if(driverRender instanceof RenderObject){

@@ -2686,7 +2686,7 @@ export class Viewer {
     return Object.assign(stop,{reset:()=>{pair.reset();last=undefined;lastText=-Infinity;},pause:(value:boolean)=>{paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},
       wireframe:(value:boolean)=>views.forEach(({view})=>view.wireframe(value)),chassisCrumple:(value:number)=>built.forEach(({car})=>car.setChassisCrumple(value)),pair});
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; blocked?():boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; blocked?():boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void; placement?(): { position: THREE.Vector3; yaw: number } | undefined }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -2833,6 +2833,9 @@ export class Viewer {
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
+      // Java scripts reposition the player's car (e.g. City.startNightRace puts it on the start line).
+      const placement = crash instanceof Vehicle3D ? java?.placement?.() : undefined;
+      if (placement && crash instanceof Vehicle3D) { crash.placeAt(placement.position, placement.yaw); crash.settleSpawn(); }
       const javaInput=java?.sample();
       let input = this.playerTrafficDriver?.input ?? javaInput ?? keyboardDrivingInput(keys);
       if(javaInput?.transmissionLocked)input={...input,...javaInput};
