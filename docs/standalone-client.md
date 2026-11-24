@@ -83,3 +83,16 @@ What remains:
   pre-converted WebM files.
 - The Android System WebView is Chromium-based; WebGL 2 performance on the
   target devices is the main open question.
+
+## Icon
+
+`src-tauri/icons/app-icon.png` (1024×1024, transparent rounded square) is the
+source of every platform icon in `src-tauri/icons/`. After changing it,
+regenerate them and rebuild:
+
+```powershell
+npx tauri icon src-tauri/icons/app-icon.png -o src-tauri/icons
+```
+
+Cargo may keep the old Windows icon resource; `cargo clean -p slrr-standalone`
+in `src-tauri` forces it to be embedded again.

@@ -205,6 +205,12 @@ pub fn run() {
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 let _ = main.show();
+                // WebView2 can keep the bounds it had while the window was hidden, leaving
+                // part of the window blank. A 1 px resize round trip makes it re-read them.
+                if let Ok(size) = main.inner_size() {
+                    let _ = main.set_size(tauri::PhysicalSize::new(size.width + 1, size.height));
+                    let _ = main.set_size(size);
+                }
                 let _ = main.set_focus();
                 let _ = splash.close();
             });
