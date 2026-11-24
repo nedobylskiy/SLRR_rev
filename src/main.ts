@@ -47,11 +47,23 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <main><aside><div class="eyebrow">ORIGINAL ASSETS</div><h1>Under the hood.</h1><p class="intro">An open-source engine remaster of Street Legal Racing: Redline, rebuilt for the browser with WebGL 2.</p><div id="counts"></div><input id="search" type="search" placeholder="Search: Baiern, chassis, GameLogic…" aria-label="Search assets"><nav id="filters"><button data-kind="scx" class="active">Models</button><button data-kind="rpk">Packages</button><button data-kind="class">Scripts</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Cars</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
 <section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">JAVA / ENTRY POINT</span><div id="filename">Waiting for Init.java</div></div><span class="badge" id="state">Idle</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">Left drag: rotate &nbsp; · &nbsp; Wheel: zoom &nbsp; · &nbsp; Right drag: pan</div><div class="detail"><div class="eyebrow">DIAGNOSTICS</div><div id="details">Loading game catalog…</div></div></section></main><footer><span>JAVA SOURCE / WEBGL 2</span><span>Original Init.java runs first · GameLogic is under implementation</span><span id="total"></span></footer>`;
 
+/** game.html: the player page. The viewport is always expanded and letterboxed
+ * to 16:9; playground diagnostics start hidden (Ctrl+Shift+U) and the Java
+ * console opens with the backquote key. */
+const gameMode = document.documentElement.dataset.mode === 'game';
+if (gameMode) document.body.classList.add('game-mode', 'debug-ui-hidden');
+
 // Keep Java OSD, minimap and native cursor independent of host diagnostics.
 window.addEventListener('keydown', event => {
-  if (event.code !== 'KeyU' || !event.ctrlKey || !event.altKey || event.metaKey) return;
+  if (event.metaKey) return;
+  const debugToggle = event.code === 'KeyU' && event.ctrlKey && (event.altKey || gameMode && event.shiftKey);
+  const consoleToggle = gameMode && event.code === 'Backquote' && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!debugToggle && !consoleToggle) return;
+  // The game never sees these keys.
   event.preventDefault(); event.stopImmediatePropagation();
-  if (!event.repeat) document.body.classList.toggle('debug-ui-hidden');
+  if (event.repeat) return;
+  if (debugToggle) document.body.classList.toggle('debug-ui-hidden');
+  else document.body.classList.toggle('java-console-open');
 }, { capture: true });
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -445,15 +457,17 @@ const viewportCollapseButton = textElement('button', 'Minimize view · Esc', 'vi
 viewportCollapseButton.hidden = true; el('viewport').after(viewportCollapseButton);
 let trackDriving = false;
 function setViewportExpanded(expanded: boolean) {
+  if (gameMode) expanded = true; // The player page has no collapsed playground layout.
   el('viewport').parentElement?.classList.toggle('viewport-expanded', expanded);
   document.body.classList.toggle('viewport-expanded', expanded);
   viewportExpandButton.hidden = expanded;
-  viewportCollapseButton.hidden = !expanded;
+  viewportCollapseButton.hidden = !expanded || gameMode; // Esc belongs to the game there.
   trackDriveButton.textContent = trackDriving ? 'Expand drive view' : 'Drive Test Track';
   if (expanded && trackDriving) el('viewport').querySelector('canvas')?.focus({ preventScroll: true });
 }
 viewportExpandButton.onclick = () => setViewportExpanded(true);
 viewportCollapseButton.onclick = () => setViewportExpanded(false);
+if (gameMode) setViewportExpanded(true);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !viewportCollapseButton.hidden) {
     event.preventDefault(); event.stopImmediatePropagation(); setViewportExpanded(false);

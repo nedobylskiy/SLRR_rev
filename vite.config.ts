@@ -99,5 +99,8 @@ export default defineConfig({
   ] },
   // Imported only from the LOD worker; prebundle it so the first worker start does not reload the page.
   optimizeDeps: { include: ['meshoptimizer/simplifier'] },
+  // index.html is the development playground; game.html is the player page
+  // (16:9 viewport, diagnostics hidden) used by the standalone client.
+  build: { rollupOptions: { input: { main: path.resolve('index.html'), game: path.resolve('game.html') } } },
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
 });

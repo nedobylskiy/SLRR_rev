@@ -596,3 +596,24 @@ body.debug-ui-hidden :is(header, footer, main > aside, .toolbar, .detail,
 body.debug-ui-hidden main { grid-template-columns: minmax(0, 1fr); height: 100vh; min-height: 0; }
 
 .osd-decal-preview img{object-fit:contain}
+
+/* game.html: player page. The viewport keeps a 16:9 frame, letterboxed on black. */
+body.game-mode{background:#000}
+body.game-mode .workspace.viewport-expanded{display:grid;place-items:center;background:#000}
+body.game-mode .workspace.viewport-expanded #viewport{
+  flex:none;
+  width:min(100vw,calc(100dvh * 16 / 9));
+  height:min(100dvh,calc(100vw * 9 / 16));
+  min-height:0
+}
+/* Backquote opens the Java console over the game, even with diagnostics hidden. */
+body.game-mode.java-console-open #app .workspace.viewport-expanded .java-console{
+  display:block !important;
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  z-index:60;
+  background:#0a1117eb
+}
+body.game-mode.java-console-open #java-log{max-height:40vh}
