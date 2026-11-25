@@ -7,6 +7,8 @@ import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection, javaTrackIsCurrent } from './runtime/java-scene';
 import { javaPlacementWatcher } from './runtime/java-placement';
 import { JavaCarBrake } from './runtime/java-car-brake';
+import { TouchDrivingControls, mergeTouchInput, touchControlsEnabled } from './render/touch-driving';
+import { TouchToolbar } from './render/touch-toolbar';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaPartPreviews } from './render/java-part-previews';
@@ -99,6 +101,7 @@ function appendJavaEvent(event: BootEvent) {
   // On the player page the console is normally closed; surface Java failures.
   if (gameMode && event.level === 'error') document.body.classList.add('java-console-open');
 }
+let touchToolbar: TouchToolbar | undefined;
 let gameBootReady:Promise<void>|undefined;
 function runGameBoot(){return gameBootReady=runGameBootNow();}
 async function runGameBootNow() {
@@ -135,6 +138,12 @@ async function runGameBootNow() {
     flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined,
     work => viewer ? viewer.profiler.measure('Java OSD sync CPU', work) : work());
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
+  if (touchControlsEnabled()) {
+    // Mobile button bar for the whole game (menus too): keyboard, menu, camera, settings.
+    const toolbar = new TouchToolbar(el('viewport'), result.input);
+    touchToolbar = toolbar;
+    disposeGameOsd = () => { toolbar.dispose(); if (touchToolbar === toolbar) touchToolbar = undefined; gameOsd.dispose(); };
+  }
   result.parts.setPaintListener((id,color,strokes)=>{
     if(source!==assets||run!==sequence||!viewer)return;
     void viewer.updateJavaPaint(id,color,strokes,source).catch(reason=>appendJavaEvent({level:'error',message:`Paint overlay: ${reason instanceof Error?reason.message:String(reason)}`}));
@@ -263,6 +272,7 @@ async function runGameBootNow() {
       let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
       let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
       let finishBrake: JavaCarBrake | undefined;
+      let touchDriving: TouchDrivingControls | undefined;
       let persistPhysics: (() => void) | undefined;
       try {
         status('Loading Java track…');
@@ -319,11 +329,13 @@ async function runGameBootNow() {
             const javaVehicle = result.gameTypes.get(car);
             const javaPlacement = javaPlacementWatcher(javaVehicle);
             finishBrake = new JavaCarBrake(result.gameTypes, car);
+            if (touchControlsEnabled()) { touchDriving = new TouchDrivingControls(el('viewport')); touchToolbar?.setDriving(true); }
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
               { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => {
                 viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync());
-                const v = javaVehicle?.velocity, input = javaControls.sample();
+                const v = javaVehicle?.velocity, sampled = javaControls.sample();
+                const input = touchDriving ? mergeTouchInput(sampled, touchDriving.state) : sampled;
                 return finishBrake ? finishBrake.apply(input, v ? Math.hypot(v.x, v.y, v.z) : 0) : input;
               },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
@@ -354,7 +366,7 @@ async function runGameBootNow() {
           }
         }
         activeTrackCleanup = () => {
-          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); finishBrake?.dispose(); gauges?.dispose();
+          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); finishBrake?.dispose(); touchDriving?.dispose(); touchToolbar?.setDriving(false); gauges?.dispose();
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose();
         };
@@ -369,7 +381,7 @@ async function runGameBootNow() {
         if(source===assets&&run===sequence&&javaTrackIsCurrent(result,selected))trackReady=true;
       } catch (reason) {
         session?.();gauges?.dispose();
-        physicsBinding?.dispose(); finishBrake?.dispose();
+        physicsBinding?.dispose(); finishBrake?.dispose(); touchDriving?.dispose(); touchToolbar?.setDriving(false);
         if (built) viewer?.removeWorld(built.world);
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });

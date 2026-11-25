@@ -50,6 +50,10 @@ window. The game window loads hidden meanwhile and replaces the splash once the
 logo has been on screen for three seconds and `game.html` has loaded (at most fifteen
 seconds in total).
 
+Phones have a single full-screen webview, so the mobile client opens
+`game.html?splash=1` instead: the page itself covers everything with the logo
+for three seconds while the game loads underneath, then fades it out.
+
 ## Video
 
 Original FMV is AVI, which no webview decodes. The provider looks for ffmpeg in
@@ -68,21 +72,63 @@ npm run standalone:debug
 executable. Bundling (installers) is disabled in `tauri.conf.json`.
 Requirements: Rust (stable-msvc), MSVC Build Tools, the WebView2 runtime.
 
-## Android (next step, not built yet)
+## Android (experimental test build)
 
-Tauri 2 routes custom schemes through `WebViewClient.shouldInterceptRequest`
-on Android, so the same `slrr://` provider works there with no local server.
-What remains:
+The Android project is `src-tauri/gen/android` (from `tauri android init`).
+The same `slrr://` provider serves the page and the game; Tauri routes the
+scheme through the Android WebView, so there is no local server either.
 
-- `npx tauri android init` (needs Android SDK/NDK, JDK 17, Rust Android targets).
-- Game files: the provider currently expects a filesystem directory. On
-  Android it looks in `<app data>/game`. A first-run import (Storage Access
-  Framework folder pick, copying into app storage) is still to be written;
-  reading straight from a SAF `content://` tree would need a Kotlin plugin.
-- ffmpeg is not available there; FMV would need a different decoder or
-  pre-converted WebM files.
-- The Android System WebView is Chromium-based; WebGL 2 performance on the
-  target devices is the main open question.
+- **Game files.** On first start `MainActivity.kt` asks for the Street Legal
+  Racing Redline folder on the device (system folder picker), checks for
+  `system` and `sl`, and copies it into the app's `files/game` with a progress
+  dialog. The provider looks for that folder again on every request while it
+  has none, so the page simply reloads when the copy is done.
+- **Window.** One full-screen webview: no splash window on Android.
+- **Controls.** The test build uses the touch frontend (`build:web:touch`), so
+  the on-screen wheel and lever are on by default.
+- **Video.** No ffmpeg on Android: FMV is skipped.
+
+Requirements: JDK 17, Android SDK (platform 35+, build-tools, NDK) in
+`%LOCALAPPDATA%\Android\Sdk`, and the Rust targets
+`aarch64-linux-android` (plus armv7/x86_64 for other devices).
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Microsoft\jdk-17.0.21.102-hotspot"
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:NDK_HOME = "$env:ANDROID_HOME
+dk.0.16248370"
+npx tauri android build --debug --apk --target aarch64 --config src-tauri/tauri.touch.conf.json
+```
+
+On Windows without Developer Mode the Tauri CLI cannot create the symbolic
+link to the Rust library and stops after compiling it. Then copy the library
+and let Gradle finish without rebuilding Rust:
+
+```powershell
+Copy-Item src-tauri\target\aarch64-linux-android\debug\libslrr_standalone_lib.so src-tauri\gen\android\app\src\main\jniLibs\arm64-v8a\
+cd src-tauri\gen\android; .\gradlew.bat assembleArm64Debug -x rustBuildArm64Debug
+```
+
+The APK is `src-tauri/gen/android/app/build/outputs/apk/arm64/debug/app-arm64-debug.apk`
+(debug-signed, unstripped). Open questions: WebGL 2 performance on phones,
+and memory for multi-gigabyte installations.
+
+## GitHub Actions builds
+
+`.github/workflows/standalone.yml` builds both clients on every push to
+`standalone-client`, on `standalone-v*` tags, and on demand (Actions → Standalone
+client builds → Run workflow). The run's Artifacts hold
+`slrr-standalone-windows-x64` (the exe) and `slrr-standalone-android-arm64` (a
+signed release APK with the touch frontend). Linux runners have no symlink
+problem, so the Android job runs the normal `tauri android build`.
+
+The APK is signed with the keystore in the secrets `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+Without them it uses a new throwaway key each run, and Android refuses to
+update an installed app signed with another key. To keep updating an APK
+built locally, store `~/.android/debug.keystore` (password `android`, alias
+`androiddebugkey`) in those secrets, for example with `gh secret set
+ANDROID_KEYSTORE_BASE64 < base64-of-the-file`.
 
 ## Icon
 
@@ -96,3 +142,31 @@ npx tauri icon src-tauri/icons/app-icon.png -o src-tauri/icons
 
 Cargo may keep the old Windows icon resource; `cargo clean -p slrr-standalone`
 in `src-tauri` forces it to be embedded again.
+
+## Touch driving controls (experimental)
+
+`src/render/touch-driving.ts` draws on-screen driving controls over the game
+frame while a car is being driven (not in menus, where they would cover OSD
+buttons):
+
+- a steering wheel on the left: turn it with a finger up to ±150° for full
+  lock; released, it springs back to centre;
+- a throttle/brake lever on the right, one analog axis like an aircraft
+  throttle: push forward for gas, pull back to brake, proportionally, with a
+  small dead zone at the centre; released, it springs back to neutral.
+
+Each widget follows its own finger, so both work at once; a mouse works too.
+Their axes are merged into the Java driving input: the held wheel replaces
+steering, the lever adds to the pedals, and the keyboard keeps working.
+
+Two fingers on the game picture (outside the widgets) move the chase camera
+(`src/render/touch-camera.ts`, wired in the viewer's drive loop): drag both
+to orbit around the car, pinch to zoom out and spread to zoom in (0.6× to
+2.5× of the script's distance). This works on any touch screen, flag or not;
+the cockpit view is not affected.
+
+They are off by default. `npm run build:web:touch` (`vite build --mode
+touch`, or `SLRR_TOUCH=1`) turns them on by default, and
+`npm run standalone:debug:touch` builds the client that way. At runtime
+`?touch=1` turns them on in any build and `?touch=0` turns them off, e.g.
+`http://127.0.0.1:5174/game.html?touch=1`.

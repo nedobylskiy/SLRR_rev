@@ -25,6 +25,32 @@ for (const [letters, start] of [['QWERTYUIOP', 16], ['ASDFGHJKL', 30], ['ZXCVBNM
   [...letters].forEach((letter, index) => { codes[`Key${letter}`] = start + index; });
 for (let n = 1; n <= 10; n++) codes[`F${n}`] = 58 + n;
 codes.F11 = 87; codes.F12 = 88;
+/** DirectInput key names for Input.axisName on the keyboard (device 0, DIK scan codes). */
+const keyNames: Record<number, string> = {
+  1: 'Esc', 12: '-', 13: '=', 14: 'Backspace', 15: 'Tab', 26: '[', 27: ']', 28: 'Enter', 29: 'Left Ctrl',
+  39: ';', 40: "'", 41: '`', 42: 'Left Shift', 43: '\\', 51: ',', 52: '.', 53: '/', 54: 'Right Shift',
+  55: 'Num *', 56: 'Left Alt', 57: 'Space', 58: 'Caps Lock', 69: 'Num Lock', 70: 'Scroll Lock',
+  71: 'Num 7', 72: 'Num 8', 73: 'Num 9', 74: 'Num -', 75: 'Num 4', 76: 'Num 5', 77: 'Num 6', 78: 'Num +',
+  79: 'Num 1', 80: 'Num 2', 81: 'Num 3', 82: 'Num 0', 83: 'Num Del', 87: 'F11', 88: 'F12',
+  156: 'Num Enter', 157: 'Right Ctrl', 181: 'Num /', 184: 'Right Alt', 197: 'Pause', 199: 'Home',
+  200: 'Up', 201: 'Page Up', 203: 'Left', 205: 'Right', 207: 'End', 208: 'Down', 209: 'Page Down',
+  210: 'Insert', 211: 'Delete',
+};
+for (let n = 1; n <= 9; n++) keyNames[n + 1] = String(n);
+keyNames[11] = '0';
+for (let n = 1; n <= 10; n++) keyNames[58 + n] = `F${n}`;
+for (const [letters, start] of [['QWERTYUIOP', 16], ['ASDFGHJKL', 30], ['ZXCVBNM', 44]] as const)
+  [...letters].forEach((letter, index) => { keyNames[start + index] = letter; });
+/** Mouse (device 1): ControlSet.defaults binds X/Y to 0/1, the wheel to 2 and buttons from 3. */
+const mouseAxisNames = ['Mouse X', 'Mouse Y', 'Mouse Wheel'];
+
+/** Input.axisName(device, axis): the label OptionsDialog shows for a control binding. */
+export function inputAxisName(device: number, axis: number): string {
+  if (device === 0) return keyNames[axis] ?? `Key ${axis}`;
+  if (device === 1) return mouseAxisNames[axis] ?? `Mouse Button ${axis - 2}`;
+  return `Device ${device} Axis ${axis}`;
+}
+
 const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> = {
   Digit1: { cameraAxis: codes.F1, command: 7 },
   Digit2: { cameraAxis: codes.F2, command: 0 },
@@ -60,6 +86,10 @@ export class InputNative {
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'getAxis', ['int', 'int'], ({ args }) =>
       jv('float', this.physicalAxis(Number(args[0].value), Number(args[1].value))));
+    jvm.natives.register(owner, 'axisName', ['int', 'int'], ({ args }) =>
+      jv('String', inputAxisName(Number(args[0].value), Number(args[1].value))));
+    // OptionsDialog's "redefine control" polls this for the axis being pressed.
+    jvm.natives.register(owner, 'activeAxis', ['int'], ({ args }) => jv('int', this.activeAxis(Number(args[0].value))));
     jvm.natives.register(owner, 'lastKey', [], () => {
       const key = this.pressedKeys.shift() ?? 0;
       const character = (key >>> 16) & 0xff;
@@ -112,6 +142,17 @@ export class InputNative {
   }
 
   physicalAxis(device: number, axis: number): number { return this.axes.get(`${device}:${axis}`) ?? 0; }
+  /** First pressed axis of a device, or -1. Mouse X/Y/wheel hold the cursor and
+   * wheel samples rather than a press, so only mouse buttons (axis 3+) count. */
+  activeAxis(device: number): number {
+    let found = -1;
+    for (const [key, value] of this.axes) {
+      const [owner, axis] = key.split(':').map(Number);
+      if (owner !== device || Math.abs(value) <= 0.5 || device === 1 && axis < 3) continue;
+      if (found < 0 || axis < found) found = axis;
+    }
+    return found;
+  }
   /** Java OSD uses [-1,1] screen coordinates, with Y increasing toward the bottom. */
   setCursorPosition(x:number,y:number){if(Number.isFinite(x)&&Number.isFinite(y))this.cursorPosition=[Math.max(-1,Math.min(1,x)),Math.max(-1,Math.min(1,y)),0];}
 

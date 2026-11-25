@@ -30,7 +30,10 @@ struct IndexEntry {
 }
 
 pub struct GameProvider {
-    root: Option<PathBuf>,
+    root: Mutex<Option<PathBuf>>,
+    /// Checked again on each request while no root is known: on Android the
+    /// installation is copied into app storage after the page has loaded.
+    later: Vec<PathBuf>,
     index: OnceLock<Result<Vec<u8>, String>>,
     videos: Mutex<HashMap<String, Arc<OnceLock<Result<Vec<u8>, String>>>>>,
 }
@@ -68,19 +71,24 @@ fn query_param(query: Option<&str>, name: &str) -> Option<String> {
 }
 
 impl GameProvider {
-    pub fn new(root: Option<PathBuf>) -> Self {
-        Self { root, index: OnceLock::new(), videos: Mutex::new(HashMap::new()) }
+    pub fn new(root: Option<PathBuf>, later: Vec<PathBuf>) -> Self {
+        Self { root: Mutex::new(root), later, index: OnceLock::new(), videos: Mutex::new(HashMap::new()) }
     }
 
-    pub fn root(&self) -> Option<&Path> {
-        self.root.as_deref()
+    pub fn root(&self) -> Option<PathBuf> {
+        let mut root = self.root.lock().unwrap();
+        if root.is_none() {
+            *root = self.later.iter().find(|dir| is_game_root(dir)).cloned();
+        }
+        root.clone()
     }
 
     /// `path` is the URL path after `/api/game`.
     pub fn handle(&self, path: &str, query: Option<&str>, range: Option<&str>) -> Reply {
-        let Some(root) = self.root.as_deref() else {
+        let Some(root) = self.root() else {
             return text(StatusCode::NOT_FOUND, "No game folder selected");
         };
+        let root = root.as_path();
         let result = match path {
             "/index" => self.index(root),
             "/file" => self.file(root, &query_param(query, "path").unwrap_or_default(), range),

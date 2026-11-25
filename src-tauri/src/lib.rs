@@ -70,8 +70,8 @@ fn locate_game_root(app: &AppHandle) -> Option<PathBuf> {
         return Some(dir.clone());
     }
     let fallback = if cfg!(target_os = "android") {
-        // Copy the installation into the app's own storage (no picker on Android yet).
-        app.path().app_data_dir().ok().map(|dir| dir.join("game"))
+        // MainActivity asks for the folder and copies it into app storage.
+        android_game_dirs(app).into_iter().find(|dir| is_game_root(dir))
     } else {
         Some(PathBuf::from(DEFAULT_ROOT))
     };
@@ -153,6 +153,91 @@ fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     }
 }
 
+/// Where the Android first-run import (MainActivity) copies the installation:
+/// the app's files directory. Desktop builds pick or remember a real folder.
+fn android_game_dirs(app: &AppHandle) -> Vec<PathBuf> {
+    if !cfg!(target_os = "android") {
+        return Vec::new();
+    }
+    let identifier = &app.config().identifier;
+    let mut dirs = vec![PathBuf::from(format!("/data/data/{identifier}/files/game")), PathBuf::from(format!("/data/user/0/{identifier}/files/game"))];
+    dirs.extend(app.path().app_data_dir().ok().map(|dir| dir.join("game")));
+    dirs
+}
+
+/// Desktop: the logo splash, then the game window that loaded hidden behind it.
+#[cfg(desktop)]
+fn open_windows(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let title = match app.state::<GameProvider>().root() {
+        Some(root) => format!("SLRR Standalone - {}", root.display()),
+        None => "SLRR Standalone - no game folder".to_string(),
+    };
+    // Splash: the project logo in a transparent, borderless window. The game window loads hidden behind it and
+    // replaces it once the logo has been on screen for SPLASH_MIN and game.html has loaded.
+    let started = Instant::now();
+    // The webview paints the logo only once splash.html has loaded; count from then.
+    let splash_ready: Arc<Mutex<Option<Instant>>> = Arc::default();
+    let splash_mark = splash_ready.clone();
+    let splash = WebviewWindowBuilder::new(app, "splash", WebviewUrl::CustomProtocol(page_url("splash.html").parse()?))
+        .title("SLRR REV")
+        // docs/media/slrr-rev-logo.png is 1403x1121 with transparency.
+        .inner_size(600.0, 480.0)
+        .center()
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .skip_taskbar(true)
+        .always_on_top(true)
+        .focused(false)
+        .on_page_load(move |_, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                splash_mark.lock().unwrap().get_or_insert_with(Instant::now);
+            }
+        })
+        .build()?;
+    let loaded = Arc::new(AtomicBool::new(false));
+    let page_loaded = loaded.clone();
+    let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(page_url("game.html").parse()?))
+        .title(title)
+        .inner_size(1600.0, 900.0)
+        .center()
+        .visible(false)
+        .on_page_load(move |_, payload| {
+            if payload.event() == PageLoadEvent::Finished {
+                page_loaded.store(true, Ordering::Release);
+            }
+        })
+        .build()?;
+    std::thread::spawn(move || {
+        loop {
+            let logo_done = splash_ready.lock().unwrap().is_some_and(|at| at.elapsed() >= SPLASH_MIN);
+            if logo_done && loaded.load(Ordering::Acquire) || started.elapsed() >= SPLASH_MAX {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = main.show();
+        // WebView2 can keep the bounds it had while the window was hidden, leaving
+        // part of the window blank. A 1 px resize round trip makes it re-read them.
+        if let Ok(size) = main.inner_size() {
+            let _ = main.set_size(tauri::PhysicalSize::new(size.width + 1, size.height));
+            let _ = main.set_size(size);
+        }
+        let _ = main.set_focus();
+        let _ = splash.close();
+    });
+    Ok(())
+}
+
+/// Android/iOS have a single full-screen webview: no splash window, no sizing.
+#[cfg(mobile)]
+fn open_windows(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    // No splash window on phones: game.html shows the logo itself for three seconds.
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(page_url("game.html?splash=1").parse()?)).build()?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -163,66 +248,8 @@ pub fn run() {
         })
         .setup(|app| {
             let root = locate_game_root(app.handle());
-            app.manage(GameProvider::new(root));
-            let title = match app.state::<GameProvider>().root() {
-                Some(root) => format!("SLRR Standalone - {}", root.display()),
-                None => "SLRR Standalone - no game folder".to_string(),
-            };
-            // Splash: the project logo in a transparent, borderless window. The game window loads hidden behind it and
-            // replaces it once the logo has been on screen for SPLASH_MIN and game.html has loaded.
-            let started = Instant::now();
-            // The webview paints the logo only once splash.html has loaded; count from then.
-            let splash_ready: Arc<Mutex<Option<Instant>>> = Arc::default();
-            let splash_mark = splash_ready.clone();
-            let splash = WebviewWindowBuilder::new(app, "splash", WebviewUrl::CustomProtocol(page_url("splash.html").parse()?))
-                .title("SLRR REV")
-                // docs/media/slrr-rev-logo.png is 1403x1121 with transparency.
-                .inner_size(600.0, 480.0)
-                .center()
-                .decorations(false)
-                .transparent(true)
-                .shadow(false)
-                .resizable(false)
-                .skip_taskbar(true)
-                .always_on_top(true)
-                .focused(false)
-                .on_page_load(move |_, payload| {
-                    if payload.event() == PageLoadEvent::Finished {
-                        splash_mark.lock().unwrap().get_or_insert_with(Instant::now);
-                    }
-                })
-                .build()?;
-            let loaded = Arc::new(AtomicBool::new(false));
-            let page_loaded = loaded.clone();
-            let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(page_url("game.html").parse()?))
-                .title(title)
-                .inner_size(1600.0, 900.0)
-                .center()
-                .visible(false)
-                .on_page_load(move |_, payload| {
-                    if payload.event() == PageLoadEvent::Finished {
-                        page_loaded.store(true, Ordering::Release);
-                    }
-                })
-                .build()?;
-            std::thread::spawn(move || {
-                loop {
-                    let logo_done = splash_ready.lock().unwrap().is_some_and(|at| at.elapsed() >= SPLASH_MIN);
-                    if logo_done && loaded.load(Ordering::Acquire) || started.elapsed() >= SPLASH_MAX {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                let _ = main.show();
-                // WebView2 can keep the bounds it had while the window was hidden, leaving
-                // part of the window blank. A 1 px resize round trip makes it re-read them.
-                if let Ok(size) = main.inner_size() {
-                    let _ = main.set_size(tauri::PhysicalSize::new(size.width + 1, size.height));
-                    let _ = main.set_size(size);
-                }
-                let _ = main.set_focus();
-                let _ = splash.close();
-            });
+            app.manage(GameProvider::new(root, android_game_dirs(app.handle())));
+            open_windows(app)?;
             Ok(())
         })
         .run(tauri::generate_context!())
