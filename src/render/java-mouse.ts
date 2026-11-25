@@ -6,6 +6,10 @@ import { type ScxMesh } from '../formats/scx';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { normalizePath } from '../assets';
 import { readExeCursor, stockCursorIndex } from '../formats/exe-cursor';
+import { TwoFingerCamera } from './touch-camera';
+
+/** Pinch ratio that counts as one mouse-wheel notch. */
+export const PINCH_NOTCH = Math.log(1.12);
 
 /** Font glyph UVs select the original pointer artwork, including modded fonts. */
 export function pointerUv(mesh: ScxMesh, character: string) {
@@ -31,6 +35,11 @@ export class JavaMouse {
   private styles = new Map<string, Promise<string>>();
   private exe?: Promise<Uint8Array>;
   private timer: ReturnType<typeof setInterval>;
+  /** Touch screens: two fingers act as a right-button drag (orbit) and a pinch as the wheel (zoom). */
+  private readonly fingers = new TwoFingerCamera();
+  private touchDrag = false;
+  private touchDragged = false;
+  private pinch = 0;
   constructor(private readonly viewport: HTMLElement, private readonly result: BootResult,
     private readonly assets: Assets, private readonly report: (message: string) => void,
     private readonly pick?: (x: number, y: number) => { id: number; local: number[]; world: number[] } | undefined) {
@@ -38,11 +47,11 @@ export class JavaMouse {
     viewport.addEventListener('click', this.click, true);
     viewport.addEventListener('pointermove', this.move);
     viewport.addEventListener('pointerup', this.up);
-    viewport.addEventListener('pointercancel', this.cancel);
+    viewport.addEventListener('pointercancel', this.cancelPointer);
     viewport.addEventListener('lostpointercapture', this.cancel);
     viewport.addEventListener('wheel', this.wheel, { passive: false });
     viewport.addEventListener('contextmenu', this.context);
-    window.addEventListener('blur', this.cancel);
+    window.addEventListener('blur', this.blur);
     window.addEventListener('pointerup',this.up);
     this.timer = setInterval(() => this.update(), 50);
     this.update();
@@ -64,6 +73,14 @@ export class JavaMouse {
   }
   private down = (event: PointerEvent) => {
     this.trackPosition(event);
+    if (event.pointerType === 'touch' && event.target instanceof HTMLCanvasElement) {
+      this.fingers.down(event.pointerId, event.clientX, event.clientY);
+      if (this.fingers.active) {
+        event.preventDefault();
+        if (!this.touchDrag && this.controlled()) this.beginTouchDrag();
+        return;
+      }
+    }
     if (event.button === 0 && this.controlled()) {
       this.suppressClick = false;
       const physics = this.result.osdButtons?.physicsAt(event.clientX, event.clientY);
@@ -85,6 +102,14 @@ export class JavaMouse {
     this.result.input.cursorEvent(3, this.rightOrigin.hit);
   };
   private move = (event: PointerEvent) => {
+    if (event.pointerType === 'touch') {
+      const gesture = this.fingers.move(event.pointerId, event.clientX, event.clientY);
+      if (this.touchDrag) {
+        event.preventDefault();
+        if (gesture) this.touchGesture(gesture.dx, gesture.dy, gesture.zoom);
+        return;
+      }
+    }
     this.trackPosition(event);
     const pressed = this.pressed;
     if (pressed && pressed.pointer === event.pointerId) {
@@ -118,6 +143,10 @@ export class JavaMouse {
     input.setPhysicalAxis(1, 1, Math.max(-1, Math.min(1, input.physicalAxis(1, 1) + dy * 0.01)));
   };
   private up = (event: PointerEvent) => {
+    if (event.pointerType === 'touch') {
+      this.fingers.up(event.pointerId);
+      if (this.touchDrag) { if (!this.fingers.active) this.endTouchDrag(); return; }
+    }
     this.trackPosition(event);
     if (event.button === 0 && this.pressed && event.pointerId === this.pressed.pointer) {
       const pressed = this.pressed; this.pressed = undefined;
@@ -149,6 +178,47 @@ export class JavaMouse {
         this.result.input.cursorEvent(6, hit);
     }
   };
+  /** The second finger turns a one-finger press into a camera gesture: drop the
+   * press without a click and hold the right button, as for a mouse orbit. */
+  private beginTouchDrag() {
+    const pressed = this.pressed; this.pressed = undefined;
+    if (pressed) {
+      if (pressed.dragged && pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
+      if (pressed.hit) this.result.input.cursorEvent(2, pressed.hit);
+      this.result.input.setPickedTarget?.();
+    }
+    this.suppressClick = true;
+    this.touchDrag = true; this.touchDragged = false; this.pinch = 0;
+    this.result.input.setPhysicalAxis(1, 4, 1);
+    this.result.input.cursorEvent(3);
+  }
+  private touchGesture(dx: number, dy: number, zoom: number) {
+    const input = this.result.input;
+    if ((dx || dy) && !this.touchDragged) { this.touchDragged = true; input.cursorEvent(12); }
+    if (dx || dy) {
+      input.setPhysicalAxis(1, 0, Math.max(-1, Math.min(1, input.physicalAxis(1, 0) + dx * 0.01)));
+      input.setPhysicalAxis(1, 1, Math.max(-1, Math.min(1, input.physicalAxis(1, 1) + dy * 0.01)));
+    }
+    // Spreading the fingers (zoom < 1) zooms in like scrolling the wheel up.
+    this.pinch -= Math.log(zoom);
+    const notches = Math.trunc(this.pinch / PINCH_NOTCH);
+    if (notches) { this.pinch -= notches * PINCH_NOTCH; input.setPhysicalAxis(1, 2, Math.sign(notches)); }
+  }
+  private endTouchDrag() {
+    if (!this.touchDrag) return;
+    this.touchDrag = false;
+    if (this.touchDragged) this.result.input.cursorEvent(13);
+    this.result.input.cursorEvent(4); this.touchDragged = false;
+    for (const axis of [0, 1, 2, 4]) this.result.input.setPhysicalAxis(1, axis, 0);
+  }
+  private cancelPointer = (event: PointerEvent) => {
+    if (event.pointerType === 'touch') {
+      this.fingers.up(event.pointerId);
+      if (this.touchDrag) { if (!this.fingers.active) this.endTouchDrag(); return; }
+    }
+    this.cancel();
+  };
+  private blur = () => { this.fingers.clear(); this.endTouchDrag(); this.cancel(); };
   private click = (event: MouseEvent) => {
     if (!this.suppressClick) return;
     this.suppressClick = false; event.preventDefault(); event.stopImmediatePropagation();
@@ -236,16 +306,16 @@ export class JavaMouse {
     } finally { bitmap.close(); }
   }
   dispose() {
-    this.cancel(); this.disposed = true; clearInterval(this.timer);
+    this.blur(); this.disposed = true; clearInterval(this.timer);
     this.viewport.removeEventListener('pointerdown', this.down);
     this.viewport.removeEventListener('click', this.click, true);
     this.viewport.removeEventListener('pointermove', this.move);
     this.viewport.removeEventListener('pointerup', this.up);
-    this.viewport.removeEventListener('pointercancel', this.cancel);
+    this.viewport.removeEventListener('pointercancel', this.cancelPointer);
     this.viewport.removeEventListener('lostpointercapture', this.cancel);
     this.viewport.removeEventListener('wheel', this.wheel);
     this.viewport.removeEventListener('contextmenu', this.context);
-    window.removeEventListener('blur', this.cancel);
+    window.removeEventListener('blur', this.blur);
     window.removeEventListener('pointerup',this.up);
     delete this.viewport.dataset.gameCursor; this.viewport.style.removeProperty('cursor');
     this.styles.clear();

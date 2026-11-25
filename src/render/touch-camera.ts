@@ -7,6 +7,9 @@ export interface CameraGestureDelta {
   pitch: number;
   /** Multiplier for the camera distance: below 1 moves closer. */
   zoom: number;
+  /** Midpoint travel in pixels, for consumers that orbit through mouse axes. */
+  dx: number;
+  dy: number;
 }
 
 /** Radians per pixel of finger travel. */
@@ -24,6 +27,7 @@ export class TwoFingerCamera {
   private readonly points = new Map<number, Point>();
 
   get active(): boolean { return this.points.size >= 2; }
+  get fingers(): number { return this.points.size; }
 
   down(id: number, x: number, y: number): void {
     this.points.set(id, { x, y });
@@ -46,10 +50,12 @@ export class TwoFingerCamera {
     point.x = x; point.y = y;
     if (!pair || !before) return undefined;
     const after = measure(pair[0], pair[1]);
+    const dx = after.mid.x - before.mid.x, dy = after.mid.y - before.mid.y;
     return {
+      dx, dy,
       // Same directions as the right-mouse-button orbit in the viewer.
-      yaw: (after.mid.x - before.mid.x) * ORBIT_PER_PIXEL,
-      pitch: -(after.mid.y - before.mid.y) * ORBIT_PER_PIXEL,
+      yaw: dx * ORBIT_PER_PIXEL,
+      pitch: -dy * ORBIT_PER_PIXEL,
       // Fingers apart (spread) brings the camera closer.
       zoom: before.span > 1 && after.span > 1 ? before.span / after.span : 1,
     };
