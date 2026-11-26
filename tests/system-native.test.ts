@@ -112,3 +112,19 @@ test('Java loading reset cannot dismiss pending host assets, and dialog pause ca
   assert.equal(jvm.natives.invoke('java.lang.System','isLoading',receiver,[])!.value,0,'Java must be able to hide its dialog while gameplay is still paused');
   assert.equal(native.timeScale,0);native.setSceneLoading(false);assert.equal(native.timeScale,1);
 });
+
+test('System.exit() asks the host to quit once, although MainMenu keeps calling it', async () => {
+  // Gates.run: fade to black, userWait(1.5), System.exit(); its thread loop then repeats the call.
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => className === 'java.lang.System'
+    ? { path: 'System.java', source: 'package java.lang; class System { static native void exit(); static native void exit(String message); }' } : null });
+  const events: BootEvent[] = [], alerts: string[] = [];
+  const native = new SystemNative(jvm, event => events.push(event), () => 0, () => 0, message => alerts.push(message));
+  let exits = 0;
+  native.setExitHandler(() => exits++);
+  await jvm.loadClass('java.lang.System');
+  const receiver = jv('class', 'java.lang.System');
+  for (let frame = 0; frame < 3; frame++) assert.equal(jvm.invoke(receiver, 'exit', []).type, 'void');
+  assert.equal(exits, 1);
+  assert.deepEqual(alerts, [], 'a plain exit shows no message box');
+  assert.equal(events.filter(event => /System\.exit/.test(event.message)).length, 1);
+});

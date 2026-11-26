@@ -91,13 +91,20 @@ function gameAssets(): Plugin {
     }
   };
 }
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [gameAssets()],
+  // `vite build --mode touch` (npm run build:web:touch) or SLRR_TOUCH=1 turns the
+  // experimental on-screen driving controls on by default
+  // (src/render/touch-driving.ts); ?touch=1 / ?touch=0 override at runtime.
+  define: { __SLRR_TOUCH__: JSON.stringify(mode === 'touch' || process.env.SLRR_TOUCH === '1') },
   resolve: { alias: [
     { find: /^slrr-jvm$/, replacement: path.resolve('packages/slrr-jvm/src/index.ts') },
     { find: /^slrr-jvm-compiler$/, replacement: path.resolve('src/runtime/jvm-compiler-browser.ts') },
   ] },
   // Imported only from the LOD worker; prebundle it so the first worker start does not reload the page.
   optimizeDeps: { include: ['meshoptimizer/simplifier'] },
+  // index.html is the development playground; game.html is the player page
+  // (16:9 viewport, diagnostics hidden) used by the standalone client.
+  build: { rollupOptions: { input: { main: path.resolve('index.html'), game: path.resolve('game.html'), splash: path.resolve('splash.html') } } },
   server: { host: '0.0.0.0', port: 5173, strictPort: true },
-});
+}));

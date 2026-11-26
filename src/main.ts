@@ -7,6 +7,8 @@ import { Assets, isSavedVehiclePath, type Asset } from './assets';
 import { activeJavaTrack, javaDrivingControls, javaStockSelection, javaTrackIsCurrent } from './runtime/java-scene';
 import { javaPlacementWatcher } from './runtime/java-placement';
 import { JavaCarBrake } from './runtime/java-car-brake';
+import { TouchDrivingControls, mergeTouchInput, touchControlsEnabled } from './render/touch-driving';
+import { TouchToolbar } from './render/touch-toolbar';
 import { javaSceneCamera } from './runtime/java-scene-camera';
 import { JavaSceneVehicles } from './render/java-vehicles';
 import { JavaPartPreviews } from './render/java-part-previews';
@@ -47,11 +49,23 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 <main><aside><div class="eyebrow">ORIGINAL ASSETS</div><h1>Under the hood.</h1><p class="intro">An open-source engine remaster of Street Legal Racing: Redline, rebuilt for the browser with WebGL 2.</p><div id="counts"></div><input id="search" type="search" placeholder="Search: Baiern, chassis, GameLogic…" aria-label="Search assets"><nav id="filters"><button data-kind="scx" class="active">Models</button><button data-kind="rpk">Packages</button><button data-kind="class">Scripts</button><button data-kind="cfg">CFG</button><button data-kind="vehicle">Cars</button></nav><div id="list" role="list"></div><div id="list-count"></div></aside>
 <section class="workspace"><div class="toolbar"><div><span class="eyebrow" id="format">JAVA / ENTRY POINT</span><div id="filename">Waiting for Init.java</div></div><span class="badge" id="state">Idle</span></div><div id="viewport"></div><div id="inspector" hidden></div><div class="scene-help" id="scene-help">Left drag: rotate &nbsp; · &nbsp; Wheel: zoom &nbsp; · &nbsp; Right drag: pan</div><div class="detail"><div class="eyebrow">DIAGNOSTICS</div><div id="details">Loading game catalog…</div></div></section></main><footer><span>JAVA SOURCE / WEBGL 2</span><span>Original Init.java runs first · GameLogic is under implementation</span><span id="total"></span></footer>`;
 
+/** game.html: the player page. The viewport is always expanded and letterboxed
+ * to 16:9; playground diagnostics start hidden (Ctrl+Shift+U) and the Java
+ * console opens with the backquote key. */
+const gameMode = document.documentElement.dataset.mode === 'game';
+if (gameMode) document.body.classList.add('game-mode', 'debug-ui-hidden');
+
 // Keep Java OSD, minimap and native cursor independent of host diagnostics.
 window.addEventListener('keydown', event => {
-  if (event.code !== 'KeyU' || !event.ctrlKey || !event.altKey || event.metaKey) return;
+  if (event.metaKey) return;
+  const debugToggle = event.code === 'KeyU' && event.ctrlKey && (event.altKey || gameMode && event.shiftKey);
+  const consoleToggle = gameMode && event.code === 'Backquote' && !event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!debugToggle && !consoleToggle) return;
+  // The game never sees these keys.
   event.preventDefault(); event.stopImmediatePropagation();
-  if (!event.repeat) document.body.classList.toggle('debug-ui-hidden');
+  if (event.repeat) return;
+  if (debugToggle) document.body.classList.toggle('debug-ui-hidden');
+  else document.body.classList.toggle('java-console-open');
 }, { capture: true });
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -84,7 +98,10 @@ function appendJavaEvent(event: BootEvent) {
   line.textContent = `[${time}] ${event.level.toUpperCase()}  ${event.message}`;
   el('java-log').append(line);
   el('java-log').scrollTop = el('java-log').scrollHeight;
+  // On the player page the console is normally closed; surface Java failures.
+  if (gameMode && event.level === 'error') document.body.classList.add('java-console-open');
 }
+let touchToolbar: TouchToolbar | undefined;
 let gameBootReady:Promise<void>|undefined;
 function runGameBoot(){return gameBootReady=runGameBootNow();}
 async function runGameBootNow() {
@@ -121,11 +138,18 @@ async function runGameBootNow() {
     flare => source === assets && run === sequence ? viewer?.setSceneFlare(flare) : undefined,
     work => viewer ? viewer.profiler.measure('Java OSD sync CPU', work) : work());
   if (source !== assets || run !== sequence) { result.dispose(); gameOsd.dispose(); return; }
+  if (touchControlsEnabled()) {
+    // Mobile button bar for the whole game (menus too): keyboard, menu, camera, settings.
+    const toolbar = new TouchToolbar(el('viewport'), result.input);
+    touchToolbar = toolbar;
+    disposeGameOsd = () => { toolbar.dispose(); if (touchToolbar === toolbar) touchToolbar = undefined; gameOsd.dispose(); };
+  }
   result.parts.setPaintListener((id,color,strokes)=>{
     if(source!==assets||run!==sequence||!viewer)return;
     void viewer.updateJavaPaint(id,color,strokes,source).catch(reason=>appendJavaEvent({level:'error',message:`Paint overlay: ${reason instanceof Error?reason.message:String(reason)}`}));
   });
   result.parts.setPaintTargetsReader((hit,size)=>viewer?.javaPaintTargets(hit,size)??[]);
+  result.system.setExitHandler(() => { if (source === assets && run === sequence) void exitGame(); });
   viewer?.setJavaFlapReader(id => result.parts.flapOpen(id));
   activeBoot=result;activeNavigator=result.navigator;activeNavigator.mode=minimapMode;activeNavigator.zoomScale=minimapZoomScale;
   const minimap=new NavigatorView(gameOsd.stage,source,()=>hideGameUi.checked?[]:result.navigator.frames(16/9),message=>appendJavaEvent({level:'error',message}),id=>{const node=result.gameTypes.getByResourceId(id);return node?result.gameTypes.resolveRenderResource(node)??undefined:result.resolveResourceIdentity(id);},viewer?.profiler,(code,hit)=>result.input.cursorEvent(code,hit,true));
@@ -248,6 +272,7 @@ async function runGameBootNow() {
       let session: ReturnType<Viewer['drive']> | undefined, gauges: JavaGauges | null = null;
       let physicsBinding: ReturnType<typeof result.physicsRefs.bindCollision> | undefined;
       let finishBrake: JavaCarBrake | undefined;
+      let touchDriving: TouchDrivingControls | undefined;
       let persistPhysics: (() => void) | undefined;
       try {
         status('Loading Java track…');
@@ -304,11 +329,13 @@ async function runGameBootNow() {
             const javaVehicle = result.gameTypes.get(car);
             const javaPlacement = javaPlacementWatcher(javaVehicle);
             finishBrake = new JavaCarBrake(result.gameTypes, car);
+            if (touchControlsEnabled()) { touchDriving = new TouchDrivingControls(el('viewport')); touchToolbar?.setDriving(true); }
             session = viewer!.drive(built.root, () => {}, true,
               { terrain: map.terrain, collision: map.collision, position: start, yaw: point.yaw }, source, music,
               { ...javaControls, blocked:sceneBlocked, persist: () => persistPhysics?.(), active: () => javaTrackIsCurrent(result, selected), sample: () => {
                 viewer!.profiler.measure('Java colliders CPU',()=>physicsBinding?.sync());
-                const v = javaVehicle?.velocity, input = javaControls.sample();
+                const v = javaVehicle?.velocity, sampled = javaControls.sample();
+                const input = touchDriving ? mergeTouchInput(sampled, touchDriving.state) : sampled;
                 return finishBrake ? finishBrake.apply(input, v ? Math.hypot(v.x, v.y, v.z) : 0) : input;
               },
                 instruments: (speed, rpm, gear, damage, engineCondition, transmissionCondition) => gauges?.update(speed, rpm, gear, damage, engineCondition, transmissionCondition),
@@ -339,7 +366,7 @@ async function runGameBootNow() {
           }
         }
         activeTrackCleanup = () => {
-          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); finishBrake?.dispose(); gauges?.dispose();
+          clearVehicleDebug(); session?.(); physicsBinding?.dispose(); finishBrake?.dispose(); touchDriving?.dispose(); touchToolbar?.setDriving(false); gauges?.dispose();
           if (built) viewer?.removeWorld(built.world);
           built?.world.dispose();
         };
@@ -354,7 +381,7 @@ async function runGameBootNow() {
         if(source===assets&&run===sequence&&javaTrackIsCurrent(result,selected))trackReady=true;
       } catch (reason) {
         session?.();gauges?.dispose();
-        physicsBinding?.dispose(); finishBrake?.dispose();
+        physicsBinding?.dispose(); finishBrake?.dispose(); touchDriving?.dispose(); touchToolbar?.setDriving(false);
         if (built) viewer?.removeWorld(built.world);
         built?.world.dispose();
         appendJavaEvent({ level: 'error', message: `Java scene rendering: ${reason instanceof Error ? reason.message : String(reason)}` });
@@ -445,15 +472,17 @@ const viewportCollapseButton = textElement('button', 'Minimize view · Esc', 'vi
 viewportCollapseButton.hidden = true; el('viewport').after(viewportCollapseButton);
 let trackDriving = false;
 function setViewportExpanded(expanded: boolean) {
+  if (gameMode) expanded = true; // The player page has no collapsed playground layout.
   el('viewport').parentElement?.classList.toggle('viewport-expanded', expanded);
   document.body.classList.toggle('viewport-expanded', expanded);
   viewportExpandButton.hidden = expanded;
-  viewportCollapseButton.hidden = !expanded;
+  viewportCollapseButton.hidden = !expanded || gameMode; // Esc belongs to the game there.
   trackDriveButton.textContent = trackDriving ? 'Expand drive view' : 'Drive Test Track';
   if (expanded && trackDriving) el('viewport').querySelector('canvas')?.focus({ preventScroll: true });
 }
 viewportExpandButton.onclick = () => setViewportExpanded(true);
 viewportCollapseButton.onclick = () => setViewportExpanded(false);
+if (gameMode) setViewportExpanded(true);
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !viewportCollapseButton.hidden) {
     event.preventDefault(); event.stopImmediatePropagation(); setViewportExpanded(false);
@@ -1724,6 +1753,28 @@ async function connect() {
     el('details').textContent = `Game catalog unavailable. Select an installed game with Open game folder. ${e}`;
     status('No catalog', true);
   }
+}
+
+/** Java System.exit() ("Exit game" in the main menu). The standalone client
+ * answers /api/app/exit by closing the application; a browser tab cannot be
+ * closed by script, so stop the game there and offer to start it again. */
+async function exitGame() {
+  try {
+    const response = await fetch('/api/app/exit', { method: 'POST' });
+    if (response.ok && response.headers.get('x-slrr-exit') === '1') return;
+  } catch { /* No host exit endpoint (dev server). */ }
+  disposeJavaScene?.(); disposeJavaScene = undefined;
+  disposeJavaInput?.(); disposeJavaInput = undefined;
+  disposeGameBoot?.(); disposeGameBoot = undefined;
+  disposeGameOsd?.(); disposeGameOsd = undefined;
+  stopDrive(); viewer?.clear(); sequence++;
+  disconnectMusic?.(); disconnectMusic = undefined; music?.dispose(); music = undefined;
+  const screen = textElement('div', '', 'game-exited');
+  const restart = textElement('button', 'Start again');
+  restart.onclick = () => location.reload();
+  screen.append(textElement('strong', 'The game has exited'), restart);
+  document.body.append(screen);
+  restart.focus();
 }
 
 function attach(source: Assets, label: string, local = false) {

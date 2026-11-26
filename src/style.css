@@ -596,3 +596,68 @@ body.debug-ui-hidden :is(header, footer, main > aside, .toolbar, .detail,
 body.debug-ui-hidden main { grid-template-columns: minmax(0, 1fr); height: 100vh; min-height: 0; }
 
 .osd-decal-preview img{object-fit:contain}
+
+/* game.html: player page. The viewport keeps a 16:9 frame, letterboxed on black. */
+body.game-mode{background:#000}
+body.game-mode .workspace.viewport-expanded{display:grid;place-items:center;background:#000}
+body.game-mode .workspace.viewport-expanded #viewport{
+  flex:none;
+  width:min(100vw,calc(100dvh * 16 / 9));
+  height:min(100dvh,calc(100vw * 9 / 16));
+  min-height:0
+}
+/* Backquote opens the Java console over the game, even with diagnostics hidden. */
+body.game-mode.java-console-open #app .workspace.viewport-expanded .java-console{
+  display:block !important;
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  z-index:60;
+  background:#0a1117eb
+}
+body.game-mode.java-console-open #java-log{max-height:40vh}
+
+/* Shown after Java System.exit() when the page cannot close itself (browser tab). */
+.game-exited{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#000;color:#d1d9df;font:600 18px Manrope,'Segoe UI',sans-serif;letter-spacing:.06em}
+.game-exited button{padding:9px 18px;border:1px solid #8097a3;border-radius:4px;background:#0b1014;color:#f3f7f9}
+
+/* Experimental on-screen driving controls (SLRR_TOUCH=1 build or ?touch=1), shown while driving. */
+.touch-driving{position:absolute;inset:0;z-index:8;pointer-events:none;opacity:var(--touch-opacity,.8);-webkit-user-select:none;user-select:none}
+.touch-wheel,.touch-lever-track{pointer-events:auto;touch-action:none;-webkit-tap-highlight-color:transparent}
+/* Sized from the 16:9 game frame and kept above the minimap and the right HUD panel. */
+.touch-wheel{position:absolute;left:3%;bottom:27%;height:36%;aspect-ratio:1;border-radius:50%;cursor:grab}
+.touch-wheel-graphic{width:100%;height:100%;filter:drop-shadow(0 3px 8px #000a)}
+.touch-wheel-graphic svg{width:100%;height:100%;display:block}
+.touch-wheel-rim{fill:none;stroke:#1c2329;stroke-width:22}
+.touch-wheel-rim-inner{fill:none;stroke:#59646d;stroke-width:3}
+.touch-wheel-spoke{fill:#2a3238;stroke:#59646d;stroke-width:2}
+.touch-wheel-hub{fill:#161b1f;stroke:#edab57;stroke-width:3}
+/* Own class names: the page header's global .mark (skew) must not reach the wheel. */
+.touch-wheel-mark{fill:#edab57}
+.touch-lever{position:absolute;right:3%;bottom:27%;height:44%;width:7%;display:flex;flex-direction:column;align-items:center;gap:6px}
+.touch-lever-label{font:700 clamp(9px,1.6vh,14px) Manrope,'Segoe UI',sans-serif;letter-spacing:.12em;color:#d1d9dfcc;text-shadow:0 1px 3px #000}
+.touch-lever-track{position:relative;flex:1;width:100%;border-radius:14px;background:#0b1014b8;border:2px solid #59646dcc;cursor:ns-resize;overflow:hidden}
+.touch-lever-track::after{content:'';position:absolute;left:12%;right:12%;top:50%;height:2px;background:#8097a3aa}
+.touch-lever-fill{position:absolute;left:0;right:0;height:0}
+.touch-lever-track.gas .touch-lever-fill{bottom:50%;height:calc(var(--touch-throttle) * 50%);background:#3fbf7f99}
+.touch-lever-track.brake .touch-lever-fill{top:50%;height:calc(var(--touch-brake) * 50%);background:#e0503f99}
+.touch-lever-knob{position:absolute;left:6%;right:6%;height:16%;transform:translateY(-50%);border-radius:10px;background:linear-gradient(#edab57,#b97a2c);border:2px solid #10161b;box-shadow:0 2px 6px #000a;pointer-events:none}
+
+/* Mobile button bar (touch builds): keyboard, camera, game menu, mobile settings. */
+.touch-toolbar{position:absolute;top:2%;right:1.5%;z-index:9;display:flex;gap:min(1.2vh,8px);opacity:var(--touch-opacity,.8)}
+.touch-toolbar button{width:clamp(30px,7vh,52px);height:clamp(30px,7vh,52px);padding:clamp(5px,1.4vh,10px);box-sizing:border-box;border-radius:10px;border:2px solid #59646dcc;background:#0b1014cc;color:#edab57;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.touch-toolbar button svg{width:100%;height:100%;display:block}
+.touch-toolbar .touch-driving-only{display:none}
+.touch-toolbar.driving .touch-driving-only{display:block}
+/* The hidden field that raises the system keyboard; typed text goes to the game. */
+.touch-ime{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;pointer-events:none}
+.touch-settings{position:absolute;inset:0;z-index:20;display:grid;place-items:center;background:#000a}
+.touch-settings[hidden]{display:none}
+.touch-settings-box{width:min(78%,520px);display:flex;flex-direction:column;gap:14px;padding:18px 20px;border-radius:12px;background:#101a20f2;border:1px solid #59646d;color:#e5e9ed;font:600 clamp(12px,2.4vh,16px) Manrope,'Segoe UI',sans-serif}
+.touch-settings-box strong{color:#edab57;letter-spacing:.08em}
+.touch-settings-box label{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.touch-settings-box input[type=range]{flex:1 1 100%;accent-color:#edab57}
+.touch-settings-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.touch-settings-box button{padding:8px 14px;border-radius:8px;border:1px solid #8097a3;background:#0b1014;color:#f3f7f9;font:inherit}
+.touch-settings-check input{width:20px;height:20px;accent-color:#edab57}

@@ -59,6 +59,7 @@ import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugR
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TwoFingerCamera, clampZoom } from './touch-camera';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
 import {assetReadBatch} from './asset-read-batch';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
@@ -2778,7 +2779,9 @@ export class Viewer {
       if (event.code === 'KeyR' && !event.repeat) { if (crash) crash.reset(); else demo.reset(); tireEffects?.reset(); keys.clear(); }
     };
     const up = (event: KeyboardEvent) => { keys.delete(event.code); };
-    let mousePointer: number | undefined, mouseX = 0, mouseY = 0, orbitYaw = 0, orbitPitch = 0;
+    let mousePointer: number | undefined, mouseX = 0, mouseY = 0, orbitYaw = 0, orbitPitch = 0, cameraZoom = 1;
+    // Touch screens: two fingers on the canvas orbit the chase camera, a pinch zooms it.
+    const fingers = new TwoFingerCamera();
     const releaseMouse = () => {
       if (mousePointer === undefined) return;
       const pointer = mousePointer; mousePointer = undefined;
@@ -2786,6 +2789,11 @@ export class Viewer {
       if (canvas.hasPointerCapture(pointer)) canvas.releasePointerCapture(pointer);
     };
     const pointerDown = (event: PointerEvent) => {
+      if (java && event.pointerType === 'touch') {
+        fingers.down(event.pointerId, event.clientX, event.clientY);
+        if (fingers.active) event.preventDefault();
+        return;
+      }
       if (!java || event.button !== 2) return;
       event.preventDefault();
       releaseMouse();
@@ -2794,16 +2802,26 @@ export class Viewer {
       java.mouseButton?.(true);
     };
     const pointerMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') {
+        const gesture = fingers.move(event.pointerId, event.clientX, event.clientY);
+        if (!gesture) return;
+        event.preventDefault();
+        orbitYaw += gesture.yaw;
+        orbitPitch = THREE.MathUtils.clamp(orbitPitch + gesture.pitch, -1.1, 1.1);
+        cameraZoom = clampZoom(cameraZoom * gesture.zoom);
+        return;
+      }
       if (mousePointer !== event.pointerId) return;
       if (!(event.buttons & 2)) { releaseMouse(); return; }
       java?.mouseMotion?.(event.clientX - mouseX, event.clientY - mouseY);
       mouseX = event.clientX; mouseY = event.clientY;
     };
-    const pointerUp = (event: PointerEvent) => { if (mousePointer === event.pointerId) releaseMouse(); };
+    const pointerUp = (event: PointerEvent) => { if (event.pointerType === 'touch') fingers.up(event.pointerId); if (mousePointer === event.pointerId) releaseMouse(); };
     const contextMenu = (event: MouseEvent) => { if (java) event.preventDefault(); };
-    const release = () => { keys.clear(); last = undefined; releaseMouse(); };
+    const release = () => { keys.clear(); last = undefined; releaseMouse(); fingers.clear(); };
     const visibility = () => { release(); vehicleAudio?.suspend(document.hidden); };
     const focus = () => { vehicleAudio?.activate(); canvas.focus({ preventScroll: true }); };
+    const touchAction = canvas.style.touchAction; if (java) canvas.style.touchAction = 'none';
     canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Vehicle controls'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
     canvas.addEventListener('pointerdown', pointerDown); canvas.addEventListener('pointermove', pointerMove);
     canvas.addEventListener('pointerup', pointerUp); canvas.addEventListener('pointercancel', pointerUp);
@@ -2909,7 +2927,7 @@ export class Viewer {
             orbitYaw += look.x * 0.3;
             orbitPitch = THREE.MathUtils.clamp(orbitPitch - look.y * 0.3, -1.1, 1.1);
             const relative = offset.sub(new THREE.Vector3(0, 1.1, 0));
-            const radius = relative.length();
+            const radius = relative.length() * cameraZoom;
             const elevation = THREE.MathUtils.clamp(Math.atan2(relative.y, Math.hypot(relative.x, relative.z)) + orbitPitch, -1.35, 1.35);
             const azimuth = Math.atan2(relative.x, relative.z) + orbitYaw;
             relative.set(radius * Math.cos(elevation) * Math.sin(azimuth), radius * Math.sin(elevation), radius * Math.cos(elevation) * Math.cos(azimuth));
@@ -2963,7 +2981,7 @@ export class Viewer {
       canvas.removeEventListener('pointerup', pointerUp); canvas.removeEventListener('pointercancel', pointerUp);
       canvas.removeEventListener('lostpointercapture', pointerUp); canvas.removeEventListener('contextmenu', contextMenu);
       window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visibility);
-      canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
+      canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear(); fingers.clear(); canvas.style.touchAction = touchAction;
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
       root.world.lightMask &= ~7;

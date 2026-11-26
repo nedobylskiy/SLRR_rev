@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru" data-mode="game"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="An open-source engine remaster of Street Legal Racing: Redline, rebuilt for the browser with WebGL 2."><title>SLRR · Redline Rebuilt</title>
+<!-- Mobile standalone client (src-tauri/src/lib.rs opens game.html?splash=1): the logo
+     covers the page for three seconds while the game loads behind it. Desktop shows the
+     same logo in its own splash window (splash.html) instead. -->
+<style>
+  .boot-splash { display: none; }
+  html[data-splash] .boot-splash { display: grid; position: fixed; inset: 0; z-index: 2147483647; place-items: center;
+    background: #000; transition: opacity .4s ease-in; pointer-events: auto; }
+  html[data-splash] .boot-splash.done { opacity: 0; pointer-events: none; }
+  .boot-splash img { width: min(70vw, 70vh * 1.25); max-height: 70vh; object-fit: contain; -webkit-user-drag: none;
+    animation: boot-splash-in .35s ease-out both; }
+  @keyframes boot-splash-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+</style>
+<script>
+  if (new URLSearchParams(location.search).has('splash')) {
+    document.documentElement.dataset.splash = '';
+    setTimeout(() => {
+      const splash = document.querySelector('.boot-splash');
+      splash?.classList.add('done');
+      setTimeout(() => { splash?.remove(); delete document.documentElement.dataset.splash; }, 450);
+    }, 3000);
+  }
+</script>
+</head><body><div class="boot-splash" aria-hidden="true"><img src="/docs/media/slrr-rev-logo.png" alt="" draggable="false"></div><div id="app"></div><script type="module" src="/src/main.ts"></script></body></html>

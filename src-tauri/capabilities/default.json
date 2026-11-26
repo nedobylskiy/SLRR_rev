@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The game page needs no Tauri IPC commands: it reads resources through the slrr:// protocol.",
+  "windows": ["main"],
+  "permissions": []
+}
