@@ -116,10 +116,13 @@ and memory for multi-gigabyte installations.
 ## GitHub Actions builds
 
 `.github/workflows/standalone.yml` builds both clients on every push to
-`standalone-client`, on `standalone-v*` tags, and on demand (Actions → Standalone
-client builds → Run workflow). The run's Artifacts hold
-`slrr-standalone-windows-x64` (the exe) and `slrr-standalone-android-arm64` (a
-signed release APK with the touch frontend). Linux runners have no symlink
+`main`, on `standalone-v*` tags, and on demand (Actions → Standalone client
+builds → Run workflow). Each run's Artifacts hold `slrr-standalone-windows-x64`
+(the exe) and `slrr-standalone-android-arm64` (a signed release APK with the
+touch frontend). A push to `main` also recreates the `latest` prerelease with
+`slrr-standalone-windows-x64.exe` and `slrr-standalone-android-arm64.apk`, so
+`releases/download/latest/<file>` always serves the newest build; a
+`standalone-v*` tag publishes a regular release. Linux runners have no symlink
 problem, so the Android job runs the normal `tauri android build`.
 
 The APK is signed with the keystore in the secrets `ANDROID_KEYSTORE_BASE64`,

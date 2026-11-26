@@ -2,7 +2,10 @@ name: Standalone client builds
 # Builds the Tauri standalone client (docs/standalone-client.md):
 # - Windows: slrr-standalone.exe (desktop frontend, no installer bundle)
 # - Android: arm64 release APK with the touch frontend
-# Download them from the run's Artifacts section.
+# Every run keeps them in its Artifacts section. Pushes to main also replace
+# the assets of the rolling "latest" prerelease, so README links such as
+# releases/download/latest/slrr-standalone-windows-x64.exe always point at the
+# newest main build; a standalone-v* tag publishes a regular release.
 #
 # Android signing: set the repository secrets ANDROID_KEYSTORE_BASE64
 # (base64 of a .jks/.keystore file), ANDROID_KEYSTORE_PASSWORD,
@@ -12,8 +15,11 @@ name: Standalone client builds
 on:
   workflow_dispatch:
   push:
-    branches: [standalone-client]
+    branches: [main]
     tags: ['standalone-v*']
+
+permissions:
+  contents: read
 
 concurrency:
   group: standalone-${{ github.ref }}
@@ -96,3 +102,31 @@ jobs:
           name: slrr-standalone-android-arm64
           path: out/slrr-standalone-arm64.apk
           if-no-files-found: error
+
+  release:
+    needs: [windows, android]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/standalone-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish the release
+        run: |
+          mkdir -p out
+          cp artifacts/slrr-standalone-windows-x64/slrr-standalone.exe out/slrr-standalone-windows-x64.exe
+          cp artifacts/slrr-standalone-android-arm64/slrr-standalone-arm64.apk out/slrr-standalone-android-arm64.apk
+          short=${GITHUB_SHA::7}
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            gh release create "$GITHUB_REF_NAME" out/* --title "Standalone client $GITHUB_REF_NAME" --generate-notes
+          else
+            notes="Automatic build of main at $short ($(date -u +%Y-%m-%d)). Windows x64 executable and Android arm64 APK of the standalone client; both need a local Street Legal Racing Redline installation. See docs/standalone-client.md."
+            # Recreate the release so the latest tag follows main; the asset URLs stay the same.
+            gh release delete latest --yes --cleanup-tag || true
+            gh release create latest out/* --prerelease --target "$GITHUB_SHA" --title "Latest build (main, $short)" --notes "$notes"
+          fi
