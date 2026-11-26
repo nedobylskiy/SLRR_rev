@@ -13,6 +13,17 @@ function rig(){
   for(const side of ['L','R']){const thigh=add(`${side} Thigh`,pelvis,[side==='L'?-10:10,0,0]),calf=add(`${side} Calf`,thigh,[0,-43,0]),foot=add(`${side} Foot`,calf,[0,-43,0]);add(`${side} Toe0`,foot,[0,-4,13]);}
   const skeleton=createCharacterSkeleton(definitions),group=new Group();group.add(skeleton.root);return {skeleton,group};
 }
+
+test('sleeping ragdolls skip solver and pose work, but wake on another impact',()=>{
+ const {skeleton,group}=rig(),ragdoll=new CharacterRagdoll(skeleton.skeleton,group,0);
+ for(const limb of ragdoll.limbs)limb.body.sleep();
+ assert.equal(ragdoll.sleeping,true);
+ const time=ragdoll.world.time;assert.equal(ragdoll.step(.1),false);assert.equal(ragdoll.world.time,time);
+ const bounds=ragdoll.bounds;for(const limb of ragdoll.limbs)assert.ok(bounds.containsPoint(new Vector3(limb.body.position.x,limb.body.position.y,limb.body.position.z)));
+ ragdoll.impulse(new Vector3(100,0,0),ragdoll.position);
+ assert.equal(ragdoll.sleeping,false);assert.equal(ragdoll.step(1/120),true);assert.ok(ragdoll.world.time>time);
+ ragdoll.dispose();skeleton.skeleton.dispose();
+});
 test('ragdoll preserves activation pose through scaled inspection parents, then falls with connected joints above the floor',()=>{
   const {skeleton,group}=rig(),inspection=new Group();inspection.position.set(5,2,-4);inspection.scale.setScalar(3);inspection.add(group);inspection.updateMatrixWorld(true);
   const before=skeleton.bones.map(b=>b.matrixWorld.clone()),ragdoll=new CharacterRagdoll(skeleton.skeleton,group,0);

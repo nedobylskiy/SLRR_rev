@@ -26,6 +26,7 @@ export class TriangleSurface implements PanelSurface {
   private stack: Branch[] = [];
   private center = new Vector3(); private surface = new Vector3(); private closest = new Vector3(); private delta = new Vector3();
   private hit = new Vector3(); private hitNormal = new Vector3();
+  private refitEdge = new Vector3();
   readonly radius = 0.035;
   hits = 0;
   constructor(triangles: ArrayLike<number>, private enabled: () => boolean, private velocity: (point: Vector3) => Vector3, private reaction: (impulse: Triple, point: Triple) => void) {
@@ -57,8 +58,11 @@ export class TriangleSurface implements PanelSurface {
     for(const {start,count} of work)for(let offset=start;offset<start+count;offset+=9){
       const face=this.faceSlots[offset/9],t=face.triangle;
       t.a.fromArray(triangles,offset);t.b.fromArray(triangles,offset+3);t.c.fromArray(triangles,offset+6);
-      face.active=t.getArea()>=1e-10;face.bounds.makeEmpty();
-      if(face.active){t.getNormal(face.normal);face.bounds.expandByPoint(t.a).expandByPoint(t.b).expandByPoint(t.c);}
+      // Area and unit normal use the same cross product. Do it once per face.
+      face.normal.subVectors(t.c,t.b).cross(this.refitEdge.subVectors(t.a,t.b));
+      const normalLength=face.normal.length();
+      face.active=normalLength*.5>=1e-10;face.bounds.makeEmpty();
+      if(face.active){face.normal.divideScalar(normalLength);face.bounds.expandByPoint(t.a).expandByPoint(t.b).expandByPoint(t.c);}
       this.lastRefitTriangles++;
       if(dirty)for(let node=face.owner;node&&!dirty.has(node);node=node.parent)dirty.add(node);
     }
@@ -118,7 +122,7 @@ export class TriangleSurface implements PanelSurface {
     for (const { triangle, normal: n, bounds, active } of cache.faces) {
       if (!active || !query.intersectsBox(bounds)) continue;
       if(profile)profile.triangleTests++;
-      const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < 0 ? -1 : 1;
+      const a = this.delta.subVectors(from, triangle.a).dot(n), b = this.delta.subVectors(to, triangle.a).dot(n), sign = a < -1e-9 ? -1 : a > 1e-9 ? 1 : b > 1e-9 ? -1 : 1;
       if (sign * b < this.radius && sign * a > sign * b) {
         const time = Math.max(0, (sign * a - this.radius) / (sign * a - sign * b)), center = this.center.copy(from).lerp(to, time), surface = this.surface.copy(center).addScaledVector(n, -this.delta.subVectors(center, triangle.a).dot(n));
         if (time >= 0 && time <= 1 && time < first && triangle.containsPoint(surface)) {

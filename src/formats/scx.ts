@@ -15,6 +15,8 @@ export interface ScxMesh {
   mixMap?: ScxMesh['textureMap'];
   indices: Uint32Array; diffuse: number[]; textureIndex: number;
   layer2Index?: number; materialFlags?: number; textureChannel?: number; layer2Channel?: number;
+  /** Original SCX4 alpha-test reference, stored as an unsigned byte-valued property. */
+  alphaReference?: number;
   textureMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
   lightmapIndex?: number; lightmapMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
   selfIllumIndex?: number; selfIllumMap?: { channel: number; tiling: number; scaleU: number; scaleV: number; offsetU: number; offsetV: number };
@@ -26,6 +28,12 @@ export interface ScxModel { version: number; meshes: ScxMesh[]; warnings: string
 /** V3's alphaOpacity flag controls whether diffuse-map alpha affects the surface. */
 export function scxDiffuseUsesAlpha(version: number, materialFlags = 0) {
   return version !== 3 || (materialFlags & 1) !== 0;
+}
+
+/** Native alpha-test defaults to 0x38; using 0.5 erases thin authored foliage mips. */
+export function scxAlphaTestReference(version: number, materialFlags = 0, reference?: number) {
+  if (reference !== undefined) return reference / 255;
+  return version === 3 || (materialFlags & 0x20000000) !== 0 ? 0x38 / 255 : 0.5;
 }
 
 /** V3 facade paint materials use texture alpha as coverage, not surface opacity. */
@@ -115,6 +123,7 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         selfIllumIndex: current.selfIllumIndex, selfIllumMap: current.selfIllumMap,
         illuminationIndex:current.illuminationIndex,illuminationMap:current.illuminationMap,
         materialFlags: current.materialFlags,
+        alphaReference: current.alphaReference,
         materialType: current.materialType, reflectionIndex: current.reflectionIndex,
         reflectionStrength: current.reflectionStrength, reflectionMap: current.reflectionMap,
         mixIndex: current.mixIndex, mixMap: current.mixMap,
@@ -139,7 +148,12 @@ export function parseScx(bytes: Uint8Array): ScxModel {
             else if (type >= 0x01000000 && type <= 0x01000002) {
               const value = r.f32(); if (type === 0x01000001) current.reflectionStrength = value;
             }
-            else if (type === 0x05000000 || type === 0x07000000) {
+            else if (type === 0x05000000) {
+              const reference = r.u32();
+              if (reference > 255) throw new Error('SCX v4: alpha reference exceeds 255');
+              current.alphaReference = reference;
+            }
+            else if (type === 0x07000000) {
               r.skip(4); warnings.push(`Material property 0x${type.toString(16)}: value read, shading semantics not implemented`);
             }
             else if (type >= 0x06000000 && type <= 0x06000007) {
@@ -172,9 +186,9 @@ export function parseScx(bytes: Uint8Array): ScxModel {
         if (!current) throw new Error('SCX v4: vertices before mesh');
         if (current.positions) {
           const { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags } = current;
-          const { materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap,illuminationIndex,illuminationMap } = current;
+          const { materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap,illuminationIndex,illuminationMap,alphaReference } = current;
           finish(); current = { name, diffuse, textureIndex, textureMap, lightmapIndex, lightmapMap, selfIllumIndex, selfIllumMap, paintMask, materialFlags,
-            materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap,illuminationIndex,illuminationMap };
+            materialType, reflectionIndex, reflectionStrength, reflectionMap, mixIndex, mixMap,illuminationIndex,illuminationMap,alphaReference };
         }
         const n = r.u32(), flags = r.u32();
         if (!(flags & 1) || flags & ~0x40fff) throw new Error(`SCX v4: unsupported vertex flags 0x${flags.toString(16)}`);

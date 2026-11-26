@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Box3,Vector3,Group,Mesh,BoxGeometry,MeshBasicMaterial,PerspectiveCamera,Frustum,Matrix4,Sphere} from 'three';
 import {TrafficDamageView} from '../src/render/traffic-damage-view';
-import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,safeTrafficSpawn,chooseSafeTrafficSpawn,trafficCruiseSpeed,type TrafficSpawn} from '../src/engine/traffic-stream';
+import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,safeTrafficSpawn,chooseSafeTrafficSpawn,trafficCruiseSpeed,trafficSpawnSector,type TrafficSpawn,type TrafficOccupant} from '../src/engine/traffic-stream';
 import {TrafficVehicle} from '../src/engine/traffic-vehicle';
 import {RoadTrafficCar,trafficRoadSpeedGroups} from '../src/engine/road-traffic';
 import {Bot} from '../src/engine/bot';
@@ -39,6 +39,18 @@ test('distant rivals update every five seconds within the local speed radius and
   assert.equal(planner.update(1,pose,false,after,50,10000),false,'nearby rivals must not teleport');assert.deepEqual(pose.position,snapshot);
   assert.equal(planner.update(1,pose,true,focus,50,15000),false,'streamed physics owns visible cars');assert.deepEqual(pose.position,snapshot);
  }
+});
+
+test('unplaced Java rivals enter independent lanes even when their service position is beside the player',()=>{
+ const index=new TrafficSpawnIndex(graph()),planner=new DistantRivals(index,()=>.99);
+ const pose={position:{x:0,y:-10000,z:0},yaw:0,velocity:{x:0,y:0,z:0}},focus=new Vector3();
+ assert.equal(planner.update(1,pose,false,focus,50,0,true),true);
+ const placed=new Vector3(pose.position.x,pose.position.y,pose.position.z);
+ assert.ok(placed.distanceTo(focus)>50);assert.equal(placed.y,0);
+ assert.ok(index.nearest(placed)!.position.distanceTo(placed)<1e-6);
+ assert.equal(planner.update(1,pose,false,focus,50,4999),false);
+ assert.equal(planner.update(1,pose,false,focus,50,5000),true);
+ assert.ok(placed.distanceTo(new Vector3(pose.position.x,pose.position.y,pose.position.z))>0);
 });
 
 test('spawn speed is rural with a yellow crossing at either end of the road',()=>{
@@ -83,7 +95,8 @@ test('safe spawn rejects near visible/front cars, closing paths and leaves unfil
  assert.equal(safeTrafficSpawn(spawn(30),center,forward,0,false,[],3),false,'looking away must not spawn immediately ahead of the car');
  assert.equal(safeTrafficSpawn(spawn(90),center,forward,0,true,[],3),true);
  assert.equal(safeTrafficSpawn(spawn(90),center,forward,30,true,[],3),false,'fast player gets a larger front exclusion zone');
- assert.equal(safeTrafficSpawn(spawn(-40),center,forward,0,false,[],3),true);
+ assert.equal(safeTrafficSpawn(spawn(-40),center,forward,0,false,[],3),false,'rear spawns must stay far away');
+ assert.equal(safeTrafficSpawn(spawn(-120),center,forward,0,false,[],3),true);
  const peer=Object.assign(new Vector3(100,0,0),{trafficRadius:3,trafficVelocity:new Vector3()});
  assert.equal(safeTrafficSpawn(spawn(90),center,forward,0,true,[peer],3),false,'would catch a stationary car immediately');
  const index=new TrafficSpawnIndex(graph()),focus=new Vector3(200,0,0),occupied:Vector3[]=[];
@@ -138,6 +151,94 @@ test('puppets follow lanes and animate wheels without invoking the physical solv
  const {vehicle,lod,bot}=car();let physics=0;const physicalStep=vehicle.step.bind(vehicle);vehicle.step=(dt,input)=>{physics++;physicalStep(dt,input);};
  for(let i=0;i<180;i++)bot.advance(1/60);
  assert.equal(physics,0);assert.equal(lod.physical,false);assert.ok(vehicle.body.position.x>105);assert.ok(Math.abs(vehicle.body.position.z)<.01);assert.ok(vehicle.wheels.some(w=>w.spin>0));
+});
+
+test('physical to rail handoff advances at the inherited speed between delayed planner replies',()=>{
+ const {vehicle,lod,route}=car();vehicle.body.velocity.set(20,0,0);
+ lod.updateRange(vehicle.body.position,30);assert.equal(lod.physical,true);
+ lod.updateRange(new Vector3(-100,0,0),30);assert.equal(lod.physical,false);
+ assert.equal(vehicle.body.velocity.length(),20);
+ const origin=vehicle.body.position.x;let expected=0;
+ for(let batch=0;batch<20;batch++){
+   const old=structuredClone(route.snapshot());
+   for(let frame=0;frame<6;frame++){
+     const before=vehicle.body.position.x;lod.step(1/60,{throttle:0,steer:0,brake:false});
+     const distance=vehicle.body.velocity.length()/60;expected+=distance;
+     assert.ok(Math.abs(vehicle.body.position.x-before-distance)<1e-6,'every frame travels speed × dt, independently of planner frequency');
+   }
+   const position=route.position.clone();route.applyPlan(old);
+   assert.ok(route.position.distanceTo(position)<1e-8,'late plans never rewind the rail cursor');
+ }
+ assert.ok(Math.abs(vehicle.body.position.x-origin-expected)<1e-6);assert.ok(expected>35);
+});
+
+test('old approach plans cannot rewind a rail car out of a crossing',()=>{
+ const route=new RoadTrafficCar(graph(),new Vector3(499,0,0),()=>0,2),old=structuredClone(route.snapshot());
+ route.advanceDistance(2);assert.ok(route.insideCrossing);const current=route.snapshot();route.applyPlan(old);
+ assert.deepEqual(route.snapshot(),current);
+ route.advanceDistance(5);const exited=route.snapshot();assert.equal(route.roadId,3);route.applyPlan(current);assert.deepEqual(route.snapshot(),exited);
+});
+
+test('population reserves ahead/side/rear slots, mixes lane directions, and never fills visible gaps',()=>{
+ const samples:TrafficSpawn[]=[];
+ for(let i=0;i<20;i++)for(const [x,z]of [[120+i*15,0],[0,110+i*15],[-120-i*15,0]])samples.push({road:i,position:new Vector3(x,0,z),direction:new Vector3(i%2?1:-1,0,0),speedGroup:1});
+ const index={choose:(center:Vector3,radius:number,occupied:TrafficOccupant[],random:()=>number,_minimum:number,_near:boolean,_preferred:unknown,_body:number,accept:(s:TrafficSpawn)=>boolean)=>{
+   let selected:TrafficSpawn|undefined,count=0;for(const s of samples)if(s.position.distanceTo(center)<=radius&&!occupied.some(p=>p.distanceTo(s.position)<20)&&accept(s)&&random()<1/++count)selected=s;return selected;
+ }} as unknown as TrafficSpawnIndex;
+ let seed=91;const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+ const center=new Vector3(),forward=new Vector3(1,0,0),occupied:TrafficOccupant[]=[],directions=new Set<number>(),counts={ahead:0,around:0,behind:0};
+ for(let i=0;i<15;i++){
+   const spawn=chooseSafeTrafficSpawn(index,center,300,500,occupied,forward,0,3,()=>true,random);assert.ok(spawn);
+   counts[trafficSpawnSector(spawn.position,center,forward)]++;directions.add(spawn.direction.x);occupied.push(spawn.position.clone());
+ }
+ assert.ok(counts.ahead>=5&&counts.around>=5&&counts.behind>=1);assert.equal(directions.size,2);
+ assert.equal(chooseSafeTrafficSpawn(index,center,300,500,[],forward,0,3,()=>false,random),undefined,'visible slots are left empty');
+ const rearOnly=(s:TrafficSpawn)=>s.position.x<0,behind:Vector3[]=[];
+ for(let i=0;i<25;i++){const spawn=chooseSafeTrafficSpawn(index,center,300,500,behind,forward,0,3,rearOnly,random);if(spawn)behind.push(spawn.position.clone());}
+ assert.ok(behind.length<=2,'unavailable ahead/side slots do not all respawn behind');
+});
+
+test('distant traffic follows uphill and downhill spline pitch and retains it at the physics handoff',()=>{
+ for(const slope of [-.2,.2])for(const heading of [new Vector3(1,0,0),new Vector3(0,0,-1),new Vector3(-1,0,1).normalize()]){
+  const {vehicle,lod}=car(),direction=heading.clone().setY(slope).normalize();
+  const route={targetAhead:(_distance:number,position:Vector3,tangent:Vector3)=>{position.set(100,20,0);tangent.copy(direction);}} as unknown as RoadTrafficCar;
+  route.advanceDistance=()=>{};route.steeringTargetAhead=(_distance,_window,position,tangent)=>route.targetAhead(_distance,position,tangent);
+  lod.route=route;
+  vehicle.place(new Vector3(100,20,0),direction,1.107);
+  const forward=()=>new Vector3(0,0,-1).applyQuaternion(vehicle.body.orientation);
+  assert.ok(forward().distanceTo(direction)<1e-9,'spawn includes the slope');
+  vehicle.step=()=>{throw Error('a puppet must not run suspension physics');};
+  lod.step(1/60,{throttle:1,steer:0,brake:false});
+  assert.ok(forward().distanceTo(direction)<1e-9,'puppet movement retains spline pitch for every heading');
+  const orientation=vehicle.body.orientation.clone(),position=vehicle.body.position.clone();
+  lod.updateRange(position,30);
+  assert.equal(lod.physical,true);assert.ok(vehicle.body.orientation.equals(orientation),'physics adopts the current tilted pose');
+  assert.ok(vehicle.body.position.equals(position));
+ }
+});
+
+test('puppet traffic rounds a sharp route joint and rotates continuously, without running physics',()=>{
+ const {vehicle,lod}=car();let progress=-3;
+ const route={targetAhead:(distance:number,point:Vector3,direction:Vector3)=>{
+   const t=progress+distance;
+   if(t<0){point.set(100+t,0,0);direction.set(1,0,0);}
+   else {point.set(100,0,-t);direction.set(0,0,-1);}
+ }} as unknown as RoadTrafficCar;
+ route.advanceDistance=distance=>{progress+=distance;};route.steeringTargetAhead=RoadTrafficCar.prototype.steeringTargetAhead;
+ lod.route=route;vehicle.place(new Vector3(97,0,0),new Vector3(1,0,0),1.107);vehicle.body.velocity.set(3,0,0);
+ vehicle.step=()=>{throw Error('distant traffic must not invoke physics');};
+ let previous=vehicle.body.orientation.clone(),largestTurn=0,rounded=false;
+ for(let i=0;i<180;i++){
+   lod.step(1/60,{throttle:0,steer:0,brake:false});
+   largestTurn=Math.max(largestTurn,previous.angleTo(vehicle.body.orientation));previous.copy(vehicle.body.orientation);
+   const origin=new Vector3().setFromMatrixPosition(vehicle.body.matrix());
+   if(origin.x<99.99&&origin.z<-.01)rounded=true;
+ }
+ assert.ok(rounded,'the car follows a short rounded corner instead of an angular vertex');
+ assert.ok(largestTurn<.15,'a right-angle spline joint cannot snap the body through 90 degrees');
+ assert.ok(new Vector3(0,0,-1).applyQuaternion(vehicle.body.orientation).distanceTo(new Vector3(0,0,-1))<.01);
+ const pose=vehicle.body.orientation.clone();lod.updateRange(vehicle.body.position,30);
+ assert.ok(vehicle.body.orientation.equals(pose),'the physical handoff retains the smoothed pose');
 });
 
 test('LOD handoffs retain pose, speed and dents, use hysteresis, and wake physics for impact',()=>{

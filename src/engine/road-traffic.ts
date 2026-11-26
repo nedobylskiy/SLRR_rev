@@ -4,6 +4,7 @@ import { sampleRoadSegment, type RoadNetwork, type RoadOther, type RoadSegment }
 const JOIN_TOLERANCE = .03;
 const distance = (a: readonly number[], b: readonly number[]) => Math.hypot(...a.map((v, i) => v - b[i]));
 export interface TrafficTurn { crossing: number; outgoing: number; branch: number; segment: RoadSegment }
+export interface TrafficCursor {road:number;at:number;pending?:TrafficTurn;crossing?:TrafficTurn;previous?:TrafficTurn;lane?:{road:number;start:number;length:number};crossings:number;travelled:number;stopped:boolean;group?:0|1}
 
 /** Geometry joins are checked only among the explicit links of the same TRC crossing. */
 export function trafficConnections(network: RoadNetwork): Map<number, TrafficTurn[]> {
@@ -81,6 +82,23 @@ function crossingCurve(segment:RoadSegment){let curve=turns.get(segment);if(!cur
 
 /** Per-car navigation cursor over a shared road graph; no physics or signal policy. */
 export class RoadTrafficCar {
+  snapshot():TrafficCursor{return {road:this.roadId,at:this.at,pending:this.pending,crossing:this.crossingTurn,previous:this.previousTurn,
+    lane:this.laneChange?{road:[...this.curves].find(([,curve])=>curve===this.laneChange!.source)![0],start:this.laneChange.start,length:this.laneChange.length}:undefined,
+    crossings:this.crossingsPassed,travelled:this.travelled,stopped:this.stopped,group:this.lastCrossingGroup};}
+  restore(state:TrafficCursor){
+    this.roadId=state.road;this.at=state.at;this.pending=state.pending;this.crossingTurn=state.crossing;this.previousTurn=state.previous;
+    this.curve=state.crossing?crossingCurve(state.crossing.segment):this.curves.get(state.road)!;
+    this.laneChange=state.lane?{source:this.curves.get(state.lane.road)!,start:state.lane.start,length:state.lane.length}:undefined;
+    this.crossingsPassed=state.crossings;this.travelled=state.travelled;this.stopped=state.stopped;this.lastCrossingGroup=state.group;
+    if(this.laneChange)this.sampleLaneChange(this.at,this.position,this.direction);else this.curve.sample(this.at,this.position,this.direction);
+  }
+  /** A worker response may choose a turn/lane, but must not rewind local rail motion. */
+  applyPlan(state:TrafficCursor){
+    const current=this.snapshot();
+    if(state.crossings<current.crossings||state.crossings===current.crossings&&current.crossing&&(!state.crossing||state.crossing.crossing!==current.crossing.crossing||state.crossing.outgoing!==current.crossing.outgoing))return;
+    const same=state.road===current.road&&state.crossing?.crossing===current.crossing?.crossing&&state.crossing?.outgoing===current.crossing?.outgoing;
+    this.restore(same?{...state,at:Math.max(current.at,state.at),travelled:Math.max(current.travelled,state.travelled)}:state);
+  }
   readonly speed = 15 / 3.6;
   readonly position = new Vector3();
   readonly direction = new Vector3();
@@ -216,6 +234,7 @@ export class RoadTrafficCar {
     if (!Number.isFinite(seconds) || seconds <= 0 || this.stopped) return;
     this.moveDistance(Math.min(seconds,.25)*this.speed);
   }
+  advanceDistance(distance:number){if(Number.isFinite(distance)&&distance>0&&!this.stopped)this.moveDistance(distance);}
   private moveDistance(distance:number){
     let remaining=distance;
     for (let transition = 0; remaining > 0 && transition < 16; transition++) {
@@ -237,3 +256,6 @@ export class RoadTrafficCar {
     this.curve.sample(this.at, this.position, this.direction);
   }
 }
+
+/** Shared user-defined speed bands in km/h: rural (yellow), urban (pink). */
+export function trafficSpeedBand(group:0|1|undefined):readonly[number,number]{return group===0?[60,100]:[15,35];}

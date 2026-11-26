@@ -2,7 +2,7 @@ import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { EnginePart } from './world';
 import { slotMatrix } from './slot-frames';
 
-export interface DrivingInput { throttle: number; throttleMode?: 'directional' | 'pedal'; steer: number; steerDigital?: boolean; brake: boolean; brakeAxis?: number; serviceBrakeAxis?: number; handbrakeAxis?: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean }
+export interface DrivingInput { throttle: number; throttleMode?: 'directional' | 'pedal'; steer: number; steerDigital?: boolean; brake: boolean; brakeAxis?: number; serviceBrakeAxis?: number; handbrakeAxis?: number; clutch?: boolean; gearUp?: boolean; gearDown?: boolean; neutral?: boolean; start?: boolean; transmissionLocked?: boolean }
 export const MAX_HANDBRAKE_EFFORT=0.3;
 export function handbrakeEffort(axis:number):number{return Math.max(0,Math.min(1,axis))*MAX_HANDBRAKE_EFFORT;}
 

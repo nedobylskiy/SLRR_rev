@@ -173,3 +173,42 @@ Permanent deformation now limits part condition using RMS plastic beam strain in
 Vehicle body-panel mount failure loads use a 1.10 multiplier: the hood threshold is 66 kN and other panels retain their mass-dependent thresholds scaled by 10%. This changes attachment strength only; panel stiffness, plasticity, release delay, chassis anchors, and wheel mounts retain their existing values.
 
 Rigid detached panels also resist twisting on the ground. The support patch is approximated from cage points within the existing ground-clearance shell; its RMS radius bounds a torsional friction impulse by the accumulated ground normal impulse and friction coefficient. The impulse cannot reverse the normal component of spin. This prevents a dented hood spinning indefinitely about one support point without adding angular drag in flight. Patch spread is measured relative to a local point to retain accuracy far from the world origin.
+
+
+## Detached panels and moving contacts
+
+The coarse chassis impact distributes a local impulse to installed soft panels;
+it no longer drains their condition directly from chassis collision energy.
+Soft-panel condition follows permanent deformation, while physical mount loads
+decide detachment. An explicit zero condition supplied by game logic still
+breaks attachments. This prevents coarse contacts from removing intact panels
+before their node solver has responded.
+
+Detached vehicle panels immediately become rigid bodies fitted to their current
+node positions and velocities. The dented cage and plastic beam lengths are
+preserved; collisions and subsequent impulses never reactivate their XPBD solver.
+They retain ground/chassis contacts, friction, rotation and supported-debris sleep.
+This deliberately prevents any further crumpling after detachment.
+
+A loose panel contacting its moving chassis uses relative point velocity and both
+bodies' effective masses. The chassis receives the opposite normal and friction
+impulse. Co-moving shapes therefore do not generate an impact merely from their
+common world velocity.
+
+Installed panels retain the minimum active duration and existing quiet-speed
+threshold. Brief small internal vibrations consume two quiet ticks instead of
+clearing all quiet credit. Mount overload or internal speed at least 0.3 m/s
+clears the credit; a new explicit wake also resets it. Persistent vibration still
+prevents sleep.
+
+Collision-surface attachment transforms use a 1e-10 element tolerance when
+compared with the last generated frame. This filters matrix roundoff without
+changing node/beam state or plasticity. Comparison remains against the cached
+frame, so accumulated motion eventually invalidates it; shape-version changes,
+detachment and restoration invalidate independently of transform tolerance.
+
+Rigid collision sections also index exactly shared source positions. Each unique
+vertex is transformed once, then expanded back into the original triangle order
+for BVH refitting. No triangles are removed or approximated. Source coordinates
+and index buffers are cached once per part; near-but-distinct vertices remain
+distinct. The collision vertex-work counter includes these rigid transforms.

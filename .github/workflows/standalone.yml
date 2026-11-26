@@ -1,0 +1,98 @@
+name: Standalone client builds
+# Builds the Tauri standalone client (docs/standalone-client.md):
+# - Windows: slrr-standalone.exe (desktop frontend, no installer bundle)
+# - Android: arm64 release APK with the touch frontend
+# Download them from the run's Artifacts section.
+#
+# Android signing: set the repository secrets ANDROID_KEYSTORE_BASE64
+# (base64 of a .jks/.keystore file), ANDROID_KEYSTORE_PASSWORD,
+# ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD. Without them each run signs with
+# a throwaway key, and such an APK cannot be installed over one signed with a
+# different key (uninstall first, which also deletes the imported game files).
+on:
+  workflow_dispatch:
+  push:
+    branches: [standalone-client]
+    tags: ['standalone-v*']
+
+concurrency:
+  group: standalone-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      # beforeBuildCommand (npm run build:web) builds the frontend first.
+      - run: npx tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slrr-standalone-windows-x64
+          path: src-tauri/target/release/slrr-standalone.exe
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build the APK
+        run: |
+          # The runner image ships the Android SDK and NDK.
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          chmod +x src-tauri/gen/android/gradlew
+          npx tauri android build --apk --target aarch64 --config src-tauri/tauri.touch.conf.json
+      - name: Sign the APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          unsigned=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-unsigned.apk' | head -1)
+          test -n "$unsigned"
+          keystore="$RUNNER_TEMP/release.keystore"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          else
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: signing with a throwaway key"
+            KEYSTORE_PASSWORD=android KEY_ALIAS=androiddebugkey KEY_PASSWORD=android
+            keytool -genkeypair -keystore "$keystore" -storepass android -keypass android \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          mkdir -p out
+          "$tools/zipalign" -f -p 4 "$unsigned" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --ks "$keystore" --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --ks-key-alias "$KEY_ALIAS" --key-pass "pass:${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" \
+            --out out/slrr-standalone-arm64.apk "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" verify out/slrr-standalone-arm64.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slrr-standalone-android-arm64
+          path: out/slrr-standalone-arm64.apk
+          if-no-files-found: error

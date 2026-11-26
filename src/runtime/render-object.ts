@@ -8,6 +8,11 @@ export class RenderObject extends ResourceObject {
   orientation: OrientationState = { y: 0, p: 0, r: 0 };
   renderResource: { pack: string; id: number } | null = null;
   animation:RenderAnimationState|null=null;
+  /** Optional ARGB modulation set by Java RenderRef.setColor. */
+  color: number | null = null;
+  route?: {points:[number,number,number][];color:number;width:number};
+  /** A corpse/renderinstance command delegates this figure to a vehicle renderer. */
+  nativeVehicleDriver = false;
 
   constructor(id: number, className: string, public renderType: ResourceObject | null,
     alias: string) {

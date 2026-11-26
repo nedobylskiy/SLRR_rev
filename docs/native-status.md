@@ -2,17 +2,17 @@
 
 Snapshot: 2026-11-08. Generated from the installed game and current browser host.
 
-1. [Implemented (354)](#1-implemented)
+1. [Implemented (365)](#1-implemented)
 2. [Mocked (24)](#2-mocked)
-3. [Not implemented (110)](#3-not-implemented)
+3. [Not implemented (100)](#3-not-implemented)
 
 Scanned **3047 TUFA files**, **3118 classes**; **0 read errors**. Each overload is a separate row.
 
 | Status | Total overloads | Game native declarations | Host additions |
 |---|---:|---:|---:|
-| Implemented | 354 | 291 | 63 |
+| Implemented | 365 | 301 | 64 |
 | Mocked | 24 | 17 | 7 |
-| Not implemented | 110 | 110 | 0 |
+| Not implemented | 100 | 100 | 0 |
 
 **Status definitions**
 
@@ -39,11 +39,11 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 
 ## 1. Implemented
 
-**354 overloads.**
+**365 overloads.**
 
 | Method | Implementation | Notes |
 |---|---|---|
-| `java.game.GameLogic.kismajomCheck(String[]) → int` | [src/runtime/input-native.ts:64](../src/runtime/input-native.ts#L64) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.game.GameLogic.kismajomCheck(String[]) → int` | [src/runtime/input-native.ts:71](../src/runtime/input-native.ts#L71) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.Navigator.updateNavigator(GameRef, int) → void` | [src/runtime/navigator-native.ts:27](../src/runtime/navigator-native.ts#L27) | Java-owned minimap tile/marker/viewport adapter with north-up and heading-up modes; host map bounds and projected symbol clamp. Exact native transform parity remains approximate. |
 | `java.game.parts.bodypart.Chassis.forceUpdate() → void` | [src/runtime/chassis-native.ts:175](../src/runtime/chassis-native.ts#L175) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.bodypart.Chassis.getCM() → Vector3` | [src/runtime/part-native.ts:126](../src/runtime/part-native.ts#L126) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -60,6 +60,7 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.game.parts.bodypart.Chassis.getWheels() → int` | [src/runtime/chassis-native.ts:131](../src/runtime/chassis-native.ts#L131) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.bodypart.Chassis.setAckermann(float) → void` | [src/runtime/chassis-native.ts:162](../src/runtime/chassis-native.ts#L162) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.bodypart.Chassis.setCooling(float, float, float) → void` | [src/runtime/chassis-native.ts:47](../src/runtime/chassis-native.ts#L47) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.game.parts.bodypart.Chassis.setHornSFX(ResourceRef, float, int) → void` | [src/runtime/vehicle-horn-native.ts:27](../src/runtime/vehicle-horn-native.ts#L27) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.bodypart.Chassis.setMaxSteer(float) → void` | [src/runtime/chassis-native.ts:156](../src/runtime/chassis-native.ts#L156) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.bodypart.Chassis.setMileage(float) → void` | [src/runtime/chassis-native.ts:82](../src/runtime/chassis-native.ts#L82) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.bodypart.Chassis.setSfxExhaustMinVol(float) → void` | [src/runtime/chassis-native.ts:104](../src/runtime/chassis-native.ts#L104) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -138,8 +139,8 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.game.parts.WheelRef.setStiffness(float) → void` | [src/runtime/wheel-ref-native.ts:47](../src/runtime/wheel-ref-native.ts#L47) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.WheelRef.setWidth(float) → void` | [src/runtime/wheel-ref-native.ts:47](../src/runtime/wheel-ref-native.ts#L47) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.game.parts.WheelRef.setYpr(Ypr) → void` | [src/runtime/wheel-ref-native.ts:91](../src/runtime/wheel-ref-native.ts#L91) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.game.Vehicle.getHorn() → int` | [src/runtime/vehicle-horn-native.ts:23](../src/runtime/vehicle-horn-native.ts#L23) | Reads the player controller’s original AXIS_HORN mapping and script sethorn state. Career scripts may consume the request with sethorn 0; playback uses original sound:0x0015. |
-| `java.game.Vehicle.getSpeedSquare() → float` | [src/runtime/game-boot.ts:434](../src/runtime/game-boot.ts#L434) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.game.Vehicle.getHorn() → int` | [src/runtime/vehicle-horn-native.ts:26](../src/runtime/vehicle-horn-native.ts#L26) | Reads the player controller’s original AXIS_HORN mapping and script sethorn state. Career scripts may consume the request with sethorn 0; playback uses original sound:0x0015. |
+| `java.game.Vehicle.getSpeedSquare() → float` | [src/runtime/game-boot.ts:484](../src/runtime/game-boot.ts#L484) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.io.Controller.user_Add(int, int, int, float, float, float, float) → int` | [src/runtime/controller-native.ts:45](../src/runtime/controller-native.ts#L45) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.io.Controller.user_Del(int, int, int) → int` | [src/runtime/controller-native.ts:56](../src/runtime/controller-native.ts#L56) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.io.Controller.user_GetAxisVal(int) → float` | [src/runtime/controller-native.ts:81](../src/runtime/controller-native.ts#L81) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -164,19 +165,21 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.io.FindFile.close() → void` | [src/runtime/find-file-native.ts:45](../src/runtime/find-file-native.ts#L45) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.io.FindFile.first(String, int) → String` | [src/runtime/find-file-native.ts:30](../src/runtime/find-file-native.ts#L30) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.io.FindFile.next() → String` | [src/runtime/find-file-native.ts:39](../src/runtime/find-file-native.ts#L39) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.Input.checkHotkeys(GameRef, Osd) → void` | [src/runtime/input-native.ts:98](../src/runtime/input-native.ts#L98) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.Input.createHotkey(int, int, Hotkey, GameRef, Osd, int) → void` | [src/runtime/input-native.ts:84](../src/runtime/input-native.ts#L84) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.Input.deleteHotkey(Hotkey) → void` | [src/runtime/input-native.ts:89](../src/runtime/input-native.ts#L89) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.Input.flushHotkeys() → void` | [src/runtime/input-native.ts:94](../src/runtime/input-native.ts#L94) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.Input.getAxis(int, int) → float` | [src/runtime/input-native.ts:51](../src/runtime/input-native.ts#L51) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.Input.getDeviceName(int) → String` | [src/runtime/game-boot.ts:515](../src/runtime/game-boot.ts#L515) | Browser adapter exposes SysKeyboard/SysMouse; other device indices return null. |
-| `java.io.Input.initControllers(Init, String)` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Partial browser adapter: stores Controller.controlFile; does not initialize original OS device drivers. **Host addition.** |
-| `java.io.Input.lastKey() → int` | [src/runtime/input-native.ts:53](../src/runtime/input-native.ts#L53) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.MouseCursor.getPos() → Vector3` | [src/runtime/game-type-native.ts:491](../src/runtime/game-type-native.ts#L491) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.io.MouseCursor.getPos(Vector3) → Vector3` | [src/runtime/game-type-native.ts:494](../src/runtime/game-type-native.ts#L494) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.Debug.errorEX(String) → void` | [src/runtime/system-native.ts:81](../src/runtime/system-native.ts#L81) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.Debug.giveWarning(String) → void` | [src/runtime/system-native.ts:77](../src/runtime/system-native.ts#L77) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.Debug.writeFile(String, String) → void` | [src/runtime/system-native.ts:73](../src/runtime/system-native.ts#L73) | Writes a host log event, not an original filesystem debug file. |
+| `java.io.Input.checkHotkeys(GameRef, Osd) → void` | [src/runtime/input-native.ts:105](../src/runtime/input-native.ts#L105) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.io.Input.createHotkey(int, int, Hotkey, GameRef, Osd, int) → void` | [src/runtime/input-native.ts:91](../src/runtime/input-native.ts#L91) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.io.Input.deleteHotkey(Hotkey) → void` | [src/runtime/input-native.ts:96](../src/runtime/input-native.ts#L96) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.io.Input.flushHotkeys() → void` | [src/runtime/input-native.ts:101](../src/runtime/input-native.ts#L101) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.io.Input.getAxis(int, int) → float` | [src/runtime/input-native.ts:58](../src/runtime/input-native.ts#L58) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.io.Input.getDeviceName(int) → String` | [src/runtime/game-boot.ts:566](../src/runtime/game-boot.ts#L566) | Browser adapter exposes SysKeyboard/SysMouse; other device indices return null. |
+| `java.io.Input.initControllers(Init, String)` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Partial browser adapter: stores Controller.controlFile; does not initialize original OS device drivers. **Host addition.** |
+| `java.io.Input.lastKey() → int` | [src/runtime/input-native.ts:60](../src/runtime/input-native.ts#L60) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.io.MouseCursor.getPickedPos() → Vector3` | [src/runtime/input-native.ts:52](../src/runtime/input-native.ts#L52) | Returns the latest browser pick position as a new Vector3 or writes the supplied vector. Interactive Navigator maps unproject the displayed camera into smallmap coordinates and dispatch cursor notifications to the Java click object; Java owns destination selection. |
+| `java.io.MouseCursor.getPickedPos(Vector3) → Vector3` | [src/runtime/input-native.ts:52](../src/runtime/input-native.ts#L52) | Returns the latest browser pick position as a new Vector3 or writes the supplied vector. Interactive Navigator maps unproject the displayed camera into smallmap coordinates and dispatch cursor notifications to the Java click object; Java owns destination selection. |
+| `java.io.MouseCursor.getPos() → Vector3` | [src/runtime/input-native.ts:52](../src/runtime/input-native.ts#L52) | Returns the browser pointer position normalized to the game viewport (-1..1, Y down), independently of world picking and camera-control state. Supports fresh vectors and the output-vector overload; original Java OSD positions and clamps tooltips. |
+| `java.io.MouseCursor.getPos(Vector3) → Vector3` | [src/runtime/input-native.ts:52](../src/runtime/input-native.ts#L52) | Returns the browser pointer position normalized to the game viewport (-1..1, Y down), independently of world picking and camera-control state. Supports fresh vectors and the output-vector overload; original Java OSD positions and clamps tooltips. |
+| `java.lang.Debug.errorEX(String) → void` | [src/runtime/system-native.ts:82](../src/runtime/system-native.ts#L82) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.Debug.giveWarning(String) → void` | [src/runtime/system-native.ts:78](../src/runtime/system-native.ts#L78) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.Debug.writeFile(String, String) → void` | [src/runtime/system-native.ts:74](../src/runtime/system-native.ts#L74) | Writes a host log event, not an original filesystem debug file. |
 | `java.lang.Float.toString(float, String) → String` | [src/runtime/string-native.ts:28](../src/runtime/string-native.ts#L28) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.GameType.<init>()` | [src/runtime/game-type-native.ts:277](../src/runtime/game-type-native.ts#L277) | Host-only overload/adapter; no matching native TUFA declaration in this corpus. **Host addition.** |
 | `java.lang.GameType.addNotification(GameRef, int, int, String, String) → void` | [src/runtime/game-type-native.ts:307](../src/runtime/game-type-native.ts#L307) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -234,7 +237,7 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.lang.Math.total(int[])` | [src/runtime/math-native.ts:57](../src/runtime/math-native.ts#L57) | Host-only overload/adapter; no matching native TUFA declaration in this corpus. **Host addition.** |
 | `java.lang.Object.notify() → void` | [src/runtime/thread-native.ts:87](../src/runtime/thread-native.ts#L87) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.Object.notifyAll() → void` | [src/runtime/thread-native.ts:87](../src/runtime/thread-native.ts#L87) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.Object.toString() → String` | [src/runtime/game-boot.ts:210](../src/runtime/game-boot.ts#L210) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.Object.toString() → String` | [src/runtime/game-boot.ts:248](../src/runtime/game-boot.ts#L248) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.Object.wait() → void` | [src/runtime/thread-native.ts:80](../src/runtime/thread-native.ts#L80) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.String.append(int) → String` | [src/runtime/string-native.ts:42](../src/runtime/string-native.ts#L42) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.String.finalize() → void` | [src/runtime/string-native.ts:60](../src/runtime/string-native.ts#L60) | Browser lifetime adapter: returns void; JavaScript owns memory. |
@@ -243,19 +246,19 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.lang.String.intValue() → int` | [src/runtime/string-native.ts:52](../src/runtime/string-native.ts#L52) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.String.length() → int` | [src/runtime/string-native.ts:41](../src/runtime/string-native.ts#L41) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.String.token(int, String) → String` | [src/runtime/string-native.ts:47](../src/runtime/string-native.ts#L47) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.arraycopy(Object, int, Object, int, int) → void` | [src/runtime/game-boot.ts:377](../src/runtime/game-boot.ts#L377) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.buildNumber() → int` | [src/runtime/system-native.ts:42](../src/runtime/system-native.ts#L42) | Compatibility constant 940, not the host engine version. |
-| `java.lang.System.currentTime() → float` | [src/runtime/system-native.ts:24](../src/runtime/system-native.ts#L24) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.isLoading() → int` | [src/runtime/system-native.ts:63](../src/runtime/system-native.ts#L63) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.isLoadingReset() → void` | [src/runtime/system-native.ts:59](../src/runtime/system-native.ts#L59) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.log(String) → void` | [src/runtime/system-native.ts:67](../src/runtime/system-native.ts#L67) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.memUsage() → int` | [src/runtime/system-native.ts:44](../src/runtime/system-native.ts#L44) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.openLib(String) → int` | [src/runtime/game-boot.ts:368](../src/runtime/game-boot.ts#L368) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.setLdPriority(int) → void` | [src/runtime/system-native.ts:55](../src/runtime/system-native.ts#L55) | Stores the priority; no original engine loader scheduling. |
-| `java.lang.System.setMeasure(float) → void` | [src/runtime/system-native.ts:30](../src/runtime/system-native.ts#L30) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.simTime() → float` | [src/runtime/system-native.ts:25](../src/runtime/system-native.ts#L25) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.syncGameTime(float) → void` | [src/runtime/system-native.ts:26](../src/runtime/system-native.ts#L26) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.lang.System.timeWarp(float) → float` | [src/runtime/system-native.ts:48](../src/runtime/system-native.ts#L48) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.arraycopy(Object, int, Object, int, int) → void` | [src/runtime/game-boot.ts:423](../src/runtime/game-boot.ts#L423) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.buildNumber() → int` | [src/runtime/system-native.ts:43](../src/runtime/system-native.ts#L43) | Compatibility constant 940, not the host engine version. |
+| `java.lang.System.currentTime() → float` | [src/runtime/system-native.ts:25](../src/runtime/system-native.ts#L25) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.isLoading() → int` | [src/runtime/system-native.ts:64](../src/runtime/system-native.ts#L64) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.isLoadingReset() → void` | [src/runtime/system-native.ts:60](../src/runtime/system-native.ts#L60) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.log(String) → void` | [src/runtime/system-native.ts:68](../src/runtime/system-native.ts#L68) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.memUsage() → int` | [src/runtime/system-native.ts:45](../src/runtime/system-native.ts#L45) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.openLib(String) → int` | [src/runtime/game-boot.ts:414](../src/runtime/game-boot.ts#L414) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.setLdPriority(int) → void` | [src/runtime/system-native.ts:56](../src/runtime/system-native.ts#L56) | Stores the priority; no original engine loader scheduling. |
+| `java.lang.System.setMeasure(float) → void` | [src/runtime/system-native.ts:31](../src/runtime/system-native.ts#L31) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.simTime() → float` | [src/runtime/system-native.ts:26](../src/runtime/system-native.ts#L26) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.syncGameTime(float) → void` | [src/runtime/system-native.ts:27](../src/runtime/system-native.ts#L27) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.lang.System.timeWarp(float) → float` | [src/runtime/system-native.ts:49](../src/runtime/system-native.ts#L49) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.Thread.getPriority() → int` | [src/runtime/thread-native.ts:52](../src/runtime/thread-native.ts#L52) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.Thread.init(String) → void` | [src/runtime/thread-native.ts:22](../src/runtime/thread-native.ts#L22) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.lang.Thread.isAlive() → int` | [src/runtime/thread-native.ts:51](../src/runtime/thread-native.ts#L51) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -276,14 +279,14 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.lang.Ypr.mul(Ypr) → void` | [src/runtime/vector-native.ts:64](../src/runtime/vector-native.ts#L64) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Camera.create(ResourceRef, Viewport, int, float, float, float, float, float, int, int) → void` | [src/runtime/camera-native.ts:23](../src/runtime/camera-native.ts#L23) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Camera.destroy() → void` | [src/runtime/camera-native.ts:37](../src/runtime/camera-native.ts#L37) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.render.GfxEngine.closeVideo() → void` | [src/runtime/game-boot.ts:499](../src/runtime/game-boot.ts#L499) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
-| `java.render.GfxEngine.currDisplayMode() → int` | [src/runtime/game-boot.ts:479](../src/runtime/game-boot.ts#L479) | Browser adapter exposes one current viewport-sized mode, not OS display enumeration. |
-| `java.render.GfxEngine.displayModeName(int) → String` | [src/runtime/game-boot.ts:480](../src/runtime/game-boot.ts#L480) | Browser adapter exposes one current viewport-sized mode, not OS display enumeration. |
-| `java.render.GfxEngine.isPlayingVideo() → int` | [src/runtime/game-boot.ts:500](../src/runtime/game-boot.ts#L500) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
-| `java.render.GfxEngine.numDisplayModes() → int` | [src/runtime/game-boot.ts:478](../src/runtime/game-boot.ts#L478) | Browser adapter exposes one current viewport-sized mode, not OS display enumeration. |
-| `java.render.GfxEngine.openVideo(String, int, int, int) → int` | [src/runtime/game-boot.ts:497](../src/runtime/game-boot.ts#L497) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
-| `java.render.GfxEngine.openVideo(String, int, int) → int` | [src/runtime/game-boot.ts:497](../src/runtime/game-boot.ts#L497) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
-| `java.render.GfxEngine.setGlobalEnvmap(ResourceRef) → void` | [src/runtime/game-boot.ts:482](../src/runtime/game-boot.ts#L482) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.render.GfxEngine.closeVideo() → void` | [src/runtime/game-boot.ts:550](../src/runtime/game-boot.ts#L550) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
+| `java.render.GfxEngine.currDisplayMode() → int` | [src/runtime/game-boot.ts:530](../src/runtime/game-boot.ts#L530) | Browser adapter exposes one current viewport-sized mode, not OS display enumeration. |
+| `java.render.GfxEngine.displayModeName(int) → String` | [src/runtime/game-boot.ts:531](../src/runtime/game-boot.ts#L531) | Browser adapter exposes one current viewport-sized mode, not OS display enumeration. |
+| `java.render.GfxEngine.isPlayingVideo() → int` | [src/runtime/game-boot.ts:551](../src/runtime/game-boot.ts#L551) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
+| `java.render.GfxEngine.numDisplayModes() → int` | [src/runtime/game-boot.ts:529](../src/runtime/game-boot.ts#L529) | Browser adapter exposes one current viewport-sized mode, not OS display enumeration. |
+| `java.render.GfxEngine.openVideo(String, int, int, int) → int` | [src/runtime/game-boot.ts:548](../src/runtime/game-boot.ts#L548) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
+| `java.render.GfxEngine.openVideo(String, int, int) → int` | [src/runtime/game-boot.ts:548](../src/runtime/game-boot.ts#L548) | Delegates to OsdVideo when supplied. Without it: openVideo returns 1, isPlayingVideo returns 0, closeVideo has no effect. |
+| `java.render.GfxEngine.setGlobalEnvmap(ResourceRef) → void` | [src/runtime/game-boot.ts:533](../src/runtime/game-boot.ts#L533) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Text.changeAlign(int) → void` | [src/runtime/osd-text-native.ts:68](../src/runtime/osd-text-native.ts#L68) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Text.changeColor(int) → void` | [src/runtime/osd-text-native.ts:75](../src/runtime/osd-text-native.ts#L75) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Text.create(ResourceRef, ResourceRef, float, float) → void` | [src/runtime/osd-text-native.ts:38](../src/runtime/osd-text-native.ts#L38) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -305,18 +308,18 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.render.Viewport.getTop() → float` | [src/runtime/viewport-native.ts:43](../src/runtime/viewport-native.ts#L43) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Viewport.getWidth() → float` | [src/runtime/viewport-native.ts:43](../src/runtime/viewport-native.ts#L43) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.render.Viewport.resize(float, float, float, float) → void` | [src/runtime/viewport-native.ts:36](../src/runtime/viewport-native.ts#L36) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.sound.Sound.changeMusicSet(int) → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.firstTrack() → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.getNowPlaying() → int` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.getTotalTracks() → int` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.getVolume(int) → float` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.nextTrack() → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.playTrack(int) → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.playTrack(String) → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.prevTrack() → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.randomTrack() → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.setVolume(int, float) → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
-| `java.sound.Sound.stopMusic() → void` | [src/runtime/game-boot.ts:509](../src/runtime/game-boot.ts#L509) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.changeMusicSet(int) → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.firstTrack() → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.getNowPlaying() → int` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.getTotalTracks() → int` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.getVolume(int) → float` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.nextTrack() → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.playTrack(int) → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.playTrack(String) → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.prevTrack() → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.randomTrack() → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.setVolume(int, float) → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
+| `java.sound.Sound.stopMusic() → void` | [src/runtime/game-boot.ts:560](../src/runtime/game-boot.ts#L560) | Delegates to SoundJavaBridge when supplied. Without the bridge returns void/0; this fallback is not audio playback. |
 | `java.util.resource.Animation.<init>(RenderRef, ResourceRef) → void` | [src/runtime/animation-native.ts:9](../src/runtime/animation-native.ts#L9) | Per-RenderRef skeleton/AnimationMixer bridge loads original matrixdata clips, preserves Java placement and controls playback/lifecycle. Host position is seconds; fade is approximated as fade-in duration. Exact original native timing/blending semantics remain unverified. |
 | `java.util.resource.Animation.finalize() → void` | [src/runtime/animation-native.ts:27](../src/runtime/animation-native.ts#L27) | Per-RenderRef skeleton/AnimationMixer bridge loads original matrixdata clips, preserves Java placement and controls playback/lifecycle. Host position is seconds; fade is approximated as fade-in duration. Exact original native timing/blending semantics remain unverified. |
 | `java.util.resource.Animation.getPos() → float` | [src/runtime/animation-native.ts:26](../src/runtime/animation-native.ts#L26) | Per-RenderRef skeleton/AnimationMixer bridge loads original matrixdata clips, preserves Java placement and controls playback/lifecycle. Host position is seconds; fade is approximated as fade-in duration. Exact original native timing/blending semantics remain unverified. |
@@ -345,7 +348,7 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.util.resource.GameRef.isScripted()` | [src/runtime/game-type-native.ts:383](../src/runtime/game-type-native.ts#L383) | Host-only overload/adapter; no matching native TUFA declaration in this corpus. **Host addition.** |
 | `java.util.resource.GameRef.isScripted(String) → int` | [src/runtime/game-type-native.ts:382](../src/runtime/game-type-native.ts#L382) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.GameRef.queueEvent(ResourceRef, int, String) → void` | [src/runtime/game-type-native.ts:510](../src/runtime/game-type-native.ts#L510) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.GameRef.setActiveCollision() → void` | [src/runtime/game-type-native.ts:546](../src/runtime/game-type-native.ts#L546) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.GameRef.setActiveCollision() → void` | [src/runtime/game-type-native.ts:556](../src/runtime/game-type-native.ts#L556) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.GameRef.setFlags(int) → void` | [src/runtime/game-type-native.ts:482](../src/runtime/game-type-native.ts#L482) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.GameRef.setMatrix(Vector3, Ypr) → void` | [src/runtime/game-type-native.ts:503](../src/runtime/game-type-native.ts#L503) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.GameRef.setParent(ResourceRef) → void` | [src/runtime/game-type-native.ts:488](../src/runtime/game-type-native.ts#L488) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -356,12 +359,18 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.util.resource.GroundRef.addTrafficCar(GameRef, Vector3) → int` | [src/runtime/traffic-native.ts:30](../src/runtime/traffic-native.ts#L30) | Registers existing Java Bot cars with stable per-ground traffic IDs. Visible stream instances emit car_add/car_rem to the bound Track, expose GII_CAR_TRAFFICPTR and sync live poses/velocities. Individual removal preserves the Java-owned car; pursuit AI commands are separate work. Host registration IDs are not original native pointers. |
 | `java.util.resource.GroundRef.addTrafficN(GameRef, float, float, float, float)` | [src/runtime/traffic-native.ts:19](../src/runtime/traffic-native.ts#L19) | Registers/clears per-ground Java model resources and density weights consumed by the host traffic stream (user cap 0–50). Remaining three parameters are preserved but not assigned unverified semantics. addTrafficN returns a host catalogue registration ID; original native ID parity is not claimed. **Host addition.** |
 | `java.util.resource.GroundRef.addTrafficN(GameRef, int, float, float, float) → int` | [src/runtime/traffic-native.ts:19](../src/runtime/traffic-native.ts#L19) | Registers/clears per-ground Java model resources and density weights consumed by the host traffic stream (user cap 0–50). Remaining three parameters are preserved but not assigned unverified semantics. addTrafficN returns a host catalogue registration ID; original native ID parity is not claimed. |
+| `java.util.resource.GroundRef.clearHalts() → void` | [src/runtime/ground-road-native.ts:40](../src/runtime/ground-road-native.ts#L40) | Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity. |
 | `java.util.resource.GroundRef.delTraffic() → void` | [src/runtime/traffic-native.ts:28](../src/runtime/traffic-native.ts#L28) | Registers/clears per-ground Java model resources and density weights consumed by the host traffic stream (user cap 0–50). Remaining three parameters are preserved but not assigned unverified semantics. addTrafficN returns a host catalogue registration ID; original native ID parity is not claimed. |
-| `java.util.resource.GroundRef.getNearestCross(Vector3, float) → Vector3` | [src/runtime/ground-road-native.ts:8](../src/runtime/ground-road-native.ts#L8) | Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed. |
-| `java.util.resource.GroundRef.getNearestCross(Vector3, int)` | [src/runtime/ground-road-native.ts:8](../src/runtime/ground-road-native.ts#L8) | Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed. **Host addition.** |
+| `java.util.resource.GroundRef.getNearestCross(Vector3, float) → Vector3` | [src/runtime/ground-road-native.ts:41](../src/runtime/ground-road-native.ts#L41) | Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed. |
+| `java.util.resource.GroundRef.getNearestCross(Vector3, int)` | [src/runtime/ground-road-native.ts:41](../src/runtime/ground-road-native.ts#L41) | Queries the receiver ground’s cached TRC graph across both crossing pools in 3D. Minimizes abs(distance - requested radius), not a radius cutoff; stable ties keep file order. Returns a fresh Vector3 or null for absent/empty graph. JS double precision; bit-exact original x87 parity is not claimed. **Host addition.** |
+| `java.util.resource.GroundRef.getRouteLength(Vector3, Vector3) → float` | [src/runtime/ground-road-native.ts:26](../src/runtime/ground-road-native.ts#L26) | Receiver-specific cached TRC routing using street endpoints, lane-link travel directions and shortest sampled distance in metres. Shared two-way centrelines support both legal directions, including partial endpoint roads. Returns -1/null when unavailable. Start direction is a fresh normalized forward vector. Host routing approximation; original route-solver parity is not claimed. |
+| `java.util.resource.GroundRef.getStartDirection(Vector3, Vector3) → Vector3` | [src/runtime/ground-road-native.ts:26](../src/runtime/ground-road-native.ts#L26) | Receiver-specific cached TRC routing using street endpoints, lane-link travel directions and shortest sampled distance in metres. Shared two-way centrelines support both legal directions, including partial endpoint roads. Returns -1/null when unavailable. Start direction is a fresh normalized forward vector. Host routing approximation; original route-solver parity is not claimed. |
+| `java.util.resource.GroundRef.haltTrafficCross(Vector3, float) → void` | [src/runtime/ground-road-native.ts:35](../src/runtime/ground-road-native.ts#L35) | Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity. |
+| `java.util.resource.GroundRef.haltTrafficCross(Vector3, int)` | [src/runtime/ground-road-native.ts:35](../src/runtime/ground-road-native.ts#L35) | Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity. **Host addition.** |
+| `java.util.resource.GroundRef.haltTrafficPath(Vector3, Vector3) → void` | [src/runtime/ground-road-native.ts:26](../src/runtime/ground-road-native.ts#L26) | Per-ground race exclusions reach host spawning, existing traffic and worker AI. Path halts clear both street directions until clearHalts; crossing halts expire after the requested seconds. Already-entered crossing traffic may exit. Host route/clearance policy, not claimed original binary parity. |
 | `java.util.resource.GroundRef.notifyTrafficCar(int, int) → int` | [src/runtime/traffic-native.ts:39](../src/runtime/traffic-native.ts#L39) | Registers existing Java Bot cars with stable per-ground traffic IDs. Visible stream instances emit car_add/car_rem to the bound Track, expose GII_CAR_TRAFFICPTR and sync live poses/velocities. Individual removal preserves the Java-owned car; pursuit AI commands are separate work. Host registration IDs are not original native pointers. |
 | `java.util.resource.GroundRef.remTrafficCar(int) → void` | [src/runtime/traffic-native.ts:43](../src/runtime/traffic-native.ts#L43) | Registers existing Java Bot cars with stable per-ground traffic IDs. Visible stream instances emit car_add/car_rem to the bound Track, expose GII_CAR_TRAFFICPTR and sync live poses/velocities. Individual removal preserves the Java-owned car; pursuit AI commands are separate work. Host registration IDs are not original native pointers. |
-| `java.util.resource.GroundRef.setFog(int, float, float) → void` | [src/runtime/game-boot.ts:330](../src/runtime/game-boot.ts#L330) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.GroundRef.setFog(int, float, float) → void` | [src/runtime/game-boot.ts:376](../src/runtime/game-boot.ts#L376) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.PhysicsRef.createBox(ResourceRef, float, float, float, String) → void` | [src/runtime/osd-button-native.ts:44](../src/runtime/osd-button-native.ts#L44) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.PhysicsRef.destroy()` | [src/runtime/physics-ref-native.ts:36](../src/runtime/physics-ref-native.ts#L36) | Host-only overload/adapter; no matching native TUFA declaration in this corpus. **Host addition.** |
 | `java.util.resource.PhysicsRef.getAngVel() → Vector3` | [src/runtime/physics-ref-native.ts:33](../src/runtime/physics-ref-native.ts#L33) | Fixed script-created colliders only. setStatic(0) throws; getVel/getAngVel return zero. Standalone dynamic bodies are absent. |
@@ -371,12 +380,14 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.util.resource.PhysicsRef.setMatrix(Vector3, Ypr) → void` | [src/runtime/osd-button-native.ts:59](../src/runtime/osd-button-native.ts#L59) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.PhysicsRef.setStatic(int) → void` | [src/runtime/physics-ref-native.ts:25](../src/runtime/physics-ref-native.ts#L25) | Fixed script-created colliders only. setStatic(0) throws; getVel/getAngVel return zero. Standalone dynamic bodies are absent. |
 | `java.util.resource.RenderRef.changeResource(ResourceRef, ResourceRef) → void` | [src/runtime/game-type-native.ts:198](../src/runtime/game-type-native.ts#L198) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.RenderRef.create(ResourceRef, RenderRef, String) → void` | [src/runtime/render-ref-native.ts:24](../src/runtime/render-ref-native.ts#L24) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.RenderRef.getTypeID() → int` | [src/runtime/render-ref-native.ts:39](../src/runtime/render-ref-native.ts#L39) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.RenderRef.setFlare(ResourceRef, int, float, float, int, int) → void` | [src/runtime/render-ref-native.ts:60](../src/runtime/render-ref-native.ts#L60) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.RenderRef.setLight(int, int, int) → void` | [src/runtime/render-ref-native.ts:51](../src/runtime/render-ref-native.ts#L51) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.RenderRef.setMatrix(Vector3, Ypr) → void` | [src/runtime/render-ref-native.ts:29](../src/runtime/render-ref-native.ts#L29) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.RenderRef.setType(ResourceRef) → void` | [src/runtime/render-ref-native.ts:41](../src/runtime/render-ref-native.ts#L41) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.create(ResourceRef, RenderRef, String) → void` | [src/runtime/render-ref-native.ts:43](../src/runtime/render-ref-native.ts#L43) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.getTypeID() → int` | [src/runtime/render-ref-native.ts:58](../src/runtime/render-ref-native.ts#L58) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.plotRoute(ResourceRef, ResourceRef, int, float, Vector3) → int` | [src/runtime/render-ref-native.ts:25](../src/runtime/render-ref-native.ts#L25) | Snapshots the last successful ground route query into a Java-owned navigator render resource. Applies XYZ scale, ARGB color and width; the minimap draws an unlit ribbon and honors replacement/destruction. No original route-texture shader parity is claimed. |
+| `java.util.resource.RenderRef.setColor(int) → void` | [src/runtime/render-ref-native.ts:35](../src/runtime/render-ref-native.ts#L35) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.setFlare(ResourceRef, int, float, float, int, int) → void` | [src/runtime/render-ref-native.ts:79](../src/runtime/render-ref-native.ts#L79) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.setLight(int, int, int) → void` | [src/runtime/render-ref-native.ts:70](../src/runtime/render-ref-native.ts#L70) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.setMatrix(Vector3, Ypr) → void` | [src/runtime/render-ref-native.ts:48](../src/runtime/render-ref-native.ts#L48) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.RenderRef.setType(ResourceRef) → void` | [src/runtime/render-ref-native.ts:60](../src/runtime/render-ref-native.ts#L60) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.ResourceRef.deleteNative() → void` | [src/runtime/game-type-native.ts:269](../src/runtime/game-type-native.ts#L269) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.ResourceRef.destroy() → void` | [src/runtime/game-type-native.ts:244](../src/runtime/game-type-native.ts#L244) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.ResourceRef.duplicate(ResourceRef) → void` | [src/runtime/game-type-native.ts:163](../src/runtime/game-type-native.ts#L163) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -389,7 +400,7 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.util.resource.ResourceRef.isScripted()` | [src/runtime/game-type-native.ts:383](../src/runtime/game-type-native.ts#L383) | Host-only overload/adapter; no matching native TUFA declaration in this corpus. **Host addition.** |
 | `java.util.resource.ResourceRef.isScripted(String)` | [src/runtime/game-type-native.ts:382](../src/runtime/game-type-native.ts#L382) | Host-only overload/adapter; no matching native TUFA declaration in this corpus. **Host addition.** |
 | `java.util.resource.ResourceRef.load() → void` | [src/runtime/game-type-native.ts:76](../src/runtime/game-type-native.ts#L76) | Host implementation registered; original-engine semantic parity is not implied. |
-| `java.util.resource.ResourceRef.makeTexture(ResourceRef, String) → void` | [src/runtime/game-boot.ts:321](../src/runtime/game-boot.ts#L321) | Host implementation registered; original-engine semantic parity is not implied. |
+| `java.util.resource.ResourceRef.makeTexture(ResourceRef, String) → void` | [src/runtime/game-boot.ts:367](../src/runtime/game-boot.ts#L367) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.ResourceRef.newNative() → void` | [src/runtime/game-type-native.ts:95](../src/runtime/game-type-native.ts#L95) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.ResourceRef.scaleMesh(float, float, float) → void` | [src/runtime/game-type-native.ts:191](../src/runtime/game-type-native.ts#L191) | Host implementation registered; original-engine semantic parity is not implied. |
 | `java.util.resource.ResourceRef.set(int) → void` | [src/runtime/game-type-native.ts:98](../src/runtime/game-type-native.ts#L98) | Host implementation registered; original-engine semantic parity is not implied. |
@@ -404,34 +415,34 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 
 | Method | Implementation | Notes |
 |---|---|---|
-| `java.game.Frontend.init()` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Logs and returns void. Original frontend initialization is not reproduced by this adapter. **Host addition.** |
-| `java.game.LoadingScreen.show(ResourceRef, int)` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Conditional no-op only when original LoadingScreen assets are absent. With assets, the Java loading-screen implementation runs. **Host addition.** |
-| `java.io.Input.enablePointingDevice()` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Logs and returns void; browser pointer events are managed separately. **Host addition.** |
-| `java.lang.GarbageCollector.<init>()` | [src/runtime/game-boot.ts:443](../src/runtime/game-boot.ts#L443) | No-op host adapter; no original collector lifecycle. JavaScript manages memory. **Host addition.** |
-| `java.lang.GarbageCollector.flush()` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | No-op host adapter; no original collector lifecycle. JavaScript manages memory. **Host addition.** |
-| `java.lang.GarbageCollector.push(Object)` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | No-op host adapter; no original collector lifecycle. JavaScript manages memory. **Host addition.** |
-| `java.lang.System.compileAll(String) → int` | [src/runtime/system-native.ts:66](../src/runtime/system-native.ts#L66) | Returns 0; does not force collection/finalization or compile the original scripts. |
-| `java.lang.System.gc() → int` | [src/runtime/system-native.ts:65](../src/runtime/system-native.ts#L65) | Returns 0; does not force collection/finalization or compile the original scripts. |
-| `java.lang.System.getConfigOptions() → void` | [src/runtime/system-native.ts:38](../src/runtime/system-native.ts#L38) | Logs and returns void; does not apply the full original system/graphics/FFB configuration. |
-| `java.lang.System.runFinalization() → int` | [src/runtime/system-native.ts:65](../src/runtime/system-native.ts#L65) | Returns 0; does not force collection/finalization or compile the original scripts. |
-| `java.render.GfxEngine.changeVideoMode(int, int, int) → void` | [src/runtime/game-boot.ts:481](../src/runtime/game-boot.ts#L481) | Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change. |
-| `java.render.GfxEngine.flush() → void` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change. |
-| `java.render.GfxEngine.forceRendering() → void` | [src/runtime/game-boot.ts:470](../src/runtime/game-boot.ts#L470) | Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change. |
-| `java.sound.Sound.enableDebugDump(ResourceRef) → int` | [src/runtime/game-boot.ts:511](../src/runtime/game-boot.ts#L511) | Returns 0; no original sound debug dump. |
-| `java.sound.Sound.init()` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Logs and returns void; browser audio initialization belongs to host services. **Host addition.** |
-| `java.util.resource.GroundRef.addPedestrianType(GameRef) → void` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Accepts/logs the call; no pedestrian simulation. |
-| `java.util.resource.GroundRef.addWaterLimit(Vector3, Vector3) → void` | [src/runtime/game-boot.ts:462](../src/runtime/game-boot.ts#L462) | Returns void; no water-plane rendering or water bounds. |
-| `java.util.resource.GroundRef.setPedestrianDensityN(float) → void` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Accepts/logs the call; no pedestrian simulation. |
-| `java.util.resource.GroundRef.setWater(Vector3, Vector3, float, float) → void` | [src/runtime/game-boot.ts:461](../src/runtime/game-boot.ts#L461) | Returns void; no water-plane rendering or water bounds. |
-| `java.util.resource.RenderRef.lineAdd(Vector3, Vector3, int, float) → void` | [src/runtime/render-ref-native.ts:81](../src/runtime/render-ref-native.ts#L81) | lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible. |
-| `java.util.resource.RenderRef.lineCreate(ResourceRef, ResourceRef) → int` | [src/runtime/render-ref-native.ts:72](../src/runtime/render-ref-native.ts#L72) | lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible. |
-| `java.util.resource.ResourceRef.cache() → void` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Logs the call; no original resource-cache operation or explicit unloading. |
-| `java.util.resource.ResourceRef.precache() → void` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Logs the call; no original resource-cache operation or explicit unloading. |
-| `java.util.resource.ResourceRef.unload() → void` | [src/runtime/game-boot.ts:201](../src/runtime/game-boot.ts#L201) | Logs the call; no original resource-cache operation or explicit unloading. |
+| `java.game.Frontend.init()` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Logs and returns void. Original frontend initialization is not reproduced by this adapter. **Host addition.** |
+| `java.game.LoadingScreen.show(ResourceRef, int)` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Conditional no-op only when original LoadingScreen assets are absent. With assets, the Java loading-screen implementation runs. **Host addition.** |
+| `java.io.Input.enablePointingDevice()` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Logs and returns void; browser pointer events are managed separately. **Host addition.** |
+| `java.lang.GarbageCollector.<init>()` | [src/runtime/game-boot.ts:493](../src/runtime/game-boot.ts#L493) | No-op host adapter; no original collector lifecycle. JavaScript manages memory. **Host addition.** |
+| `java.lang.GarbageCollector.flush()` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | No-op host adapter; no original collector lifecycle. JavaScript manages memory. **Host addition.** |
+| `java.lang.GarbageCollector.push(Object)` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | No-op host adapter; no original collector lifecycle. JavaScript manages memory. **Host addition.** |
+| `java.lang.System.compileAll(String) → int` | [src/runtime/system-native.ts:67](../src/runtime/system-native.ts#L67) | Returns 0; does not force collection/finalization or compile the original scripts. |
+| `java.lang.System.gc() → int` | [src/runtime/system-native.ts:66](../src/runtime/system-native.ts#L66) | Returns 0; does not force collection/finalization or compile the original scripts. |
+| `java.lang.System.getConfigOptions() → void` | [src/runtime/system-native.ts:39](../src/runtime/system-native.ts#L39) | Logs and returns void; does not apply the full original system/graphics/FFB configuration. |
+| `java.lang.System.runFinalization() → int` | [src/runtime/system-native.ts:66](../src/runtime/system-native.ts#L66) | Returns 0; does not force collection/finalization or compile the original scripts. |
+| `java.render.GfxEngine.changeVideoMode(int, int, int) → void` | [src/runtime/game-boot.ts:532](../src/runtime/game-boot.ts#L532) | Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change. |
+| `java.render.GfxEngine.flush() → void` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change. |
+| `java.render.GfxEngine.forceRendering() → void` | [src/runtime/game-boot.ts:521](../src/runtime/game-boot.ts#L521) | Returns void; no explicit renderer flush, forced synchronous rendering, or OS display-mode change. |
+| `java.sound.Sound.enableDebugDump(ResourceRef) → int` | [src/runtime/game-boot.ts:562](../src/runtime/game-boot.ts#L562) | Returns 0; no original sound debug dump. |
+| `java.sound.Sound.init()` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Logs and returns void; browser audio initialization belongs to host services. **Host addition.** |
+| `java.util.resource.GroundRef.addPedestrianType(GameRef) → void` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Accepts/logs the call; no pedestrian simulation. |
+| `java.util.resource.GroundRef.addWaterLimit(Vector3, Vector3) → void` | [src/runtime/game-boot.ts:513](../src/runtime/game-boot.ts#L513) | Returns void; no water-plane rendering or water bounds. |
+| `java.util.resource.GroundRef.setPedestrianDensityN(float) → void` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Accepts/logs the call; no pedestrian simulation. |
+| `java.util.resource.GroundRef.setWater(Vector3, Vector3, float, float) → void` | [src/runtime/game-boot.ts:512](../src/runtime/game-boot.ts#L512) | Returns void; no water-plane rendering or water bounds. |
+| `java.util.resource.RenderRef.lineAdd(Vector3, Vector3, int, float) → void` | [src/runtime/render-ref-native.ts:100](../src/runtime/render-ref-native.ts#L100) | lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible. |
+| `java.util.resource.RenderRef.lineCreate(ResourceRef, ResourceRef) → int` | [src/runtime/render-ref-native.ts:91](../src/runtime/render-ref-native.ts#L91) | lineCreate parents a resource and returns 1, but creates no line geometry. lineAdd discards points. Route/SkidMark native lines are invisible. |
+| `java.util.resource.ResourceRef.cache() → void` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Logs the call; no original resource-cache operation or explicit unloading. |
+| `java.util.resource.ResourceRef.precache() → void` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Logs the call; no original resource-cache operation or explicit unloading. |
+| `java.util.resource.ResourceRef.unload() → void` | [src/runtime/game-boot.ts:239](../src/runtime/game-boot.ts#L239) | Logs the call; no original resource-cache operation or explicit unloading. |
 
 ## 3. Not implemented
 
-**110 overloads.**
+**100 overloads.**
 
 | Method | Implementation | Notes |
 |---|---|---|
@@ -451,7 +462,6 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.game.parts.bodypart.Chassis.setAIparam_float(int, float) → void` | — | No matching registration in the browser Java host. |
 | `java.game.parts.bodypart.Chassis.setAIparam_int(int, int) → void` | — | No matching registration in the browser Java host. |
 | `java.game.parts.bodypart.Chassis.setBuck(int, int, float, float, float, float) → void` | — | No matching registration in the browser Java host. |
-| `java.game.parts.bodypart.Chassis.setHornSFX(ResourceRef, float, int) → void` | — | No matching registration in the browser Java host. |
 | `java.game.parts.bodypart.Chassis.setNitroSFX(ResourceRef, float) → void` | — | No matching registration in the browser Java host. |
 | `java.game.parts.bodypart.Chassis.setOSD(int, float) → void` | — | No matching registration in the browser Java host. |
 | `java.game.parts.bodypart.Chassis.setRPM(float) → void` | — | No matching registration in the browser Java host. |
@@ -465,8 +475,6 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.io.Input.axisName(int, int) → String` | — | No matching registration in the browser Java host. |
 | `java.io.Input.mapAxis(GameRef, int, int, int, float, float, float, float) → void` | — | No matching registration in the browser Java host. |
 | `java.io.Input.setAxisSmooth(GameRef, int, float, float, float, float) → void` | — | No matching registration in the browser Java host. |
-| `java.io.MouseCursor.getPickedPos() → Vector3` | — | No matching registration in the browser Java host. |
-| `java.io.MouseCursor.getPickedPos(Vector3) → Vector3` | — | No matching registration in the browser Java host. |
 | `java.lang.Math.atan2(float, float) → float` | — | No matching registration in the browser Java host. |
 | `java.lang.Math.exp(float) → float` | — | No matching registration in the browser Java host. |
 | `java.lang.Math.ln(float) → float` | — | No matching registration in the browser Java host. |
@@ -504,18 +512,13 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.util.resource.GameRef.isEmpty() → int` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.addTrafficP(GameRef, Vector3, int, float, float, float) → int` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.alignToRoad(Vector3) → Vector3[]` | — | No matching registration in the browser Java host. |
-| `java.util.resource.GroundRef.clearHalts() → void` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.findRoute(Vector3, Vector3) → float` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.getMaterialCount() → int` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.getMaterialName(int) → String` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.getPedestrianPos(Vector3, Vector3, int) → void` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.getRouteDist(Vector3) → float` | — | No matching registration in the browser Java host. |
-| `java.util.resource.GroundRef.getRouteLength(Vector3, Vector3) → float` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.getRoutePos(float) → Vector3` | — | No matching registration in the browser Java host. |
-| `java.util.resource.GroundRef.getStartDirection(Vector3, Vector3) → Vector3` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.getTrafficCarPos(int, Vector3) → void` | — | No matching registration in the browser Java host. |
-| `java.util.resource.GroundRef.haltTrafficCross(Vector3, float) → void` | — | No matching registration in the browser Java host. |
-| `java.util.resource.GroundRef.haltTrafficPath(Vector3, Vector3) → void` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.haltTrafficRoad(Vector3, Vector3) → void` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.pedestrianDistance(Vector3, int) → float` | — | No matching registration in the browser Java host. |
 | `java.util.resource.GroundRef.remPedestrianType(GameRef) → void` | — | No matching registration in the browser Java host. |
@@ -536,8 +539,6 @@ Machine-readable output: [native-status.json](reports/native-status.json). Class
 | `java.util.resource.PhysicsRef.getVel(Vector3) → Vector3` | — | No matching registration in the browser Java host. |
 | `java.util.resource.RenderRef.getBoneId(String) → int` | — | No matching registration in the browser Java host. |
 | `java.util.resource.RenderRef.getDetail() → float` | — | No matching registration in the browser Java host. |
-| `java.util.resource.RenderRef.plotRoute(ResourceRef, ResourceRef, int, float, Vector3) → int` | — | No matching registration in the browser Java host. |
-| `java.util.resource.RenderRef.setColor(int) → void` | — | No matching registration in the browser Java host. |
 | `java.util.resource.RenderRef.setMatrix(int, ResourceRef, Vector3, Ypr) → void` | — | No matching registration in the browser Java host. |
 | `java.util.resource.ResourceRef.makeSound(ResourceRef, String) → void` | — | No matching registration in the browser Java host. |
 | `java.util.Steam.getPackage(int) → String` | — | No matching registration in the browser Java host. |

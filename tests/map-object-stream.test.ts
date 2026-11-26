@@ -1,7 +1,69 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
+import { BoxGeometry, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, Texture, Vector3 } from 'three';
 import { MapObjectStream, isMapTreeAlias } from '../src/render/map-object-stream';
+import {MapGpuOcclusion} from '../src/render/map-gpu-occlusion';
+import type {WebGLRenderer} from 'three';
+
+test('initial scene waits for nearby models and placements without loading distant props',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4);
+  let finish!:(parts:Mesh[])=>void,farLoaded=false,ready=false;
+  stream.add(Array.from({length:12},(_,i)=>({matrix:new Matrix4().makeTranslation(i,0,0),position:new Vector3(i,0,0)})),()=>new Promise(resolve=>{finish=resolve;}));
+  stream.add([{matrix:new Matrix4().makeTranslation(1000,0,0),position:new Vector3(1000,0,0)}],async()=>{farLoaded=true;return [];});
+  const loading=stream.prepareNear(new Vector3()).then(()=>{ready=true;});await Promise.resolve();
+  assert.equal(ready,false);finish([new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);await loading;
+  assert.equal(farLoaded,false);assert.equal((parent.children[0] as InstancedMesh).count,12);
+  stream.dispose();
+});
+
+test('required ground batches equal materials automatically, including distant sections, without prop options',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,200);
+  let releases=0;
+  stream.add([{matrix:new Matrix4(),position:new Vector3(),bounds:{minX:-2000,maxX:2000,minZ:-10,maxZ:10}}],async()=>
+    Array.from({length:200},(_,i)=>{
+      const geometry=new BoxGeometry();geometry.translate(i*10,0,0);geometry.addEventListener('dispose',()=>releases++);
+      // BoxGeometry groups are not needed with this single opaque material.
+      geometry.clearGroups();
+      const mesh=new Mesh(geometry,new MeshStandardMaterial());
+      mesh.userData.mapOcclusionRole='terrain';return mesh;
+    }),false,true);
+  await stream.preparePinnedModels();stream.update(new Vector3());
+  assert.equal(parent.children.length,1,'200 equal sections become one resident material batch');
+  assert.equal(stream.visible,1);assert.equal(releases,200,'replaced section buffers are released');
+  const mesh=parent.children[0] as InstancedMesh;
+  assert.equal(mesh.geometry.index!.count,200*36,'all original triangles are retained');
+  assert.equal(mesh.userData.mapOcclusionRole,'terrain');stream.dispose();
+});
+
+test('ground sections outside the radius are rejected individually even when their parent covers the camera',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  stream.add([{matrix:new Matrix4(),position:new Vector3(),bounds:{minX:-1000,maxX:1000,minZ:-10,maxZ:10}}],async()=>
+    [0,500].map((x,i)=>{
+      const geometry=new BoxGeometry();geometry.clearGroups();geometry.translate(x,0,0);
+      const mesh=new Mesh(geometry,new MeshStandardMaterial({color:i?0xff0000:0xffffff}));
+      mesh.userData.mapOcclusionRole='terrain';return mesh;
+    }),false,true);
+  await stream.preparePinnedModels();stream.update(new Vector3());
+  assert.equal(parent.children.filter(m=>m.visible).length,1);
+  stream.setRange(600);stream.update(new Vector3());assert.equal(parent.children.filter(m=>m.visible).length,2);
+  stream.dispose();
+});
+
+test('moved props update instance buffers and culling without rebuilding cached static cells',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  const placement={movable:true,position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)};
+  stream.add([placement],async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())],'bins');
+  stream.update(new Vector3());await Promise.resolve();stream.update(new Vector3());
+  await stream.setCachedCells(true);
+  const mesh=parent.children.find(m=>m instanceof InstancedMesh) as InstancedMesh;
+  const version=mesh.instanceMatrix.version,shadows=stream.shadowRevision;
+  placement.position.x=5;placement.matrix.makeTranslation(5,0,-10);stream.placementsMoved([placement]);stream.update(new Vector3());
+  const matrix=new Matrix4();mesh.getMatrixAt(0,matrix);assert.equal(matrix.elements[12],5);
+  assert.ok(mesh.instanceMatrix.version>version);assert.equal(stream.shadowRevision,shadows,'moving props do not rebake the static city shadow map');
+  assert.match(stream.cachedCellInfo,/cells 0/);
+  placement.position.x=1000;placement.matrix.makeTranslation(1000,0,-10);stream.placementsMoved([placement]);stream.update(new Vector3());
+  assert.equal(mesh.count,0,'streaming uses the moved location');stream.dispose();
+});
 
 test('repeated tree parts share one instanced batch per geometry/material',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,500);
@@ -334,6 +396,27 @@ test('per-part frustum drops only the off-screen component and retains its shado
   stream.dispose();
 });
 
+test('tree trunk and crown share complete bounds in both frustum and Hi-Z tests',async()=>{
+  const root=new Group(),stream=new MapObjectStream(root,200),camera=new PerspectiveCamera(25,1,.1,200);
+  const trunk=new Mesh(new BoxGeometry(.5,3,.5).translate(0,1.5,0),new MeshStandardMaterial());trunk.name='trunk';
+  const crown=new Mesh(new BoxGeometry(6,6,6).translate(0,7,0),new MeshStandardMaterial({alphaTest:.5}));crown.name='crown';
+  for(const part of [trunk,crown])part.userData.mapOcclusionRole='prop';
+  camera.position.set(0,8,0);camera.lookAt(0,8,-10);camera.updateMatrixWorld();
+  stream.add([{position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)}],async()=>[trunk,crown],'trees',true);
+  await stream.preparePinnedModels();stream.update(camera.position,camera);root.updateMatrixWorld(true);
+  const meshes=root.children.filter((m):m is InstancedMesh=>m instanceof InstancedMesh&&!m.userData.streamAuxiliary);
+  assert.equal(meshes.length,2);assert.ok(meshes.every(m=>m.count===1),'the trunk stays even when only the crown intersects the view');
+  assert.deepEqual(trunk.geometry.boundingBox,crown.geometry.boundingBox);
+  const cull=new MapGpuOcclusion({shadowMap:{render(){}}} as unknown as WebGLRenderer),api=cull as any;
+  api.collect(root);
+  const states=meshes.map(mesh=>api.states.get(mesh));
+  assert.deepEqual(states[0].bounds[0],states[1].bounds[0],'GPU tests the full tree for both materials');
+  const items=api.prepareCandidates();assert.equal(items.length,2);
+  api.apply({items,bytes:new Uint8Array(items.length*4)});
+  assert.ok(states.every(state=>state.hidden===1),'full occlusion hides both trunk and crown');
+  cull.dispose();stream.dispose();
+});
+
 test('all nearby object types load after the concurrent-load slots are freed', async () => {
   const parent = new Group(), stream = new MapObjectStream(parent, 100);
   const loads = Array(6).fill(0);
@@ -359,7 +442,7 @@ test('all nearby object types load after the concurrent-load slots are freed', a
   parent.traverse(object => { if (object instanceof Mesh) { object.geometry.dispose(); (object.material as MeshBasicMaterial).dispose(); } });
 });
 
-test('tree toggle hides trunks, foliage and auxiliary casters, then restores resident instances',async()=>{
+test('tree toggle hides trunks and foliage together, then restores resident instances',async()=>{
   const parent=new Group(),stream=new MapObjectStream(parent,200),camera=new PerspectiveCamera(60,1,.1,500);
   camera.updateMatrixWorld();stream.setShadowRange(150);
   const placement={position:new Vector3(0,0,-10),matrix:new Matrix4().makeTranslation(0,0,-10)};
@@ -369,7 +452,7 @@ test('tree toggle hides trunks, foliage and auxiliary casters, then restores res
   stream.add([placement],async()=>{const mesh=new Mesh(new BoxGeometry(),new MeshBasicMaterial());mesh.name='building';return [mesh];});
   stream.update(new Vector3(),camera);await Promise.resolve();stream.update(new Vector3(),camera);
   const count=(name:string)=>(parent.children.find(m=>m.name===name) as InstancedMesh).count;
-  assert.equal(count('trunk'),1);assert.equal(count('leaves / auxiliary casters'),1);
+  assert.equal(count('trunk'),1);assert.equal(count('leaves'),1,'tree parts share the same visibility selection');
   stream.setTreesHidden(true);stream.setInspectResident(true);stream.update(new Vector3(),camera);
   for(const mesh of parent.children as InstancedMesh[])if(mesh.name!=='building'){assert.equal(mesh.count,0);assert.equal(mesh.visible,false);}
   assert.equal(count('building'),1);assert.equal(stream.active,2,'toggle preserves residency');
@@ -400,6 +483,21 @@ test('street furniture categories toggle independently, including late loads and
   stream.setCategoryHidden('bins',false);stream.setCategoryHidden('small-props',true);stream.update(new Vector3(),camera);
   assert.equal(count('bins'),1);assert.equal(count('small-props'),0);assert.equal(count('building'),1);
   assert.equal(stream.active,4);stream.dispose();
+});
+
+test('required road preparation waits for delayed geometry even while the camera moves away',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100);
+  let finish!:(parts:Mesh[])=>void,wanted!:()=>boolean,ready=false;
+  stream.add([{position:new Vector3(),matrix:new Matrix4()}],async keep=>{
+    wanted=keep;return new Promise<Mesh[]>(resolve=>{finish=resolve;});
+  },false,true);
+  const preparation=stream.preparePinnedModels().then(()=>{ready=true;});
+  stream.update(new Vector3(1000,0,0));await Promise.resolve();
+  assert.equal(ready,false,'map readiness must wait for the required road');
+  assert.equal(wanted(),true,'moving the camera cannot cancel required ground geometry');
+  finish([new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);await preparation;
+  stream.update(new Vector3());assert.equal(ready,true);assert.equal(stream.visible,1);
+  stream.dispose();
 });
 
 test('pinned prepared models load before playback and retain resources outside the streaming radius',async context=>{
@@ -510,5 +608,49 @@ for(const cachedCells of [false,true])test(`static shadow revision ignores camer
   stream.setTreesHidden(true);stream.update(new Vector3(),camera);assert.ok(stream.shadowRevision>shadow,'removing actual nearby casters invalidates shadows');
   const hidden=stream.shadowRevision;stream.setTreesHidden(false);stream.update(new Vector3(),camera);assert.ok(stream.shadowRevision>hidden);
   const shown=stream.shadowRevision;stream.update(new Vector3(300,0,0),camera);assert.ok(stream.shadowRevision>shown,'moving the reserve changes real caster membership');
+  stream.dispose();
+});
+
+test('a loaded model draws only after its shader warmup completes, and loads wait for it',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4);
+  let warm!:()=>void,warmed:InstancedMesh[]=[];
+  stream.setShaderWarmup(meshes=>{warmed=meshes;return new Promise<void>(resolve=>{warm=resolve;});});
+  stream.add([0,1,2].map(i=>({matrix:new Matrix4().makeTranslation(i,0,0),position:new Vector3(i,0,0)})),async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())]);
+  let ready=false;const loading=stream.prepareNear(new Vector3()).then(()=>{ready=true;});
+  for(let i=0;i<5;i++){await Promise.resolve();stream.update(new Vector3());}
+  const mesh=parent.children[0] as InstancedMesh;
+  assert.equal(warmed.length,1);assert.equal(warmed[0],mesh,'the warmup sees the real instanced batch');
+  assert.equal(ready,false,'prepareNear waits for compiled programs');assert.equal(mesh.count,0,'nothing draws while programs compile');
+  warm();await loading;stream.update(new Vector3());
+  assert.equal(ready,true);assert.equal(mesh.count,3);
+  stream.dispose();
+});
+
+test('day and night variants swap with the time of day without reloading',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,100,4),placement=()=>[{matrix:new Matrix4(),position:new Vector3()}];
+  const model=async()=>[new Mesh(new BoxGeometry(),new MeshBasicMaterial())];
+  stream.add(placement(),model,false,false,'day');stream.add(placement(),model,false,false,'night');stream.add(placement(),model);
+  await stream.prepareNear(new Vector3());stream.update(new Vector3());
+  const [day,night,always]=parent.children as InstancedMesh[];
+  assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
+  stream.setNight(true);stream.update(new Vector3());
+  assert.deepEqual([day.count,night.count,always.count],[0,1,1]);
+  stream.setNight(false);stream.update(new Vector3());
+  assert.deepEqual([day.count,night.count,always.count],[1,0,1]);
+  stream.dispose();
+});
+
+test('far size cull drops objects under 4 px beyond 40 m and keeps near or larger ones',async()=>{
+  const parent=new Group(),stream=new MapObjectStream(parent,1000),focus=new Vector3();
+  const camera=new PerspectiveCamera(60,1,.1,2000);camera.lookAt(0,0,-1);camera.updateMatrixWorld();
+  stream.screenHeight=1000; // projected diameter = radius × cot(30°) × 1000 / distance = radius × 1732 / distance
+  const at=(z:number)=>({matrix:new Matrix4().makeTranslation(0,0,-z),position:new Vector3(0,0,-z)});
+  // A 0.5 m box has a 0.43 m bounding radius: 2.5 px at 300 m, 25 px at 30 m.
+  stream.add([at(30),at(300)],async()=>[new Mesh(new BoxGeometry(.5,.5,.5),new MeshBasicMaterial())]);
+  stream.update(focus,camera);await Promise.resolve();stream.update(focus,camera);
+  assert.equal(stream.visible,1,'the box at 300 m is under 4 px and dropped');
+  stream.setFarCullPixels(2);stream.update(focus,camera);assert.equal(stream.visible,2,'a 2 px threshold keeps it');
+  stream.setFarCullPixels(0);stream.update(focus,camera);assert.equal(stream.visible,2,'0 disables the cull');
+  stream.setFarCullPixels(4);stream.screenHeight=3000;stream.update(focus,camera);assert.equal(stream.visible,2,'a taller screen draws it larger');
   stream.dispose();
 });

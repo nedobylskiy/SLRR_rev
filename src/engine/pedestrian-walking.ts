@@ -1,3 +1,4 @@
+import {pedestrianRun} from './pedestrian-run';
 import {Vector3} from 'three';
 import {WALKING_CLEARANCE,insideTransition} from './pedestrian-transition';
 import {forwardWalkingRoutes} from './pedestrian-route';
@@ -21,7 +22,7 @@ export function buildWalkingZones(rows:PedestrianWalk[]){
   const zones:WalkingZone[]=[];
   for(const row of rows){const runs:PedestrianRecord[]=[],spans:PedestrianRecord[]=[];const visit=(r:PedestrianRecord)=>{if(r.kind===23&&r.points)runs.push(r);if(r.kind===22&&r.id!==undefined&&r.quad)spans.push(r);if(r.child)visit(r.child);};row.records.forEach(visit);
     if(runs.length!==2||spans.length!==2)continue;
-    const a=boundary(runs[0].points!.map(p=>new Vector3(...p))),raw=runs[1].points!.map(p=>new Vector3(...p));
+    const a=boundary(pedestrianRun(runs[0])),raw=pedestrianRun(runs[1]);
     if(flatDistance(a.points[0],raw[0])>flatDistance(a.points[0],raw.at(-1)!))raw.reverse();const b=boundary(raw);
     if(a.length<1||b.length<1)continue;
     const ends=[sample(a,0).lerp(sample(b,0),.5),sample(a,1).lerp(sample(b,1),.5)];

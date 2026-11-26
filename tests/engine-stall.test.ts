@@ -27,9 +27,10 @@ function engine(transmissionType: string) {
   return { world, system, step };
 }
 
-test('a manual engine stalls against a stopped driveline and restarts with the clutch open', () => {
+test('dropping an explicit manual clutch stalls against a stopped driveline and restarting with it open works', () => {
   const { world, system, step } = engine('TT_MANUAL');
-  step({ gearUp: true });
+  step({ gearUp: true,clutch:true });
+  for(let i=0;i<60;i++)step({clutch:true}); // User-operated clutch overrides the lever's assisted reconnection.
   for (let i = 0; i < 360; i++) step();
   assert.equal(system.running, false);
   assert.equal(system.gear, 1);
@@ -51,4 +52,12 @@ test('an automatic can idle in first, while a very low neutral idle can stall', 
   assert.equal(system.running, false);
   assert.throws(() => system.setTuning(100, 7000), /range/);
   world.dispose();
+});
+
+
+test('a freshly created manual drivetrain starts at idle and selects first without a compulsory stall',()=>{
+  const {world,system:fixture}=engine('TT_MANUAL'),system=new MechanicalSystem(fixture.root);
+  assert.equal(system.rpm,system.idleRpm);assert.equal(system.running,true);assert.equal(system.manual,true);assert.equal(system.gear,0);
+  for(let tick=0;tick<360;tick++)system.advance(1/240,{throttle:0,gearUp:tick===0},[0,0,0,0]);
+  assert.equal(system.running,true);assert.equal(system.gear,1);world.dispose();
 });

@@ -70,3 +70,16 @@ test('global facade change notifications include primary-to-shadow-only switches
   changes.length=0;batch.update(frustum,new Vector3(100,0,0),30,changed);assert.equal(changes.length,0);
   batch.dispose();
 });
+
+test('global facades batch by map cell, so distant cells leave the view range instead of spanning the city',()=>{
+  const parent=new Group(),texture=new Texture(),a=source(texture);
+  const batch=new GlobalFacadeBatches(parent,[{mesh:a,placements:[placement(0),placement(100),placement(900),placement(1700)]}],250000,4000000,256);
+  assert.equal(batch.meshes.length,3,'one batch per occupied 256 m cell for a shared material');
+  assert.ok(batch.meshes.every(m=>m.geometry.boundingBox!.max.x-m.geometry.boundingBox!.min.x<256+2),'no batch spans more than its cell');
+  batch.update(undefined,new Vector3(0,0,-20),0,undefined,500);
+  const shown=batch.meshes.filter(m=>m.visible).map(m=>Math.floor(m.geometry.boundingBox!.min.x));
+  assert.deepEqual(shown,[-1],'only the cell within the 500 m view range is drawn');
+  batch.update(undefined,new Vector3(0,0,-20),1000,undefined,500);
+  assert.equal(batch.meshes.filter(m=>m.visible&&m.userData.streamAuxiliary).length,1,'cells beyond view range but within shadow range stay as shadow-only casters');
+  batch.dispose();
+});

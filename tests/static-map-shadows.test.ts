@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial, Scene, Texture, Vector3, Vector4 } from 'three';
-import { StaticMapShadows } from '../src/render/static-map-shadows';
+import { STREAM_REBAKE_MS, StaticMapShadows } from '../src/render/static-map-shadows';
 
 test('static shadow cache excludes vehicles, preserves cutouts and restores renderer state even after failure', () => {
   const cache = new StaticMapShadows(), scene = new Scene(), root = new Group();scene.add(root);
@@ -27,9 +27,9 @@ test('static shadow cache excludes vehicles, preserves cutouts and restores rend
   update(0);assert.equal(captures,0);
   cache.enabled.value=1;update(0);assert.equal(captures,1);assert.equal(cache.available.value,1);
   update(2000);assert.equal(captures,1,'stationary static scene reuses its projection');
-  update(2001,2);assert.equal(captures,2,'new streamed geometry invalidates the cache');
-  update(2100,3);assert.equal(captures,2,'streaming captures are throttled');
-  update(3100,3);assert.equal(captures,3);
+  update(STREAM_REBAKE_MS+1,2);assert.equal(captures,2,'new streamed geometry invalidates the cache');
+  update(STREAM_REBAKE_MS+100,3);assert.equal(captures,2,'streaming captures are throttled');
+  update(2*STREAM_REBAKE_MS+2,3);assert.equal(captures,3);
   direction.set(-1,2,1).normalize();update(3150,3);
   assert.equal(captures,4,'sun turns bypass the streaming throttle to follow dynamic shadows');
   const sunProjection=cache.matrix.value.clone();

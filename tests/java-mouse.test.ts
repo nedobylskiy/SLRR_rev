@@ -4,6 +4,32 @@ import { JavaMouse } from '../src/render/java-mouse';
 import type { BootResult } from '../src/runtime/game-boot';
 import type { Assets } from '../src/assets';
 
+test('captured painting retains its pick and always emits left release on window up or cancellation',()=>{
+  class Surface extends EventTarget {
+    dataset:Record<string,string>={};style={cursor:'',removeProperty(){}};
+    setPointerCapture(_:number){}hasPointerCapture(_:number){return false;}releasePointerCapture(_:number){}
+  }
+  class Canvas extends Surface {}
+  const originals=['HTMLCanvasElement','window'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);
+  const win=new EventTarget();Object.defineProperty(globalThis,'HTMLCanvasElement',{value:Canvas,configurable:true});Object.defineProperty(globalThis,'window',{value:win,configurable:true});
+  const surface=new Surface(),canvas=new Canvas(),events:number[]=[];
+  const hit={id:42,local:[1,2,3],world:[4,5,6],normal:[0,0,1]};let picked:unknown;
+  const result={input:{mouseCursor:()=>({value:{}}),cursorEvent:(code:number)=>events.push(code),setPhysicalAxis(){},physicalAxis:()=>0,setPickedTarget:(value:unknown)=>{picked=value;}},
+    jvm:{get:(_:unknown,key:string)=>({value:key==='visible'?0:{}})},gameTypes:{lastCommand:()=>undefined}} as unknown as BootResult;
+  const mouse=new JavaMouse(surface as unknown as HTMLElement,result,{} as Assets,()=>{},()=>hit);
+  const send=(type:string,x:number,target:EventTarget=surface,on:EventTarget=surface)=>{
+    const event=new Event(type,{cancelable:true});Object.assign(event,{button:0,pointerId:1,clientX:x,clientY:10});Object.defineProperty(event,'target',{value:target});on.dispatchEvent(event);
+  };
+  try{
+    send('pointerdown',0,canvas);send('pointermove',30);assert.equal(picked,hit,'capture retargeting does not clear the paint hit');
+    send('pointerup',30,win,win);assert.deepEqual(events,[1,9,10,2]);
+    events.length=0;send('pointerdown',0,canvas);win.dispatchEvent(new Event('blur'));assert.deepEqual(events,[1,2]);
+    events.length=0;send('pointerdown',0,canvas);send('pointermove',30);send('pointercancel',30);assert.deepEqual(events,[1,9,10,2]);
+  }finally{
+    mouse.dispose();for(const [key,original]of originals)if(original)Object.defineProperty(globalThis,key,original);else Reflect.deleteProperty(globalThis,key);
+  }
+});
+
 test('right click sends the picked part to Java, while drag and cancellation never click', () => {
   class Canvas extends EventTarget {
     dataset: Record<string, string> = {};
@@ -77,7 +103,7 @@ test('left drag carries car parts or dock gadgets to OSD without clicking or dro
   try {
     pointer('pointerdown',10); pointer('pointermove',30); pointer('pointerup',110);
     await Promise.resolve();
-    assert.deepEqual(events,[1,9,10]); assert.deepEqual(drops,[{onto:target,source:{object:part}}]);
+    assert.deepEqual(events,[1,9,10,2]); assert.deepEqual(drops,[{onto:target,source:{object:part}}]);
     const click=new Event('click',{cancelable:true});surface.dispatchEvent(click);assert.equal(click.defaultPrevented,true);
     events.length=0; drops.length=0;
     pointer('pointerdown',55);pointer('pointermove',70);pointer('pointerup',110);await Promise.resolve();
@@ -87,5 +113,57 @@ test('left drag carries car parts or dock gadgets to OSD without clicking or dro
   } finally {
     mouse.dispose();
     for(const [name,descriptor] of originals) if(descriptor)Object.defineProperty(globalThis,name,descriptor);else Reflect.deleteProperty(globalThis,name);
+  }
+});
+
+test('two fingers on a Java-controlled camera act as a right-button drag, and a pinch as the wheel', () => {
+  class Canvas extends EventTarget {
+    dataset: Record<string, string> = {};
+    style = { cursor: '', removeProperty: (_: string) => {} };
+    setPointerCapture(_: number) {}
+    hasPointerCapture(_: number) { return false; }
+    releasePointerCapture(_: number) {}
+  }
+  const savedCanvas = Object.getOwnPropertyDescriptor(globalThis, 'HTMLCanvasElement');
+  const savedWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'HTMLCanvasElement', { value: Canvas, configurable: true });
+  Object.defineProperty(globalThis, 'window', { value: new EventTarget(), configurable: true });
+  const canvas = new Canvas(), events: number[] = [], axes = new Map<number, number>(), wheel: number[] = [];
+  const hit = { id: 42, local: [0, 0, 0], world: [0, 0, 0] };
+  const result = {
+    input: { mouseCursor: () => ({ value: {} }), cursorEvent: (code: number) => events.push(code), setPickedTarget() {},
+      setPhysicalAxis: (_: number, axis: number, value: number) => { axes.set(axis, value); if (axis === 2 && value) wheel.push(value); },
+      physicalAxis: (_: number, axis: number) => axes.get(axis) ?? 0 },
+    jvm: { get: (_: unknown, key: string) => ({ value: key === 'visible' ? 0 : {} }) },
+    gameTypes: { lastCommand: () => undefined },
+  } as unknown as BootResult;
+  const mouse = new JavaMouse(canvas as unknown as HTMLElement, result, {} as Assets, message => assert.fail(message), () => hit);
+  const touch = (type: string, id: number, x: number, y = 100) => {
+    const event = new Event(type, { cancelable: true });
+    Object.assign(event, { button: 0, pointerId: id, pointerType: 'touch', clientX: x, clientY: y });
+    Object.defineProperty(event, 'target', { value: canvas });
+    canvas.dispatchEvent(event);
+  };
+  try {
+    touch('pointerdown', 1, 100);
+    assert.deepEqual(events, [1], 'one finger is a left press on the part');
+    touch('pointerdown', 2, 200);
+    assert.deepEqual(events, [1, 2, 3], 'the second finger drops the press and holds the right button');
+    assert.equal(axes.get(4), 1);
+    touch('pointermove', 1, 120); // midpoint +10 px, span 100 -> 80 (pinch: zoom out)
+    assert.deepEqual(events, [1, 2, 3, 12]);
+    assert.ok(Math.abs(axes.get(0)! - .1) < 1e-9, 'midpoint travel feeds mouse X like a right-button drag');
+    assert.deepEqual(wheel, [-1], 'a 20% pinch is a wheel notch down');
+    touch('pointermove', 2, 340); // span 80 -> 220: spread, zoom in
+    assert.equal(wheel.at(-1), 1);
+    touch('pointerup', 2, 340);
+    assert.deepEqual(events.slice(-2), [13, 4], 'lifting a finger ends the drag');
+    assert.equal(axes.get(4), 0);
+    touch('pointerup', 1, 120);
+    assert.equal(events.filter(code => code === 5).length, 0, 'the gesture never clicks the part');
+  } finally {
+    mouse.dispose();
+    for (const [name, descriptor] of [['HTMLCanvasElement', savedCanvas], ['window', savedWindow]] as const)
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
   }
 });

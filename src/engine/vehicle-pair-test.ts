@@ -47,6 +47,12 @@ export class VehiclePairTest {
     this.clock=new FixedClock(a.physicsFrequency,physicsTickBudget(a.physicsFrequency));this.reset();
   }
   get time(){return this.clock.tick*this.clock.dt;}
+  /** Presentation-only bookkeeping when a worker owns the physical world. */
+  observePhysics(time:number,closing?:number){
+    this.clock.restore(Math.round(time/this.clock.dt));
+    if(closing!==undefined){this.contacts++;this.firstImpact??={time,closing};if(this.scenario==='rear-chain')this.rearImpact??={time,speed:closing};}
+    if(this.scenario==='rear-chain'&&!this.obstacleImpact&&this.a.impactSpeed>1)this.obstacleImpact={time,speed:this.a.impactSpeed};
+  }
   reset(scenario:VehiclePairScenario=this.scenario) {
     this.scenario=scenario;this.contacts=0;this.firstImpact=undefined;
     this.obstacleImpact=this.rearImpact=undefined;
@@ -75,8 +81,8 @@ export class VehiclePairTest {
         const boundsB=this.b.body.bounds.clone().applyMatrix4(this.b.body.matrix());
         if(hit.impulse.lengthSq()>1){
           if(chain)this.rearImpact??={time:this.time,speed:this.b.velocity().length()};
-          this.a.vehicleContact(hit.impulse,hit.point,boundsB,hit.closing);
-          this.b.vehicleContact(hit.impulse.clone().negate(),hit.point,boundsA,hit.closing);
+          this.a.vehicleContact(hit.impulse,hit.point,boundsB,hit.closing,this.b);
+          this.b.vehicleContact(hit.impulse.clone().negate(),hit.point,boundsA,hit.closing,this.a);
           this.contacts++;this.firstImpact??={time:this.time,closing:hit.closing};
         }
         // Separate once per shared tick, mass-weighted, without a restitution kick.

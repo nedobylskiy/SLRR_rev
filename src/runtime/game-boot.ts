@@ -1,10 +1,15 @@
+import {OsdDecalNative} from './osd-decal-native';
+import {registerFrontendAliases} from './frontend-aliases';
 import { VehicleHornNative } from './vehicle-horn-native';
 import {NavigatorNative} from './navigator-native';
 import { SlrrJvm, jv, type JavaObject, type JavaValue, type ResourceIdentity } from 'slrr-jvm';
 import { decompileClass, parseTufa } from 'slrr-jvm-decompiler';
+import { tufaClassName } from '../formats/tufa-class-name';
+import { resourceScriptFile } from './resource-script-file';
 import { Assets, normalizePath, normalizeResourcePackPath } from '../assets';
 import { GameTypeNative } from './game-type-native';
 import { GroundRoadNative } from './ground-road-native';
+import { VehicleCrimeNative } from './vehicle-crime-native';
 import { TrafficNative } from './traffic-native';
 import { loadMapRoads } from '../engine/map-roads';
 import { resourceBoundsReader, resourceSizeReader } from './resource-size';
@@ -48,7 +53,7 @@ import type { OsdVideo } from '../osd/osd-video';
 
 export type BootEvent = { level: 'info' | 'native' | 'error'; message: string };
 export interface JavaCallTiming { calls: number; averageMs: number; peakMs: number; lastAt: number }
-export type BootResult = { horns:VehicleHornNative; navigator:NavigatorNative; traffic:TrafficNative; javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; osdButtons: OsdButtonNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
+export type BootResult = { system:SystemNative; horns:VehicleHornNative; navigator:NavigatorNative; traffic:TrafficNative; javaProfile: Map<string, JavaCallTiming>; threads: ThreadNative; jvm: SlrrJvm; gameTypes: GameTypeNative; osdButtons: OsdButtonNative; physicsRefs: PhysicsRefNative; parts: PartNative; chassis: ChassisNative; dyno: DynoNative; viewports: ViewportNative; renderRefs: RenderRefNative; cameras: CameraNative; controllers: ControllerNative; input: InputNative; files: VirtualFileSystem; resolveResourceIdentity(id: number): ResourceIdentity | undefined; dispose(): void; error?: Error };
 
 const sourceRoot = 'sl/scripts/game/src/';
 const systemRoot = 'system/scripts/';
@@ -87,7 +92,8 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   setMapFog?: (settings: MapFogSettings) => void,
   setSceneLight?: (settings: RenderLightSettings) => void,
   setGlobalEnvmap?: (source: EnvironmentMapSource | null) => Promise<void> | void,
-  setSceneFlare?: (source: RenderFlareSource) => Promise<void> | void): Promise<BootResult> {
+  setSceneFlare?: (source: RenderFlareSource) => Promise<void> | void,
+  measureOsdSync: (work: () => void) => void = work => work()): Promise<BootResult> {
   const files = await VirtualFileSystem.load(keyValue);
   for (const asset of assets.files) {
     files.indexOriginalPath(asset.path);
@@ -98,15 +104,24 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dynamicSources = new Map<string, { path: string; source: string }>();
   const carScripts = new Map<string, string>();
   const javaSourcesByName = new Map<string, string[]>();
+  const javaClassesByName = new Map<string, string[]>();
   const frontendPack = assets.byPath.has('frontend.rpk') ? await assets.pack('frontend.rpk') : null;
   const frontendTextureIds = new Set(frontendPack?.entries.filter(entry => entry.type === 7).map(entry => entry.typeId));
   const partsPack = assets.byPath.has('parts.rpk') ? await assets.pack('parts.rpk') : null;
   const sourcePacks = new Map<string, RpkPack>();
   const packedResources = new Map<number, ResourceIdentity | null>();
   const unlistedResourceSlots = new Map<string, number>();
+  const unlistedResourcePacks = new Map<number, string>();
   let nextUnlistedSlot = 0x7000;
+  const resolvePackedResource = (id: number): ResourceIdentity | undefined => {
+    const exact = packedResources.get(id);
+    if (exact) return exact;
+    // Java adds avatar indices to a packed base RID; the namespace survives that arithmetic.
+    const pack = unlistedResourcePacks.get(id >>> 16);
+    return pack ? { pack, id: id & 0xffff } : undefined;
+  };
   const resolveResourceIdentity = (id: number): ResourceIdentity | undefined =>
-    packedResources.get(id) ?? gameTypes?.resolveResourceIdentity(id);
+    resolvePackedResource(id) ?? gameTypes?.resolveResourceIdentity(id);
   for (const asset of assets.files) {
     const path = normalizePath(asset.path);
     if (path.endsWith('.java')) {
@@ -114,6 +129,12 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const matches = javaSourcesByName.get(name) ?? [];
       matches.push(asset.path);
       javaSourcesByName.set(name, matches);
+    }
+    if (path.endsWith('.class')) {
+      const name = path.split('/').at(-1)!;
+      const matches = javaClassesByName.get(name) ?? [];
+      matches.push(asset.path);
+      javaClassesByName.set(name,matches);
     }
     const match = /^cars\/.+\/scripts\/src\/([a-z_$][\w$]*)\.java$/i.exec(path);
     if (match) carScripts.set(`java.game.cars.${match[1]}`.toLowerCase(), asset.path);
@@ -132,6 +153,14 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     },
     allowNumericNarrowing: true,
     allowNumericStringArguments: true,
+    allowResourceHandleArguments: true,
+    isSourceReferenceCompatible: (parameter, argument) => {
+      if(parameter!=='java.game.parts.Part'&&parameter!=='java.game.parts.bodypart.Chassis')return false;
+      // Night-race fake racers have a native car CFG but no Part Java script.
+      // Vehicle(Part) wraps that existing native car rather than constructing one.
+      const node=gameTypes.get(argument);
+      return !!node?.resourcePack&&gameTypes.catalogResource(node.resourcePack,node.typeId)?.nativeType==='car';
+    },
     resolveResourceId: (resource, path) => {
       const sourcePath = normalizePath(path);
       const owner = sourcePacks.get(sourcePath)
@@ -146,6 +175,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
             if (nextUnlistedSlot > 0x7fff) throw new Error('Unlisted resource slot range exhausted');
             slot = nextUnlistedSlot++;
             unlistedResourceSlots.set(pack, slot);
+            unlistedResourcePacks.set(slot, pack);
           }
           packed = (slot << 16) | resource.id;
         }
@@ -180,14 +210,32 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
         sources.set(candidatePath, source);
         return { path: candidate, source };
       }
-      if (!assets.byPath.has(path.toLowerCase())) return null;
-      const classes = parseTufa(await assets.read(path));
-      const cls = classes.find(entry => entry.name === className);
-      if (!cls) throw new Error(`TUFA class missing in ${path}: ${className}`);
-      const result = decompileClass(cls);
-      if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${path}: ${result.diagnostics.join('; ')}`);
-      sources.set(path.toLowerCase(), result.source);
-      return { path, source: result.source };
+      const candidates = new Set([path,...javaClassesByName.get(`${simpleName.toLowerCase()}.class`) ?? []]);
+      for (const candidate of candidates) {
+        if (!assets.byPath.has(candidate.toLowerCase())) continue;
+        const normalized = normalizePath(candidate);
+        if (normalized.startsWith(systemRoot)
+          && `java.${normalized.slice(systemRoot.length,-6).replaceAll('/','.')}` !== className.toLowerCase()) continue;
+        let classes: ReturnType<typeof parseTufa>;
+        try {
+          const bytes = await assets.read(candidate);
+          if (tufaClassName(bytes) !== className) continue;
+          classes = parseTufa(bytes);
+        }
+        catch (error) { throw new Error(`Cannot decompile ${candidate}: ${error instanceof Error ? error.message : String(error)}`,{cause:error}); }
+        if (!classes.some(entry => entry.name === className)) continue;
+        // One TUFA file can contain helper classes without matching .class filenames.
+        // Publish them before the JVM resolves constructor/type hints in the main class.
+        for (const entry of classes) {
+          const result = decompileClass(entry);
+          if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${candidate} (${entry.name}): ${result.diagnostics.join('; ')}`);
+          dynamicSources.set(entry.name, {path:candidate,source:result.source});
+        }
+        const result = dynamicSources.get(className)!;
+        sources.set(candidate.toLowerCase(), result.source);
+        return result;
+      }
+      return null;
     },
     readSource: async path => {
       const source = repairDecompiledSource(path, new TextDecoder().decode(await assets.read(path)));
@@ -228,6 +276,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const osdButtons = new OsdButtonNative(jvm, osd,
     error => report({ level: 'error', message: `OSD click: ${error.message}` }), viewportLayout, stageAspect);
   let osdRectangles: OsdRectangleNative | undefined;
+  let osdDecals:OsdDecalNative|undefined;
   let chassisNative!: ChassisNative;
   let partNative!: PartNative;
   // Native resource trees include part/car descendants before their scripts
@@ -238,16 +287,24 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     .filter(path => assets.byPath.has(normalizePath(path)))
     .map(async path => [path, await assets.pack(path)] as const)));
   const readResourceScript = async (script: string, pack: string | null) => {
-      const compiled = normalizePath(script);
-      const sourcePath = compiled.endsWith('.class')
-        ? compiled.replace(/\/([^/]+)\.class$/i, '/src/$1.java')
-        : javaSourcesByName.get(`${compiled.split('.').at(-1)}.java`)?.[0] ?? compiled;
-      const source = assets.byPath.get(normalizePath(sourcePath));
-      if (!source) throw new Error(`Resource Java source missing: ${sourcePath}`);
-      let content = new TextDecoder().decode(await assets.read(source.path));
+      const source = await resourceScriptFile(assets,script,javaSourcesByName,javaClassesByName);
+      const bytes = await assets.read(source.path);
+      let simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.(java|class)$/i, '');
+      let content = '';
+      if (/\.class$/i.test(source.path)) {
+        const classes = parseTufa(bytes);
+        const main = classes.find(entry => entry.name.split('.').at(-1)!.toLowerCase() === simpleName.toLowerCase());
+        if (!main) throw new Error(`Resource TUFA class missing: ${source.path}`);
+        simpleName = main.name.split('.').at(-1)!;
+        for (const entry of classes) {
+          const result = decompileClass(entry);
+          if (result.diagnostics.length) throw new Error(`TUFA decompilation failed for ${source.path}: ${result.diagnostics.join('; ')}`);
+          if (entry === main) content = result.source;
+          else dynamicSources.set(entry.name,{path:source.path,source:result.source});
+        }
+      } else content = new TextDecoder().decode(bytes);
       const packageName = /\bpackage\s+([\w.]+)\s*;/.exec(content)?.[1];
       if (!packageName) throw new Error(`Resource Java package missing: ${source.path}`);
-      let simpleName = source.path.replaceAll('\\', '/').split('/').at(-1)!.replace(/\.java$/i, '');
       let className = `${packageName}.${simpleName}`;
       if (dynamicSources.has(className) && normalizePath(dynamicSources.get(className)!.path) !== normalizePath(source.path)) {
         // Resource packs may declare the same Java class name (for example, every map has track_data).
@@ -282,7 +339,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   };
   const readResourceBounds: ReturnType<typeof resourceBoundsReader> = resourceBoundsReader(assets, () => gameTypes);
   const gameTypes: GameTypeNative = new GameTypeNative(jvm, report, node => {
-    if (!osdRectangles?.sync(node)) renderChanged?.(node);
+    if (!osdRectangles?.sync(node)&&!osdDecals?.sync(node)) renderChanged?.(node);
   }, resourceCatalog,
     async (script, typeId, pack) => {
       const { className, simpleName, content } = await loadResourceScript(script, pack);
@@ -304,7 +361,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const path = pack.toLowerCase().endsWith('.rpk') ? pack : `${pack.replaceAll('.', '/')}.rpk`;
       if (!assets.byPath.has(normalizePath(path))) return;
       resourceCatalog.addPack(path, await assets.pack(path));
-    }, id => packedResources.get(id) ?? undefined, node => { osdRectangles?.remove(node); renderChanged?.(node); },
+    }, resolvePackedResource, node => { osdRectangles?.remove(node); osdDecals?.remove(node); renderChanged?.(node); },
     async (receiver, cfgPath) => {
       const cfg = parsePartConfig(new TextDecoder('windows-1252').decode(await assets.read(cfgPath)));
       partNative.configure(receiver, cfg);
@@ -318,11 +375,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
       const { className } = await loadResourceScript(script, pack);
       return jvm.isInstance(jv(className, { className, fields: new Map() }), base);
     }, resourceSizeReader(assets, () => gameTypes, readResourceBounds));
-  jvm.natives.register('java.util.resource.ResourceRef', 'makeTexture', ['ResourceRef', 'String'], ({ receiver, args }) => {
-    const path = normalizePath(String(args[1].value ?? ''));
+  gameTypes.setTextureLoader(path => {
     const identity = assets.registerTexture(path);
     resourceCatalog.registerTexture(identity.pack, identity.id, path);
-    gameTypes.bindTexture(receiver, identity);
+    return identity;
+  });
+  jvm.natives.register('java.util.resource.ResourceRef', 'makeTexture', ['ResourceRef', 'String'], ({ receiver, args }) => {
+    const path = normalizePath(String(args[1].value ?? ''));
+    const ref = gameTypes.restoreTextureIdentity({ pack: '__runtime/textures.rpk', id: 0, source: path });
+    gameTypes.bindTexture(receiver, gameTypes.resolveResourceIdentity(Number(ref.value))!);
     return jv('void', undefined);
   });
   const physicsRefs = new PhysicsRefNative(jvm, gameTypes);
@@ -342,12 +403,15 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const localId=(resolveResourceIdentity(ground.typeId)?.id??ground.typeId)&0xffff;
     return (await loadMapRoads(assets,ground.resourcePack,localId))?.network;
   };
-  new GroundRoadNative(jvm,groundRoadNetwork);
+  const groundRoads=new GroundRoadNative(jvm,groundRoadNetwork,receiver=>receiver.value==null?undefined:gameTypes.getResource(receiver));
   const sfxRefs = new SfxRefNative(jvm, assets, gameTypes,
     () => Number(sound?.call('getVolume', [jv('int', SOUND_CHANNEL.EFFECTS)]).value ?? 1),
     error => report({ level: 'error', message: `SfxRef: ${error.message}` }));
   osdRectangles = new OsdRectangleNative(gameTypes, osd, id =>
-    packedResources.get(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
+    resolvePackedResource(id) ?? (frontendTextureIds.has(id) ? { pack: 'frontend', id } : undefined), viewportLayout, stageAspect);
+  osdDecals=new OsdDecalNative(assets,gameTypes,osd,viewportLayout,error=>report({level:'error',message:`Decal button: ${error.message}`}),
+    async (icon,owner)=>{await jvm.invokeAsync(jv('Osd',owner),'event_handler',[
+      jv('GameRef',gameTypes.reference(icon).value),jv('int',0),jv('String','5')]);});
   chassisNative = new ChassisNative(jvm, gameTypes, readResourceBounds);
   const partFactory = new PartFactory(assets);
   partNative = new PartNative(jvm, gameTypes, async (parent, parentSlot, child, childSlot) => {
@@ -412,19 +476,25 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
         const detail = reason instanceof Error ? reason.message || reason.name : String(reason);
         throw new Error(`RenderRef.setFlare ${phase}: ${detail || 'unknown error'}`, { cause: reason });
       }
-    });
+    },()=>groundRoads.routeForPlot());
   const cameras = new CameraNative(jvm, gameTypes, viewports);
   const navigator=new NavigatorNative(jvm,gameTypes,viewports,cameras);
   const animations=new AnimationNative(jvm,gameTypes);
   let input!: InputNative;
   const controllers = new ControllerNative(jvm, (device, axis) => input.physicalAxis(device, axis));
   input = new InputNative(jvm, controllers, gameTypes);
+  partNative.setPaintPickReader(()=>input.pickedTarget());
+  partNative.setPaintBrushResolver(id=>resolveResourceIdentity(id)??undefined);
   const hornSound = jv('SfxRef', { className: 'java.util.resource.SfxRef', fields: new Map<string, JavaValue>() });
   jvm.natives.invoke('java.util.resource.ResourceRef', 'set', hornSound, [gameTypes.remountSavedResource('sound.rpk', 0x15)]);
   const horns = new VehicleHornNative(jvm, gameTypes, controllers, {
-    start: () => Number(jvm.natives.invoke('java.util.resource.SfxRef', 'nplay',
+    start: settings => {
+      const resource = settings?.resource ?? {pack:'sound.rpk',id:0x15};
+      jvm.natives.invoke('java.util.resource.ResourceRef','set',hornSound,[gameTypes.remountSavedResource(resource.pack,resource.id)]);
+      return Number(jvm.natives.invoke('java.util.resource.SfxRef', 'nplay',
       hornSound, [jv('Vector3', null),
-        jv('float', 20), jv('float', 1), jv('float', 1), jv('int', 1), jv('int', 0)])!.value),
+        jv('float', 20), jv('float', settings?.pitch ?? 1), jv('float', 1), jv('int', 1), jv('int', 0)])!.value);
+    },
     stop: handle => { jvm.natives.invoke('java.util.resource.SfxRef', 'stop', jv('SfxRef', null), [jv('int', handle)]); },
   });
   osdButtons.setCursorEvents((code, physics) => input.cursorEvent(code, {
@@ -435,6 +505,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     const velocity = gameTypes.get(receiver)?.velocity;
     return jv('float', velocity ? velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2 : 0);
   });
+  new VehicleCrimeNative(jvm,gameTypes,groundRoadNetwork);
   new FileNative(jvm, files, gameTypes, () => partNative.flushPhysics());
   new FindFileNative(jvm, files, new AssetCatalogAdapter(assets));
   new MathNative(jvm);
@@ -451,9 +522,10 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   // Capture the original Java map population and let the host stream its selected models.
   const traffic=new TrafficNative(jvm,receiver=>receiver.value==null?undefined:gameTypes.getResource(receiver),value=>{
     if(value.value==null)return;
+    if(typeof value.value==='number')return resolveResourceIdentity(value.value);
     const node=gameTypes.getResource(value);if(!node)return;
     return instanceResourceIdentity(node,resolveResourceIdentity);
-  },gameTypes,groundRoadNetwork);
+  },gameTypes,groundRoadNetwork,receiver=>groundRoads.trafficHalts(receiver));
   native('java.util.resource.GroundRef', 'setPedestrianDensityN', ['float']);
   // MOCK: Pedestrian simulation is not hosted yet; accept registrations so city setup can continue.
   native('java.util.resource.GroundRef', 'addPedestrianType', ['GameRef']);
@@ -542,14 +614,7 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   if (realLoadingScreen) {
     jvm.natives.registerField('java.render.Frontend', 'render', renderSignal);
     jvm.natives.registerField('java.game.Frontend', 'render', renderSignal);
-    jvm.natives.registerField('java.game.Frontend', 'inputQueue',
-      jvm.get(jv('class', 'java.render.Frontend'), 'inputQueue'));
-    for (const name of ['largeFont', 'mediumFont', 'smallFont', 'largeFont_strong', 'smallFont_strong',
-      'largeFont_russian', 'largeFont_scale', 'smallFont_scale', 'largeFont_strong_scale',
-      'smallFont_strong_scale', 'largeFont_russian_scale', 'defLoadingPic', 'fadeRes', 'fadeRes_HD', 'pointers',
-      ...frontendSounds])
-      jvm.natives.registerField('java.game.Frontend', name,
-        jvm.get(jv('class', 'java.render.Frontend'), name));
+    await registerFrontendAliases(jvm);
   }
   // The original Frontend values are engine-owned. These placeholders only identify precache requests.
   if (!realLoadingScreen) for (const name of frontendSounds)
@@ -561,21 +626,23 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
   const dispose = () => {
     disposed = true;
     if (renderTicker) clearInterval(renderTicker);
-    horns.dispose();traffic.dispose();navigator.dispose();animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose(); video?.dispose();
+    horns.dispose();traffic.dispose();navigator.dispose();animations.dispose();cameras.dispose(); sfxRefs.dispose(); physicsRefs.dispose(); gameTypes.dispose(); threads.dispose(); osdText.dispose(); osdButtons.dispose(); osdRectangles?.dispose();osdDecals?.dispose(); video?.dispose();
   };
   report({ level: 'info', message: `Entry: ${entry} → new Init(0)` });
   try {
-    if (['src', 'decompiled'].some(folder => assets.byPath.has(`system/scripts/lang/${folder}/string.java`)))
+    // String natives also have Java wrappers, including token(int), in class-only installations.
+    if (['src/string.java', 'decompiled/string.java', 'string.class']
+      .some(path => assets.byPath.has(`system/scripts/lang/${path}`)))
       await jvm.loadClass('java.lang.String');
     await jvm.loadClass('java.game.Init');
     if (realLoadingScreen) {
       system.beginLoading();
-      renderTicker = setInterval(() => {
+      renderTicker = setInterval(() => measureOsdSync(() => {
         osdButtons.sync();
         osdText.syncVisibility();
-        osdRectangles?.syncVisibility();
+        osdRectangles?.syncVisibility();osdDecals?.syncVisibility();
         jvm.natives.invoke('java.lang.Object', 'notifyAll', renderSignal, []);
-      }, 50);
+      }), 50);
       void jvm.invokeAsync(loadingScreen, 'run').catch(reason => {
         if (!disposed) report({ level: 'error', message: `LoadingScreen.run: ${reason instanceof Error ? reason.message : String(reason)}` });
       });
@@ -583,11 +650,11 @@ export async function bootGame(assets: Assets, report: (event: BootEvent) => voi
     await jvm.constructAsync('java.game.Init', [jv('int', 0)]);
     gameTypes.dispatchQueuedEvents();
     report({ level: 'info', message: 'Init.java completed' });
-    return { horns, navigator, traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
+    return { system, horns, navigator, traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose };
   } catch (reason) {
     const original = reason instanceof Error ? reason : new Error(String(reason));
     const error = new Error(sourceDiagnostic(original.message || original.name, sources, assets), { cause: original });
     report({ level: 'error', message: error.message });
-    return { horns, navigator, traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
+    return { system, horns, navigator, traffic, javaProfile, threads, jvm, gameTypes, osdButtons, physicsRefs, parts: partNative, chassis: chassisNative, dyno, viewports, renderRefs, cameras, controllers, input, files, resolveResourceIdentity, dispose, error };
   }
 }

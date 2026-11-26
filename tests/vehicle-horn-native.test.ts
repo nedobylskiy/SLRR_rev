@@ -6,6 +6,32 @@ import {ControllerNative} from '../src/runtime/controller-native';
 import {InputNative} from '../src/runtime/input-native';
 import {VehicleHornNative} from '../src/runtime/vehicle-horn-native';
 
+test('old Chassis horn slots snapshot resources, pitch and explicit silent slots',async()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null}),objects=new GameTypeNative(jvm,()=>{});
+  const controllers=new ControllerNative(jvm,()=>0);
+  const chassis=jv('Chassis',{className:'java.game.parts.bodypart.Chassis',fields:new Map()});
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',chassis,[]);
+  const sound=jv('ResourceRef',{className:'java.util.resource.ResourceRef',fields:new Map()});
+  const car=jv('Vehicle',{className:'java.game.Vehicle',fields:new Map([['chassis',chassis]])});
+  const received:unknown[]=[];
+  const horns=new VehicleHornNative(jvm,objects,controllers,{start(settings){received.push(settings);return 1;},stop(){received.push('stop');}},
+    ()=>({car,controller:jv('Controller',null)}));
+  const set=(id:number,index:number)=>{
+    const value=jv('int',id);if(id)value.resource={pack:'sound',id};
+    jvm.natives.invoke('java.util.resource.ResourceRef','set',sound,[value]);
+    jvm.natives.invoke('java.game.parts.bodypart.Chassis','setHornSFX',chassis,[sound,jv('float',.75),jv('int',index)]);
+  };
+  const command=async(index:number)=>{
+    await jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',chassis,[jv('ResourceRef',null),jv('int',16),jv('String',`sethorn ${index}`)]);
+    horns.update();
+  };
+  set(0x15,1);set(0x16,3);set(0,2);
+  await command(1);await command(3);await command(2);
+  assert.deepEqual(received,[{resource:{pack:'sound',id:0x15},pitch:.75},'stop',
+    {resource:{pack:'sound',id:0x16},pitch:.75},'stop']);
+  horns.dispose();objects.dispose();
+});
+
 test('Java horn follows original H binding, career consumption, vehicle aliases and release',async()=>{
   const jvm=new SlrrJvm({resolveImport:()=>null}),objects=new GameTypeNative(jvm,()=>{});
   let input!:InputNative;const controllers=new ControllerNative(jvm,(device,axis)=>input.physicalAxis(device,axis));

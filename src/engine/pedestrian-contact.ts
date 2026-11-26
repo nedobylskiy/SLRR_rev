@@ -3,6 +3,16 @@ import type {RigidBody3D} from './rigid-body-3d';
 export const PEDESTRIAN_MASS=68.8;
 /** Gameplay coupling: a yielding pedestrian must not behave like an anchored obstacle. */
 export const PEDESTRIAN_CAR_REACTION=.25;
+/** Hidden ragdolls only need simulation when a nearby vehicle can contact them. */
+export function ragdollUpdateNeeded(point:Vector3,height:number,visible:boolean,cars:readonly RigidBody3D[],timeScale=1):boolean {
+  if(timeScale<=0)return false;
+  if(visible)return true;
+  const size=new Vector3();
+  return cars.some(car=>{
+    const reach=car.bounds.getSize(size).length()*.5+height+2+car.velocity.length()*.1;
+    return car.position.distanceToSquared(point)<=reach*reach;
+  });
+}
 /** Swept upright capsule envelope against the car OBB. Previous position prevents tunnelling at driving speeds. */
 export function pedestrianCarContact(feet:Vector3,height:number,radius:number,walkingVelocity:Vector3,car:RigidBody3D,previousFrame:Matrix4){
   const current=car.matrix(),inverse=current.clone().invert(),center=feet.clone().add(new Vector3(0,height/2,0));

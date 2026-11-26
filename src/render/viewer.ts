@@ -1,5 +1,21 @@
+import type {PaintStroke} from '../engine/paint-stroke';
+import { advancePartFlap } from '../engine/part-flap';
+import {paintTargets} from './paint-targets';
+import {hasPaintSurface,isPaintSurface,paintSurfaceGeometry} from './paint-surface';
+import {projectPaintGeometry,maskPaintProjection} from './paint-projection';
+import {bakePaintLayer,configurePaintLayer,copyPaintLayer,disposePaintLayer,paintLayerOf,paintLayerSize,paintUvInfo,type PaintDecal} from './paint-layer';
+import {isOsdRender} from '../runtime/osd-render-scope';
+import {VehiclePhysicsClient} from '../engine/vehicle-physics-client';
+import {LodPlayground} from './lod-playground';
+import {worldTrafficSpawn,trafficResidentActive} from '../engine/traffic-residency';
+import {AmbientAudio} from '../audio/ambient-audio';
+import {cacheUnchangedTransform} from './stable-transform';
+import {MapAmbience,parseMapAmbience} from '../audio/map-ambience';
+import {MapProps,settleMapPropFrame} from '../engine/map-props';
 import {partGeometryBounds} from './part-geometry-bounds';
-import {trafficWheelIndex} from '../engine/traffic-running-gear';
+import {trafficWheelIndex,trafficWheelFrame} from '../engine/traffic-running-gear';
+import {RivalPanelView} from './rival-panel-view';
+import type {RivalPanelDefinition} from '../engine/rival-panels';
 import {VehicleSuspensionSkin} from './vehicle-suspension-skin';
 import {SuspensionRoadTest} from '../engine/suspension-road-test';
 import {linkedSuspensionAnchors} from '../engine/linked-suspension';
@@ -25,11 +41,14 @@ import { MapDistanceCutoff } from './map-distance-cutoff';
 import { MapBackfaceCulling } from './map-backface-culling';
 import { MapRaycastOcclusion } from './map-raycast-occlusion';
 import {MapGpuOcclusion} from './map-gpu-occlusion';
+import {SceneVisibility,type VisibilityObject} from './scene-visibility';
 import { diffuseTextureIndex } from './diffuse-texture';
 import { StaticMapShadows } from './static-map-shadows';
 import { bakedLightmapUvs, configureBakedLightmap, stockGarageLightmap } from './baked-lightmap';
-import { partPaint, partPaintTextures, type PartPaint } from './part-paint';
-import { normalizePath } from '../assets';
+import { partPaint, partPaintTextures, solidPartPaint, type PartPaint } from './part-paint';
+import { applyRenderColor } from './render-color';
+import { StaticMapDuplicates } from './static-map-duplicates';
+import { normalizePath, resourceTextureSource } from '../assets';
 import { cfgRenderVisible, applyCfgRenderChannels, drivingLightMask, isNightTime, configureCfgLampEmission, cfgLampRenderFlags } from './vehicle-lights';
 import { createVehicleFlare } from './vehicle-flare';
 import { trafficLampDefinitions, createTrafficLamps, type TrafficLamp } from './traffic-lamps';
@@ -40,15 +59,17 @@ import { defaultSuspensionDebug, suspensionDebugMatrix, suspensionCorner, debugR
 import { configureVehicleMaterial, type VehicleReflectionUniforms } from './vehicle-material';
 import { VehicleReflections } from './vehicle-reflections';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TwoFingerCamera, clampZoom } from './touch-camera';
 import { DDSLoader } from 'three/addons/loaders/DDSLoader.js';
+import {assetReadBatch} from './asset-read-batch';
 import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import type { ScxModel, ScxMesh } from '../formats/scx';
 import type { Assets } from '../assets';
-import { scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
+import { scxAlphaTestReference, scxDiffuseUsesAlpha, scxUsesVertexPaintMask } from '../formats/scx';
 import { PartFactory, poseMatrix, type EnginePart, type EngineWorld } from '../engine/world';
 import { modelMatrix } from '../engine/model-transform';
-import { loadPartCollision } from '../engine/part-collision';
+import { loadPartCollision, partContactTriangles } from '../engine/part-collision';
 import { DrivingDemo, keyboardDrivingInput } from '../engine/driving-demo';
 import type { DrivingInput } from '../engine/driving-demo';
 import { HoodLab } from './hood-lab';
@@ -59,11 +80,12 @@ import { PanelView } from './panel-view';
 import { Vehicle3D } from '../engine/vehicle-3d';
 import {RoutePlayback,RouteCheckpoints,routeBodyMatrix,routeSourceSummary,type RouteBenchmark,type RouteCamera,type RoutePose,type RouteMode} from '../engine/route-benchmark';
 import type {DriveTelemetry} from '../engine/drive-telemetry';
-import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, isStockMapCollisionShell, mapRenderIds } from '../engine/map';
+import { groundRenderDefinition, groundRenderHasChildren, groundRenderIsRoom, groundRoomRenderIds, isStockMapCollisionShell, mapRenderIds } from '../engine/map';
+import { parsePackedGround, type PackedGround } from '../formats/ground';
 import { entryProperties } from '../formats/rpk';
 import { MapTerrain } from '../engine/map-terrain';
 import { MapCollision } from '../engine/map-collision';
-import { mapObjectPlacements, mapObjectSeed, mapRenderResource, isNightMapRenderResource, parseIcfg } from '../engine/map-objects';
+import { mapObjectPlacements, mapObjectSeed, mapRenderResource, mapRenderDaypart, isNightMapRenderResource, parseIcfg } from '../engine/map-objects';
 import { textureAlphaMode } from './texture-alpha';
 import { stockContainerTexture } from './stock-container-texture';
 import {mapObjectCategory,type MapObjectCategory} from './map-object-category';
@@ -75,9 +97,13 @@ import {loadMapPedestrians} from '../engine/map-pedestrians';
 import {PedestrianCrowd} from './pedestrian-crowd';
 import { loadMapRoads } from '../engine/map-roads';
 import { RoadTrafficCar } from '../engine/road-traffic';
-import { Bot } from '../engine/bot';
+import { Bot, cruisePedals } from '../engine/bot';
+import {AgentWorkerClient,agentBody} from '../engine/agent-worker-client';
 import { PlayerTrafficDriver } from '../engine/player-traffic-driver';
-import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,chooseSafeTrafficSpawn,safeTrafficSpawn,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
+import {RaceDriver,raceVehicleInput,raceTrafficContact,type JavaRaceControl} from '../engine/race-driver';
+import {roadImpactScenario} from '../engine/road-impact-scenario';
+import {raceRoadRoutes} from '../engine/road-route';
+import {TrafficSpawnIndex,TrafficVehicleLod,initializeTrafficMotion,type TrafficSpawn,type TrafficOccupant} from '../engine/traffic-stream';
 import {pickTrafficModel,DEFAULT_TRAFFIC_MODELS,MAX_TRAFFIC_CARS,type TrafficModel,type JavaTrafficBridge,type TrafficStreamHandle} from '../engine/traffic-models';
 import { TrafficVehicle } from '../engine/traffic-vehicle';
 import { TrafficDamageView } from './traffic-damage-view';
@@ -93,14 +119,29 @@ import { FrameProfiler } from './frame-profiler';
 import { SceneLighting } from './scene-lighting';
 import { FollowCamera } from './follow-camera';
 import { InertialCamera } from './inertial-camera';
+import { PathChaseCamera } from './path-chase-camera';
+import { skyMaterial } from './sky-material';
 import { createResourceLight, parseResourceLight, type ResourceLight } from './resource-light';
 import type { JavaSceneCamera } from '../runtime/java-scene-camera';
 import { FixedClock } from '../runtime/fixed-clock';
+import { extrapolationMatrix } from './render-extrapolation';
+import { FramePacer, type FramePacing } from './frame-pacer';
+const trafficCarry = new THREE.Matrix4();
+const trafficForward = new THREE.Vector3();
+/** Re-derive a background driver's pedals from its planned speed each tick (see cruisePedals). */
+function trackCruiseSpeed(test:{bot:Bot;vehicle:{body:{velocity:THREE.Vector3;orientation:THREE.Quaternion}}}){
+  const body=test.vehicle.body,speed=body.velocity.dot(trafficForward.set(0,0,-1).applyQuaternion(body.orientation));
+  const {throttle,brakeAxis}=cruisePedals(test.bot.desiredSpeed,speed);
+  test.bot.input={...test.bot.input,throttle,throttleMode:'directional',brake:brakeAxis>.1,brakeAxis};
+}
 import { TrafficControl,trafficFixtureKind,type TrafficFixture } from '../engine/traffic-control';
 import {createTrafficSignals} from './traffic-signals';
+import {LodLibrary} from './lod-library';
+import {ObjectLod} from './object-lod';
+import {lodReach} from './lod-distance';
 
-type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[]};
-type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
+type TrafficTemplate={group:THREE.Group;bounds:THREE.Box3;height:number;mass:number;wheels:CfgWheel[];lamps:TrafficLamp[];panels:RivalPanelDefinition[]};
+type TrafficTestCar={ model:TrafficModel;java?:TrafficStreamHandle;active:boolean;placed?:boolean;lod:TrafficVehicleLod;car:RoadTrafficCar;bot:Bot;vehicle:TrafficVehicle;damage:TrafficDamageView|RivalPanelView;lamps:Awaited<ReturnType<typeof createTrafficLamps>>;voice?:TrafficVoice;group:THREE.Group;wheels:{mount:THREE.Group;rotor:THREE.Group}[] };
 
 export interface MapFogSettings { color: number; near: number; far: number }
 const DEFAULT_MAP_FOG: MapFogSettings = { color: 0x8295a3, near: 260, far: 900 };
@@ -160,6 +201,8 @@ function syncLinkedRenders(part: EnginePart, group: THREE.Group, debug?: Suspens
 }
 
 export class Viewer {
+  private javaFlapReader?: (id: number) => boolean;
+  setJavaFlapReader(read: (id: number) => boolean) { this.javaFlapReader = read; }
   /** Optional garage alignment override; normal Java setsteer resumes when cleared. */
   calibrationSteering?: number;
   private suspensionDebug = defaultSuspensionDebug();
@@ -171,7 +214,7 @@ export class Viewer {
     this.suspensionDebug = structuredClone(settings);
     this.suspensionDebugActive = Object.values(settings).some((values: number[]) => values.some(value => value !== 0));
     for (const [part, group] of this.proxies) {
-      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      if(!group.userData.panelViewOwnsTransform)group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       syncLinkedRenders(part, group, this.suspensionDebug);
     }
@@ -194,11 +237,56 @@ export class Viewer {
   private inspectionManualOverride=false;
   private mapPackPath?:string;
   private collisionOnlyMapMeshes=0;
-  private excludedNightMapVariants=0;
-  private excludedNightMapInstances=0;
+  private lastNight=false;
+  private nightMapVariants=0;
+  private nightMapInstances=0;
   private geometryCutoff=false;
   private staticBatching=false;
-  private autoMapLod=false;
+  private autoMapLod=true;
+  /** Generated meshoptimizer LOD chains shared by map objects and vehicles. */
+  private readonly lodLibrary=new LodLibrary();
+  readonly vehicleLod=new ObjectLod(this.lodLibrary);
+  private readonly vehicleLodRefresh=this.lodLibrary.onChange(()=>this.vehicleLod.refresh());
+  get lodInfo(){return `Vehicle LOD: ${this.vehicleLod.enabled?'on':'off'} · ${this.vehicleLod.size} tracked · ${this.lodLibrary.info}`;}
+  setVehicleLodEnabled(enabled:boolean){this.vehicleLod.enabled=enabled;}
+  /**
+   * Compile programs for objects about to appear, against the live scene lights, without blocking: with
+   * KHR_parallel_shader_compile the driver links in the background and the promise resolves when ready.
+   */
+  private warmShaders(objects:THREE.Object3D[]):Promise<unknown> {
+    // A detached holder: traversal sees the objects without reparenting them out of the stream.
+    const holder=new THREE.Object3D();holder.children=objects;
+    // The other part of the day first, in the background; the current state last, so its programs are what
+    // the returned promise waits for (compileAsync polls each material's current program).
+    void this.compileDaypart(holder,!this.lastNight);
+    return this.compileDaypart(holder,this.lastNight);
+  }
+  /**
+   * Compile programs as they will be needed by day or night. Night swaps the sun to hard shadows and turns on
+   * the player's headlight spots; both are part of every lit program's key, so a dusk switch would otherwise
+   * recompile every material on the spot. Only the synchronous program creation sees the temporary state.
+   */
+  private compileDaypart(objects:THREE.Object3D,night:boolean):Promise<unknown> {
+    const renderer=this.renderer,shadowType=renderer.shadowMap.type,added:THREE.SpotLight[]=[],hidden:THREE.SpotLight[]=[];
+    const spots:THREE.SpotLight[]=[];this.scene.traverse(object=>{if((object as THREE.SpotLight).isSpotLight)spots.push(object as THREE.SpotLight);});
+    const visible=(light:THREE.Object3D)=>{for(let o:THREE.Object3D|null=light;o;o=o.parent)if(!o.visible)return false;return true;};
+    try{
+      if(night!==this.lastNight){
+        renderer.shadowMap.type=night?THREE.BasicShadowMap:THREE.PCFSoftShadowMap;
+        if(night){const lit=spots.filter(visible).length;for(let i=lit;i<Math.max(2,spots.length);i++){const spot=new THREE.SpotLight();spot.castShadow=false;this.scene.add(spot);added.push(spot);}}
+        else for(const spot of spots)if(spot.visible&&visible(spot)){spot.visible=false;hidden.push(spot);}
+      }
+      return renderer.compileAsync(objects,this.camera,this.scene).catch(()=>undefined);
+    }catch{return Promise.resolve();}
+    finally{
+      for(const spot of added){spot.removeFromParent();spot.dispose();}for(const spot of hidden)spot.visible=true;
+      renderer.shadowMap.type=shadowType;
+    }
+  }
+  private lodStrength=1;
+  get lodReachDistance(){return lodReach(this.mapStreamRange,this.lodStrength);}
+  /** Shared by map objects and vehicles: higher strength reaches the coarsest level closer to the camera. */
+  setLodStrength(strength:number){this.lodStrength=strength;this.mapStream?.setLodStrength(strength);this.nextStreamUpdate=-Infinity;}
   private tightMapFrustum=true;
   private globalFacadeBatching=false;
   private mapGlobalFacadeBatching=false;
@@ -285,7 +373,7 @@ export class Viewer {
     if(!this.mapStream)return;
     const continuation=this.streamThrottle&&now<this.nextStreamUpdate;
     if(continuation&&!this.mapStream.hasPendingWork)return;
-    this.mapStream.update(this.mapStreamFocus??this.camera.position,this.camera,continuation);
+    this.mapStream.update(this.camera.position,this.camera,continuation);
     if(!continuation)this.nextStreamUpdate=now+this.streamIntervalMs;
   }
   setMapBackfaceCullingEnabled(enabled:boolean){this.mapBackfaces.setEnabled(enabled);}
@@ -302,20 +390,26 @@ export class Viewer {
   resetInspectionCamera(){this.inspection.reset(this.controls.target);this.inspection.camera.far=this.normalCameraFar;this.inspection.camera.updateProjectionMatrix();}
   graphicsDebugLines(fullReport=true){return [
     `FPS ${this.fps}`,
+    `Map ambience: emitters ${this.mapAmbience?.stats.emitters??0} · nearby ${this.mapAmbience?.stats.nearby??0} · voices ${this.mapAmbience?.stats.voices??0} · pending ${this.mapAmbience?.stats.pending??0}`,
+    ...(this.ambientAudio?[this.ambientAudio.diagnosticLine()]:[]),
     `Detailed diagnostics: ${this.graphicsDiagnostics.enabled?'on':'off'} · displayed vehicles ${new Set([...this.proxies.keys()].map(p=>p.world)).size} · vehicle part proxies ${this.proxies.size}`,
+    `Java scene: render nodes ${this.javaRenderNodes.size} · lights ${this.javaRenderLights.size} · characters ${this.javaCharacters.size} · driver bindings ${this.javaDrivers.size}`,
     `Map: ${this.mapPackPath??'none'} · primary camera: ${this.camera.position.toArray().map(n=>n.toFixed(2)).join(', ')} · streaming focus: ${(this.mapStreamFocus??this.camera.position).toArray().map(n=>n.toFixed(2)).join(', ')}`,
     `Suspension bone animation: ${this.suspensionBonesEnabled?'on':'off'} · bound parts ${this.suspensionSkins.size}`,
     `Static environment: ${this.environmentPath??'none'}`,
     `Lighting ${this.lighting.dynamic.value?'on':'off'} · vertex colors ${this.lighting.vertexColors.value?'on':'off'} · dynamic shadows ${this.lighting.shadows?'on':'off'} · baked ${this.bakedLightmaps.value?'on':'off'} · brake helping ${this.drivingHelping.brake.toFixed(2)} · steer helping ${this.drivingHelping.steer.toFixed(2)} · clutch helping ${this.drivingHelping.clutch.toFixed(2)} · acceleration helping ${this.drivingHelping.acceleration.toFixed(2)} · ABS ${this.drivingHelping.abs.toFixed(2)} · headlights plain spots · shadow filter ${this.renderer.shadowMap.type===THREE.BasicShadowMap?'hard (night)':'soft'} ${this.sunLight.shadow.mapSize.x}² · reflections ${this.vehicleReflections.enabled?'on':'off'}`,
     `Unified building materials: ${this.mapUnifiedBuildingMaterials?'on':'off'}${this.unifiedBuildingMaterials!==this.mapUnifiedBuildingMaterials?' (reload map to apply selection)':''} · prepared parts ${[...this.unifiedBuildingOutputs.values()].reduce((n,v)=>n+v.parts,0)} → ${this.unifiedBuildingOutputs.size} · array storage ≈ ${(this.buildingTextureArrays.bytes/1048576).toFixed(1)} MiB (${this.buildingTextureArrays.count} shared arrays)`,
-    `Map variants: daytime only · excluded night batches ${this.excludedNightMapVariants} · component instances ${this.excludedNightMapInstances}`,
+    `Map variants: day/night swap (${this.mapStream&&this.lastNight?'night':'day'}) · night batches ${this.nightMapVariants} · component instances ${this.nightMapInstances}`,
     `Collision-only map meshes excluded from rendering: ${this.collisionOnlyMapMeshes}`,
     `Map back-face culling: ${this.mapBackfaces.enabled?'on':'off'} (opaque, consistent winding only; two-sided shadows)`,
     `Map render preparation: shared materials ${this.sharedMapMaterials?'on':'off'} · early main-pass culling ${this.earlyMapCulling?'on':'off'}`,
+    'Ground material batching: on (required surface sections share resident geometry batches)',
+    `Scene transform cache: ${this.stableTransforms?'on':'off'} (unchanged containers; dynamic children still update)`,
     `Experimental hub geometry: ${this.experimentalHubGeometry?'on':'off'} (pose only; supported independent arm/hub 0/-1; unsupported corners retain legacy pose)`,
     `Streamer updates: ${this.streamThrottle?`interval ${this.streamIntervalMs} ms`:'every frame'}`,
     `Far plane: ${this.farPlaneEnabled?'on':'off'} · primary camera far ${this.camera.far.toFixed(1)} m`,
     `Auxiliary map caster instances (excluded from main color): ${this.mapStream?.auxiliaryVisible??0}`,
+    this.lodInfo,
     ...(this.mapStream?[this.mapStream.chunkInfo,this.mapStream.optimizationInfo,this.mapStream.treeInfo,this.mapStream.cachedCellInfo,this.mapStream.globalFacadeInfo]:[]),
     ...this.rayOcclusion.lines(),...this.gpuOcclusion.lines(),
     ...(this.inspection.enabled?[`Observer camera · streamer/culling still use primary camera`,
@@ -333,9 +427,14 @@ export class Viewer {
   private camera = new THREE.PerspectiveCamera(42, 1, 0.01, 1000);
   private controls: OrbitControls;
   private model = new THREE.Group();
+  private stableTransforms=true;
+  setStableTransformsEnabled(enabled:boolean){this.stableTransforms=enabled;}
   private javaRenderRoot = new THREE.Group();
   private javaRenderNodes = new Map<number, THREE.Group>();
   private javaRenderModels = new Map<number, THREE.Group>();
+  /** SCX path of script models drawn unmodified (no texture swaps or colour), for static-map duplicate checks. */
+  private javaRenderPaths = new Map<number, string>();
+  private readonly staticDuplicates = new StaticMapDuplicates();
   private javaSkyDomeNodes = new Map<number, { group: THREE.Group; offset: THREE.Vector3 }>();
   private javaRenderTypes = new Map<number, string>();
   private javaRenderRequests = new Map<number, number>();
@@ -344,11 +443,50 @@ export class Viewer {
   private driverIk?:DriverIk;private driverCutawayVisibility=new Map<THREE.Group,boolean>();
   private driverCameraChassis?:EnginePart;
   private javaDrivers=new Map<number,{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}>();
+  private readonly vehiclePhysics=new VehiclePhysicsClient();
+  private readonly registerTrafficTickContacts=this.vehiclePhysics.setTickContacts(()=>this.trafficPeerContacts());
+  /**
+   * Player against road traffic on every 120 Hz player physics tick. In the 60 Hz traffic loop the player had
+   * already moved a whole rendered frame (≈1.9 m at 200 km/h and 30 fps), so a check per frame could skip a
+   * 1.8 m wide car or find it so deep that the push-out sent the player through. Distant LOD cars are tested
+   * too: an overlap makes them physical, so a car outside the physics radius still stops a fast player.
+   */
+  private trafficPeerContacts(){
+    const peer=this.trafficPeer;if(!peer||!this.trafficTestEnabled)return;
+    for(const test of this.trafficCars)if(test.active)this.trafficPeerContact(peer,test);
+  }
+  private trafficPeerContact(peer:Vehicle3D,test:TrafficTestCar){
+    const hit=vehiclePairContact(peer.body,test.vehicle.body);if(!hit)return;
+    if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
+    const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
+    peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
+  }
+  private javaRaces=new Map<EnginePart,{car:Vehicle3D;update(now:number):void;publish():void;pause():void;dispose():void}>();
+  private sceneVisibility=new SceneVisibility();
+  readonly framePacer=new FramePacer();
+  setFramePacing(mode:FramePacing){this.framePacer.setMode(mode);}
+  private *visibilityObjects():Iterable<VisibilityObject>{
+    const cars=[...this.javaRaces.values()].map(r=>r.car);
+    if(this.trafficPeer)cars.push(this.trafficPeer);
+    const bounds=new Map(cars.map(car=>[car.root,car.body.bounds.clone().applyMatrix4(car.body.matrix()).expandByScalar(.5)]));
+    for(const [part,object]of this.proxies){let root=part;while(root.parent)root=root.parent;yield {object,bounds:bounds.get(root)};}
+    for(const car of this.trafficCars)if(car.active)yield {object:car.group,bounds:car.vehicle.body.bounds.clone().applyMatrix4(car.vehicle.body.matrix()).expandByScalar(.5)};
+    for(const [id,object]of this.javaRenderNodes)if(!this.javaSkyDomeNodes.has(id))yield {object};
+    for(const binding of this.javaDrivers.values())if(binding.driver)yield {object:binding.driver.root};
+    if(this.pedestrianCrowd)yield* this.pedestrianCrowd.visibilityObjects();
+    for(const object of [...this.staticMapRoot?.children??[]]){
+      if(object.userData.globalFacadeBatch||object.userData.mergedStatic)continue;
+      yield {object,exclude:!!object.userData.streamAuxiliary};
+    }
+  }
+  get vehicleSceneRevision(){return this.generation;}
   private javaCharacters=new Map<number,{character:SkinnedCharacter;node:RenderObject;key:string;serial:number;ready:boolean;state?:RenderAnimationState;revision?:number}>();
   private javaCharacterTextures=new Map<string,Promise<THREE.Texture>>();
   private javaRenderLights = new Map<number, { key: string; group: THREE.Group }>();
   private javaLightDefinitions = new Map<string, Promise<ResourceLight | null>>();
   private proxies = new Map<EnginePart, THREE.Group>();
+  /** Per physics world: parent of its part proxies and drivers, carrying them from the last tick to render time. */
+  private renderCarriers = new Map<EngineWorld, THREE.Group>();
   private internalView = false;
   private readonly vehicleReflections = new VehicleReflections();
   private readonly reflectionUniforms: VehicleReflectionUniforms = {
@@ -370,6 +508,7 @@ export class Viewer {
   private frame?: (now: number) => void;
   private afterFrame?:()=>void;
   private suspensionPlayground?:SuspensionPlayground;
+  private lodPlayground?:LodPlayground;
   private suspensionSkins=new Map<EnginePart,VehicleSuspensionSkin>();
   private suspensionBonesEnabled=true;
   setSuspensionBonesEnabled(enabled:boolean){this.suspensionBonesEnabled=enabled;for(const binding of this.suspensionSkins.values())binding.setEnabled(enabled);}
@@ -392,18 +531,37 @@ export class Viewer {
   private stopDriving?: () => void;
   private scriptCamera?: () => JavaSceneCamera | null;
   private scriptCameraId?: number;
+  private scriptCameraPose?:{id:number;position:THREE.Vector3;target:THREE.Vector3};
+  private scriptPathChase=new PathChaseCamera();
+  private scriptPathChaseActive=false;
   private scriptTimeOfDay?: () => number;
+  private scriptTimeScale?:()=>number;private ambientEffectsVolume?:()=>number;
+  private mapAmbience?:MapAmbience;private ambientAudio?:AmbientAudio;
   private drivingTimeOfDay?: () => number;
-  setJavaSceneCamera(reader?: () => JavaSceneCamera | null, timeOfDay?: () => number) {
+  setJavaSceneCamera(reader?: () => JavaSceneCamera | null, timeOfDay?: () => number, timeScale?:()=>number, soundVolume?:()=>number) {
     if (this.scriptCameraId !== undefined && !this.stopDriving) this.controls.enabled = true;
-    this.scriptCamera = reader; this.scriptCameraId = undefined;
-    this.scriptTimeOfDay = timeOfDay;
+    this.scriptCamera = reader; this.scriptCameraId = undefined; this.scriptCameraPose=undefined;
+    this.scriptTimeOfDay = timeOfDay;this.scriptTimeScale=timeScale;this.ambientEffectsVolume=soundVolume;
   }
   private generation = 0;
+  private mapProps?:MapProps;
+  private previousPropFrame?:number;
   private mapStream?: MapObjectStream;
   private mapTextures = new TextureSourceCache();
   private vehicleTextures = new AssetTextureSources();
+  private readonly livePaint=new WeakMap<EnginePart,{color:number|undefined;strokes:readonly PaintStroke[]|undefined}>();
+  javaPaintTargets(hit:{id:number;local:number[];normal?:number[]},size:number){return paintTargets(this.proxies,hit,size);}
+  /** Publish a native paint edit straight onto its existing GPU proxy. */
+  async updateJavaPaint(id:number,color:number|undefined,strokes:readonly PaintStroke[]|undefined,assets:Assets){
+    for(const [part]of this.proxies)if(part.nativeId===id&&!part.world.disposed){
+      this.livePaint.set(part,{color,strokes});part.paintColor=color;part.paintStrokes=strokes;
+      await this.updatePartPaint(part,assets);
+    }
+  }
   private mapStreamRange = 500;
+  private mapFarCullPixels = 4;
+  /** Map objects beyond 40 m that would span fewer pixels than this are not drawn (0 = off). */
+  setMapFarCullPixels(value:number){if(!Number.isFinite(value)||value<0)return;this.mapFarCullPixels=value;this.mapStream?.setFarCullPixels(value);}
   get streamRange() { return this.mapStreamRange; }
   setMapStreamRange(value: number) {
     if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid map stream range');
@@ -421,62 +579,55 @@ export class Viewer {
   roadDebugStatus = 'Road graph off';
   pedestrianDebugStatus='Pedestrian graph off';
   pedestrianCrowdStatus='Walking pedestrians off';
+  walkingPedestriansEnabled=true;
   private pedestrianCrowd?:PedestrianCrowd;
   private pedestrianCrowdRevision=0;
-  private pedestrianCount=6;private pedestrianRadius=100;
+  private pedestrianCount=25;private pedestrianRadius=100;
   private pedestrianSpawnFrustum=new THREE.Frustum();private pedestrianSpawnProjection=new THREE.Matrix4();private pedestrianSpawnSphere=new THREE.Sphere(new THREE.Vector3(),1.5);
-  private pedestrianOffscreen=(point:THREE.Vector3)=>{this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);};
+  private pedestrianOffscreen=(point:THREE.Vector3,bounds?:THREE.Box3)=>{
+    if(bounds)return !this.pedestrianSpawnFrustum.intersectsBox(bounds);
+    this.pedestrianSpawnSphere.center.copy(point).y+=.9;return !this.pedestrianSpawnFrustum.intersectsSphere(this.pedestrianSpawnSphere);
+  };
   private updatePedestrianSpawnView(){this.camera.updateMatrixWorld();this.pedestrianSpawnFrustum.setFromProjectionMatrix(this.pedestrianSpawnProjection.multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));}
   setPedestrianCount(count:number){if(!Number.isInteger(count)||count<0||count>50)throw Error('Pedestrian count must be 0–50');this.pedestrianCount=count;this.pedestrianCrowd?.configure(count,this.pedestrianRadius);}
   setPedestrianRadius(radius:number){if(!Number.isFinite(radius)||radius<50||radius>300)throw Error('Pedestrian radius must be 50–300 m');this.pedestrianRadius=radius;this.pedestrianCrowd?.configure(this.pedestrianCount,radius);}
-  pedestrianInfo(){const crowd=this.pedestrianCrowd;return crowd?`Pedestrians ${crowd.count}/${this.pedestrianCount} · ragdolls ${crowd.ragdollCount} · cached models ${crowd.cachedCount} · spawn ${this.pedestrianRadius} m · unload ${this.pedestrianRadius+50} m${crowd.lastError?' · '+crowd.lastError:''}`:this.pedestrianCrowdStatus;}
+  pedestrianInfo(){const crowd=this.pedestrianCrowd;return crowd?`Pedestrians ${crowd.count}/${this.pedestrianCount} · ragdolls ${crowd.ragdollCount} · cached models ${crowd.cachedCount} · spawn ${this.pedestrianRadius} m · unload ${this.pedestrianRadius+50} m · movement ${crowd.movementMode}${crowd.lastError?' · '+crowd.lastError:''}`:this.pedestrianCrowdStatus;}
 
   private mapPedestrianDebug?:MapPedestrianDebug;
   private mapPedestrianLayers=new Set<PedestrianDebugLayer>();
   private mapPedestrianPending?:Promise<void>;
   private trafficTestEnabled = false;
+  get trafficTestActive(){return this.trafficTestEnabled;}
   private trafficTestRevision = 0;
   private trafficCars:TrafficTestCar[]=[];
   private get trafficTest(){return this.trafficCars.find(car=>car.active);}
   private get trafficFollower(){return this.trafficCars.filter(car=>car.active)[1];}
-  private trafficCount=2;
+  private trafficCount=25;
   private trafficPhysicsRadius=30;
-  private trafficSpawnRadius=100;
-  private trafficSpawnSphereRadius=4;
-  private trafficSpawnCenterHeight=1.5;
+  private trafficSpawnRadius=275;
   get trafficSpawnRange(){return this.trafficSpawnRadius;}
-  setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic spawn radius must be 25–500 m');this.trafficSpawnRadius=radius;}
+  setTrafficSpawnRadius(radius:number){if(!Number.isFinite(radius)||radius<25||radius>500)throw Error('Traffic activation radius must be 25–500 m');this.trafficSpawnRadius=radius;}
   private trafficOccupant(body:import('../engine/rigid-body-3d').RigidBody3D):TrafficOccupant {const point=body.position.clone() as TrafficOccupant,size=body.bounds.getSize(new THREE.Vector3());point.trafficRadius=Math.hypot(size.x,size.z)*.5;point.trafficVelocity=body.velocity.clone();return point;}
   private rivalInRange(model:TrafficModel){const pose=this.javaTrafficBridge?.location(model);return !!pose&&Math.hypot(pose.position.x-this.trafficFocus().x,pose.position.z-this.trafficFocus().z)<=this.mapStreamRange;}
-  private chooseTrafficSpawn(occupied:readonly TrafficOccupant[],bounds?:THREE.Box3,height=0,model?:TrafficModel){
-    if(bounds){const sphere=bounds.getBoundingSphere(new THREE.Sphere());this.trafficSpawnSphereRadius=sphere.radius+Math.hypot(sphere.center.x,sphere.center.z)+.5;this.trafficSpawnCenterHeight=height-.1+sphere.center.y;}
-    const radius=Math.min(this.trafficSpawnRadius,this.mapStreamRange);
-    // The primary/player camera owns spawning; the independent inspection camera must not affect it.
-    this.camera.updateMatrixWorld();
-    const frustum=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
-    const sphere=new THREE.Sphere(new THREE.Vector3(),this.trafficSpawnSphereRadius);
-    const center=this.trafficFocus(),forward=this.trafficPeer?new THREE.Vector3(0,0,-1).applyQuaternion(this.trafficPeer.body.orientation):this.camera.getWorldDirection(new THREE.Vector3());forward.y=0;forward.normalize();
-    const speed=this.trafficPeer?.body.velocity.length()??0,bodyRadius=bounds?Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5:6;
-    const offscreen=(spawn:TrafficSpawn)=>{
-      sphere.center.copy(spawn.position);sphere.center.y+=this.trafficSpawnCenterHeight;
-      return !frustum.intersectsSphere(sphere);
-    };
-    if(model?.registrationId&&this.javaTrafficBridge){
-      const pose=this.javaTrafficBridge.location(model);if(!pose||!this.rivalInRange(model))return;
-      const spawn=this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
-      return spawn&&safeTrafficSpawn(spawn,center,forward,speed,!offscreen(spawn),occupied,bodyRadius)?spawn:undefined;
-    }
-    return this.trafficSpawns&&chooseSafeTrafficSpawn(this.trafficSpawns,center,radius,this.mapStreamRange,occupied,forward,speed,bodyRadius,offscreen);
+  private registeredTrafficSpawn(model:TrafficModel){
+    const pose=this.javaTrafficBridge?.location(model);
+    return pose&&this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
   }
   private trafficSpawns?:TrafficSpawnIndex;
-  private trafficRefillAt=0;
   get trafficAmount(){return this.trafficCount;}
+  async prepareJavaScene(){
+    const generation=this.generation,focus=this.trafficFocus().clone();
+    await this.mapStream?.prepareNear(focus);
+    // Behind the loading screen: vehicles, ground and props outside the stream warm for both parts of the day.
+    if(generation===this.generation)await Promise.all([this.compileDaypart(this.scene,!this.lastNight),this.compileDaypart(this.scene,this.lastNight)]);
+    if(generation===this.generation&&this.trafficTestEnabled)await this.restartTrafficTest(true);
+  }
   get trafficPhysicalRange(){return this.trafficPhysicsRadius;}
   setTrafficPhysicsRadius(radius:number){if(!Number.isFinite(radius)||radius<5||radius>200)throw Error("Traffic physics radius must be 5–200 m");this.trafficPhysicsRadius=radius;}
   async setTrafficCount(count:number){
-    if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error("Traffic count must be an integer from 0 to 50");
+    if(!Number.isInteger(count)||count<0||count>MAX_TRAFFIC_CARS)throw Error(`Traffic count must be an integer from 0 to ${MAX_TRAFFIC_CARS}`);
     this.trafficCount=count;this.trafficTestEnabled=true;
-    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;car.group.visible=false;car.voice?.setActive(false);}});
+    this.trafficCars.forEach((car,i)=>{if(i>=count){car.active=false;this.showTrafficCar(car,false);car.voice?.setActive(false);}});
     if(this.mapRoadSource&&(!this.trafficControl||this.trafficCars.length<count))await this.restartTrafficTest(true);
   }
   private trafficFocus(){return this.trafficPeer?.body.position??this.mapStreamFocus??this.camera.position;}
@@ -484,18 +635,33 @@ export class Viewer {
   private trafficClock=new FixedClock(60,15);
   private mapTrafficFixtures:TrafficFixture[]=[];
   private trafficControl?:TrafficControl;
+  private trafficAgents?:AgentWorkerClient;
+  private trafficAgentIds=new WeakMap<Bot,number>();private nextTrafficAgentId=0;private trafficAgentTime=0;
   private trafficSignals?:Awaited<ReturnType<typeof createTrafficSignals>>;
   private trafficSignalError?:string;
   private trafficTemplates=new Map<Assets,Map<string,Promise<TrafficTemplate>>>();
   private javaTrafficTypes?:readonly TrafficModel[];
+  private javaTrafficEligible?:readonly TrafficModel[];
   private javaTrafficBridge?:JavaTrafficBridge;
   private trafficModelErrors=new Map<string,string>();
   setJavaTrafficTypes(types:readonly TrafficModel[]|undefined){
-    if(this.javaTrafficTypes===types)return;this.javaTrafficTypes=types;
+    const changed=this.javaTrafficTypes!==types;this.javaTrafficTypes=types;
+    const eligible=types?.filter(model=>!model.registrationId||this.rivalInRange(model));
+    const previous=this.javaTrafficEligible;this.javaTrafficEligible=eligible;
+    if(!changed&&(eligible===previous||eligible&&previous&&eligible.length===previous.length&&eligible.every((model,i)=>model===previous[i])))return;
     if(this.trafficTestEnabled&&this.mapRoadSource)void this.restartTrafficTest(true);
   }
   private trafficAudio?:TrafficAudio;
-  private trafficAudioStart=()=>this.trafficAudio?.activate();
+  private ambienceVisibility=()=>{
+    this.ambientAudio?.pause(document.hidden||(this.scriptTimeScale?.()??1)<=0);
+    // rAF may stop completely while minimized: reset on the event itself,
+    // rather than waiting for a frame that observes document.hidden.
+    this.previousFrame=this.trafficPrevious=this.previousPropFrame=undefined;
+    this.vehiclePhysics.pause();
+    this.trafficClock.restore(this.trafficClock.tick);
+    for(const racer of this.javaRaces.values())racer.pause();
+  };
+  private trafficAudioStart=()=>{this.trafficAudio?.activate();this.ambientAudio?.activate();};
   private trafficPeer?:Vehicle3D;
   private playerTrafficDriver?:PlayerTrafficDriver;
   private playerTrafficRevision=0;
@@ -517,7 +683,7 @@ export class Viewer {
       if(this.trafficControl&&driver.control!==this.trafficControl){driver.dispose();this.playerTrafficDriver=new PlayerTrafficDriver(vehicle,this.trafficControl.network,this.trafficControl);}
       const current=this.playerTrafficDriver!;
       if(!this.trafficTestEnabled)current.control.advance(dt);
-      return current.sample(dt,this.trafficCars.filter(car=>car.active).map(car=>car.vehicle.body));
+      return this.profiler.measure('Player traffic driver CPU',()=>current.sample(dt,this.trafficCars.filter(car=>car.active).map(car=>car.vehicle.body)));
     };
   }
   trafficTestStatus = 'Traffic test off';
@@ -560,16 +726,21 @@ export class Viewer {
   private sunFlareTexture?: THREE.Texture;
   private sunFlareRevision = 0;
   private observer: ResizeObserver;
+  private viewportSize={width:1,height:1};
   getViewportSize(): { width: number; height: number } {
-    return { width: this.container.clientWidth || this.renderer.domElement.clientWidth || 1,
-      height: this.container.clientHeight || this.renderer.domElement.clientHeight || 1 };
+    return {...this.viewportSize};
   }
   constructor(private container: HTMLElement) {
+    for(const root of [this.scene,this.model,this.javaRenderRoot])cacheUnchangedTransform(root,()=>this.stableTransforms);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.profiler = new FrameProfiler(this.renderer);
     this.graphicsDiagnostics=new GraphicsDiagnostics(this.renderer,this.profiler);
     this.rayOcclusion=new MapRaycastOcclusion(this.renderer);
     this.gpuOcclusion=new MapGpuOcclusion(this.renderer);
+    // Off by default: on Chrome/ANGLE (D3D11) getBufferSubData is a synchronous round trip to the GPU process
+    // even after both fences signal. It measured 20–45 ms whenever that process was busy presenting, once per
+    // interval, while the city route drew no faster with the verdicts applied.
+    this.gpuOcclusion.setEnabled(false);
     this.mapBackfaces.setEnabled(true);
     this.setBakedLightmapsEnabled(true);
     this.setShadowMapsEnabled(true);
@@ -581,7 +752,7 @@ export class Viewer {
     this.lighting.configureMaterial(this.ground.material);
     this.ground.receiveShadow = true;
     container.append(this.renderer.domElement);
-    container.addEventListener('pointerdown',this.trafficAudioStart,true);
+    container.addEventListener('pointerdown',this.trafficAudioStart,true);document.addEventListener('keydown',this.trafficAudioStart,true);document.addEventListener('visibilitychange',this.ambienceVisibility);
     this.camera.position.set(4, 3, 6);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -596,9 +767,14 @@ export class Viewer {
     this.scene.add(this.javaRenderRoot);
     this.observer = new ResizeObserver(() => {
       const { clientWidth: w, clientHeight: h } = container;
+      this.viewportSize={width:Math.max(1,w),height:Math.max(1,h)};
+      if(this.mapStream)this.mapStream.screenHeight=this.viewportSize.height;
       this.renderer.setSize(w, h); this.camera.aspect = w / Math.max(h, 1); this.camera.updateProjectionMatrix();
     }); this.observer.observe(container);
     this.renderer.setAnimationLoop(now => {
+      // Skipped refreshes do nothing at all: the display keeps the last frame and simulations see one longer step.
+      if(!this.framePacer.shouldRender(now))return;
+      const callbackStart=performance.now();
       this.profiler.captureCpuFrame=!!this.renderRecorder?.status.recording;
       this.mapStream?.workProfile.setEnabled(this.profiler.captureCpuFrame);
       this.gpuOcclusion.workProfile.setEnabled(this.profiler.captureCpuFrame);
@@ -607,10 +783,10 @@ export class Viewer {
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.beginFrame());
       this.suspensionPlayground?.update(now);
       this.characterPreview?.update(now);
-      for(const actor of this.javaCharacters.values()){
+      this.profiler.measure('Java characters CPU',()=>{for(const actor of this.javaCharacters.values()){
         actor.character.update(now,false);
         if(actor.ready&&actor.node.animation)actor.node.animation.position=actor.character.playbackTime;
-      }
+      }});
       if(this.characterPreview&&(this.characterPreview.isRagdoll||this.characterFollowingRagdoll)){
         const center=new THREE.Box3().setFromObject(this.characterPreview.root).getCenter(new THREE.Vector3());
         const delta=center.sub(this.controls.target);
@@ -624,21 +800,38 @@ export class Viewer {
         this.profiler.recordFrame(now - this.previousFrame);
         this.frameDuration += ((now - this.previousFrame) - this.frameDuration) * 0.1;
       }
+      const flapSeconds = this.previousFrame === undefined ? 0 : (now - this.previousFrame) / 1000;
       this.previousFrame = document.hidden ? undefined : now;
+      let flapChanged = false;
+      if (this.javaFlapReader) for (const [part] of this.proxies) {
+        if (part.nativeId !== undefined)
+          flapChanged = advancePartFlap(part, this.javaFlapReader(part.nativeId), flapSeconds) || flapChanged;
+      }
       this.graphicsDiagnostics.beginFrame();
+      this.vehiclePhysics.beginFrame();
       this.profiler.measure('Simulation + vehicle visuals', () => this.frame?.(now));
-      this.driverIk?.update();
+      if (flapChanged) this.syncWorld();
+      this.profiler.measure('Race opponents CPU',()=>{for(const racer of this.javaRaces.values())racer.update(now);});
+      this.profiler.measure('Physics frame finalize CPU',()=>this.vehiclePhysics.flush());
+      this.profiler.measure('Race vehicle visuals CPU',()=>{for(const racer of this.javaRaces.values())racer.publish();});
+      this.profiler.record('Shared vehicle physics CPU',this.vehiclePhysics.workMs);
+
+      this.profiler.measure('Map props CPU',()=>this.mapProps?.update(this.previousPropFrame===undefined?0:(now-this.previousPropFrame)/1000));this.previousPropFrame=now;
+      this.profiler.measure('Driver IK CPU',()=>{this.driverIk?.update();
       for(const binding of this.javaDrivers.values())if(binding.driver){
         binding.driver.root.visible=this.driverCameraChassis!==binding.chassis&&(this.javaRenderNodes.get(binding.node.id)?.visible??false);
         binding.driver.update();
-      }
-      this.updateTrafficTest(now);
-      if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
-      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen);}
-      // Shops and garages share the same day/night quality policy as driving.
+      }});
+      this.profiler.measure('Traffic CPU',()=>this.updateTrafficTest(now));
       const timeOfDay = this.drivingTimeOfDay?.() ?? this.scriptTimeOfDay?.()
         ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
       const night = isNightTime(timeOfDay);
+      this.lastNight=night;this.mapStream?.setNight(night);
+      this.profiler.measure('Pedestrians CPU',()=>{
+      if(this.pedestrianCrowd||this.pedestrianCrowdStatus==='Loading walking pedestrians…')this.updatePedestrianSpawnView();
+      if(this.pedestrianCrowd){const cars=this.trafficCars.filter(c=>c.active).map(c=>c.vehicle.body);if(this.trafficPeer)cars.push(this.trafficPeer.body);this.pedestrianCrowd.update(now,cars,this.trafficPeer?.body.position??this.controls.target,this.pedestrianOffscreen,this.scriptTimeScale?.()??1,!night);}
+      });
+      // Shops and garages share the same day/night quality policy as driving.
       if (this.lighting.setNightShadows(this.renderer, this.sunLight, night)) {
         this.staticMapShadows.setNightQuality(night);
         this.scene.traverse(object => {
@@ -646,46 +839,70 @@ export class Viewer {
         });
       }
 
-      const scriptCamera = !this.stopDriving ? this.scriptCamera?.() : null;
+      const scriptCamera = this.scriptCamera?.();
       if (scriptCamera) {
+        const chaseSnap=this.scriptCameraId!==scriptCamera.id||!this.scriptPathChaseActive;
         const factor = this.scriptCameraId !== scriptCamera.id || !scriptCamera.smoothing ? 1
           : 1 - Math.exp(-Math.min(this.frameDuration, 100) / 1000 / scriptCamera.smoothing);
         this.scriptCameraId = scriptCamera.id;
         this.controls.enabled = false;
-        this.camera.position.lerp(scriptCamera.position, factor);
-        this.controls.target.lerp(scriptCamera.target, factor);
+        // The player's chase frame runs before this override. Smooth from the
+        // last SCRIPT pose, never from that unrelated player-camera position.
+        if(this.scriptCameraPose?.id!==scriptCamera.id)this.scriptCameraPose={id:scriptCamera.id,position:scriptCamera.position.clone(),target:scriptCamera.target.clone()};
+        if(scriptCamera.pathChase){
+          const offset=scriptCamera.position.clone().sub(scriptCamera.target);offset.y=0;
+          if(offset.lengthSq()<1e-8)offset.set(0,0,1);
+          offset.normalize().multiplyScalar(12);offset.y=2.4;
+          this.scriptPathChase.update(this.scriptCameraPose.position,this.scriptCameraPose.target,scriptCamera.target,offset,document.hidden?0:this.frameDuration/1000,chaseSnap);
+        }else{
+          this.scriptCameraPose.position.lerp(scriptCamera.position,factor);
+          this.scriptCameraPose.target.lerp(scriptCamera.target,factor);
+        }
+        this.scriptPathChaseActive=!!scriptCamera.pathChase;
+        this.camera.position.copy(this.scriptCameraPose.position);
+        this.controls.target.copy(this.scriptCameraPose.target);
         this.camera.lookAt(this.controls.target);
         this.camera.fov = scriptCamera.fov; this.camera.near = scriptCamera.near; this.normalCameraFar = scriptCamera.far;
         this.updateFarPlane();
         this.camera.updateProjectionMatrix();
       } else {
+        this.scriptPathChaseActive=false;
+        this.scriptCameraPose=undefined;
         if (this.scriptCameraId !== undefined) { this.scriptCameraId = undefined; if (!this.stopDriving) this.controls.enabled = true; }
         if (this.controls.enabled) this.controls.update();
       }
       this.updateFarPlane();
-      this.mapDistanceCutoff.focus.value.copy(this.mapStreamFocus??this.camera.position);
+      this.mapDistanceCutoff.focus.value.copy(this.camera.position);
       this.mapDistanceCutoff.radius.value=this.mapStreamRange;
       this.profiler.measure('Streaming CPU', () => this.updateMapStream(now));
       this.profiler.measure('Occlusion CPU',()=>this.rayOcclusion.prepare(this.camera,this.staticMapRoot));
       const size=this.getViewportSize();
-      this.inspection.update(size.width,size.height,this.mapStreamFocus??this.camera.position,this.mapStreamRange);
+      this.inspection.update(size.width,size.height,this.camera.position,this.mapStreamRange);
       const renderCamera=this.inspection.enabled?this.inspection.camera:this.camera;
-      if(this.trafficCars.some(car=>car.voice))this.trafficAudio?.listener(renderCamera);
+      this.trafficAudio?.listener(renderCamera);
+      if(this.mapAmbience){this.ambientAudio?.listener(renderCamera);this.mapAmbience.update(now,renderCamera.position,timeOfDay,document.hidden?0:this.scriptTimeScale?.()??1);}
       this.mapRoadDebug?.updateTraffic(this.trafficControl);
       this.mapRoadDebug?.update(renderCamera,size.width,size.height,now);
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(this.camera.position).add(offset);
-      this.lighting.updateSun(this.sunLight, this.mapStreamFocus ?? this.controls.target);
+      this.lighting.updateSun(this.sunLight, this.camera.position);
       if (this.sunFlare) this.sunFlare.position.copy(this.camera.position)
         .addScaledVector(this.lighting.direction, 500);
+      // The observer shows primary-camera culling; only the explicit resident
+      // inspection switch bypasses it. Keep the filter active for ALL passes.
+      if(!(this.inspection.enabled&&this.inspectResident))
+        this.profiler.measure('Scene visibility CPU',()=>this.sceneVisibility.apply(this.camera,this.mapStream?this.mapStreamRange:Infinity,this.visibilityObjects()));
+      // Pedestrians load lazily; tracking an already tracked mount is a map lookup.
+      if(this.pedestrianCrowd)for(const mount of this.pedestrianCrowd.mounts)this.vehicleLod.track(mount,1,{skinned:true});
+      this.profiler.measure('Vehicle LOD CPU',()=>this.vehicleLod.update(this.camera.position,this.lodReachDistance));
       this.profiler.beginGpu();
       this.inspection.helpers.visible=false;
       if(this.mapRoadDebug)this.mapRoadDebug.root.visible=false;
       try {
         this.profiler.measure('Static shadow bake CPU', () => this.graphicsDiagnostics.pass('Static bake',()=>this.staticMapShadows.update(this.renderer,this.staticMapRoot,
-          this.mapStreamFocus ?? this.controls.target,this.lighting.direction,this.mapStream?.shadowRevision ?? 0,now)));
+          this.camera.position,this.lighting.direction,(this.mapStream?.shadowRevision??0)+(this.mapStream?.revision??0),now)));
         this.profiler.measure('Reflections CPU', () => this.graphicsDiagnostics.pass('Reflections',()=>this.vehicleReflections.update(this.renderer, this.scene,
-          this.mapStreamFocus ?? this.controls.target, [...this.proxies.values()], now)));
+          this.camera.position, [...this.proxies.values()], now)));
       } finally {this.inspection.helpers.visible=this.inspection.enabled;if(this.mapRoadDebug)this.mapRoadDebug.root.visible=true;}
       for (const { group, offset } of this.javaSkyDomeNodes.values())
         group.position.copy(renderCamera.position).add(offset);
@@ -702,6 +919,7 @@ export class Viewer {
       this.profiler.endGpu();
       this.profiler.measure('GPU occlusion CPU',()=>this.gpuOcclusion.endFrame());
       }finally{
+        this.sceneVisibility.restore();
         this.profiler.endGpu();this.profiler.endFrame();
         if(this.renderRecorder?.status.recording){const size=this.renderer.getDrawingBufferSize(new THREE.Vector2());
           this.renderRecorder.recordRenderFrame(now,{...this.renderer.info.render,width:size.x,height:size.y},document.hidden);
@@ -711,14 +929,17 @@ export class Viewer {
             if(work)for(const [key,value] of Object.entries(work.drain()))workFields[prefix+key]=value;
           this.renderRecorder.recordPerformanceFrame(now,timings,document.hidden,workFields);}
         this.afterFrame?.();
+        this.framePacer.recordWork(performance.now()-callbackStart);
         const capture=this.frameCapture;if(capture){this.frameCapture=undefined;
           this.renderer.domElement.toBlob(blob=>blob?capture.resolve(blob):capture.reject(Error('Frame capture failed')),'image/png');}
       }
     });
   }
   clear() {
+    this.lodPlayground?.dispose();this.lodPlayground=undefined;
     this.suspensionPlayground?.dispose();this.suspensionPlayground=undefined;
     this.setDriverCutaway(false);this.driverIk?.dispose();this.driverIk=undefined;
+    for(const racer of this.javaRaces.values())racer.dispose();this.javaRaces.clear();
     for(const id of this.javaDrivers.keys())this.releaseJavaDriver(id);
     for(const actor of this.javaCharacters.values())actor.character.dispose();this.javaCharacters.clear();
     for(const texture of this.javaCharacterTextures.values())void texture.then(t=>t.dispose()).catch(()=>{});this.javaCharacterTextures.clear();
@@ -726,7 +947,7 @@ export class Viewer {
     this.frameCapture?.reject(Error('Scene cleared'));this.frameCapture=undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapPackPath=undefined;
-    this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
+    this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
     // Loads from a previous scene retain their own pool until their clones dispose.
     this.mapTextures = new TextureSourceCache();
     this.vehicleTextures = new AssetTextureSources();
@@ -743,7 +964,9 @@ export class Viewer {
     for (const promise of this.javaRenderTemplates.values())
       void promise.then(group => this.disposeGroup(group)).catch(() => undefined);
     this.javaRenderTemplates.clear();
-    this.stopDriving?.(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.stopDriving?.(); this.carryVehicleRenders(); for(const part of this.suspensionSkins.keys())this.releaseSuspensionSkin(part); this.proxies.clear(); this.collisionMeshes.clear(); this.alphaModes.clear();
+    this.mapAmbience?.dispose();this.mapAmbience=undefined;this.ambientAudio=undefined;
+    this.mapProps?.dispose();this.mapProps=undefined;this.previousPropFrame=undefined;
     this.mapStream?.dispose(); this.mapStream = undefined;
     this.mapDebug?.dispose(); this.mapDebug = undefined;
     this.resetRoadDebug();
@@ -757,17 +980,17 @@ export class Viewer {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.geometry.dispose();
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); disposePaintLayer(material); material.dispose(); });
     });
     this.model.clear();
   }
-  async upsertJavaRenderObject(node: RenderObject, assets: Assets): Promise<void> {
+  async upsertJavaRenderObject(node: RenderObject, assets: Assets, bindVehicleDriver = false): Promise<void> {
     const generation = this.generation;
     let group = this.javaRenderNodes.get(node.id);
-    if (node.resourceType !== 3) {
+    if (node.resourceType !== 3||isOsdRender(node)) {
       this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
       group?.removeFromParent(); this.javaRenderNodes.delete(node.id);
-      this.javaRenderModels.delete(node.id);
+      this.javaRenderModels.delete(node.id); this.javaRenderPaths?.delete(node.id);
       this.javaRenderLights.get(node.id)?.group.removeFromParent(); this.javaRenderLights.delete(node.id);
       this.javaSkyDomeNodes.delete(node.id);
       this.javaRenderTypes.delete(node.id); this.javaRenderRequests.delete(node.id);
@@ -795,9 +1018,13 @@ export class Viewer {
     const unit=this.javaCharacters.has(node.id)?1:.01;
     modelGroup.scale.set(unit * node.meshScale.x, unit * node.meshScale.y, unit * node.meshScale.z);
     // Navigator tiles and car markers belong to the OSD map, not the 3D world.
-    const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker';
-    if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node)) {
+    const isNavigatorOverlay = node.alias === 'navigator_segment' || node.alias === 'marker' || node.alias === 'navigator_route';
+    const unboundVehicleDriver = node.nativeVehicleDriver && !bindVehicleDriver && !this.javaDrivers.has(node.id);
+    if (isNavigatorOverlay || node.renderType?.sceneLightManaged || previewScope(node) || unboundVehicleDriver) {
       group.visible = false;
+      if (unboundVehicleDriver) {
+        this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
+      }
       modelGroup.clear();
       this.javaRenderTypes.delete(node.id);
       this.javaRenderRequests.set(node.id, (this.javaRenderRequests.get(node.id) ?? 0) + 1);
@@ -850,14 +1077,15 @@ export class Viewer {
 
     // A render instance is just a transform until its RPK resource is resolved and its SCX is loaded.
     const identity = node.renderResource;
-    // Navigator tiles are per-instance clones whose textures are replaced by the Java script.
-    // Keep this interpretation scoped to those aliases; other RenderRefs retain existing semantics.
-    const overrides = node.alias === 'navigator_segment' ? node.renderType : null;
+    // Navigator tiles and Painter decal buttons both clone a model and replace
+    // its texture without changing the shared resource template.
+    const overrides = node.renderType?.resourceReplacements.size ? node.renderType : null;
     const overrideKey = overrides ? [...overrides.resourceReplacements]
       .map(([source, target]) => `${source.toString(16)}>${target.toString(16)}@${overrides.resourceReplacementPacks.get(source) ?? ''}`)
       .sort().join(',') : '';
-    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}` : '';
-    if (this.javaRenderTypes.get(node.id) === key) {await this.syncJavaCharacter(node,assets);return;}
+    const key = identity ? `${identity.pack.toLowerCase()}:${identity.id}|${overrideKey}|color:${node.color}` : '';
+    if (this.javaRenderTypes.get(node.id) === key) {this.hideStaticDuplicate?.(node.id);await this.syncJavaCharacter(node,assets);return;}
+    this.javaRenderPaths?.delete(node.id); modelGroup.visible = true;
     this.releaseJavaDriver(node.id);this.javaCharacters.get(node.id)?.character.dispose();this.javaCharacters.delete(node.id);
     modelGroup.scale.set(.01*node.meshScale.x,.01*node.meshScale.y,.01*node.meshScale.z);
     this.javaRenderTypes.set(node.id, key);
@@ -890,14 +1118,15 @@ export class Viewer {
           sourcePacks: overrides.resourceReplacementSourcePacks,
         } : undefined);
         const parsed = await parseScxAsync(await assets.read(model.path));
-        const template = new THREE.Group();
+        const template = new THREE.Group(); template.userData.modelPath = model.path;
         const warnings = await this.append(parsed, assets, model.textures, template, generation);
         if (isSkyDome) template.traverse(object => {
           if (!(object instanceof THREE.Mesh)) return;
           object.renderOrder = -1000;
           object.castShadow = false; object.receiveShadow = false;
           const materials = Array.isArray(object.material) ? object.material : [object.material];
-          materials.forEach(material => this.configureSkyMaterial(material));
+          const sky=materials.map(material=>this.configureSkyMaterial(material));
+          object.material=Array.isArray(object.material)?sky:sky[0];
         });
         if (generation !== this.generation) this.disposeGroup(template);
         if (warnings.length) console.warn(`Java RenderRef ${node.alias}: ${warnings.join('; ')}`);
@@ -911,15 +1140,33 @@ export class Viewer {
     const template = await templatePromise;
     if (generation !== this.generation || this.javaRenderRequests.get(node.id) !== request
       || this.javaRenderNodes.get(node.id) !== group || !group.parent) return;
-    modelGroup.add(template.clone(true));
+    const instance = template.clone(true);
+    applyRenderColor(instance, node.color);
+    modelGroup.add(instance);
+    if (!overrides && node.color === null && !isSkyDome && template.userData.modelPath) {
+      this.javaRenderPaths?.set(node.id, template.userData.modelPath); this.hideStaticDuplicate?.(node.id);
+    }
   }
+  /** A script copy of a model the static map already draws at the same pose is not drawn (see StaticMapDuplicates). */
+  private hideStaticDuplicate(id: number) {
+    const path = this.javaRenderPaths.get(id), modelGroup = this.javaRenderModels.get(id);
+    if (!path || !modelGroup) return;
+    const root = this.staticMapRoot;
+    let duplicate = false;
+    if (root?.parent && this.staticDuplicates.size) {
+      modelGroup.updateWorldMatrix(true, false); root.updateWorldMatrix(true, false);
+      duplicate = this.staticDuplicates.covers(path, modelGroup.matrixWorld, root.matrixWorld);
+    }
+    modelGroup.visible = !duplicate;
+  }
+  private refreshStaticDuplicates() { for (const id of this.javaRenderPaths.keys()) this.hideStaticDuplicate(id); }
   private releaseJavaDriver(id:number){
     const binding=this.javaDrivers.get(id);this.javaDrivers.delete(id);binding?.driver?.dispose();
   }
   async bindJavaDriver(node:RenderObject,chassis:EnginePart,assets:Assets){
     // Load the existing Java render first; an in-flight model replacement must not
     // leave a binding referring to the character it just disposed.
-    await this.upsertJavaRenderObject(node,assets);
+    await this.upsertJavaRenderObject(node,assets,true);
     if(chassis.world.disposed||node.resourceType!==3)return;
     this.releaseJavaDriver(node.id);
     const binding:{node:RenderObject;chassis:EnginePart;driver?:DriverIk;pending?:Promise<void>}={node,chassis};
@@ -1070,6 +1317,7 @@ export class Viewer {
   }
   showMapDebug(layer: MapDebugLayer, visible: boolean) { this.mapDebug?.show(layer, visible); }
   private stopTrafficTest() {
+    this.trafficAgents?.dispose();this.trafficAgents=undefined;this.trafficAgentTime=0;
     this.trafficTestRevision++;
     for(const test of this.trafficCars)this.disposeTrafficCar(test);
     this.trafficCars=[];this.trafficSpawns=undefined;this.trafficPrevious=undefined;this.trafficClock=new FixedClock(60,15);
@@ -1077,7 +1325,15 @@ export class Viewer {
     this.trafficSignalError=undefined;
     this.trafficModelErrors.clear();this.trafficTestStatus='Traffic test off';
   }
-  private disposeTrafficCar(test:TrafficTestCar){test.java?.remove();test.java=undefined;test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
+  /**
+   * Hidden residents leave the scene graph: three.js recomputes world matrices of invisible objects too, and a
+   * few hundred parked cars of ~50 nodes each otherwise cost more per frame than the whole visible city.
+   */
+  private showTrafficCar(test:TrafficTestCar,shown:boolean){
+    test.group.visible=shown;
+    if(!shown)test.group.removeFromParent();else if(!test.group.parent)this.scene.add(test.group);
+  }
+  private disposeTrafficCar(test:TrafficTestCar){this.vehicleLod.untrack(test.group);test.java?.remove();test.java=undefined;test.voice?.dispose();test.lamps.dispose();test.damage.dispose();test.group.removeFromParent();}
   async setTrafficPairEnabled(enabled:boolean){await this.setTrafficCount(enabled?2:1);}
   private trafficTemplate(assets:Assets,key:TrafficModel=DEFAULT_TRAFFIC_MODELS[0]):Promise<TrafficTemplate>{
     let cache=this.trafficTemplates.get(assets);if(!cache){cache=new Map();this.trafficTemplates.set(assets,cache);}
@@ -1088,15 +1344,19 @@ export class Viewer {
       const selection=await this.javaTrafficBridge?.selection(key);
       const built=await new PartFactory(assets).stock({pack:key.pack,id:key.id},{javaSelection:selection});let group:THREE.Group|undefined;
       try{
+        const paint=this.javaTrafficBridge?.paint?.(key)??selection?.rootTexture;
+        if(paint)for(const part of built.world.parts.values())if(part.definition.config.texture!==undefined&&!part.paintTexture)part.paintTexture=paint;
         group=await this.createPreviewWorld(built.world,assets,false);
         const bounds=new THREE.Box3().setFromObject(group),wheels=built.root.definition.config.wheels.map((wheel,i)=>({...wheel,radius:built.world.wheelRefs[i]?.radius??wheel.radius}));
         for(let i=0;i<wheels.length;i++){
-          const wheel=wheels[i];if(!wheel.render){
-            const mount=new THREE.Group(),rotor=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.matrixAutoUpdate=false;mount.matrix.makeTranslation(...wheel.position);mount.add(rotor);group.add(mount);
+          const wheel=wheels[i],installedWheel=built.root.definition.config.slots.find(slot=>slot.type===101+i);
+          if(!wheel.render||installedWheel&&built.root.children.get(installedWheel.id)?.definition.model){
+            const frame=trafficWheelFrame(built.root,i),inverse=frame.clone().invert();wheel.position=new THREE.Vector3().setFromMatrixPosition(frame).toArray();
+            const mount=new THREE.Group(),rotor=new THREE.Group();mount.name=`Traffic wheel ${i}`;mount.userData.trafficWheel=true;mount.userData.spinSign=new THREE.Vector3(1,0,0).transformDirection(frame).x<0?-1:1;mount.matrixAutoUpdate=false;mount.matrix.copy(frame);mount.add(rotor);group.add(mount);
             for(const part of built.world.parts.values()){
               if(trafficWheelIndex(part,built.root)!==i)continue;
               const mesh=group.getObjectByName(`Preview part ${part.id}`);
-              if(mesh){mesh.removeFromParent();mesh.matrix.premultiply(new THREE.Matrix4().makeTranslation(-wheel.position[0],-wheel.position[1],-wheel.position[2]));rotor.add(mesh);}
+              if(mesh){mesh.removeFromParent();mesh.matrix.premultiply(inverse);rotor.add(mesh);}
             }
             continue;
           }
@@ -1107,8 +1367,22 @@ export class Viewer {
           if(warnings.length)throw Error(warnings.join('\n'));
         }
         if(generation!==this.generation)throw Error('Traffic template load superseded');
+        const panels:RivalPanelDefinition[]=[];
+        if(key.registrationId){group.updateMatrixWorld(true);const inverse=group.matrixWorld.clone().invert();
+          for(const part of built.world.parts.values()){
+            const root=part===built.root,file=part.definition.cfgPath.split('/').at(-1)??'';
+            if(!root&&!/hood|trunk|door|quarterpanel|bumper|sideskirt/i.test(file))continue;
+            const meshGroup=group.getObjectByName(`Preview part ${part.id}`);if(!meshGroup)continue;
+            const samples:number[]=[],point=new THREE.Vector3();meshGroup.traverse(object=>{if(!(object instanceof THREE.Mesh))return;const positions=object.geometry.getAttribute('position'),frame=inverse.clone().multiply(object.matrixWorld);for(let j=0;j<positions.count;j++){point.fromBufferAttribute(positions,j).applyMatrix4(frame);samples.push(point.x,point.y,point.z);}});
+            if(samples.length<9)continue;
+            const slot=part.definition.config.slots.find(s=>s.id===part.ownSlot),mount=new THREE.Vector3(...(slot?.position??[0,0,0])).applyMatrix4(part.matrix());
+            panels.push({id:meshGroup.name,samples,mass:Math.max(.1,part.definition.config.bodies.reduce((s,b)=>s+b.mass,0)),mount:mount.toArray(),root,hood:/hood/i.test(file)});
+          }
+        }
         const lamps=await trafficLampDefinitions(built.world,assets);
-        const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps};group=undefined;return result;
+        // Cars stay hidden until they wake; compile their programs meanwhile instead of on the first visible frame.
+        void this.warmShaders([group]);
+        const result={group,bounds,height:-new THREE.Box3().setFromObject(group).min.y,mass:Math.max(800,[...built.world.parts.values()].reduce((sum,part)=>sum+part.definition.config.bodies.reduce((s,b)=>s+b.mass,0),0)),wheels,lamps,panels};group=undefined;return result;
       }finally{built.world.dispose();if(group)this.disposeGroup(group);}
     })();
     cache.set(identity,pending);pending.catch(()=>{if(cache!.get(identity)===pending)cache!.delete(identity);});return pending;
@@ -1131,14 +1405,15 @@ export class Viewer {
       if(!roads){this.trafficTestStatus='No road graph for traffic test';return;}
       this.trafficSpawns??=new TrafficSpawnIndex(roads.network);
       const control=this.trafficControl??new TrafficControl(roads.network,this.mapTrafficFixtures);
+      control.setHalts(this.javaTrafficBridge?.halts?.()??{revision:0,roads:[],crossings:[]});
+      this.trafficAgents??=new AgentWorkerClient({kind:'traffic-init',network:roads.network,control:control.snapshot()});
       const models=this.javaTrafficTypes??DEFAULT_TRAFFIC_MODELS;
       for(const test of [...this.trafficCars])if(this.javaTrafficBridge&&(!this.javaTrafficBridge.available(test.model)||test.model.registrationId&&!test.active&&!this.rivalInRange(test.model))){this.disposeTrafficCar(test);this.trafficCars.splice(this.trafficCars.indexOf(test),1);}
       if(this.javaTrafficBridge){
         const nearby=models.filter(m=>m.registrationId&&this.javaTrafficBridge!.available(m)&&this.rivalInRange(m));
         const target=Math.min(Math.floor(this.trafficCount/2),nearby.length),present=this.trafficCars.filter(c=>c.model.registrationId).length;
         if(target>present){
-          this.camera.updateMatrixWorld();const view=new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(this.camera.projectionMatrix,this.camera.matrixWorldInverse));
-          const replace=this.trafficCars.filter(c=>!c.model.registrationId&&(!c.active||!view.intersectsBox(c.vehicle.body.bounds.clone().applyMatrix4(c.vehicle.body.matrix())))).slice(0,target-present);
+          const replace=this.trafficCars.filter(c=>!c.model.registrationId&&!c.active).slice(0,target-present);
           for(const car of replace){this.disposeTrafficCar(car);this.trafficCars.splice(this.trafficCars.indexOf(car),1);}
         }
       }
@@ -1154,11 +1429,13 @@ export class Viewer {
         const route=new RoadTrafficCar(roads.network,this.trafficFocus());
         const lamps=await createTrafficLamps(template.lamps,source.assets);
         if(!current()){lamps.dispose();return;}
-        const group=template.group.clone(true);group.matrixAutoUpdate=false;group.add(lamps.group);
+        // Track before lamps join the car: lamp glows are not surfaces to simplify.
+        const group=template.group.clone(true);this.vehicleLod.track(group);group.matrixAutoUpdate=false;group.add(lamps.group);
         const vehicle=new TrafficVehicle(template.bounds.clone(),template.mass,template.wheels,source.terrain,source.collision);
         vehicle.place(route.position,route.direction,template.height);
         const lod=new TrafficVehicleLod(vehicle,route,template.height);lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
-        const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=new TrafficDamageView(group,vehicle.crush);
+        const bot=new Bot(route,lod,Math.random,(15+Math.random()*20)/3.6,control),damage=template.panels.length?new RivalPanelView(group,template.panels):new TrafficDamageView(group,vehicle.crush);
+        if(damage instanceof RivalPanelView)vehicle.panelImpact=(impulse,point,closing)=>damage.physics.hit(impulse,point,closing,vehicle.body.mass);
         const wheels=template.wheels.map((_,i)=>{const mount=group.getObjectByName(`Traffic wheel ${i}`) as THREE.Group;return {mount,rotor:mount.children[0] as THREE.Group};});
         group.name=`Traffic ${model.pack.split('/').at(-1)} ${index+1}`;group.visible=false;
         staged.push({model,active:false,lod,car:route,bot,vehicle,damage,lamps,group,wheels});
@@ -1166,11 +1443,12 @@ export class Viewer {
       this.trafficCars.push(...staged);
       this.trafficControl=control;
       const cars=staged.splice(0);for(const test of cars){
-        this.scene.add(test.group);
-        const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
-        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height,test.model);if(spawn)this.recycleTrafficCar(test,spawn);
+        const occupied=this.trafficCars.filter(car=>car.placed).map(car=>this.trafficOccupant(car.vehicle.body));
+        const bounds=test.vehicle.body.bounds,bodyRadius=Math.hypot(bounds.max.x-bounds.min.x,bounds.max.z-bounds.min.z)*.5;
+        const spawn=test.model.registrationId?this.registeredTrafficSpawn(test.model):worldTrafficSpawn(this.trafficSpawns!,occupied,bodyRadius,this.trafficFocus());
+        if(spawn)this.recycleTrafficCar(test,spawn);
       }
-      this.trafficTestStatus=`Streaming active · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
+      this.trafficTestStatus=`Persistent world population · ${this.javaTrafficTypes?`Java traffic catalogue ${this.javaTrafficTypes.length} models`:'preview Pickup'} · model errors ${this.trafficModelErrors.size}`;this.updateTrafficTest(performance.now());
       for(const test of cars){
         try{this.trafficAudio??=new TrafficAudio();void this.trafficAudio.voice(source.assets).then(voice=>{if(generation===this.generation&&this.trafficCars.includes(test))test.voice=voice;else voice.dispose();}).catch(()=>{});}catch{/* Missing audio must not stop physics. */}
       }
@@ -1180,22 +1458,29 @@ export class Viewer {
   }
   trafficTestInfo() {
     const cars=this.trafficCars.filter(car=>car.active),physical=cars.filter(car=>car.lod.physical).length;
-    return `Traffic ${cars.length}/${this.trafficCount} · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · spawn ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
+    return `Traffic active ${cars.length} / world ${this.trafficCars.filter(car=>car.placed).length} (limit ${this.trafficCount}) · physics ${physical} · puppets ${cars.length-physical} · physics radius ${this.trafficPhysicsRadius} m · activation ${this.trafficSpawnRadius} m · stream ${this.mapStreamRange} m\n`+
       cars.map((test,i)=>`${test.model.pack.split('/').at(-1)?.replace(/\.rpk$/i,'')} ${i+1} · ${test.lod.physical?'physics':'puppet'} · target ${(test.bot.cruiseSpeed*3.6).toFixed(0)} km/h · ${(test.vehicle.body.velocity.length()*3.6).toFixed(1)} km/h · ${test.car.phase} · ${test.bot.trafficStatus||'free'}`).join('\n')+
-      `\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
+      `\nDriver calculations: ${this.trafficAgents?.available?`worker · 30 Hz · last CPU ${this.trafficAgents.workMs.toFixed(2)} ms · round trip ${this.trafficAgents.roundTripMs.toFixed(1)} ms`:`main thread${this.trafficAgents?.error?' · '+this.trafficAgents.error:''}`}\nSignals ${this.trafficControl?.signals.length??0} · ${this.trafficSignalError??this.trafficTestStatus}`;
   }
   private recycleTrafficCar(test:TrafficTestCar,spawn:TrafficSpawn){
     const network=this.trafficSpawns!.network,route=new RoadTrafficCar(network,spawn.position,Math.random,spawn.road);
-    test.damage.reset();test.vehicle.crush.offsets.fill(0);test.vehicle.crush.version=0;test.vehicle.collisionVersion=0;
+    if(!test.model.registrationId)test.damage.reset();test.vehicle.crush.offsets.fill(0);test.vehicle.crush.version=0;test.vehicle.collisionVersion=0;
     test.vehicle.place(route.position,route.direction,test.lod.height);test.vehicle.setMode('cruise');
     test.car=route;test.lod.route=route;test.lod.physical=false;test.lod.setMode('cruise');
     test.lod.updateRange(this.trafficFocus(),this.trafficPhysicsRadius);
     const peers=this.trafficCars.filter(car=>car.active&&car!==test).map(car=>car.vehicle.body);if(this.trafficPeer)peers.push(this.trafficPeer.body);
     test.bot=initializeTrafficMotion(route,test.lod,this.trafficControl,peers);
     test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
-    test.java?.remove();test.java=undefined;
-    if(this.javaTrafficBridge){test.java=this.javaTrafficBridge.spawn(test.model,{position:test.vehicle.body.position,yaw:Math.atan2(-route.direction.x,-route.direction.z),velocity:test.vehicle.body.velocity});if(!test.java){test.active=false;test.group.visible=false;return;}}
-    test.active=true;test.group.visible=true;
+    test.java?.remove();test.java=undefined;test.placed=true;
+    test.active=false;this.showTrafficCar(test,false);
+  }
+  private wakeTrafficResident(test:TrafficTestCar){
+    if(this.javaTrafficBridge){
+      const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
+      test.java=this.javaTrafficBridge.spawn(test.model,{position:test.vehicle.body.position,yaw:Math.atan2(-forward.x,-forward.z),velocity:test.vehicle.body.velocity});
+      if(!test.java)return false;
+    }
+    test.active=true;return true;
   }
   focusTrafficTest() {
     if(!this.trafficTest)return;
@@ -1209,39 +1494,54 @@ export class Viewer {
   }
   private updateTrafficTest(now:number) {
     if(!this.trafficControl||!this.trafficTestEnabled)return;
+    if((this.scriptTimeScale?.()??1)<=0){this.trafficPrevious=undefined;return;}
+    this.trafficControl.setHalts(this.javaTrafficBridge?.halts?.()??{revision:0,roads:[],crossings:[]});
     const center=this.trafficFocus();
+    const activation=Math.max(this.trafficPhysicsRadius+10,Math.min(this.trafficSpawnRadius,this.mapStreamRange));
     for(const [i,test] of this.trafficCars.entries()){
-      const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
-      if(i>=this.trafficCount||distance>this.mapStreamRange+20||test.car.stopped&&distance>this.trafficPhysicsRadius+10||test.java&&!test.java.active()){test.java?.remove();test.java=undefined;test.active=false;test.group.visible=false;}
-      else test.group.visible=test.active&&distance<=this.mapStreamRange;
+      const available=!this.javaTrafficBridge||this.javaTrafficBridge.available(test.model);
+      // Script-owned rivals keep their existing global Java location. Ordinary
+      // traffic never chooses another spawn when it leaves the active range.
+      if(test.model.registrationId&&!test.active&&available&&this.rivalInRange(test.model)){
+        const pose=this.javaTrafficBridge?.location(test.model),spawn=pose&&this.trafficSpawns?.nearest(new THREE.Vector3(pose.position.x,pose.position.y,pose.position.z));
+        if(spawn&&(!test.placed||test.vehicle.body.position.distanceTo(new THREE.Vector3(pose!.position.x,pose!.position.y,pose!.position.z))>5))this.recycleTrafficCar(test,spawn);
+      }
+      const wanted=i<this.trafficCount&&test.placed&&available&&trafficResidentActive(test.vehicle.body.position,center,activation,test.active)&&!this.trafficControl.roadHalted(test.car.roadId);
+      if(!wanted||test.java&&!test.java.active()){
+        test.java?.remove();test.java=undefined;test.active=false;this.showTrafficCar(test,false);
+      }else{
+        if(!test.active)this.wakeTrafficResident(test);
+        const distance=Math.hypot(test.vehicle.body.position.x-center.x,test.vehicle.body.position.z-center.z);
+        this.showTrafficCar(test,test.active&&distance<=this.mapStreamRange);
+      }
       test.voice?.setActive(test.active&&test.group.visible);
     }
-    if(now>=this.trafficRefillAt&&this.trafficSpawns){
-      this.trafficRefillAt=now+200;
-      const test=this.trafficCars.slice(0,this.trafficCount).find(car=>!car.active&&(!this.javaTrafficBridge||this.javaTrafficBridge.available(car.model)));
-      if(test){const occupied=this.trafficCars.filter(car=>car.active).map(car=>this.trafficOccupant(car.vehicle.body));if(this.trafficPeer)occupied.push(this.trafficOccupant(this.trafficPeer.body));
-        const spawn=this.chooseTrafficSpawn(occupied,test.vehicle.body.bounds,test.lod.height,test.model);
-        if(spawn)this.recycleTrafficCar(test,spawn);
-      }
-    }
     const cars=this.trafficCars.filter(car=>car.active);
+    this.trafficAgents?.ready(now);
+    const planned=this.trafficAgents?.take();
+    if(planned?.kind==='traffic')for(const result of planned.agents){
+      const test=cars.find(car=>this.trafficAgentIds.get(car.bot)===result.id);
+      // A collision/recycle after dispatch invalidates the old control, never the current physical body.
+      if(!test||test.bot.impactRevision!==result.revision||test.vehicle.collisionVersion!==result.collision||result.haltsRevision!==this.trafficControl.halts.revision)continue;
+      test.car.applyPlan(result.cursor);Object.assign(test.bot,{input:result.input,mode:result.mode,rpm:result.rpm,cruiseSpeed:result.speed,desiredSpeed:result.desired,trafficStatus:result.status});test.lod.setMode(result.mode);
+    }
     this.trafficAudio?.setHidden(document.hidden);
     if(document.hidden){this.trafficPrevious=undefined;return;}
     const time=this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??(this.lighting.direction.y<.1?0:12*3600);
     const peer=this.trafficPeer;
     const bodies=cars.map(car=>car.vehicle.body);if(peer)bodies.push(peer.body);
+    const backgroundDrivers=this.trafficAgents?.available,staleDrivers=backgroundDrivers&&this.trafficAgents!.stale;
     if(this.trafficPrevious!==undefined)this.trafficClock.advance(Math.min(.25,Math.max(0,(now-this.trafficPrevious)/1000)),()=>{
       this.trafficControl?.advance(this.trafficClock.dt);
-      for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);test.bot.advance(this.trafficClock.dt,bodies);}
+      for(const test of cars){test.lod.updateRange(center,this.trafficPhysicsRadius);
+        if(backgroundDrivers){if(staleDrivers)test.bot.input={throttle:0,steer:test.bot.input.steer,brake:true,brakeAxis:.8};else if(test.bot.mode==='cruise'||test.bot.mode==='recover')trackCruiseSpeed(test);test.lod.step(this.trafficClock.dt,test.bot.input);}else test.bot.advance(this.trafficClock.dt,bodies);
+      }
       for(const [i,test] of cars.entries()){
-        if(peer&&test.lod.physical){
-          const hit=vehiclePairContact(peer.body,test.vehicle.body);
-          if(hit){
-            if(hit.impulse.lengthSq()>1){peer.vehicleContact(hit.impulse,hit.point,test.vehicle.body.bounds.clone().applyMatrix4(test.vehicle.body.matrix()),hit.closing);test.bot.hit(hit.impulse.clone().negate(),hit.point,hit.closing);}
-            const total=1/peer.body.mass+1/test.vehicle.body.mass,correction=Math.min(.15,Math.max(0,hit.depth-.002)*.6);
-            peer.body.position.addScaledVector(hit.normal,correction/peer.body.mass/total);test.vehicle.body.position.addScaledVector(hit.normal,-correction/test.vehicle.body.mass/total);
-          }
+        for(const {car:racer} of this.javaRaces.values()){
+          raceTrafficContact(racer,{body:test.vehicle.body,hit:(impulse,point,closing)=>test.bot.hit(impulse,point,closing)});
         }
+        // The player's own physics tick tests traffic when it can (trafficPeerContacts); this is the fallback.
+        if(peer&&test.lod.physical&&!this.vehiclePhysics.runsTickContacts)this.trafficPeerContact(peer,test);
         for(const other of cars.slice(i+1)){
           if(!test.lod.physical&&!other.lod.physical)continue;
           const a=test.vehicle.body,b=other.vehicle.body,hit=vehiclePairContact(a,b);if(!hit)continue;
@@ -1251,21 +1551,34 @@ export class Viewer {
         }
       }
     });
+    const panelDt=this.trafficPrevious===undefined?0:Math.min(.05,Math.max(0,(now-this.trafficPrevious)/1000));
     this.trafficPrevious=now;
+    if(cars.length&&this.trafficAgents?.ready(now)){
+      const time=this.trafficControl.time,dt=Math.min(.1,Math.max(0,time-this.trafficAgentTime));
+      if(this.trafficAgents.request({kind:'traffic',dt,time,halts:this.trafficControl.halts,peer:peer?agentBody(peer.body):undefined,agents:cars.map(test=>{
+        let id=this.trafficAgentIds.get(test.bot);if(id===undefined){id=++this.nextTrafficAgentId;this.trafficAgentIds.set(test.bot,id);}
+        return {id,revision:test.bot.impactRevision,body:agentBody(test.vehicle.body),cursor:test.car.snapshot(),collision:test.vehicle.collisionVersion,physical:test.lod.physical,wheelbase:test.vehicle.wheelbase,maxSteer:test.vehicle.maxSteerAngle,speed:test.bot.cruiseSpeed,mode:test.bot.mode};
+      })},now))this.trafficAgentTime=time;
+    }
     this.trafficSignals?.update();
+    let rivalPanelCpu=0;
+    // Traffic ticks at 60 Hz: draw each car where it is now, not at its last tick (see extrapolationMatrix).
+    const trafficLead=Math.min(this.trafficClock.pendingSeconds,this.trafficClock.dt);
     for(const test of cars){
       const forward=new THREE.Vector3(0,0,-1).applyQuaternion(test.vehicle.body.orientation);
       test.lamps.update(drivingLightMask(0,(test.bot.input.brakeAxis??0)>.05,test.bot.input.throttle<0,true,time),test.vehicle.wheels[0]?.steer??0,test.vehicle.body.velocity.dot(forward),now/1000);
-      test.group.matrix.copy(test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
-      test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin,wheel.steer,0,'YXZ');});
+      test.group.matrix.multiplyMatrices(extrapolationMatrix(test.vehicle.body,trafficLead,trafficCarry),test.vehicle.body.matrix());test.group.matrixWorldNeedsUpdate=true;
+      test.vehicle.wheels.forEach((wheel,i)=>{test.wheels[i].mount.matrix.setPosition(wheel.center);test.wheels[i].mount.matrixWorldNeedsUpdate=true;test.wheels[i].rotor.rotation.set(-wheel.spin*(test.wheels[i].mount.userData.spinSign??1),wheel.steer,0,'YXZ');});
       test.java?.sync({position:test.vehicle.body.position,yaw:Math.atan2(-forward.x,-forward.z),velocity:test.vehicle.body.velocity});
-      test.damage.update();test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
+      if(test.damage instanceof RivalPanelView){const started=performance.now();test.damage.update(panelDt,now);rivalPanelCpu+=performance.now()-started;}else test.damage.update();
+      test.voice?.update(test.vehicle.body.position,test.bot.rpm,test.bot.input.throttle);
     }
+    this.profiler.record('Rival panels CPU',rivalPanelCpu);
   }
   private resetRoadDebug() {
-    this.pedestrianCrowdRevision++;this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
+    this.pedestrianCrowdRevision++;if(this.pedestrianCrowd)this.vehicleLod.untrackWithin(this.pedestrianCrowd.root);this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;this.pedestrianCrowdStatus='Walking pedestrians off';
     this.mapPedestrianDebug?.dispose();this.mapPedestrianDebug=undefined;this.mapPedestrianLayers.clear();this.mapPedestrianPending=undefined;this.pedestrianDebugStatus='Pedestrian graph off';
-    this.stopTrafficTest();this.javaTrafficBridge=undefined;this.javaTrafficTypes=undefined;
+    this.stopTrafficTest();this.javaTrafficBridge=undefined;this.javaTrafficTypes=undefined;this.javaTrafficEligible=undefined;
     this.mapTrafficFixtures=[];
     this.mapRoadRevision++; this.mapRoadDebug?.dispose(); this.mapRoadDebug=undefined;
     this.mapRoadSource=undefined;this.mapRoadPending=undefined;this.mapRoadLayers.clear();this.roadDebugStatus='Road graph off';
@@ -1298,8 +1611,9 @@ export class Viewer {
     this.inspection.enabled=false;this.controls.target.copy(point).add(new THREE.Vector3(0,1,0));this.camera.position.copy(point).add(new THREE.Vector3(6,4,6));this.controls.update();
   }
   async showWalkingPedestrians(enabled:boolean){
+    this.walkingPedestriansEnabled=enabled;
     const revision=++this.pedestrianCrowdRevision,source=this.mapRoadSource,mapRevision=this.mapRoadRevision;
-    this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
+    if(this.pedestrianCrowd)this.vehicleLod.untrackWithin(this.pedestrianCrowd.root);this.pedestrianCrowd?.dispose();this.pedestrianCrowd=undefined;
     this.pedestrianCrowdStatus=enabled?'Loading walking pedestrians…':'Walking pedestrians off';
     if(!enabled)return;
     if(!source){this.pedestrianCrowdStatus='No map loaded';return;}
@@ -1314,7 +1628,8 @@ export class Viewer {
         return (await texture).clone();
       },source.terrain?(point)=>source.terrain!.height(point.x,point.z,point.y+1):undefined,{count:this.pedestrianCount,radius:this.pedestrianRadius},this.pedestrianOffscreen);
       if(revision!==this.pedestrianCrowdRevision||mapRevision!==this.mapRoadRevision){crowd.dispose();return;}
-      this.pedestrianCrowd=crowd;crowd.configure(this.pedestrianCount,this.pedestrianRadius);this.scene.add(crowd.root);
+      this.pedestrianCrowd=crowd;crowd.configure(this.pedestrianCount,this.pedestrianRadius);
+      crowd.root.visible=!isNightTime(this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??43200);this.scene.add(crowd.root);
       this.pedestrianCrowdStatus=`${crowd.count} walking pedestrians · experimental zone routing / curved transitions / car avoidance / contact ragdoll. Toggle again to respawn nearby.`;
     }catch(error){if(revision===this.pedestrianCrowdRevision)this.pedestrianCrowdStatus=String(error);}
   }
@@ -1334,8 +1649,9 @@ export class Viewer {
     this.mapPedestrianPending=pending;try{await pending;}finally{if(this.mapPedestrianPending===pending)this.mapPedestrianPending=undefined;}
   }
   dispose() {
-    this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);this.stopTrafficTest();this.trafficAudio?.dispose();
+    this.container.removeEventListener('pointerdown',this.trafficAudioStart,true);document.removeEventListener('keydown',this.trafficAudioStart,true);document.removeEventListener('visibilitychange',this.ambienceVisibility);this.stopTrafficTest();this.trafficAudio?.dispose();
     for(const cache of this.trafficTemplates.values())for(const pending of cache.values())void pending.then(template=>this.disposeGroup(template.group)).catch(()=>{});this.trafficTemplates.clear();
+    this.vehicleLod.dispose();this.vehicleLodRefresh();this.lodLibrary.dispose();
     this.profiler.dispose();this.gpuOcclusion.dispose();
     this.environmentRevision++;
     this.scene.environment = null;
@@ -1352,6 +1668,12 @@ export class Viewer {
     const warnings = await this.append(model, assets, textures, this.model, generation);
     if (generation === this.generation) this.fit();
     return warnings;
+  }
+  async showLodPlayground(model:ScxModel,assets:Assets,textures:string[]){
+    this.clear();const generation=this.generation;
+    await this.append(model,assets,textures,this.model,generation);
+    if(generation!==this.generation)throw Error('LOD preview superseded');
+    this.fit();return this.lodPlayground=new LodPlayground(this.model);
   }
   setDriverCutaway(enabled:boolean){
     for(const [group,visible] of this.driverCutawayVisibility)group.visible=visible;this.driverCutawayVisibility.clear();
@@ -1385,6 +1707,7 @@ export class Viewer {
     return character;
   }
   removeWorld(world: EngineWorld): void {
+    for(const [root,racer]of this.javaRaces)if(root.world===world)racer.dispose();
     for(const [id,binding] of this.javaDrivers)if(binding.chassis.world===world)this.releaseJavaDriver(id);
     if(this.driverIk?.chassis.world===world){this.setDriverCutaway(false);this.driverIk.dispose();this.driverIk=undefined;}
     for (const [part, group] of this.proxies) if (part.world === world) {
@@ -1395,6 +1718,23 @@ export class Viewer {
     }
   }
   /** Build an isolated inventory mesh tree; never publish its objects/lights into the world. */
+  async createPreviewRender(node: RenderObject, assets: Assets): Promise<THREE.Group> {
+    if (!node.renderResource) throw new Error('Preview render has no resource');
+    const model = await assets.modelForResource(node.renderResource.pack, node.renderResource.id);
+    const parsed = await parseScxAsync(await assets.read(model.path));
+    const root = new THREE.Group(), mesh = new THREE.Group(); root.add(mesh);
+    try {
+      await this.append(parsed, assets, model.textures, mesh, this.generation);
+      mesh.scale.set(.01 * node.meshScale.x, .01 * node.meshScale.y, .01 * node.meshScale.z);
+      applyRenderColor(mesh, node.color, false);
+      mesh.position.set(node.position.x,node.position.y,node.position.z);
+      mesh.rotation.set(node.orientation.p,node.orientation.y,node.orientation.r,'YXZ');
+      root.add(new THREE.HemisphereLight(0xffffff,0x777777,2));
+      const light = new THREE.DirectionalLight(0xffffff,2); light.position.set(2,4,3);root.add(light);
+      return root;
+    } catch (error) { this.disposeGroup(root); throw error; }
+  }
+
   async createPreviewWorld(world: EngineWorld, assets: Assets, unlitPreview = true): Promise<THREE.Group> {
     const root = new THREE.Group(), generation = this.generation;
     try {
@@ -1419,12 +1759,23 @@ export class Viewer {
           configureCfgLampEmission(sub, flags);
         }
         syncLinkedRenders(part, group);
+        // Decals and spray strokes are part of the paint, in thumbnails too.
+        if (part.paintStrokes?.length) {
+          group.updateWorldMatrix(true, true);
+          const surfaces: THREE.Mesh[] = [];
+          group.traverse(object => { if (object instanceof THREE.Mesh && hasPaintSurface(object)) surfaces.push(object); });
+          await Viewer.prototype.bakePartPaintLayers.call(this, part, assets, surfaces, part.paintStrokes, () => true);
+        }
       }
       root.traverse(object => {
         if (!(object instanceof THREE.Mesh)) return;
         if (!unlitPreview) { object.castShadow = object.receiveShadow = true; return; }
         const unlit = (source: THREE.MeshStandardMaterial) => {
-            const material = previewMaterial(source);
+          const material = previewMaterial(source), layer = paintLayerOf(source);
+          // Thumbnails are drawn by another renderer, which cannot sample this renderer's render target.
+          const copy = layer && copyPaintLayer(this.renderer, layer);
+          if (copy) { configurePaintLayer(material, object.geometry); const own = paintLayerOf(material)!; own.copy = copy; own.map.value = copy; }
+          disposePaintLayer(source);
           source.userData.reflectionTexture?.dispose();
           source.dispose(); return material;
         };
@@ -1437,9 +1788,12 @@ export class Viewer {
   disposePreviewWorld(group: THREE.Group): void { this.disposeGroup(group); }
   private async updatePartPaint(part: EnginePart, assets: Assets): Promise<void> {
     if (part.definition.config.texture === undefined) return;
+    // A slower Java assembly refresh may finish with an older paint snapshot.
+    const latest=this.livePaint?.get(part);if(latest){part.paintColor=latest.color;part.paintStrokes=latest.strokes;}
     const group = this.proxies.get(part);
     if (!group) return;
-    const key = part.paintTexture ? `${part.paintTexture.pack}:${part.paintTexture.id}` : 'default';
+    await this.updatePartPaintStrokes(part,assets,group);
+    const key = part.paintColor!==undefined?`color:${part.paintColor}`:part.paintTexture ? `${part.paintTexture.pack}:${part.paintTexture.id}` : 'default';
     if (group.userData.paintKey === key) return;
     const paint = await partPaint(part, assets);
     if (!paint) return;
@@ -1449,7 +1803,7 @@ export class Viewer {
         if (material.userData.paintDefault) materials.push(material);
     } });
     for (const material of materials) {
-      const texture = await this.vehicleTextures.acquire(assets, paint.to,
+      const texture = paint.color!==undefined?solidPartPaint(paint.color):await this.vehicleTextures.acquire(assets, paint.to,
         async () => this.texture(await assets.read(paint.to), paint.to));
       if (part.world.disposed || this.proxies.get(part) !== group) { texture.dispose(); return; }
       texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -1458,6 +1812,138 @@ export class Viewer {
     }
     group.userData.paintKey = key;
   }
+  /**
+   * Bake a part's decals into the paint layer of every paint surface whose UVs allow it (see paint-layer.ts).
+   * Returns the meshes that still need projected overlays, or undefined when a newer request replaced this one.
+   * Placement follows the overlay path exactly: the stroke frame, face filter and non-paintable mask.
+   */
+  private async bakePartPaintLayers(part:EnginePart,assets:Assets,meshes:THREE.Mesh[],strokes:readonly PaintStroke[],current:()=>boolean):Promise<THREE.Mesh[]|undefined>{
+    const overlay:THREE.Mesh[]=[],targets:{mesh:THREE.Mesh;full:THREE.BufferGeometry;index:number;material:THREE.MeshStandardMaterial}[]=[];
+    for(const mesh of meshes){
+      const full=(mesh.geometry.userData.lodFull as THREE.BufferGeometry|undefined)??mesh.geometry;
+      const materials=Array.isArray(mesh.material)?mesh.material:[mesh.material];let baked=false,needsOverlay=false;
+      for(let index=0;index<materials.length;index++){
+        const material=materials[index];if(!isPaintSurface(material))continue;
+        const layer=paintLayerOf(material);
+        const faces=layer&&(!layer.owner||layer.owner===mesh)?paintSurfaceGeometry(Object.assign(Object.create(mesh),{geometry:full}) as THREE.Mesh,undefined,index):undefined;
+        const usable=faces?paintUvInfo(full,faces).usable:false;faces?.dispose();
+        if(layer&&usable&&material instanceof THREE.MeshStandardMaterial){layer.owner=mesh;targets.push({mesh,full,index,material});baked=true;}else needsOverlay=true;
+      }
+      if(needsOverlay||!baked)overlay.push(mesh);
+    }
+    if(!targets.length)return overlay;
+    const loaded:{stroke:PaintStroke;texture:THREE.Texture}[]=[];
+    const release=()=>{for(const {texture} of loaded)texture.dispose();};
+    for(const stroke of strokes){
+      const source=await resourceTextureSource(assets,stroke.brush);if(!source)continue;
+      const texture=await this.vehicleTextures.acquire(assets,source,()=>this.textureFromPaintBrush(assets,source));
+      loaded.push({stroke,texture});
+      if(part.world.disposed||!current()){release();return undefined;}
+      texture.colorSpace=THREE.SRGBColorSpace;
+    }
+    try{
+      const frame=part.matrix(),normalMatrix=new THREE.Matrix3().getNormalMatrix(frame);
+      for(const {mesh,full,index,material} of targets){
+        const proxy=Object.assign(Object.create(mesh),{geometry:full}) as THREE.Mesh,decals:PaintDecal[]=[];
+        const detail=material.userData.detailTexture as THREE.Texture|undefined,diffuse=material.map;
+        const coverageAttribute=detail&&full.hasAttribute('slrrDetailUv')?'slrrDetailUv':material.userData.slrrPaintMask&&diffuse?'uv':undefined;
+        const mask=coverageAttribute==='slrrDetailUv'?detail:coverageAttribute?diffuse:undefined;
+        if(coverageAttribute==='uv')diffuse?.updateMatrix();
+        for(const {stroke,texture} of loaded){
+          const point=new THREE.Vector3(...stroke.position).applyMatrix4(frame);
+          const normal=new THREE.Vector3(...stroke.normal).applyNormalMatrix(normalMatrix);
+          const orientation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+          if(stroke.tangent){
+            const x=new THREE.Vector3(...stroke.tangent).transformDirection(frame);
+            x.addScaledVector(normal,-x.dot(normal)).normalize();
+            const y=new THREE.Vector3().crossVectors(normal,x).normalize();
+            orientation.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,normal));
+          }
+          orientation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stroke.rotation));
+          const faces=paintSurfaceGeometry(proxy,normal,index);if(!faces)continue;
+          decals.push({faces,world:mesh.matrixWorld.clone(),inverse:new THREE.Matrix4().makeRotationFromQuaternion(orientation).setPosition(point).invert(),
+            size:new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5),normal,texture,color:new THREE.Color(stroke.color&0xffffff),
+            opacity:(stroke.color>>>24)/255,flip:!!stroke.flip,
+            coverage:mask&&coverageAttribute?{attribute:coverageAttribute,mask,matrix:coverageAttribute==='uv'?diffuse?.matrix:undefined}:undefined});
+        }
+        const info=paintUvInfo(full);
+        bakePaintLayer(this.renderer,paintLayerOf(material)!,paintLayerSize(full,mesh.matrixWorld,Math.max(info.coverage,.05)),decals);
+        for(const decal of decals)decal.faces.dispose();
+      }
+    }finally{release();}
+    return overlay;
+  }
+  private async updatePartPaintStrokes(part:EnginePart,assets:Assets,group:THREE.Group){
+    const strokes=part.paintStrokes;
+    if(group.userData.paintStrokes===strokes)return;
+    const request=(group.userData.paintStrokeRequest??0)+1;group.userData.paintStrokeRequest=request;
+    let projected=group.userData.paintStrokeGroup as THREE.Group|undefined;
+    if(!projected){projected=new THREE.Group();projected.name='Paint strokes';group.add(projected);group.userData.paintStrokeGroup=projected;}
+    const existing:Map<PaintStroke,THREE.Group>=group.userData.paintStrokeMeshes??new Map();group.userData.paintStrokeMeshes=existing;
+    const wanted=new Set(strokes??[]);
+    const meshes:THREE.Mesh[]=[];
+    group.updateWorldMatrix(true,true);
+    // showWorld stages rebuilt cars with their proxy root hidden until every
+    // part is ready. Culling may also hide that root. Neither means its paint
+    // surfaces are absent: project before publishing the car, while retaining
+    // authored visibility of child renders (e.g. inactive light variants).
+    for (const child of group.children) child.traverseVisible(object=>{
+      if(object instanceof THREE.Mesh&&!object.userData.paintStroke&&hasPaintSurface(object))meshes.push(object);
+    });
+    // Surfaces with a clean UV layout get the decals baked into their paint; the rest keep projected overlays.
+    // Called through the prototype: lightweight hosts (tests, previews) reuse this method without defining it.
+    const overlayMeshes=await Viewer.prototype.bakePartPaintLayers.call(this,part,assets,meshes,strokes??[],()=>group.userData.paintStrokeRequest===request);
+    if(overlayMeshes===undefined)return;
+    meshes.length=0;meshes.push(...overlayMeshes);
+    for(const stroke of strokes??[]){
+      if(existing.has(stroke)||!meshes.length)continue;
+      const addition=new THREE.Group();
+      try{
+        const source=await resourceTextureSource(assets,stroke.brush);
+        if(!source)continue;
+        const texture=await this.vehicleTextures.acquire(assets,source,()=>this.textureFromPaintBrush(assets,source));
+        if(part.world.disposed||group.userData.paintStrokeRequest!==request){texture.dispose();return;}
+        texture.colorSpace=THREE.SRGBColorSpace;
+        if(stroke.flip){texture.wrapS=THREE.RepeatWrapping;texture.repeat.x=-1;}
+        const frame=part.matrix(),point=new THREE.Vector3(...stroke.position).applyMatrix4(frame);
+        const normal=new THREE.Vector3(...stroke.normal).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(frame));
+        const orientation=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+        if(stroke.tangent){
+          const x=new THREE.Vector3(...stroke.tangent).transformDirection(frame);
+          x.addScaledVector(normal,-x.dot(normal)).normalize();
+          const y=new THREE.Vector3().crossVectors(normal,x).normalize();
+          orientation.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,normal));
+        }
+        orientation.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),stroke.rotation));
+        const material=new THREE.MeshBasicMaterial({map:texture,color:stroke.color&0xffffff,opacity:(stroke.color>>>24)/255,
+          transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-4,side:THREE.FrontSide});
+        for(const mesh of meshes){
+          const originals=Array.isArray(mesh.material)?mesh.material:[mesh.material];
+          for(let index=0;index<originals.length;index++){
+            const original=originals[index];if(!isPaintSurface(original))continue;
+            const surface=paintSurfaceGeometry(mesh,normal,index);if(!surface)continue;
+            const detail=original.userData.detailTexture as THREE.Texture|undefined;
+            const diffuse=(original as THREE.MeshStandardMaterial).map;
+            const coverage=detail&&surface.hasAttribute('slrrDetailUv')?'slrrDetailUv':original.userData.slrrPaintMask&&diffuse?'uv':undefined;
+            const mask=coverage==='slrrDetailUv'?detail:coverage?diffuse:undefined;
+            if(coverage==='uv')diffuse?.updateMatrix();
+            const geometry=projectPaintGeometry(surface,mesh.matrixWorld,point,new THREE.Euler().setFromQuaternion(orientation),new THREE.Vector3(stroke.size,stroke.size,stroke.size*.5),coverage,coverage==='uv'?diffuse?.matrix:undefined);
+            surface.dispose();
+            if(!geometry.getAttribute('position').count){geometry.dispose();continue;}
+            geometry.applyMatrix4(group.matrixWorld.clone().invert());
+            const overlayMaterial=material.clone();if(mask)maskPaintProjection(overlayMaterial,mask);
+            const overlay=new THREE.Mesh(geometry,overlayMaterial);overlay.userData.paintStroke=true;overlay.renderOrder=2;addition.add(overlay);
+          }
+        }
+        material.dispose();if(!addition.children.length)texture.dispose();
+        projected.add(addition);existing.set(stroke,addition);
+      }catch(error){this.disposeGroup(addition);throw error;}
+    }
+    if(group.userData.paintStrokeRequest!==request)return;
+    for(const [stroke,mesh]of existing)if(!wanted.has(stroke)){mesh.removeFromParent();this.disposeGroup(mesh);existing.delete(stroke);}
+    group.userData.paintStrokes=strokes;
+  }
+  private async textureFromPaintBrush(assets:Assets,source:string){return this.texture(await assets.read(source),source);}
   syncWorldVisuals(world: EngineWorld): void {
     this.profiler.measure('Vehicle mesh sync CPU',()=>this.syncWorldVisualsCore(world));
   }
@@ -1470,7 +1956,7 @@ export class Viewer {
         this.proxies.delete(part); this.collisionMeshes.delete(part);
         continue;
       }
-      group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
+      if(!group.userData.panelViewOwnsTransform)group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       group.visible = !group.userData.partLoading && this.partVisible(part);
       applyCfgRenderChannels(group, world.lightMask);
@@ -1478,7 +1964,7 @@ export class Viewer {
       this.suspensionSkins.get(part)?.update();
     }
   }
-  pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[] } | undefined {
+  pickJavaPart(clientX: number, clientY: number): { id: number; local: number[]; world: number[];normal?:number[] } | undefined {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const ray = new THREE.Raycaster();
     ray.setFromCamera(new THREE.Vector2((clientX - rect.left) / rect.width * 2 - 1,
@@ -1489,7 +1975,9 @@ export class Viewer {
     if (!hit) return;
     const entry = groups.find(([, group]) => { for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) if (node === group) return true; return false; });
     if (!entry) return;
-    return { id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
+    const normal=hit.face?.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
+    if(normal)normal.applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(entry[0].matrix().invert()));
+    return { normal:normal?.toArray(),id: entry[0].nativeId!, local: hit.point.clone().applyMatrix4(entry[0].matrix().invert()).toArray(), world: hit.point.toArray() };
   }
   async showWorld(world: EngineWorld, assets: Assets, keepScene = false, publishTogether = false): Promise<string[]> {
     world.experimentalHubGeometry = this.experimentalHubGeometry;
@@ -1511,6 +1999,7 @@ export class Viewer {
       this.collisionMeshes.set(part, collision);
       warnings.push(...await this.append(parsed, assets, model.textures, group, generation, false, () => true, undefined, paint, true, THREE.FrontSide));
       if (generation !== this.generation) return warnings;
+      await this.updatePartPaintStrokes(part,assets,group);
       applySavedPanel(group,part);
       const primaryPose = part.definition.config.renderPose ? poseMatrix(part.definition.config.renderPose) : new THREE.Matrix4();
       for (const extra of part.definition.additionalModels ?? []) {
@@ -1540,7 +2029,7 @@ export class Viewer {
           .multiply(light.pose ? poseMatrix(light.pose) : new THREE.Matrix4());
         lamp.userData.lightFlags = light.flags ?? 0; lamp.visible = cfgRenderVisible(light.flags, world.lightMask);
         lamp.add(flare); group.add(lamp);
-        if (light.source.beam && ((light.flags ?? 0) & 4)) {
+        if (!world.spriteOnlyLights && light.source.beam && ((light.flags ?? 0) & 4)) {
           try {
             const beam = createVehicleBeam(light.source);
             if (generation !== this.generation || world.disposed) {
@@ -1563,6 +2052,7 @@ export class Viewer {
         }catch(error){warnings.push(`Suspension skin ${part.definition.alias}: ${String(error)}`);}
       }
       for (const group of staged) delete group.userData.partLoading;
+      for(const [part,group] of this.proxies)if(part.world===world)this.vehicleLod?.track(group);
       this.syncWorldVisuals(world);
     }
     if (generation === this.generation && !keepScene) this.fit();
@@ -1574,12 +2064,23 @@ export class Viewer {
     this.mapPackPath=packPath;
     this.resetRoadDebug();this.javaTrafficBridge=options?.trafficBridge;this.javaTrafficTypes=options?.trafficTypes;this.mapRoadSource={assets,pack:packPath,groundId:options?.groundId};
     const pack = await assets.pack(packPath), warnings: string[] = [];
-    const groundEntry = options?.groundId === undefined ? undefined : pack.entries.find(entry => entry.typeId === options.groundId);
+    const groundEntries=pack.entries.filter(entry=>entry.type===1);
+    const groundEntry = options?.groundId === undefined ? (groundEntries.length===1?groundEntries[0]:undefined) : pack.entries.find(entry => entry.typeId === options.groundId);
     const ground = groundEntry && groundRenderDefinition(groundEntry);
+    let packedGround: PackedGround | undefined;
     let room: typeof ground;
     if (ground) {
       const gameType = await assets.resource(packPath, ground.gameType);
       const render = await assets.resource(packPath, ground.renderId);
+      const tableResource=entryProperties(render.entry).some(property=>property.key==='mesh')
+        ? await assets.modelForResource(packPath,ground.renderId) : undefined;
+      if (tableResource && /\.scy$/i.test(tableResource.path) && groundEntry) {
+        const materials=await parseScxAsync(await assets.read(tableResource.path));
+        if(materials.meshes.every(mesh=>!mesh.indices.length)){
+          const compiled=parsePackedGround(await assets.read(packPath),groundEntry,materials);
+          if(compiled.model.meshes.length)packedGround=compiled;
+        }
+      }
       // TestTrack also names a direct ground mesh, but its child renders form
       // the rest of the map. Only leaf meshes use the isolated room path.
       if (entryProperties(gameType.entry).some(property => property.key === 'native' && property.value === 'ground')
@@ -1590,22 +2091,43 @@ export class Viewer {
         if (groundRenderIsRoom(pack, ground.renderId, model)) room = ground;
       }
     }
-    const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack }];
+    const mapSources = [{ path: packPath.replaceAll('\\', '/').toLowerCase(), pack, ground, packedGround }];
     // A map can declare a sibling map package as a continuation (for example City → City2).
-    // Load it only when both its RDB and static map render resources are present.
+    // Continuations can keep geometry/placements in their RPK or in external SCX/RDB files.
     for (const dependency of room ? [] : pack.dependencies) {
       const path = dependency.path.replaceAll('\\', '/').toLowerCase();
       if (!path.startsWith('maps/') || !path.endsWith('.rpk') || mapSources.some(source => source.path === path)) continue;
-      if (!assets.byPath.has(path.replace(/\.rpk$/i, '.rdb'))) continue;
       try {
         const linkedPack = await assets.pack(path);
-        if (mapRenderIds(linkedPack).length) mapSources.push({ path, pack: linkedPack });
+        const entries=linkedPack.entries.filter(entry=>entry.type===1);
+        const linkedEntry=entries.length===1?entries[0]:undefined;
+        const linkedGround=linkedEntry&&groundRenderDefinition(linkedEntry);
+        let linkedPacked:PackedGround|undefined;
+        if(linkedGround&&linkedEntry){
+          const render=await assets.resource(path,linkedGround.renderId);
+          const resource=entryProperties(render.entry).some(property=>property.key==='mesh')
+            ? await assets.modelForResource(path,linkedGround.renderId) : undefined;
+          if(resource&&/\.scy$/i.test(resource.path)){
+            const materials=await parseScxAsync(await assets.read(resource.path));
+            if(materials.meshes.every(mesh=>!mesh.indices.length)){
+              const compiled=parsePackedGround(await assets.read(path),linkedEntry,materials);
+              if(compiled.model.meshes.length)linkedPacked=compiled;
+            }
+          }
+        }
+        // Original City2 keeps placements and geometry inside its RPK. An RDB
+        // is required only for the external-mesh variant of a continuation.
+        if(linkedPacked||assets.byPath.has(path.replace(/\.rpk$/i,'.rdb'))&&mapRenderIds(linkedPack).length)
+          mapSources.push({path,pack:linkedPack,ground:linkedGround,packedGround:linkedPacked});
       } catch (error) { warnings.push(`Map dependency ${path}: ${String(error)}`); }
     }
-    const ids = room ? [{ source: mapSources[0], id: room.renderId }]
-      : mapSources.flatMap(source => mapRenderIds(source.pack).map(id => ({ source, id })));
+    const ids = room ? groundRoomRenderIds(pack,room.renderId).map(id=>({source:mapSources[0],id}))
+      : mapSources.flatMap(source => source.packedGround&&source.ground
+        ? [{source,id:source.ground.renderId}] : mapRenderIds(source.pack).map(id => ({ source, id })));
     const collision = new MapCollision(), terrain = new MapTerrain(collision);
     if (generation !== this.generation) return { loaded: 0, total: ids.length, triangles: 0, objects: 0, warnings, terrain, collision };
+    this.mapAmbience?.dispose();this.ambientAudio=new AmbientAudio(assets,()=>this.ambientEffectsVolume?.()??1);this.mapAmbience=new MapAmbience(this.ambientAudio);this.ambientAudio.activate();
+    this.mapProps?.dispose();this.mapProps=new MapProps(collision,terrain);this.previousPropFrame=undefined;
     this.mapStream?.dispose(); this.mapStreamFocus = undefined;
     this.rayOcclusion.reset();this.gpuOcclusion.reset();
     this.mapDebug?.dispose(); this.mapDebug = undefined;
@@ -1618,22 +2140,26 @@ export class Viewer {
       this.controls.target.set(0, 2, -650); this.camera.position.set(180, 130, -440); this.controls.update();
     }
     let loaded = 0, triangles = 0;
-    this.collisionOnlyMapMeshes=0;this.excludedNightMapVariants=this.excludedNightMapInstances=0;
-    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();
+    this.collisionOnlyMapMeshes=0;this.nightMapVariants=this.nightMapInstances=0;
+    this.staticMapShadows.reset();this.staticMapRoot?.removeFromParent();this.staticDuplicates.clear();this.refreshStaticDuplicates();
     this.staticMapRoot = new THREE.Group();this.staticMapRoot.name='Static map';this.model.add(this.staticMapRoot);
+    cacheUnchangedTransform(this.staticMapRoot,()=>this.stableTransforms);
     const stream = new MapObjectStream(this.staticMapRoot, this.mapStreamRange);
     stream.frameBudgetMs=2;
     stream.setInspectResident(this.inspection.enabled&&this.inspectResident);
     stream.setGeometryCutoff(this.geometryCutoff);
     stream.setStaticBatching(this.staticBatching);
-    stream.setAutoLod(this.autoMapLod);
+    stream.setLodLibrary(this.lodLibrary);stream.setAutoLod(this.autoMapLod);stream.setLodStrength(this.lodStrength);
+    stream.setShaderWarmup(meshes=>this.warmShaders(meshes));
     stream.setTightFrustum(this.tightMapFrustum);
     for(const category of this.hiddenMapCategories)stream.setCategoryHidden(category,true);
     stream.setMaterialSharing(this.sharedMapMaterials);
     stream.setShadowRange(this.bakedLightmaps.value ? 150 : 0);
+    stream.screenHeight=this.viewportSize.height;stream.setFarCullPixels(this.mapFarCullPixels);
     this.mapStream = stream;
     this.updateFarPlane();
     this.nextStreamUpdate=-Infinity;
+    for(const source of mapSources)if(source.packedGround?.collision.meshes.length)collision.add(source.packedGround.collision);
     for (const { source, id } of ids) {
       if (generation !== this.generation) break;
       try {
@@ -1647,42 +2173,50 @@ export class Viewer {
             point.fromArray(mesh.normals, i).transformDirection(transform).toArray(mesh.normals, i);
           return parsed;
         };
-        const parsed = placeGround(await parseScxAsync(await assets.read(resource.path)));
+        const compiled=source.packedGround;
+        const parsed = compiled?.model ?? placeGround(await parseScxAsync(await assets.read(resource.path)));
         if (generation !== this.generation) break;
         terrain.add(parsed, resource.textures);
-        collision.add(parsed);
+        if(!compiled?.collision.meshes.length)collision.add(parsed);
         const collisionOnly=isStockMapCollisionShell(source.path,resource.path,source.pack.entries.find(entry=>entry.typeId===id)?.alias??'',parsed);
         if(collisionOnly)this.collisionOnlyMapMeshes++;
+        if(!compiled&&!collisionOnly)this.staticDuplicates.add(resource.path,room?poseMatrix(room.pose):new THREE.Matrix4());
         const bounds = new THREE.Box3();
         const vertex = new THREE.Vector3();
         for (const mesh of parsed.meshes) for (let i = 0; i < mesh.positions.length; i += 3)
           bounds.expandByPoint(vertex.fromArray(mesh.positions, i).multiplyScalar(0.01));
         if (!collisionOnly && !bounds.isEmpty()) {
           const center = bounds.getCenter(new THREE.Vector3());
+          // Ground is required before showMap resolves and driving starts.
+          // A compiled city pack commits all its sections together; leaving it
+          // in the background prop queue allowed driving on invisible roads.
           stream.add([{ matrix: new THREE.Matrix4(), position: center,
             bounds: { minX: bounds.min.x, maxX: bounds.max.x, minZ: bounds.min.z, maxZ: bounds.max.z } }], async wanted => {
             if (!wanted()) return [];
             const template = new THREE.Group();
-            const model = placeGround(await parseScxAsync(await assets.read(resource.path)));
+            const model = compiled ? {...compiled.model,meshes:compiled.model.meshes.map(mesh=>({...mesh,positions:mesh.positions.slice(),normals:mesh.normals.slice()}))}
+              : placeGround(await parseScxAsync(await assets.read(resource.path)));
             if (!wanted()) return [];
             warnings.push(...await this.append(model, assets, resource.textures, template, generation, true, wanted));
             const parts = template.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
             for (const part of parts){part.geometry.scale(0.01, 0.01, 0.01);part.userData.mapOcclusionRole='terrain';}
             return parts;
-          });
+          },false,true);
         }
         triangles += parsed.meshes.reduce((sum, mesh) => sum + mesh.indices.length / 3, 0);
         loaded++;
       } catch (error) { warnings.push(`0x${id.toString(16)}: ${String(error)}`); }
       progress?.(loaded, ids.length);
     }
+    if (generation === this.generation) this.refreshStaticDuplicates();
     let objects = 0;
     const unifyBuildings=this.unifiedBuildingMaterials||this.globalFacadeBatching;this.mapUnifiedBuildingMaterials=unifyBuildings;
     const globalFacades=this.globalFacadeBatching;this.mapGlobalFacadeBatching=globalFacades;
-    const objectBatches = new Map<string, { pack: string; id: number; alias: string; category?:MapObjectCategory; placements: StreamPlacement[] }>();
+    const objectBatches = new Map<string, { pack: string; id: number; alias: string; movable?:boolean; category?:MapObjectCategory; daypart?:'day'|'night'; placements: StreamPlacement[] }>();
     for (const source of room ? [] : mapSources) try {
-      const rdb = new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb')));
-      const placements = mapObjectPlacements(rdb, source.pack), byType = new Map<number, typeof placements>();
+      const placements = source.packedGround ? source.packedGround.placements
+        : mapObjectPlacements(new TextDecoder('windows-1252').decode(await assets.read(source.path.replace(/\.rpk$/i, '.rdb'))),source.pack);
+      const byType = new Map<number, typeof placements>();
       for (const placement of placements) {
         const list = byType.get(placement.typeId) ?? [];
         if (!list.length) byType.set(placement.typeId, list);
@@ -1694,6 +2228,40 @@ export class Viewer {
           const resource = await assets.resource(source.path, typeId);
           if (resource.entry.type !== 8) continue;
           const cfg = parseIcfg(resource.entry.data);
+          const ambience=parseMapAmbience(cfg);
+          if(ambience.loop||ambience.randoms.length)for(const instance of instances)this.mapAmbience?.add(resource.packPath,new THREE.Vector3(...instance.pose.position),ambience);
+          const movableBounds=new THREE.Box3();
+          const movableBodies=cfg.bodies.filter(body=>body.mass>0&&body.collision!==false);
+          for(const body of movableBodies)try{
+            const bodyFrame=poseMatrix(body),half=body.shape.slice(1,4).map(Number);
+            if(body.shape[0]?.toLowerCase()==='box'&&half.length===3&&half.every(Number.isFinite)){
+              movableBounds.union(new THREE.Box3(new THREE.Vector3(-half[0],-half[1],-half[2]),new THREE.Vector3(...half as [number,number,number])).applyMatrix4(bodyFrame));
+            }else if(body.shape[0]?.toLowerCase().endsWith('.scx')){
+              const model=await parseScxAsync(await assets.read(body.shape[0]));const point=new THREE.Vector3();
+              for(const mesh of model.meshes)for(let i=0;i<mesh.positions.length;i+=3)movableBounds.expandByPoint(point.fromArray(mesh.positions,i).multiplyScalar(.01).applyMatrix4(bodyFrame));
+            }
+          }catch(error){warnings.push(`Prop collision ${resource.entry.alias}: ${String(error)}`);}
+          if(movableBodies.length){
+            const raw=cfg.unknown.find(command=>command.command==='bounds')?.args.slice(0,6).map(Number);
+            if(raw?.length===6&&raw.every(Number.isFinite)){
+              const declared=new THREE.Box3(new THREE.Vector3(raw[0],raw[1],raw[2]),new THREE.Vector3(raw[3],raw[4],raw[5]));
+              // `bounds` is a legacy broad-phase extent, not a replacement for
+              // the authored body pose. tabla_c's declared extent is 0.8 m below
+              // both its physical SCX and render. Use it only if no body loaded.
+              if(movableBounds.isEmpty())movableBounds.copy(declared);
+            }
+          }
+          const movable=movableBodies.length>0&&!movableBounds.isEmpty();
+          const propFrames=new Map<number,THREE.Matrix4>();
+          if(movable)for(const instance of instances)propFrames.set(instance.id,settleMapPropFrame(poseMatrix(instance.pose),movableBounds,terrain));
+          const movingParts=new Map<number,Array<{placement:StreamPlacement;original:THREE.Matrix4}>>();
+          if(movable)for(const instance of instances){
+            const parts:Array<{placement:StreamPlacement;original:THREE.Matrix4}>=[];movingParts.set(instance.id,parts);
+            this.mapProps!.add(propFrames.get(instance.id)!,movableBounds,movableBodies.reduce((n,b)=>n+b.mass,0),delta=>{
+              for(const {placement,original}of parts){placement.matrix.multiplyMatrices(delta,original);placement.position.setFromMatrixPosition(placement.matrix);}
+              stream.placementsMoved(parts.map(p=>p.placement));
+            });
+          }
           const nativeClass=new TextDecoder().decode(resource.entry.data.subarray(8,resource.entry.data.indexOf(0,8)));
           const fixtureKind=trafficFixtureKind(resource.entry.alias,nativeClass);
           if(fixtureKind)for(const instance of instances)this.mapTrafficFixtures.push({kind:fixtureKind,position:new THREE.Vector3(...instance.pose.position),pose:instance.pose});
@@ -1714,19 +2282,20 @@ export class Viewer {
               const seed = mapObjectSeed(instance), id = mapRenderResource(render, seed);
               if (!id) continue;
               const color = render.colors?.length ? render.colors[seed % render.colors.length] : undefined;
-              const category=mapObjectCategory(resource.entry.alias);
-              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}`;
+              const category=mapObjectCategory(resource.entry.alias),daypart=mapRenderDaypart(cfg.renders,render);
+              const key = `${resource.packPath.toLowerCase()}:${id}:${category??'other'}:${movable?'movable':'static'}:${daypart??'always'}`;
               let batch = objectBatches.get(key);
               if (!batch) {
-                batch = { pack: resource.packPath, id, alias: resource.entry.alias, category, placements: [] };
+                batch = { pack: resource.packPath, id, alias: resource.entry.alias, movable, category, daypart, placements: [] };
                 objectBatches.set(key, batch);
               }
-              const matrix = poseMatrix(instance.pose);
+              const matrix = propFrames.get(instance.id)?.clone()??poseMatrix(instance.pose);
               if (render.pose) matrix.multiply(poseMatrix(render.pose));
-              batch.placements.push({ matrix, position: new THREE.Vector3().setFromMatrixPosition(matrix), paintColor: color });
+              const placement:StreamPlacement={matrix,position:new THREE.Vector3().setFromMatrixPosition(matrix),paintColor:color,movable};
+              batch.placements.push(placement);movingParts.get(instance.id)?.push({placement,original:matrix.clone()});
             }
           }
-          for (const instance of instances) for (const body of cfg.bodies) {
+          if(!movable)for (const instance of instances) for (const body of cfg.bodies) {
             if (body.collision === false || body.shape[0]?.toLowerCase() !== 'box') continue;
             const half = body.shape.slice(1, 4).map(Number);
             if (half.length === 3) collision.addBox(poseMatrix(instance.pose).multiply(poseMatrix(body)), new THREE.Vector3(half[0], half[1], half[2]));
@@ -1743,25 +2312,29 @@ export class Viewer {
       // Filter before SCX/textures/cached cells are loaded, including night signs.
       try{
         const {entry}=await assets.resource(batch.pack,batch.id);
-        if(isNightMapRenderResource(entry.alias)){
-          this.excludedNightMapVariants++;this.excludedNightMapInstances+=batch.placements.length;continue;
-        }
+        // A night resource without a CFG day partner still only belongs to the night.
+        if(isNightMapRenderResource(entry.alias))batch.daypart='night';
+        if(batch.daypart==='night'){this.nightMapVariants++;this.nightMapInstances+=batch.placements.length;}
       }catch(error){warnings.push(`Map render metadata ${batch.pack}:0x${batch.id.toString(16)}: ${String(error)}`);continue;}
       stream.add(batch.placements, async wanted => {
       const model = await assets.modelForResource(batch.pack, batch.id);
       if (!wanted()) return [];
       const parsed = await parseScxAsync(await assets.read(model.path)), component = new THREE.Group();
       if (!wanted()) return [];
-      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted));
+      warnings.push(...await this.append(parsed, assets, model.textures, component, generation, true, wanted, undefined, undefined, false, THREE.DoubleSide, batch.daypart==='night'));
       for (const part of component.children) if (part instanceof THREE.Mesh) {
         part.geometry.scale(0.01, 0.01, 0.01);
         part.name = `map object ${batch.alias}: ${part.name}`;
       }
       const parts=component.children.filter((part): part is THREE.Mesh => part instanceof THREE.Mesh);
-      const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
-      for(const part of outputs)part.userData.mapOcclusionRole=batch.category?'prop':'structure';
+      // Night variants keep per-part materials: the shared texture-array material has no self-illumination slot.
+      const outputs=unifyBuildings&&isBuildingAlias(batch.alias)&&batch.daypart!=='night'&&wanted()?this.unifyBuildingParts(parts,warnings):parts;
+      for(const part of outputs){
+        part.userData.mapOcclusionRole=batch.movable||batch.category?'prop':'structure';
+        if(batch.movable){part.userData.staticMapCaster=false;const materials=Array.isArray(part.material)?part.material:[part.material];part.castShadow=materials.some(m=>!m.transparent);}
+      }
       return outputs;
-    },batch.category,unifyBuildings&&isBuildingAlias(batch.alias));
+    },batch.category,unifyBuildings&&isBuildingAlias(batch.alias),batch.daypart);
     }
     if (generation === this.generation) {
       await stream.preparePinnedModels();
@@ -1773,6 +2346,7 @@ export class Viewer {
       terrain.prepare(); this.mapDebug = new MapDebugView(this.model, terrain, collision); stream.update(this.camera.position);
       if(this.mapRoadSource){this.mapRoadSource.terrain=terrain;this.mapRoadSource.collision=collision;}
       if(this.trafficTestEnabled)void this.restartTrafficTest();
+      if(this.walkingPedestriansEnabled)void this.showWalkingPedestrians(true);
     }
     return { loaded, total: ids.length, triangles, objects, warnings, terrain, collision };
   }
@@ -1784,11 +2358,44 @@ export class Viewer {
     const type = part.parent?.definition.config.slots.find(s => s.id === part.parentSlot)?.type;
     return part.renderVisible && (!this.internalView || !!part.definition.mechanics || type !== undefined && type >= 101 && type < 200);
   }
+  /**
+   * Show full-physics vehicles where they are at render time, not at their last fixed tick (see
+   * extrapolationMatrix). Each world's proxies and drivers move under one carrier group, so world-space panel
+   * skins, lamps and wheels shift together; physics state is untouched. Worlds that left the shared physics
+   * clock hand their objects back to the model.
+   */
+  private carryVehicleRenders() {
+    const pending = this.vehiclePhysics.pendingSeconds, active = new Set<EngineWorld>();
+    for (const car of this.vehiclePhysics.cars()) {
+      const world = car.root.world; active.add(world);
+      let carrier = this.renderCarriers.get(world);
+      if (!carrier) {
+        carrier = new THREE.Group(); carrier.name = 'Vehicle render time'; carrier.matrixAutoUpdate = false;
+        carrier.userData.vehicleCarrier = true; this.model.add(carrier); this.renderCarriers.set(world, carrier);
+      }
+      extrapolationMatrix(car.body, Math.min(pending, car.physicsDt), carrier.matrix); carrier.matrixWorldNeedsUpdate = true;
+    }
+    for (const [world, carrier] of this.renderCarriers) if (!active.has(world)) {
+      // Culling detaches off-screen objects and re-adds them to their recorded parent; reattach them first so
+      // none return to this carrier after it leaves the scene.
+      this.sceneVisibility.restore();
+      while (carrier.children.length) this.model.add(carrier.children[0]);
+      carrier.removeFromParent(); this.renderCarriers.delete(world);
+    }
+    if (!this.renderCarriers.size) return;
+    const place = (object: THREE.Object3D, world: EngineWorld) => {
+      const parent = object.parent; if (parent !== this.model && !parent?.userData.vehicleCarrier) return;
+      const wanted = this.renderCarriers.get(world) ?? this.model; if (parent !== wanted) wanted.add(object);
+    };
+    for (const [part, group] of this.proxies) place(group, part.world);
+    for (const binding of this.javaDrivers.values()) if (binding.driver) place(binding.driver.root, binding.chassis.world);
+  }
   private syncWorld(exclude?: EnginePart | Set<EnginePart>) {
     for (const [part, group] of this.proxies) {
       applyCfgRenderChannels(group, part.world.lightMask);
       syncLinkedRenders(part, group, this.suspensionDebug);
       if (part === exclude || exclude instanceof Set && exclude.has(part)) continue;
+      if(group.userData.panelViewOwnsTransform)continue;
       group.matrix.copy(modelMatrix(this.visualPartMatrix(part), partRenderPose(part)));
       group.matrixWorldNeedsUpdate = true;
       this.suspensionSkins.get(part)?.update();
@@ -1859,7 +2466,7 @@ export class Viewer {
     return {dispose:stop,wheel:(index:number)=>{selected=Math.max(0,Math.min(3,index));focus(true);},pause:(value:boolean)=>{test.paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},body:(value:boolean)=>{showBody=value;visibility();},bones:(value:boolean)=>{showBones=value;updateSkins();},speed:(kmh:number)=>{test.speed=THREE.MathUtils.clamp(kmh,0,40)/3.6;},bumps:(cm:number)=>{test.terrain.amplitude=THREE.MathUtils.clamp(cm,0,15)/100;rebuildRoad();},reset:()=>{test.reset();last=undefined;this.syncWorld();updateSkins();focus(true);},info:()=>`${['FL','FR','RL','RR'][selected]} · ${(test.speed*3.6).toFixed(0)} km/h · 120 Hz · travel ${test.suspension.wheels.map(w=>`${(w.length*100).toFixed(1)} cm${w.contact?'':' (air)'}`).join(' / ')} · ${skins.length} original skinned suspension parts`};
   }
   /** Same CFG/SCX physics construction used by the two-car stand. */
-  private pairVehicle(root:EnginePart) {
+  private pairVehicle(root:EnginePart,terrain?:MapTerrain,collision?:MapCollision) {
     const positions=(part:EnginePart)=>{
       const group=this.proxies.get(part);if(!group)throw new Error(`No render proxy for ${part.definition.alias}`);
       const transform=modelMatrix(new THREE.Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose));
@@ -1871,7 +2478,7 @@ export class Viewer {
     for(const part of root.world.parts.values()){const group=this.proxies.get(part);if(group)restoreReferenceGeometry(group);}
     const hood=[...root.world.parts.values()].find(p=>p.parent===root&&(/(?:^|[\\/])hood(?:\.cfg|[_-])/i.test(p.definition.cfgPath)||/(?:^|[_-])hood(?:$|[_-])/i.test(p.definition.alias)))??root;
     const bounds=new THREE.Box3();for(const samples of positions(root))for(let i=0;i<samples.length;i+=3)bounds.expandByPoint(new THREE.Vector3().fromArray(samples,i));
-    const car=new Vehicle3D(root,hood,positions(hood).flat(),bounds,undefined,undefined,DRIVING_PHYSICS_HZ);
+    const car=new Vehicle3D(root,hood,positions(hood).flat(),bounds,terrain,collision,DRIVING_PHYSICS_HZ);
     const triangles:number[]=[],inverseRoot=root.matrix().invert();
     for(const part of root.world.parts.values()){
       if(part===hood&&hood!==root||!part.definition.model)continue;
@@ -1879,26 +2486,181 @@ export class Viewer {
       if(type===11)continue;
       if(type!==undefined&&type>=101&&type<=104){car.register(part,positions(part).flat(),[]);continue;}
       if(type!==undefined&&type>104&&type<200)continue;
-      const own=modelMatrix(new THREE.Matrix4(),part.definition.config.renderPose&&poseMatrix(part.definition.config.renderPose)),faces:number[]=[];
-      for(const mesh of this.proxies.get(part)?.children??[])if(mesh instanceof THREE.Mesh){
-        const samples=mesh.geometry.getAttribute('position'),indices=mesh.geometry.getIndex();
-        if(indices)for(let i=0;i<indices.count;i++)faces.push(...new THREE.Vector3().fromBufferAttribute(samples,indices.getX(i)).applyMatrix4(own).toArray());
-      }
-      const physical=this.collisionMeshes.get(part)??[],collision=physical.length?physical:faces;
+      const physical=this.collisionMeshes.get(part)??[],collision=partContactTriangles(part.definition,physical,positions(part).flat());
       car.register(part,positions(part).flat(),collision);
       if(!part.definition.mechanics){const frame=inverseRoot.clone().multiply(part.matrix());for(let i=0;i<collision.length;i+=3)triangles.push(...new THREE.Vector3().fromArray(collision,i).applyMatrix4(frame).toArray());}
     }
     car.setBodyTriangles(triangles);
     return {car,positions};
   }
+  /** An additional Java-controlled racer, without replacing the player's session/camera. */
+  async bindJavaRaceCar(root:EnginePart,control:JavaRaceControl){
+    const source=this.mapRoadSource,generation=this.generation;
+    if(!source?.terrain||!source.collision)throw Error('Race opponent requires a loaded map and collision');
+    const roads=control.parked?undefined:await loadMapRoads(source.assets,source.pack,source.groundId);
+    if(!roads&&!control.parked)throw Error('Race opponent requires a road graph');
+    if(generation!==this.generation||root.world.disposed)return {dispose(){}};
+    this.javaRaces.get(root)?.dispose();
+    const {car,positions}=this.pairVehicle(root,source.terrain,source.collision);
+    const position=new THREE.Vector3().setFromMatrixPosition(root.matrix()),yaw=new THREE.Euler().setFromRotationMatrix(root.matrix(),'YXZ').y;
+    let parkedSupportReady=false,supportFaces=source.terrain.faces;
+    const place=(position:THREE.Vector3,yaw:number)=>{
+      car.placeAt(position,yaw);
+      if(!control.parked){car.settleSpawn();return;}
+      // A Java reset can arrive after the static assembly was grounded. Sleeping
+      // cars never integrate gravity, so resolve support before putting them to sleep.
+      let correction=-Infinity;
+      const frame=car.body.matrix();
+      for(const wheel of car.suspension.wheels){
+        if(wheel.part.parent!==root)continue;
+        const center=wheel.center.clone().applyMatrix4(frame);
+        const ground=source.terrain!.placementHeight(center.x,center.z,position.y);
+        if(Number.isFinite(ground)&&ground>-999)correction=Math.max(correction,ground-center.y+wheel.radius);
+      }
+      parkedSupportReady=Number.isFinite(correction);
+      if(parkedSupportReady&&Math.abs(correction)>.001)
+        car.placeAt(position.clone().add(new THREE.Vector3(0,correction,0)),yaw);
+    };
+    car.disableObstacle();place(position,yaw);
+    if(root.savedVehicleDamage)car.restoreDamage(root.savedVehicleDamage);
+    if(control.parked){car.sleepWhenResting=true;car.sleepPhysics();}
+    const routes=roads&&raceRoadRoutes(roads.network);
+    const plan=(start:import('../formats/trc').RoadPoint,finish:import('../formats/trc').RoadPoint)=>{
+      const forward=new THREE.Vector3(0,0,-1).applyQuaternion(car.body.orientation);
+      const bodies=[...(this.trafficCars??[]).filter(other=>other.active).map(other=>other.vehicle.body),
+        ...[...this.javaRaces.values()].filter(other=>other.car!==car).map(other=>other.car.body)];
+      if(this.trafficPeer)bodies.push(this.trafficPeer.body);
+      const occupied=bodies.filter(body=>{const delta=body.position.clone().sub(car.body.position);return delta.dot(forward)>0&&delta.lengthSq()<50*50;}).map(body=>body.position.toArray());
+      return routes?.query(start,finish,occupied);
+    };
+    const driver=control.parked?undefined:new RaceDriver(control.route??plan,car.suspension.wheels.length?Math.max(...car.suspension.wheels.map(w=>w.originalHardpoint.z))-Math.min(...car.suspension.wheels.map(w=>w.originalHardpoint.z)):2.7,root.definition.config.maxSteer??.6,control.randomize?Math.random:undefined,control.target);
+    let input:DrivingInput={throttle:0,steer:0,brake:true};
+    car.controlInput=dt=>input=driver?raceVehicleInput(driver,car,control.command(),dt):{throttle:0,steer:0,brake:false};
+    // Placement/settling changed the assembly after showWorld created its draw
+    // matrices. PanelView captures those matrices as the lamps' attachment frame:
+    // synchronize them now or its skin and flares retain different spawn poses.
+    this.syncWorldVisuals(root.world);
+    const views=[...car.soft.values()].map(state=>({part:state.part,view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part),modelMatrix(state.part.matrix(),partRenderPose(state.part)),state.part.matrix())}));
+    const updateViews=()=>{for(const {part,view}of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);};
+    updateViews();
+    let last:number|undefined,disposed=false,wasSleeping=car.sleeping;
+    let voice:TrafficVoice|undefined,fakeRpm=850;
+    if(root.world.spriteOnlyLights&&!control.parked){
+      // fake_racers use the same quiet spatial engine sample as ordinary traffic.
+      this.trafficAudio??=new TrafficAudio();this.trafficAudio.activate();
+      void this.trafficAudio.voice(source.assets).then(ready=>{
+        if(disposed||root.world.disposed){ready.dispose();return;}voice=ready;
+      }).catch(error=>console.warn('Fake racer engine sound could not be loaded',error));
+    }
+    let publishPending=false;
+    const racer={car,pause:()=>{last=undefined;voice?.setActive(false);},publish:()=>{
+      if(disposed||!publishPending)return;
+      publishPending=false;
+      root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);updateViews();
+      control.motion(car.body.position,new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,car.body.velocity);
+    },update:(now:number)=>{
+      if(disposed)return;if(root.world.disposed||!control.active()){racer.dispose();return;}
+      if(document.hidden||(this.scriptTimeScale?.()??1)<=0){voice?.setActive(false);last=undefined;return;}
+      // Missing streamed ground is not a successful placement. Retry once its
+      // geometry changes, without polling four terrain rays on every idle frame.
+      const retrySupport=control.parked&&car.sleeping&&!parkedSupportReady&&supportFaces!==source.terrain!.faces;
+      supportFaces=source.terrain!.faces;
+      const placement=control.placement?.()??(retrySupport?{position:car.body.position.clone(),yaw:new THREE.Euler().setFromQuaternion(car.body.orientation,'YXZ').y,velocity:new THREE.Vector3()}:undefined);
+      if(placement){place(placement.position,placement.yaw);car.body.velocity.copy(placement.velocity);if(control.parked){if(placement.velocity.lengthSq()>.01)car.wakePhysics();else car.sleepPhysics();}root.local.copy(car.body.matrix());this.syncWorldVisuals(root.world);updateViews();control.motion(control.parked?new THREE.Vector3().setFromMatrixPosition(root.local):car.body.position,placement.yaw,car.body.velocity);last=undefined;}
+      // Foreground frame time belongs to the fixed clock. Clamping it makes
+      // opponents slower than the player as soon as rendering drops below 20 Hz.
+      const dt=(last===undefined?0:Math.max(0,(now-last)/1000))*(this.scriptTimeScale?.()??1);last=now;
+      // Native fake cars have no MechanicalSystem. A parked spectator car has
+      // its engine off; waking its collision body does not start that engine.
+      const running=car.suspension.mechanics?.running??!control.parked;
+      if(voice){
+        const speed=car.body.velocity.length(),gear=Math.max(1,Math.min(5,Math.floor(speed/9)+1));
+        fakeRpm+=(850+speed*290/gear+Math.abs(input.throttle)*500-fakeRpm)*(1-Math.exp(-dt*5));
+        voice.setActive(running);voice.update(car.body.position,fakeRpm,input.throttle);
+      }
+      const lightMask=drivingLightMask(root.world.lightMask,!control.parked&&!!input.brake,car.suspension.mechanics?.gear===-1,running,this.drivingTimeOfDay?.()??this.scriptTimeOfDay?.()??((this.lighting?.direction.y??1)<.1?0:43200));
+      if(lightMask!==root.world.lightMask){root.world.lightMask=lightMask;this.syncWorldVisuals(root.world);}
+      if(car.sleeping&&wasSleeping)return;
+      wasSleeping=car.sleeping;
+      publishPending=true;
+      if(!car.sleeping)this.vehiclePhysics.submit(car,dt,{throttle:0,steer:0,brake:false});
+      // Rival recordings need their own frame/detail rows, not just 10-Hz engine samples.
+      car.telemetry.recordPerformanceFrame(now,{},document.hidden);
+      for(const key of ['suspension','contacts','panels','panelSolve','panelSurface','other'] as const)
+        this.profiler.record(`Race physics ${key} CPU`,car.timings[key]);
+    },dispose:()=>{if(disposed)return;disposed=true;voice?.dispose();this.javaRaces.delete(root);this.vehiclePhysics.forget(car);car.controlInput=undefined;for(const {view}of views)view.dispose();car.dispose();}};
+    this.vehiclePhysics.register(car,control.impact);this.javaRaces.set(root,racer);return racer;
+  }
+  async cityImpactPlayground(roots:[EnginePart,EnginePart],assets:Assets,telemetry:(text:string)=>void){
+    const source=this.mapRoadSource;
+    if(!source?.terrain||!source.collision)throw Error('Load the city before starting the impact playground');
+    const roads=await loadMapRoads(assets,source.pack,source.groundId);
+    if(!roads)throw Error('City road graph is missing');
+    const scenario=roadImpactScenario(roads.network),yaw=(v:THREE.Vector3)=>Math.atan2(-v.x,-v.z);
+    const supported=(p:THREE.Vector3)=>new THREE.Vector3(p.x,source.terrain!.height(p.x,p.z,p.y+2)+.8,p.z);
+    const start=supported(scenario.start),target=supported(scenario.target);
+    let live=true,run=0,capturing=false,started=performance.now(),captureStart=0,captureSimulationStart=0,lastHud=-Infinity;
+    let firstContact:{seconds:number;simulationSeconds:number;closingKmh:number}|undefined;
+    const marker=new THREE.Mesh(new THREE.ConeGeometry(.7,2,12),new THREE.MeshBasicMaterial({color:0xffae35}));
+    marker.position.copy(target).add(new THREE.Vector3(0,3,0));marker.rotation.z=Math.PI;this.model.add(marker);
+    const playerSession=this.drive(roots[0],()=>{},true,{terrain:source.terrain,collision:source.collision,position:target,yaw:yaw(scenario.targetDirection)},assets);
+    const player=playerSession.vehicle!;
+    if(!player){playerSession();marker.removeFromParent();marker.geometry.dispose();marker.material.dispose();throw Error('Player physics could not be created');}
+    player.controlInput=()=>({throttle:0,steer:0,brake:true,brakeAxis:1,clutch:true});
+    roots[1].local.makeRotationY(yaw(scenario.direction)).setPosition(start);
+    const cleanupPlayer=()=>{live=false;playerSession();marker.removeFromParent();marker.geometry.dispose();marker.material.dispose();};
+    const binding=await this.bindJavaRaceCar(roots[1],{
+      active:()=>live,command:()=>`AI_race ${scenario.goal.x},${scenario.goal.y},${scenario.goal.z} ${run}`,
+      route:()=>scenario.route,
+      impact:closing=>{firstContact??={seconds:(performance.now()-started)/1000,simulationSeconds:player.simulationTime,closingKmh:closing*3.6};},
+      motion:()=>updateHud()
+    }).catch(error=>{cleanupPlayer();throw error;});
+    if(!('car' in binding)||!binding.car){binding.dispose();cleanupPlayer();throw Error('Race physics binding became stale');}
+    const opponent=binding.car;
+    const stopCapture=()=>{if(!capturing)return;capturing=false;player.telemetry.stop('playground');opponent.telemetry.stop('playground');};
+    const reset=()=>{
+      stopCapture();run++;firstContact=undefined;started=performance.now();lastHud=-Infinity;
+      player.placeAt(target,yaw(scenario.targetDirection));player.settleSpawn();
+      opponent.placeAt(start,yaw(scenario.direction));opponent.settleSpawn();
+      this.controls.target.copy(player.body.position);this.camera.position.copy(player.body.position).add(new THREE.Vector3(12,7,12));this.controls.update();
+    };
+    const record=()=>{
+      reset();captureStart=performance.now();captureSimulationStart=player.simulationTime;capturing=true;
+      for(const [role,car]of [['player',player],['opponent',opponent]] as const)
+        car.telemetry.start({playground:'city_ai_impact',role,road:scenario.road,approach_metres:scenario.approachMetres,spawn:JSON.stringify(scenario.start.toArray()),target:JSON.stringify(scenario.target.toArray())});
+    };
+    function updateHud(){
+      const now=performance.now(),captured=player.simulationTime-captureSimulationStart;
+      // Slow rendering must not end the recording before the collision happens.
+      if(capturing&&(captured>=20||now-captureStart>=60000))stopCapture();
+      if(now-lastHud<200)return;lastHud=now;
+      const timing=(car:Vehicle3D)=>Object.entries(car.timings).filter(([key])=>['suspension','contacts','panels','other'].includes(key)).map(([key,value])=>`${key} ${value.toFixed(2)}`).join(' · ');
+      telemetry([
+        `City AI impact · road #${scenario.road} · ${scenario.approachMetres} m approach · 120 Hz`,
+        `Spawn ${scenario.start.toArray().map(v=>v.toFixed(1)).join(', ')} · nearest suitable lane to (0, 0, 0)`,
+        `Opponent ${(opponent.body.velocity.length()*3.6).toFixed(1)} km/h · player ${(player.body.velocity.length()*3.6).toFixed(1)} km/h`,
+        `Opponent engine ${opponent.suspension.mechanics?.running?'on':'off'} · RPM ${opponent.suspension.mechanics?.rpm.toFixed(0)} · gear ${opponent.suspension.mechanics?.gear} · distance ${opponent.body.position.distanceTo(target).toFixed(1)} m`,
+        `Player CPU ms: ${timing(player)} · debt ${(player.simulationPendingSeconds*1000).toFixed(1)} ms`,
+        `Opponent CPU ms: ${timing(opponent)} · debt ${(opponent.simulationPendingSeconds*1000).toFixed(1)} ms`,
+        firstContact?`First impact ${firstContact.simulationSeconds.toFixed(2)} s simulated / ${firstContact.seconds.toFixed(2)} s real · closing ${firstContact.closingKmh.toFixed(1)} km/h`:'Approaching the stationary player car',
+        capturing?`Recording ${Math.min(20,captured).toFixed(1)} / 20 s simulated · ${((now-captureStart)/1000).toFixed(1)} s real (60 s limit)`:'Capture stopped · Start 20 s capture resets both cars',
+      ].join('\n'));
+    }
+    reset();
+    return {reset,record,stopCapture,player,opponent,
+      report:()=>{stopCapture();return JSON.stringify({scenario:'city_ai_impact',road:scenario.road,start:scenario.start.toArray(),target:scenario.target.toArray(),approachMetres:scenario.approachMetres,aiGoal:scenario.goal.toArray(),firstContact,player:player.telemetry.text(),opponent:opponent.telemetry.text()},null,2);},
+      dispose:()=>{if(!live)return;live=false;stopCapture();binding.dispose();player.controlInput=undefined;playerSession();marker.removeFromParent();marker.geometry.dispose();marker.material.dispose();}
+    };
+  }
   vehiclePair(roots:[EnginePart,EnginePart],scenario:VehiclePairScenario,telemetry:(text:string)=>void) {
     this.stopDriving?.();
     const built=roots.map(root=>this.pairVehicle(root)),pair=new VehiclePairTest(built[0].car,built[1].car,scenario);
+    this.vehiclePhysics.register(built[0].car,(speed,time)=>pair.observePhysics(time??built[0].car.simulationTime,speed));this.vehiclePhysics.register(built[1].car);
     const barrier=scenario==='rear-chain'?new THREE.Mesh(new THREE.BoxGeometry(...pair.barrier.getSize(new THREE.Vector3()).toArray()),new THREE.MeshStandardMaterial({color:0xe7a44d,roughness:.8})):undefined;
     if(barrier){barrier.position.copy(pair.barrier.getCenter(new THREE.Vector3()));this.model.add(barrier);}
     const views:{view:PanelView;part:EnginePart;car:Vehicle3D}[]=[],soft=new Set<EnginePart>();
     for(const {car,positions} of built)for(const state of car.soft.values()){
-      soft.add(state.part);views.push({view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part)),part:state.part,car});
+      soft.add(state.part);views.push({view:new PanelView(this.proxies.get(state.part)!,state.panel,positions(state.part),modelMatrix(state.part.matrix(),partRenderPose(state.part)),state.part.matrix()),part:state.part,car});
     }
     this.ground.visible=true;this.grid.visible=false;this.driveGrid.visible=true;
     this.model.position.set(0,0,0);this.model.scale.setScalar(1);this.controls.enabled=true;
@@ -1906,7 +2668,7 @@ export class Viewer {
     let last:number|undefined,paused=false,slow=false,stopped=false,lastText=-Infinity;
     this.frame=now=>{
       const dt=last===undefined||document.hidden?0:Math.max(0,(now-last)/1000);last=document.hidden?undefined:now;
-      if(!paused)pair.advance(dt*(slow?.25:1));
+      if(!paused)for(const {car}of built)this.vehiclePhysics.submit(car,dt*(slow?.25:1),{throttle:0,steer:0,brake:false});pair.observePhysics(built[0].car.simulationTime);
       this.syncWorld(soft);
       for(const {view,part,car} of views)view.update(part.matrix(),!car.soft.get(part)!.activity.deforming);
       if(now-lastText>150){
@@ -1920,12 +2682,12 @@ export class Viewer {
         ].join('\n'));
       }
     };
-    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;for(const {view} of views)view.dispose();if(barrier){barrier.removeFromParent();barrier.geometry.dispose();(barrier.material as THREE.Material).dispose();}this.driveGrid.visible=false;};
+    const stop=()=>{if(stopped)return;stopped=true;this.frame=undefined;this.stopDriving=undefined;for(const {car}of built){this.vehiclePhysics.forget(car);car.dispose();}for(const {view} of views)view.dispose();if(barrier){barrier.removeFromParent();barrier.geometry.dispose();(barrier.material as THREE.Material).dispose();}this.driveGrid.visible=false;};
     this.stopDriving=stop;
     return Object.assign(stop,{reset:()=>{pair.reset();last=undefined;lastText=-Infinity;},pause:(value:boolean)=>{paused=value;last=undefined;},slowMotion:(value:boolean)=>{slow=value;},
       wireframe:(value:boolean)=>views.forEach(({view})=>view.wireframe(value)),chassisCrumple:(value:number)=>built.forEach(({car})=>car.setChassisCrumple(value)),pair});
   }
-  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void }) {
+  drive(root: EnginePart, telemetry: (text: string) => void, withCrash = false, track?: { terrain: MapTerrain; collision: MapCollision; position: THREE.Vector3; yaw: number }, assets?: Assets, audioVolumes?: { getVolume(channel: number): number }, java?: { persist?(): void; active?(): boolean; blocked?():boolean; sample(): DrivingInput; timeOfDay?(): number; cameraMode(): number; cameraIndex?(): number; cameraDistance?(): number; mouseButton?(pressed: boolean): void; mouseMotion?(dx: number, dy: number): void; cameraLook?(): { x: number; y: number }; instruments?(speedKmh: number, rpm: number, gear: number, damageCondition?: number, engineCondition?: number, transmissionCondition?: number): void; motion?(position: THREE.Vector3, yaw: number, velocity: THREE.Vector3): void; placement?(): { position: THREE.Vector3; yaw: number } | undefined }) {
     this.stopDriving?.();
     const original = [...root.world.parts.values()].map(part => ({ part, local: part.local.clone() }));
     const keys = new Set<string>(), canvas = this.renderer.domElement;
@@ -1967,12 +2729,7 @@ export class Viewer {
         if (type === 11) continue;
         if (type !== undefined && type >= 101 && type <= 104) { (crash as Vehicle3D).register(part, localPositions(part).flat(), []); continue; }
         if (type !== undefined && type > 104 && type < 200) continue;
-        const ownTransform = modelMatrix(new THREE.Matrix4(), part.definition.config.renderPose && poseMatrix(part.definition.config.renderPose)), ownTriangles: number[] = [];
-        for (const mesh of this.proxies.get(part)?.children ?? []) if (mesh instanceof THREE.Mesh) {
-          const positions = mesh.geometry.getAttribute('position'), indices = mesh.geometry.getIndex();
-          if (indices) for (let i = 0; i < indices.count; i++) { const p = new THREE.Vector3().fromBufferAttribute(positions, indices.getX(i)); ownTriangles.push(...p.applyMatrix4(ownTransform).toArray()); }
-        }
-        const physical = this.collisionMeshes.get(part) ?? [], collision = physical.length ? physical : ownTriangles;
+        const physical = this.collisionMeshes.get(part) ?? [], collision = partContactTriangles(part.definition,physical,localPositions(part).flat());
         (crash as Vehicle3D).register(part, localPositions(part).flat(), collision);
         if (!part.definition.mechanics) {
           const physicalFrame = inverseRoot.clone().multiply(part.matrix());
@@ -1982,7 +2739,7 @@ export class Viewer {
       crash.setBodyTriangles(triangles);
       if (track && crash instanceof Vehicle3D) { crash.disableObstacle(); crash.placeAt(track.position, track.yaw); crash.settleSpawn(); }
       if (crash instanceof Vehicle3D && root.savedVehicleDamage) crash.restoreDamage(root.savedVehicleDamage);
-      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part)); panelViews.push(view); panelParts.set(view, s.part); }
+      for (const s of (crash as Vehicle3D).soft.values()) { softParts.add(s.part); const view = new PanelView(this.proxies.get(s.part)!, s.panel, localPositions(s.part),modelMatrix(s.part.matrix(),partRenderPose(s.part)),s.part.matrix()); panelViews.push(view); panelParts.set(view, s.part); }
       const rampGeometry = new THREE.BufferGeometry();
       rampGeometry.setAttribute('position', new THREE.Float32BufferAttribute([-1.8, 0, -4, 1.8, 0, -4, 1.8, 1.12, -8, -1.8, 0, -4, 1.8, 1.12, -8, -1.8, 1.12, -8], 3)); rampGeometry.computeVertexNormals();
       ramp = new THREE.Mesh(rampGeometry, new THREE.MeshStandardMaterial({ color: 0x668d9d, side: THREE.DoubleSide })); ramp.visible = false; if (!track) this.model.add(ramp);
@@ -1990,6 +2747,7 @@ export class Viewer {
       obstacle = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshStandardMaterial({ color: 0xe7a44d, roughness: 0.8 }));
       obstacle.position.copy(new THREE.Vector3(...box.min).add(new THREE.Vector3(...box.max)).multiplyScalar(0.5)); if (!track) this.model.add(obstacle);
     }
+    if(crash instanceof Vehicle3D)this.vehiclePhysics.register(crash);
     this.trafficPeer=crash instanceof Vehicle3D?crash:undefined;
     const demo = crash?.driving ?? new DrivingDemo(root);
     this.renderRecorder=crash instanceof Vehicle3D?crash.telemetry:undefined;
@@ -2021,7 +2779,9 @@ export class Viewer {
       if (event.code === 'KeyR' && !event.repeat) { if (crash) crash.reset(); else demo.reset(); tireEffects?.reset(); keys.clear(); }
     };
     const up = (event: KeyboardEvent) => { keys.delete(event.code); };
-    let mousePointer: number | undefined, mouseX = 0, mouseY = 0, orbitYaw = 0, orbitPitch = 0;
+    let mousePointer: number | undefined, mouseX = 0, mouseY = 0, orbitYaw = 0, orbitPitch = 0, cameraZoom = 1;
+    // Touch screens: two fingers on the canvas orbit the chase camera, a pinch zooms it.
+    const fingers = new TwoFingerCamera();
     const releaseMouse = () => {
       if (mousePointer === undefined) return;
       const pointer = mousePointer; mousePointer = undefined;
@@ -2029,6 +2789,11 @@ export class Viewer {
       if (canvas.hasPointerCapture(pointer)) canvas.releasePointerCapture(pointer);
     };
     const pointerDown = (event: PointerEvent) => {
+      if (java && event.pointerType === 'touch') {
+        fingers.down(event.pointerId, event.clientX, event.clientY);
+        if (fingers.active) event.preventDefault();
+        return;
+      }
       if (!java || event.button !== 2) return;
       event.preventDefault();
       releaseMouse();
@@ -2037,16 +2802,26 @@ export class Viewer {
       java.mouseButton?.(true);
     };
     const pointerMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') {
+        const gesture = fingers.move(event.pointerId, event.clientX, event.clientY);
+        if (!gesture) return;
+        event.preventDefault();
+        orbitYaw += gesture.yaw;
+        orbitPitch = THREE.MathUtils.clamp(orbitPitch + gesture.pitch, -1.1, 1.1);
+        cameraZoom = clampZoom(cameraZoom * gesture.zoom);
+        return;
+      }
       if (mousePointer !== event.pointerId) return;
       if (!(event.buttons & 2)) { releaseMouse(); return; }
       java?.mouseMotion?.(event.clientX - mouseX, event.clientY - mouseY);
       mouseX = event.clientX; mouseY = event.clientY;
     };
-    const pointerUp = (event: PointerEvent) => { if (mousePointer === event.pointerId) releaseMouse(); };
+    const pointerUp = (event: PointerEvent) => { if (event.pointerType === 'touch') fingers.up(event.pointerId); if (mousePointer === event.pointerId) releaseMouse(); };
     const contextMenu = (event: MouseEvent) => { if (java) event.preventDefault(); };
-    const release = () => { keys.clear(); last = undefined; releaseMouse(); };
+    const release = () => { keys.clear(); last = undefined; releaseMouse(); fingers.clear(); };
     const visibility = () => { release(); vehicleAudio?.suspend(document.hidden); };
     const focus = () => { vehicleAudio?.activate(); canvas.focus({ preventScroll: true }); };
+    const touchAction = canvas.style.touchAction; if (java) canvas.style.touchAction = 'none';
     canvas.tabIndex = 0; canvas.setAttribute('aria-label', 'Vehicle controls'); canvas.addEventListener('keydown', down); canvas.addEventListener('blur', release); canvas.addEventListener('pointerdown', focus);
     canvas.addEventListener('pointerdown', pointerDown); canvas.addEventListener('pointermove', pointerMove);
     canvas.addEventListener('pointerup', pointerUp); canvas.addEventListener('pointercancel', pointerUp);
@@ -2057,8 +2832,10 @@ export class Viewer {
     const followed = demo.position.clone();
     const followCamera = new FollowCamera();
     const inertialCamera = new InertialCamera();
+    const pathChaseCamera = new PathChaseCamera();
     let lastInertialCamera = this.inertialCameraEnabled;
     let cameraWasInternal = false;
+    let previousCameraMode: number | undefined;
     this.controls.target.copy(followed).add(new THREE.Vector3(0, 0.2, 0));
     this.camera.position.copy(this.controls.target).add(withCrash ? new THREE.Vector3(7, 4, -3) : new THREE.Vector3(5, 3, 7)); this.controls.update();
     if (java) this.controls.enabled = false;
@@ -2067,16 +2844,21 @@ export class Viewer {
       // State changes happen between scene polls. Never read Track-only fields
       // or advance its old physics once Java has returned to a menu.
       if (java?.active && !java.active()) { stop(); return; }
-      if (document.hidden) { last = undefined; return; }
+      if (document.hidden || java?.blocked?.()) { last = undefined; return; }
       // Long wall-clock pauses pause this local demo; no catch-up burst after tab switching.
       const firstFrame = last === undefined;
       const elapsed = last === undefined ? 0 : Math.max(0, (now - last) / 1000);
       // Preserve foreground elapsed time; the fixed clock retains debt above its tick budget.
       const seconds = paused ? 0 : crash instanceof Vehicle3D ? elapsed : Math.min(elapsed, 0.1); last = now;
       if (elapsed > 0 && !paused) frameMs += (elapsed * 1000 - frameMs) * 0.1;
-      let input = this.playerTrafficDriver?.input ?? (java ? java.sample() : keyboardDrivingInput(keys));
-      if (crash) { if (!paused) backlogTicks = crash.advance(seconds * timeScale, input).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
-      if(this.playerTrafficDriver)input=this.playerTrafficDriver.input;
+      // Java scripts reposition the player's car (e.g. City.startNightRace puts it on the start line).
+      const placement = crash instanceof Vehicle3D ? java?.placement?.() : undefined;
+      if (placement && crash instanceof Vehicle3D) { crash.placeAt(placement.position, placement.yaw); crash.settleSpawn(); }
+      const javaInput=java?.sample();
+      let input = this.playerTrafficDriver?.input ?? javaInput ?? keyboardDrivingInput(keys);
+      if(javaInput?.transmissionLocked)input={...input,...javaInput};
+      if (crash) { if (!paused) backlogTicks = this.profiler.measure('Player physics advance CPU',()=>crash instanceof Vehicle3D?this.vehiclePhysics.submit(crash,seconds*timeScale,input):crash!.advance(seconds*timeScale,input)).backlogTicks; this.profiler.measure('Vehicle render geometry CPU',()=>{ for (const view of panelViews) { const part = panelParts.get(view)!; view.update(part.matrix(), crash instanceof Vehicle3D && !crash.soft.get(part)!.activity.deforming); } }); if (crash instanceof Vehicle3D) { if (ramp) ramp.visible = crash.terrain.ramp; if (obstacle) obstacle.position.copy(new THREE.Vector3(...crash.obstacle.min).add(new THREE.Vector3(...crash.obstacle.max)).multiplyScalar(0.5)); tireEffects?.update(seconds * timeScale, crash.suspension.wheels, crash.velocity().length()); } } else demo.advance(seconds, input);
+      if(this.playerTrafficDriver&&!javaInput?.transmissionLocked)input=this.playerTrafficDriver.input;
       if (crash instanceof Vehicle3D && !paused) {
         for (const name of ['suspension', 'contacts', 'panels', 'other'] as const)
           this.profiler.record(`Physics ${name}`, crash.timings[name]);
@@ -2085,7 +2867,7 @@ export class Viewer {
         if(crash.telemetry.status.recording)for(const [key,title] of [['panelConstraints','XPBD constraints CPU'],['panelContacts','Panel contacts CPU'],['panelUpload','WASM input upload CPU'],['panelIntegration','Panel integration + finalize CPU'],['looseContacts','Loose body contacts CPU']] as const)this.profiler.record(title,crash.timings[key]);
         const backends = new Set([...crash.soft.values()].map(part => part.panel.backend === 'wasm' ? 'C++/WASM' : 'TypeScript'));
         const loose = [...crash.soft.values()].filter(part => !part.root && !part.part.parent);
-        this.physicsWork = `Physics rate: ${crash.physicsFrequency} Hz · step ${(crash.physicsDt*1000).toFixed(3)} ms · XPBD iterations ${XPBD_ITERATIONS}\nPhysics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · XPBD panel solves ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
+        this.physicsWork = `Physics rate: ${crash.physicsFrequency} Hz · step ${(crash.physicsDt*1000).toFixed(3)} ms · ${crash.panelSolver==='ror'?'RoR beams / max 0.5 ms':'XPBD iterations '+XPBD_ITERATIONS}\nPhysics clock: ${crash.simulationTime.toFixed(3)} s / target ${crash.simulationTargetSeconds.toFixed(3)} s · pending ${(crash.simulationPendingSeconds*1000).toFixed(1)} ms · budget ${crash.maxPhysicsSteps} ticks\nPhysics ticks ${crash.timings.ticks} · active panel steps ${crash.timings.activePanels} · body refits ${crash.timings.surfaceUpdates}\nPhysics execution: ${this.vehiclePhysics.backend} · shared world ${this.vehiclePhysics.workMs.toFixed(1)} ms\nSoft-body solver: ${[...backends].join(' + ')} · sleeping debris ${loose.filter(part => part.activity.resting).length}/${loose.length}`;
       }
       const timeOfDay = java?.timeOfDay?.() ?? (this.lighting.direction.y < 0.1 ? 0 : 12 * 3600);
       root.world.lightMask = drivingLightMask(root.world.lightMask, input.brake,
@@ -2093,6 +2875,8 @@ export class Viewer {
         crash instanceof Vehicle3D && !!crash.suspension.mechanics?.running,
         timeOfDay);
       this.profiler.measure('Vehicle world sync CPU',()=>this.syncWorld(softParts));
+      this.carryVehicleRenders();
+      const carried = this.renderCarriers.get(root.world)?.matrix;
       if(chassisBounds.visible && crash instanceof Vehicle3D){
         crash.body.bounds.getCenter(chassisCenter);crash.body.bounds.getSize(chassisSize);
         chassisLocal.makeScale(chassisSize.x,chassisSize.y,chassisSize.z).setPosition(chassisCenter);
@@ -2109,6 +2893,7 @@ export class Viewer {
         }
         const mode = java.cameraMode(), yaw = crash instanceof Vehicle3D
           ? new THREE.Euler().setFromQuaternion(crash.body.orientation, 'YXZ').y : demo.yaw;
+        if(mode!==previousCameraMode){followCamera.reset();inertialCamera.reset();pathChaseCamera.reset();previousCameraMode=mode;}
         const internalPose = mode === 5 ? root.definition.config.cameras[java.cameraIndex?.() ?? 0] : undefined;
         this.driverCameraChassis=internalPose?root:undefined;
         if (internalPose) {
@@ -2116,6 +2901,7 @@ export class Viewer {
           followCamera.reset();
           inertialCamera.reset();
           const frame = root.matrix().multiply(poseMatrix(internalPose));
+          if (carried) frame.premultiply(carried);
           frame.decompose(this.camera.position, this.camera.quaternion, new THREE.Vector3());
           this.controls.target.copy(this.camera.position).add(new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion));
           // CFG camera's optional value is a game-specific zoom parameter, not
@@ -2141,16 +2927,20 @@ export class Viewer {
             orbitYaw += look.x * 0.3;
             orbitPitch = THREE.MathUtils.clamp(orbitPitch - look.y * 0.3, -1.1, 1.1);
             const relative = offset.sub(new THREE.Vector3(0, 1.1, 0));
-            const radius = relative.length();
+            const radius = relative.length() * cameraZoom;
             const elevation = THREE.MathUtils.clamp(Math.atan2(relative.y, Math.hypot(relative.x, relative.z)) + orbitPitch, -1.35, 1.35);
             const azimuth = Math.atan2(relative.x, relative.z) + orbitYaw;
             relative.set(radius * Math.cos(elevation) * Math.sin(azimuth), radius * Math.sin(elevation), radius * Math.cos(elevation) * Math.cos(azimuth));
             offset.add(new THREE.Vector3(0, 1.1, 0));
           }
           offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-          const target = demo.position.clone().add(new THREE.Vector3(0, 1.1, 0));
+          const target = demo.position.clone();
+          if (carried) target.applyMatrix4(carried);
+          target.y += 1.1;
           offset.y -= 1.1;
-          if (this.inertialCameraEnabled)
+          if(mode===3)
+            pathChaseCamera.update(this.camera.position,this.controls.target,target,offset,seconds,firstFrame||cameraWasInternal);
+          else if (this.inertialCameraEnabled)
             inertialCamera.update(this.camera.position, this.controls.target, target, offset, seconds, 5, firstFrame || cameraWasInternal);
           else followCamera.update(this.camera.position, this.controls.target, target, offset, seconds, mode === 1 ? 5 : 9, firstFrame);
           cameraWasInternal = false;
@@ -2191,11 +2981,11 @@ export class Viewer {
       canvas.removeEventListener('pointerup', pointerUp); canvas.removeEventListener('pointercancel', pointerUp);
       canvas.removeEventListener('lostpointercapture', pointerUp); canvas.removeEventListener('contextmenu', contextMenu);
       window.removeEventListener('keyup', up); window.removeEventListener('blur', release); document.removeEventListener('visibilitychange', visibility);
-      canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear();
+      canvas.removeAttribute('tabindex'); canvas.removeAttribute('aria-label'); keys.clear(); fingers.clear(); canvas.style.touchAction = touchAction;
       if (java) this.controls.enabled = true;
       for (const [part, visible] of bodyPartVisibility) { const proxy = this.proxies.get(part); if (proxy) proxy.visible = visible; }
       root.world.lightMask &= ~7;
-      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); crash?.dispose();
+      panelViews.forEach(v => v.dispose()); tireEffects?.dispose(); vehicleAudio?.dispose(); if(crash instanceof Vehicle3D)this.vehiclePhysics.forget(crash);this.carryVehicleRenders();crash?.dispose();
       chassisBounds.removeFromParent();chassisBounds.geometry.dispose();chassisBounds.material.dispose();
       for (const helper of vehicleBounds.values()) { helper.removeFromParent(); helper.geometry.dispose(); (helper.material as THREE.Material).dispose(); }
       if (obstacle) { obstacle.removeFromParent(); obstacle.geometry.dispose(); (obstacle.material as THREE.Material).dispose(); }
@@ -2206,7 +2996,7 @@ export class Viewer {
       else this.fit();
     };
     this.stopDriving = stop; focus();
-    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; crash.advance(crash.physicsDt, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
+    const breakPart = (part?: EnginePart) => { if (crash instanceof Vehicle3D && part) { part.condition = 0; this.vehiclePhysics.submit(crash,crash.physicsDt, { throttle: 0, steer: 0, brake: false }); last = undefined; focus(); } };
     // In body-shell mode retain only mechanical parts and assemblies mounted in wheel slots.
     const bodyPartVisibility = new Map([...this.proxies].map(([part, proxy]) => [part, proxy.visible] as const));
     const skeletonParts = new Set<EnginePart>();
@@ -2275,7 +3065,7 @@ export class Viewer {
       if(!preserveObserver&&!this.inspectionManualOverride){this.inspection.setEnabled(!!view.observer,focus);if(view.observer)set(this.inspection.camera,view.observer);this.inspection.replay=true;}
       this.controls.enabled=false;focus.fromArray(view.focus);this.mapStreamFocus=focus;
     };
-    applyPose(first);session.pause(true);this.physicsWork=mode==='render'?'Physics paused (render route)':'';car.replayInput=time=>playback.input(time);
+    this.vehiclePhysics.forget(car);applyPose(first);session.pause(true);this.physicsWork=mode==='render'?'Physics paused (render route)':'';car.replayInput=time=>playback.input(time);
     let checkpoints=new RouteCheckpoints();
     if(mode==='physics')car.beforeReplayTick=time=>checkpoints.apply(time,car.body.position,playback,
       pose=>this.profiler.measure('Replay checkpoint CPU',()=>applyPose(pose)));
@@ -2293,7 +3083,7 @@ export class Viewer {
         intervals.length=draws.length=triangles.length=occlusionDraws.length=occlusionTriangles.length=windowEvents.length=0;
         driftSquared=maxDrift=driftSamples=maxPending=0;checkpoints=new RouteCheckpoints();
         if(mode!=='render'){car.reset();route.vehicle.parts.forEach((saved,i)=>{originalParts[i].condition=saved.condition;});car.body.center.fromArray(route.vehicle.bodyCenter);car.body.setMass(route.vehicle.mass);}
-        applyPose(first);session.pause(true);liveFrame(now);applyView(0);reset=true;
+        this.vehiclePhysics.forget(car);applyPose(first);session.pause(true);liveFrame(now);applyView(0);reset=true;
         updateStatus(`Loop ${lap} · ${mode} · 0.0 / ${playback.duration.toFixed(1)} s`);return;
       }
       const elapsed=last===undefined?0:Math.max(0,(now-last)/1000);last=now;
@@ -2346,6 +3136,8 @@ export class Viewer {
     }});
   }
   private disposeGroup(group: THREE.Group): void {
+    // Generated level views share vertex buffers; restore the owned geometry before disposing it.
+    this.vehicleLod?.untrackWithin(group);
     group.traverse(object => {
       object.userData.disposeVehicleLight?.();
       if (object instanceof Lensflare) return;
@@ -2353,38 +3145,26 @@ export class Viewer {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); material.dispose(); });
+      materials.forEach(material => { material.map?.dispose(); material.userData.detailTexture?.dispose(); material.userData.reflectionTexture?.dispose(); material.userData.bakedLightmapTexture?.dispose(); disposePaintLayer(material); material.dispose(); });
     });
     group.clear();
   }
-  private configureSkyMaterial(material: THREE.Material): void {
-    material.userData.sky = true;
+  private configureSkyMaterial(material: THREE.Material): THREE.MeshBasicMaterial {
     const fogColor = new THREE.Color(this.mapFog.color);
     const fogEnabled = { value: this.mapFogEnabled ? 1 : 0 };
     this.skyFogUniforms.add({ color: fogColor, enabled: fogEnabled });
-    const previousCompile = material.onBeforeCompile;
-    material.onBeforeCompile = (shader, renderer) => {
-      previousCompile.call(material, shader, renderer);
-      shader.uniforms.slrrSkyFogColor = { value: fogColor };
-      shader.uniforms.slrrSkyFogEnabled = fogEnabled;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying float vSlrrSkyElevation;')
-        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvec3 slrrSkyWorldPosition = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\nvSlrrSkyElevation = normalize( slrrSkyWorldPosition - cameraPosition ).y;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform vec3 slrrSkyFogColor;\nuniform float slrrSkyFogEnabled;\nvarying float vSlrrSkyElevation;')
-        .replace('#include <opaque_fragment>', 'float slrrHorizonFog = ( 1.0 - smoothstep( -0.015, 0.14, vSlrrSkyElevation ) ) * slrrSkyFogEnabled;\noutgoingLight = mix( outgoingLight, slrrSkyFogColor, slrrHorizonFog );\n#include <opaque_fragment>');
-    };
-    const previousKey = material.customProgramCacheKey.bind(material);
-    material.customProgramCacheKey = () => `${previousKey()}slrr-sky-horizon-fog-v1`;
-    material.depthWrite = false;
-    material.needsUpdate = true;
+    const sky=skyMaterial(material,fogColor,fogEnabled);
+    material.dispose();
+    return sky;
   }
-  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide): Promise<string[]> {
+  /** `selfIllumination`: v4 self-illumination slots become emissive maps (lit windows of night variants only). */
+  private async append(model: ScxModel, assets: Assets, textures: string[], target: THREE.Group, generation: number, mapSurface = false, wanted = () => true, paintColor?: number, paint?: PartPaint, dynamicCaster = false, side: THREE.Side = THREE.DoubleSide, selfIllumination = false): Promise<string[]> {
     const boundTextures = partPaintTextures(textures, paint);
     const warnings = [...model.warnings];
     if (!model.meshes.length) return warnings;
     const mapTextures = this.mapTextures;
     const vehicleTextures = this.vehicleTextures;
+    const read=mapSurface?assetReadBatch(assets):(path:string)=>assets.read(path);
     const loadTexture = (bytes: Uint8Array, path: string) => mapSurface
       ? mapTextures.acquire(normalizePath(path), () => this.texture(bytes, path))
       : vehicleTextures.acquire(assets, path, () => this.texture(bytes, path));
@@ -2411,10 +3191,13 @@ export class Viewer {
       const diffuseIndex = diffuseTextureIndex(part.textureIndex,boundTextures);
       const file = boundTextures[diffuseIndex];
       if (paint && textures.findIndex(path => normalizePath(path) === normalizePath(paint.from)) === diffuseIndex)
-        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24; }
-      if (file) {
+        { material.userData.paintDefault = paint.from; material.userData.vehicleReflective = true; material.roughness = 0.24;
+          if (material instanceof THREE.MeshStandardMaterial) configurePaintLayer(material, geometry); }
+      if(paint?.color!==undefined&&material.userData.paintDefault){
+        material.map=solidPartPaint(paint.color);material.color.set(0xffffff);material.needsUpdate=true;
+      }else if (file) {
         try {
-          const selected = await stockContainerTexture(part, file, await assets.read(file), assets);
+          const selected = await stockContainerTexture(part, file, await read(file), assets);
           const texture = await loadTexture(selected.bytes, selected.path);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           if (part.textureMap) {
@@ -2427,18 +3210,39 @@ export class Viewer {
           texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
           material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
           const alphaEnabled = !part.paintMask && scxDiffuseUsesAlpha(model.version, part.materialFlags);
-          if (alphaEnabled && alpha === 'cutout') { material.alphaTest = 0.5; material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
+          if (alphaEnabled && alpha === 'cutout') { material.alphaTest = scxAlphaTestReference(model.version,part.materialFlags,part.alphaReference); material.transparent = opacity < 1; material.depthWrite = opacity === 1; }
           // Stock map textures such as cross.dds and falak*.dds carry an unused
           // or reflection alpha channel. Keep fully opaque map materials solid;
           // foliage cutouts above and explicit material opacity still apply.
           else if (alphaEnabled && alpha === 'blend' && (!mapSurface || opacity < 1)) { material.transparent = true; material.depthWrite = false; }
         } catch (e) { warnings.push(`Texture ${file}: ${e}`); }
       }
+      // Daytime objects also author this slot (walls, pubs), with meanings that are not plain emission there.
+      const glowIndex = selfIllumination && model.version !== 3 ? part.selfIllumIndex : undefined;
+      const glowFile = glowIndex === undefined || glowIndex === 0xffff ? undefined : textures[glowIndex];
+      // Night signs carry no glow slot: their lit artwork is the diffuse texture itself.
+      if (selfIllumination && !glowFile && material.map && !model.meshes.some(m => m.selfIllumIndex !== undefined && m.selfIllumIndex !== 0xffff)) {
+        material.emissiveMap = material.map; material.emissive.set(0xffffff); material.needsUpdate = true;
+      }
+      if (glowFile) {
+        try {
+          const texture = await loadTexture(await read(glowFile), glowFile);
+          if (generation !== this.generation) { texture.dispose(); return warnings; }
+          const glow = part.selfIllumMap, channel = glow?.channel ?? 0;
+          if (channel !== primaryChannel) {
+            const source = channel === 1 ? part.uv2 : channel === 2 ? part.uv3 : part.uv;
+            if (source) { geometry.setAttribute('uv1', new THREE.BufferAttribute(source, 2)); texture.channel = 1; }
+          }
+          if (glow) { texture.repeat.set(glow.scaleU, glow.scaleV); texture.offset.set(glow.offsetU, glow.offsetV); }
+          texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+          material.emissiveMap = texture; material.emissive.set(0xffffff); material.needsUpdate = true;
+        } catch (e) { warnings.push(`Self-illumination ${glowFile}: ${e}`); }
+      }
       let secondLayer: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined;
       const layerFile = part.layer2Index === 0xffff ? undefined : textures[part.layer2Index ?? -1];
       if (layerFile) {
         try {
-          const bytes = await assets.read(layerFile), texture = await loadTexture(bytes, layerFile);
+          const bytes = await read(layerFile), texture = await loadTexture(bytes, layerFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           texture.colorSpace = THREE.SRGBColorSpace;
           texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
@@ -2448,7 +3252,7 @@ export class Viewer {
           if (!file) {
             geometry.setAttribute('uv', new THREE.BufferAttribute(layerUv, 2));
             material.map = texture; material.color.set(0xffffff); material.needsUpdate = true;
-            if (alpha === 'cutout') material.alphaTest = 0.5;
+            if (alpha === 'cutout') material.alphaTest = scxAlphaTestReference(model.version,part.materialFlags,part.alphaReference);
             else if (alpha === 'blend') { material.transparent = true; material.depthWrite = false; }
           } else if (alpha !== 'opaque') {
             const layerGeometry = geometry.clone();
@@ -2460,6 +3264,7 @@ export class Viewer {
             secondLayer = layer;
             this.lighting.configureMaterial(layerMaterial, !!part.colors);
             if(mapSurface)this.mapDistanceCutoff.configure(layerMaterial);
+            if(mapSurface)this.mapBackfaces.configure(layerMaterial,layerGeometry);
             layer.receiveShadow = true;
             layer.name = `${part.name} / layer2`;
             layer.renderOrder = 1;
@@ -2476,7 +3281,7 @@ export class Viewer {
         try {
           const uv = garageBake?.uv??bakedLightmapUvs(part);
           if (!uv) throw new Error(`UV channel ${part.lightmapMap?.channel ?? 1} missing`);
-          const texture = await loadTexture(await assets.read(bakedFile), bakedFile);
+          const texture = await loadTexture(await read(bakedFile), bakedFile);
           if (generation !== this.generation) { texture.dispose(); return warnings; }
           configureBakedLightmap(material, geometry, uv, texture, this.bakedLightmaps);
           // A transparent second diffuse pass belongs to the same surface.
@@ -2486,6 +3291,13 @@ export class Viewer {
       if(mapSurface&&!material.userData.bakedLightmapTexture){
         this.staticMapShadows.configure(material);
         if(secondLayer)this.staticMapShadows.configure(secondLayer.material);
+      }else if(!mapSurface&&!material.userData.bakedLightmapTexture){
+        // Vehicles receive building, tree and bridge shadows from the same cache (map objects cast no dynamic shadows).
+        // Script-placed props with a baked garage lightmap already carry their shadows. The garage script also
+        // places the room props that the room map draws, so both copies are coplanar: shading them differently
+        // turns the depth tie between them into flickering stripes.
+        if(material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(material);
+        if(secondLayer?.material instanceof THREE.MeshStandardMaterial)this.staticMapShadows.configure(secondLayer.material);
       }
       if (!mapSurface) {
         const loadLayer = async (path?: string, map?: ScxMesh['textureMap']) => {

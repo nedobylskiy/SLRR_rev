@@ -27,6 +27,17 @@ export class MapTerrain implements Terrain {
   private readonly allFaces: Face[] = [];
   private readonly size = 16;
   faces = 0;
+  physicsSnapshot(){return this.allFaces.map(f=>({...f,normal:f.normal.toArray()}));}
+  static fromPhysicsSnapshot(rows:ReturnType<MapTerrain['physicsSnapshot']>,objects?:MapCollision){
+    const terrain=new MapTerrain(objects);
+    for(const row of rows){
+      const face={...row,normal:new Vector3().fromArray(row.normal)};terrain.allFaces.push(face);terrain.faces++;
+      for(let x=Math.floor(face.minX/terrain.size);x<=Math.floor(face.maxX/terrain.size);x++)for(let z=Math.floor(face.minZ/terrain.size);z<=Math.floor(face.maxZ/terrain.size);z++){
+        const key=`${x},${z}`,cell=terrain.cells.get(key)??{faces:[]};cell.faces.push(face);terrain.cells.set(key,cell);
+      }
+    }
+    terrain.prepare();return terrain;
+  }
   add(model: ScxModel, textures: readonly string[] = []) {
     for (const mesh of model.meshes) {
       const surface = tireSurfaceForTexture(textures[mesh.textureIndex] ?? '');
@@ -107,7 +118,7 @@ export class MapTerrain implements Terrain {
     this.queryProfile.add('map_samples_count');
     return this.queryProfile.measure('map_sample_ms',()=>this.sampleCore(x,z,fromY));
   }
-  private sampleCore(x: number, z: number, fromY?: number): { height: number; normal: Vector3; surface: TireSurface } | undefined {
+  private sampleCore(x: number, z: number, fromY?: number, includeObjects = true): { height: number; normal: Vector3; surface: TireSurface } | undefined {
     const cell = this.cells.get(`${Math.floor(x / this.size)},${Math.floor(z / this.size)}`);
     let best: { height: number; normal: Vector3; surface: TireSurface } | undefined;
     let bestOrder = Infinity;
@@ -139,7 +150,7 @@ export class MapTerrain implements Terrain {
         if (!best || h > best.height || h === best.height && f.order < bestOrder) { best = { height: h, normal: f.normal, surface: f.surface }; bestOrder = f.order; }
       }
     }
-    if (fromY !== undefined) {
+    if (includeObjects && fromY !== undefined) {
       const start=this.queryProfile?.start()??-1;
       const box = this.objects?.support(x, z, fromY + 0.5,this.queryProfile);
       this.queryProfile?.end('object_support_ms',start);
@@ -148,5 +159,7 @@ export class MapTerrain implements Terrain {
     return best;
   }
   height(x: number, z: number, fromY?: number) { return this.sample(x, z, fromY)?.height ?? -1000; }
+  /** Spawn on map geometry, never on a roadside prop's collision box. */
+  placementHeight(x: number, z: number, fromY?: number) { return this.sampleCore(x, z, fromY, false)?.height ?? -1000; }
   normal(x: number, z: number, fromY?: number) { return this.sample(x, z, fromY)?.normal.clone() ?? new Vector3(0, 1, 0); }
 }

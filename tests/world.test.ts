@@ -6,6 +6,9 @@ import { parsePartConfig, secondaryRenders } from '../src/formats/cfg';
 import { EngineWorld, PartFactory, poseMatrix, type PartDefinition } from '../src/engine/world';
 import type { RpkPack } from '../src/formats/rpk';
 import { modelMatrix } from '../src/engine/model-transform';
+import { Box3 } from 'three';
+import { RigidBody3D } from '../src/engine/rigid-body-3d';
+import { Suspension3D, TestTerrain } from '../src/engine/suspension-3d';
 
 test('SCX centimetres convert to CFG metres without scaling attachment translations or mutating poses', () => {
   const world = new EngineWorld();
@@ -125,5 +128,68 @@ test('Java installed tree replaces CFG stock expansion, including nested parts a
   assert.equal(new Vector3().setFromMatrixPosition(child.matrix()).x, 2);
   assert.equal(child.children.get(7)?.definition.key.id, 5);
   assert.equal(built.warnings.length, 0);
+  built.world.dispose();
+});
+
+
+test('fake-racer deformable accepts translation-only poses and retains body palettes and additional renders',()=>{
+  const cfg=parsePartConfig('deformable 0x00000015 0.000 -0.035 0.075\ncolors 2 0x00EEB621 0x00D30C0C\nrender 0x00070008 -0.523 -0.106 -1.657 0 0 0\ncolors 1 0x00FFFFFF');
+  assert.equal(cfg.render,0x15);assert.deepEqual(cfg.renderPose,{position:[0,-.035,.075],rotation:[0,0,0]});
+  assert.deepEqual(cfg.renders[0].colors,[0xEEB621,0xD30C0C]);assert.deepEqual(cfg.renders[1].colors,[0xFFFFFF]);
+  assert.deepEqual(secondaryRenders(cfg).map(render=>render.resource),[0x70008]);
+  assert.deepEqual(new Vector3().applyMatrix4(modelMatrix(poseMatrix(cfg.renderPose!))).toArray(),[0,-.035,.075]);
+  for(const command of ['deformable 0x15','deformable 0x15 1 2 3 0.1 0.2 0.3'])assert.doesNotThrow(()=>parsePartConfig(command));
+  for(const command of ['deformable 0x15 1 2','deformable 0x15 0 NaN 0','deformable 0x15 0 0 0 0 0','deformable nope 0 0 0'])assert.throws(()=>parsePartConfig(command),/invalid deformable/);
+  const mixed=parsePartConfig('render 0x01\ndeformable 0x02 0 1 0\ncolors 1 0x00FF0000');
+  assert.equal(mixed.render,2);assert.deepEqual(mixed.renders[0].colors,undefined);assert.deepEqual(mixed.renders[1].colors,[0xFF0000]);
+});
+
+test('a native-only fake car keeps its CFG meshes without an empty scripted powertrain',async()=>{
+  const factory=new PartFactory({} as Assets);
+  factory.definition=async key=>({...definition(key.id,'category 2'),key,
+    additionalModels:[{model:{path:'wheel.scx',textures:[]}}]});
+  const built=await factory.stock({pack:'fake.rpk',id:1},{mechanical:true,javaSelection:{
+    nativeOnly:true,nativeId:123,body:[],mechanical:[],tyres:[],wheelRefs:[],installed:[],
+  }});
+  assert.equal(built.world.mechanical,false);assert.equal(built.world.javaPowertrain,undefined);
+  assert.equal(built.world.spriteOnlyLights,true,'native headlights must not compile a city-wide set of spotlights when their flares turn on');
+  assert.equal(built.root.nativeId,123);assert.equal(built.root.definition.additionalModels?.length,1);
+  assert.equal(built.world.parts.size,1);built.world.dispose();
+});
+
+test('native inline wheels provide live suspension supports without duplicating their renders or changing cached CFG',async()=>{
+  const config=parsePartConfig(`category 2
+render 0x01
+type 10 sphere .33
+spring .29 .1 .05
+wheel -.67 -.634 -1.214 0 0 0 1 1 1 0
+render 0x0a 0 0 0 0 0 0
+wheel .67 -.634 -1.214 0 0 0 1 1 1 0
+render 0x0a 0 0 0 3.142 0 0
+wheel -.67 -.634 1.214 0 0 0 0 1 1 0
+render 0x0a 0 0 0 0 0 0
+wheel .67 -.634 1.214 0 0 0 0 1 1 0
+render 0x0a 0 0 0 3.142 0 0`);
+  assert.equal(secondaryRenders(config).length,0,'inline wheels must not also render at the chassis origin');
+  const factory=new PartFactory({modelForResource:async()=>({path:'wheel.scx',textures:[]})} as unknown as Assets);
+  factory.definition=async key=>({...definition(key.id,''),key,config});
+  const built=await factory.stock({pack:'fake.rpk',id:1},{mechanical:true,javaSelection:{
+    nativeOnly:true,body:[],mechanical:[],tyres:[],wheelRefs:[],installed:[],
+  }});
+  assert.equal(config.slots.length,0,'cached native CFG remains intact');
+  assert.equal(built.root.wheelFrameOffsetY,0,'assembled-car calibration must not shift native wheel centers');
+  assert.equal(built.world.parts.size,5);
+  const body=new RigidBody3D(1100,new Box3(new Vector3(-.8,-.7,-2),new Vector3(.8,.5,2)));
+  body.setFrame(poseMatrix({position:[0,.964,0],rotation:[0,0,0]}));
+  const suspension=new Suspension3D(built.root,body,new TestTerrain());
+  assert.equal(suspension.wheels.length,4);
+  for(const wheel of suspension.wheels){
+    assert.equal(wheel.part.parent,built.root);assert.equal(wheel.part.definition.model?.path,'wheel.scx');
+    assert.equal(wheel.radius,.33);assert.equal(wheel.center.y,-.634);
+  }
+  assert.equal(suspension.wheels[1].part.definition.config.renderPose?.rotation[0],3.142,'right wheel retains authored orientation');
+  for(let i=0;i<120;i++){suspension.step(1/120,{throttle:1,steer:0,brake:false});body.integrate(1/120);}
+  assert.ok(body.velocity.z < -1,'native car can accelerate rather than remaining an unsupported display');
+  assert.ok(suspension.wheels.every(wheel=>wheel.contact));
   built.world.dispose();
 });

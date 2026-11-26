@@ -13,6 +13,7 @@ interface KernelExports extends WebAssembly.Exports {
   release_mounts(dt: number, strength: number): number;
   finish(dt: number, yieldStrain: number): number;
   set_colliders(count: number): number;
+  ror_advance(dt:number,gravity:number,attached:number,yieldStrain:number,mountStrength:number):number;
 }
 
 /** Persistent f64 views; the module never grows memory or replaces these buffers. */
@@ -20,6 +21,7 @@ export class SoftBodyKernel {
   readonly positions: Float64Array; readonly rest: Float64Array; readonly velocities: Float64Array;
   readonly previous: Float64Array; readonly anchorLambda: Float64Array; readonly incoming: Float64Array;
   readonly anchorVelocities: Float64Array; readonly ground: Float64Array;
+  readonly rorPlanes:Float64Array;
   private beams: Float64Array; private mounts: Float64Array;
   private boxes: Float64Array;
   onBoxContact: (offset: number, axis: number, sign: number, restitution: number, friction: number) => void = () => {};
@@ -40,6 +42,7 @@ export class SoftBodyKernel {
     this.anchorVelocities = view(6, nodes * 3); this.ground = view(7, nodes);
     this.beams = view(8, beams * 6); this.mounts = view(9, mounts * this.mountStride);
     this.boxes = view(10, 64 * 8);
+    this.rorPlanes=typeof api.ror_advance==='function'?view(11,nodes*8):new Float64Array(nodes*8);
   }
   uploadColliders(boxes: { min: number[]; max: number[]; restitution?: number; friction?: number }[]) {
     if (!this.api.set_colliders(boxes.length)) return false;
@@ -67,6 +70,14 @@ export class SoftBodyKernel {
   solve(dt: number) { this.api.solve(dt); }
   solveConstraints(dt:number){this.api.solve_constraints(dt);}
   solveContacts(){this.api.solve_contacts();}
+  get hasRoR(){return typeof this.api.ror_advance==='function';}
+  rorAdvance(dt:number,gravity:number,attached:boolean,yieldStrain:number,strength:number,beams:Beam[],mounts:Mount[]){
+    const steps=this.api.ror_advance(dt,gravity,Number(attached),yieldStrain,strength);
+    if(!(steps>0))throw Error('Rigs of Rods beam solver produced an invalid state');
+    for(let i=0;i<beams.length;i++){beams[i].rest=this.beams[i*6+3];beams[i].lambda=0;}
+    for(let i=0;i<mounts.length;i++){mounts[i].broken=!!this.mounts[i*this.mountStride];mounts[i].force=this.mounts[i*this.mountStride+1];mounts[i].overload=this.mounts[i*this.mountStride+2];}
+    return steps;
+  }
   release(dt: number, strength: number, mounts: Mount[]) {
     this.api.release_mounts(dt, strength);
     for (let index = 0; index < mounts.length; index++) {

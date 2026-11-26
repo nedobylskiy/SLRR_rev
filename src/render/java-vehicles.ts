@@ -9,7 +9,9 @@ import { Euler, Quaternion, Vector3, Matrix4 } from 'three';
 import type { MapTerrain } from '../engine/map-terrain';
 import type { BootResult } from '../runtime/game-boot';
 import { GameObject } from '../runtime/game-object';
-import { javaStockSelection } from '../runtime/java-scene';
+import { RenderObject } from '../runtime/render-object';
+import {raceCommand} from '../engine/race-driver';
+import { isUnscriptedJavaChassis, javaStockSelection, javaVehicleChassis } from '../runtime/java-scene';
 import type { Viewer } from './viewer';
 
 type BuiltVehicle = Awaited<ReturnType<PartFactory['stock']>>;
@@ -18,9 +20,18 @@ type BuiltVehicle = Awaited<ReturnType<PartFactory['stock']>>;
 export class JavaSceneVehicles {
   private readonly models = new Map<GameObject, BuiltVehicle>();
   private readonly assemblies = new WeakMap<BuiltVehicle, string>();
-  private readonly failed = new WeakSet<GameObject>();
+  private failed = new WeakSet<GameObject>();
+  private scene:ReturnType<BootResult['gameTypes']['getResource']>|null=undefined;
+  private sceneRevision:number|undefined;
+  private epoch=0;
   private wanted = new Set<GameObject>();
   private loading = false;
+  private work?:Promise<void>;
+  private brains=new Map<GameObject,JavaValue>();
+  private nightRacers=new Set<GameObject>();
+  private boundBrains=new WeakMap<BuiltVehicle,ReturnType<BootResult['gameTypes']['getResource']>>();
+  private racers=new Map<BuiltVehicle,{dispose():void}>();
+  private excluded?:(ref:JavaValue)=>boolean;
   private disposed = false;
   private terrain?: Pick<MapTerrain, 'height'>;
   private readonly settled = new WeakMap<BuiltVehicle, { pose: GameObject; revision: number; contacts:string }>();
@@ -28,39 +39,91 @@ export class JavaSceneVehicles {
     inputs: string; geometry: string; steering: number | undefined; pose: GameObject; revision: number; filters: string; terrain: boolean;
   }>();
   constructor(private readonly result: BootResult, private readonly assets: Assets,
-    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'>>,
+    private readonly viewer: Pick<Viewer, 'showWorld' | 'removeWorld' | 'syncWorldVisuals' | 'calibrationSteering'>&Partial<Pick<Viewer,'profiler'|'bindJavaDriver'|'bindJavaRaceCar'|'vehicleSceneRevision'>>,
     private readonly report: (message: string) => void,
     private readonly factory: Pick<PartFactory, 'stock' | 'syncJavaAssembly'> = new PartFactory(assets)) {}
 
-  update(map: JavaValue | null, terrain?: Pick<MapTerrain, 'height'>): void {
+  update(map: JavaValue | null, terrain?: Pick<MapTerrain, 'height'>,excluded?:(ref:JavaValue)=>boolean): void {
+    this.excluded=excluded;
     if(this.viewer.profiler)this.viewer.profiler.measure('Parked vehicles update CPU',()=>this.updateCore(map,terrain));
     else this.updateCore(map,terrain);
+  }
+  /** Race cars must be visible before the Java loading dialog can finish. */
+  async prepare(map:JavaValue,terrain?:Pick<MapTerrain,'height'>,excluded?:(ref:JavaValue)=>boolean){
+    do{this.update(map,terrain,excluded);if(!this.work)return;await this.work;}while(!this.disposed);
   }
   private updateCore(map:JavaValue|null,terrain?:Pick<MapTerrain,'height'>):void {
     if (this.disposed) return;
     this.terrain = terrain;
     const { gameTypes, jvm } = this.result;
     const root = map && gameTypes.getResource(map);
+    // Java may reuse its City, Bot and car handles for another quick race, while
+    // the viewer has already removed all of their render/physics bindings.
+    if(root!==this.scene||this.sceneRevision!==this.viewer.vehicleSceneRevision){
+      this.scene=root;this.sceneRevision=this.viewer.vehicleSceneRevision;this.epoch++;
+      for(const built of this.models.values())this.release(built);
+      this.models.clear();this.failed=new WeakSet();
+    }
     const vehicles = new Map<GameObject, JavaValue>();
+    this.brains.clear();
+    this.nightRacers.clear();
     let priority: number | undefined;
     const consider = (ref: JavaValue): void => {
       if (!ref?.value || typeof ref.value !== 'object' || !('fields' in ref.value)) return;
+      if(this.excluded?.(ref))return;
       const node = gameTypes.get(ref);
       if (!root || !node || node.parent !== root) return;
-      try { if (jvm.get(ref, 'chassis').value != null) vehicles.set(node, ref); } catch { /* Non-vehicle reference. */ }
+      try { if (javaVehicleChassis(this.result, ref).value != null) vehicles.set(node, ref); } catch { /* Non-vehicle reference. */ }
     };
     for (const child of root?.children ?? []) consider(gameTypes.reference(child));
     // Vehicle and its scripted chassis share a native handle. The native tree's
     // canonical reference can therefore be the Chassis, not the Vehicle wrapper.
     try {
       const state = jvm.get(jv('class', 'java.game.GameLogic'), 'actualState').value as JavaObject | null;
-      for (const value of state?.fields.values() ?? []) {
-        if (Array.isArray(value.value)) for (const item of value.value) {
-          if (item && typeof item === 'object' && 'value' in item) consider(item as JavaValue);
-          else if (item && typeof item === 'object' && 'className' in item)
-            consider(jv((item as JavaObject).className, item));
+      // Police scouts live in City.alertedScouts (Vector<PoliceScout>), with
+      // their Bot one level below each entry. They are not direct City fields.
+      const scouts = state?.fields.get('alertedScouts')?.value as JavaObject | null;
+      const scoutData = scouts?.fields?.get('elementData')?.value;
+      const scoutCount = Number(scouts?.fields?.get('elementCount')?.value ?? 0);
+      if (Array.isArray(scoutData)) for (const value of scoutData.slice(0, scoutCount)) {
+        const scout = (value && typeof value === 'object' && 'value' in value ? value.value : value) as JavaObject | null;
+        const bot = scout?.fields?.get('bot')?.value as JavaObject | null;
+        const car = bot?.fields?.get('car'), brain = bot?.fields?.get('brain');
+        if (car?.value != null) {
+          consider(car);
+          const node = gameTypes.get(car);
+          if (node && brain?.value != null) this.brains.set(node, brain);
         }
-        else consider(value);
+      }
+      for (const [name,value] of state?.fields ?? []) {
+        if (Array.isArray(value.value)) for (const item of value.value) {
+          const entry = item && typeof item === 'object' && 'value' in item ? item as JavaValue
+            : item && typeof item === 'object' && 'className' in item ? jv((item as JavaObject).className, item) : undefined;
+          if (entry) {
+            consider(entry);
+            // City keeps the spectator cars in ParkingCar[], whose gr owns the native car.
+            const parked = entry.value as JavaObject | null;
+            const gr = parked?.fields?.get('gr');
+            if (gr) consider(gr);
+          }
+        }
+        else {
+          consider(value);
+          // Race opponents belong to a Bot retained by the active City/Track,
+          // rather than directly to a Vehicle field on that section.
+          const nested=value.value as JavaObject|null;
+          if(nested?.fields instanceof Map){
+            const car=nested.fields.get('car'),brain=nested.fields.get('brain');
+            // An allocated Bot can legitimately have no car (e.g. demoBot or a
+            // rival released after the last race). It must not abort discovery
+            // of the live raceBot which occurs later in the section's fields.
+            if(car?.value!=null&&typeof car.value==='object'&&'fields' in car.value){
+              consider(car);const node=gameTypes.get(car);
+              if(node&&brain?.value!=null)this.brains.set(node,brain);
+              if(node&&(name==='nrBot1'||name==='nrBot2'))this.nightRacers.add(node);
+            }
+          }
+        }
       }
       for (const name of ['cam', 'camera']) {
         const camera = state?.fields.get(name);
@@ -73,7 +136,8 @@ export class JavaSceneVehicles {
     this.wanted = new Set(vehicles.keys());
     const changed: [GameObject, JavaValue][] = [];
     for (const [node, built] of this.models) {
-      if (!this.wanted.has(node)) { this.release(built); this.models.delete(node); }
+      const brain=this.brains.get(node),brainNode=brain?gameTypes.getResource(brain):undefined;
+      if (!this.wanted.has(node)||built.world.disposed||this.boundBrains.get(built)!==brainNode) { this.release(built); this.models.delete(node);this.failed.delete(node); }
       else {
         const ref = vehicles.get(node)!;
         if (this.assemblies.get(built) !== this.signature(ref)) changed.push([node, ref]);
@@ -84,23 +148,26 @@ export class JavaSceneVehicles {
     const edit = changed.find(([node]) => node.resourceId === priority) ?? changed[0];
     if (edit) {
       this.loading = true;
-      void this.refresh(edit[0], edit[1], this.models.get(edit[0])!).finally(() => { this.loading = false; });
+      this.work=this.refresh(edit[0], edit[1], this.models.get(edit[0])!).finally(() => { this.loading = false;this.work=undefined; });
       return;
     }
     const pending = [...vehicles].filter(([node]) => !this.models.has(node) && !this.failed.has(node));
     const next = pending.find(([node]) => node.resourceId === priority) ?? pending[0];
     if (!next) return;
     this.loading = true;
-    void this.load(...next).finally(() => { this.loading = false; });
+    this.work=this.load(...next).finally(() => { this.loading = false;this.work=undefined; });
   }
 
   private async refresh(node: GameObject, ref: JavaValue, built: BuiltVehicle): Promise<void> {
+    const epoch=this.epoch;
     try {
       const signature = this.signature(ref);
+      // An unscripted dummycar keeps its CFG stock parts; an empty Java tree would strip them.
+      if (isUnscriptedJavaChassis(this.result, javaVehicleChassis(this.result, ref))) { this.assemblies.set(built, signature); return; }
       const selection = await javaStockSelection(this.result, this.assets, built.root.definition.key.pack, ref);
-      if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      if (this.disposed || epoch!==this.epoch || !this.wanted.has(node) || built.world.disposed) return;
       await this.factory.syncJavaAssembly(built.root, selection);
-      if (this.disposed || !this.wanted.has(node) || built.world.disposed) return;
+      if (this.disposed || epoch!==this.epoch || !this.wanted.has(node) || built.world.disposed) return;
       this.settled.delete(built);
       this.synced.delete(built);
       this.sync(node, built, ref);
@@ -109,7 +176,7 @@ export class JavaSceneVehicles {
       if (built.world.disposed) this.viewer.removeWorld(built.world);
       else this.assemblies.set(built, signature);
     } catch (error) {
-      if (!this.disposed && this.wanted.has(node)) {
+      if (!this.disposed && epoch===this.epoch && this.wanted.has(node)) {
         this.assemblies.set(built, this.signature(ref));
         this.report(`Java vehicle update ${node.alias}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -117,7 +184,8 @@ export class JavaSceneVehicles {
   }
 
   private sync(node: GameObject, built: BuiltVehicle, ref: JavaValue): void {
-    const chassisRef=this.result.jvm.get(ref,'chassis');
+    if(this.racers.has(built))return;
+    const chassisRef=javaVehicleChassis(this.result,ref);
     const chassis = this.result.gameTypes.get(chassisRef);
     // WheelRef instances can appear/rebind after the assembly was first shown.
     built.world.wheelRefs=built.root.definition.config.wheels.map((_,index)=>this.result.chassis.wheelState(chassisRef,index));
@@ -136,7 +204,8 @@ export class JavaSceneVehicles {
     const filters = JSON.stringify([[...node.renderFilters], [...chassis?.renderFilters ?? []]]);
     const runningGearChanged = !previous || previous.geometry !== geometry || previous.steering !== steering;
     if (!runningGearChanged && previous.pose === pose && previous.revision === pose.poseRevision
-      && previous.filters === filters && previous.terrain === !!this.terrain) { previous.inputs = inputs; return; }
+      && previous.filters === filters && previous.terrain === !!this.terrain
+      && (!this.terrain || this.settled.has(built))) { previous.inputs = inputs; return; }
     built.root.local.copy(poseMatrix({ position: [pose.position.x, pose.position.y, pose.position.z],
       rotation: [pose.orientation.y, pose.orientation.p, pose.orientation.r] }));
     // Moving the chassis does not change the loaded spring pose or assembly mass.
@@ -154,7 +223,9 @@ export class JavaSceneVehicles {
       && built.world.wheelRefs.some(wheel => wheel && wheel.force > 0 && wheel.restLength > 0);
     // Native physics normally resolves a freshly placed car out of the floor.
     // Static displays have no driving solver, so resolve wheel penetration here.
-    let lift = suspended ? -Infinity : 0;
+    // Native cars have inline wheels but no scripted spring force. They still
+    // need to settle DOWN from Java's placement height before sleeping.
+    let lift = suspended || built.root.definition.config.wheels.length===4 ? -Infinity : 0;
     const settled = this.settled.get(built);
     const contacts:{center:Vector3;radius:number}[]=[];
     const contactKey:number[]=[];
@@ -174,14 +245,15 @@ export class JavaSceneVehicles {
     const needsContact=this.terrain&&(settled?.pose!==pose||settled.revision!==pose.poseRevision||settled.contacts!==contactSignature);
     if(needsContact)for(const {center,radius} of contacts){
       // Search the placement's floor, not furniture/ceilings above its origin.
-      const ground = this.terrain!.height(center.x, center.z, pose.position.y);
+      const ground = (this.terrain as Pick<MapTerrain,'height'|'placementHeight'>).placementHeight?.(center.x, center.z, pose.position.y)
+        ?? this.terrain!.height(center.x, center.z, pose.position.y);
       if (Number.isFinite(ground) && ground > -999) lift = Math.max(lift, ground - (center.y - radius));
     }
     if (Number.isFinite(lift) && Math.abs(lift) > 0.001) {
       pose.setMatrix({ ...pose.position, y: pose.position.y + lift }, pose.orientation);
       built.root.local.elements[13] += lift;
     }
-    if (needsContact) this.settled.set(built, { pose, revision: pose.poseRevision,contacts:contactSignature });
+    if (needsContact && Number.isFinite(lift)) this.settled.set(built, { pose, revision: pose.poseRevision,contacts:contactSignature });
     for (const part of built.world.parts.values()) {
       // Java camera look commands address the installed part, not its chassis.
       // Publish the attachment transform without generating a new placement command.
@@ -221,27 +293,79 @@ export class JavaSceneVehicles {
   }
 
   private async load(node: GameObject, ref: JavaValue): Promise<void> {
+    const epoch=this.epoch,current=()=>!this.disposed&&epoch===this.epoch&&this.wanted.has(node);
     let built: BuiltVehicle | undefined;
     try {
-      const chassis = this.result.jvm.get(ref, 'chassis');
+      const chassis = javaVehicleChassis(this.result, ref);
       const native = this.result.gameTypes.getResource(chassis);
       if (!native) throw new Error('Java vehicle has no native chassis');
       const identity = this.result.resolveResourceIdentity(native.typeId);
       const pack = normalizeResourcePackPath(identity?.pack ?? native.resourcePack ?? '');
       if (!pack) throw new Error('Java chassis has no resource pack');
       const key = { pack, id: identity?.id ?? native.typeId };
-      const selection = await javaStockSelection(this.result, this.assets, pack, ref);
+      // A traffic dummycar has no Java parts to project: build its CFG stock
+      // car, as the traffic stream does, instead of an empty assembly (a bare shell).
+      const stockOnly = isUnscriptedJavaChassis(this.result, chassis);
+      const selection = stockOnly ? undefined : await javaStockSelection(this.result, this.assets, pack, ref);
       const signature = this.signature(ref);
       built = await this.factory.stock(key, { mechanical: true, javaSelection: selection });
+      if (stockOnly) {
+        const command = this.result.gameTypes.lastCommand(chassis, 'texture');
+        const textureId = command ? Number(command.trim().split(/\s+/)[1]) : NaN;
+        const paint = Number.isSafeInteger(textureId) && textureId > 0 ? this.result.resolveResourceIdentity(textureId) : undefined;
+        if (paint) for (const part of built.world.parts.values())
+          if (part.definition.config.texture !== undefined && !part.paintTexture) part.paintTexture = paint;
+      }
       this.assemblies.set(built, signature);
-      if (this.disposed || !this.wanted.has(node)) { built.world.dispose(); return; }
+      if (!current()) { built.world.dispose(); return; }
       this.sync(node, built, ref);
       await this.viewer.showWorld(built.world, this.assets, true, true);
-      if (this.disposed || !this.wanted.has(node)) { this.release(built); return; }
+      if (!current()) { this.release(built); return; }
+      const brain=this.brains.get(node);
+      if(brain||selection?.nativeOnly){
+        const brainNode=brain?this.result.gameTypes.getResource(brain):undefined;
+        this.boundBrains.set(built,brainNode);
+        const renderCommand=brain&&this.result.gameTypes.lastCommand(brain,'renderinstance');
+        const driverId=renderCommand&&Number(renderCommand.trim().split(/\s+/)[1]);
+        const driver=driverId?this.result.gameTypes.getByResourceId(driverId):undefined;
+        // fake_racers have no skeletal driver. Keep Java's render reference
+        // unbound (the viewer suppresses it), and bind only the car's AI/physics.
+        if(!selection?.nativeOnly&&driver instanceof RenderObject)await this.viewer.bindJavaDriver?.(driver,built.root,this.assets);
+        if(!current()){this.release(built);return;}
+        const chassis=this.result.gameTypes.get(javaVehicleChassis(this.result,ref));
+        let publishedRevision=-1;
+        const racer=await this.viewer.bindJavaRaceCar?.(built.root,{
+          parked:!brain,
+          randomize:!!selection?.nativeOnly,
+          target:id=>{
+            const target=this.result.gameTypes.getByResourceId(id);
+            return target instanceof GameObject && !target.destroyed
+              ? new Vector3(target.position.x,target.position.y,target.position.z) : undefined;
+          },
+          command:()=>{
+            const command=brain?raceCommand(names=>this.result.gameTypes.latestCommand(brain,names)):undefined;
+            return command?.startsWith('AI_race ')&&this.nightRacers.has(node)&&!command.endsWith('AI_NightRace')?`${command} AI_NightRace`:command;
+          },
+          active:()=>current()&&(!brain||!!brainNode&&this.result.gameTypes.getResource(brain)===brainNode),
+          placement:()=>{
+            const pose=chassis&&chassis.poseRevision>node.poseRevision?chassis:node;
+            if(pose.poseRevision<=publishedRevision)return;
+            publishedRevision=pose.poseRevision;
+            return {position:new Vector3(pose.position.x,pose.position.y,pose.position.z),yaw:pose.orientation.y,velocity:new Vector3(pose.velocity.x,pose.velocity.y,pose.velocity.z)};
+          },
+          motion:(position,yaw,velocity)=>{
+            node.setState({x:position.x,y:position.y,z:position.z},{y:yaw,p:0,r:0},{x:velocity.x,y:velocity.y,z:velocity.z},{x:0,y:0,z:0});
+            publishedRevision=node.poseRevision;
+            this.result.gameTypes.updateTriggerContacts(ref);
+          }
+        });
+        if(racer)this.racers.set(built,racer);
+        if(!current()){this.release(built);return;}
+      }
       this.models.set(node, built);
     } catch (error) {
       if (built) this.release(built);
-      if (!this.disposed && this.wanted.has(node)) {
+      if (current()) {
         this.failed.add(node);
         this.report(`Java vehicle ${node.alias}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -249,7 +373,7 @@ export class JavaSceneVehicles {
   }
 
   private signature(ref: JavaValue): string {
-    const chassis = this.result.jvm.get(ref, 'chassis');
+    const chassis = javaVehicleChassis(this.result, ref);
     const revision = this.result.parts.visualRevision?.(chassis);
     if (revision !== undefined) return `${this.result.gameTypes.getResource(chassis)?.id}:${revision}`;
     const visit = (nodes: ReturnType<BootResult['parts']['installedTree']>): string => nodes.map(part =>
@@ -257,7 +381,7 @@ export class JavaSceneVehicles {
     return `${this.result.parts.textureFor?.(chassis)?.value}|${visit(this.result.parts.installedTree(chassis))}`;
   }
 
-  private release(built: BuiltVehicle): void { this.viewer.removeWorld(built.world); built.world.dispose(); }
+  private release(built: BuiltVehicle): void { this.racers.get(built)?.dispose();this.racers.delete(built);this.viewer.removeWorld(built.world); built.world.dispose(); }
   dispose(): void {
     this.disposed = true; this.wanted.clear();
     for (const built of this.models.values()) this.release(built);

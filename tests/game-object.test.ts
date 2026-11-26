@@ -235,3 +235,25 @@ test('ResourceRef.duplicate copies a resource binding into a separate tree node'
   assert.deepEqual(copy.meshScale, { x: 2, y: 3, z: 1 });
   assert.deepEqual(host.getResource(source)?.meshScale, { x: 1, y: 1, z: 1 });
 });
+
+
+test('destroyed camera targets and their GameRef aliases have zero IDs without retaining live instances',async()=>{
+  const jvm=new SlrrJvm({resolveImport:()=>null}),host=new GameTypeNative(jvm,()=>{}),target=ref('GameRef'),alias=ref('GameRef');
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',target,[]);
+  jvm.natives.invoke('java.util.resource.ResourceRef','set',alias,[jv('ResourceRef',target.value)]);
+  const old=host.get(target)!,id=old.resourceId;
+  assert.equal(host.get(alias),old);
+  jvm.natives.invoke('java.util.resource.ResourceRef','destroy',target,[]);
+  for(const value of [target,alias]){
+    assert.equal(jvm.natives.invoke('java.util.resource.ResourceRef','id',value,[])!.value,0,'Track.changeCamTarget can compare a stale renderer/cameraTarget');
+    assert.equal(host.getResource(value),undefined);
+    await assert.doesNotReject(()=>jvm.natives.invokeAsync('java.util.resource.GameRef','queueEvent',value,[jv('ResourceRef',null),jv('int',16),jv('String','hide 0')]));
+  }
+  assert.equal(host.getByResourceId(id),undefined);
+  assert.equal(host.runtimeStats().nativeNodes,0);
+  jvm.natives.invoke('java.lang.GameType','createNativeInstance',target,[]);
+  assert.ok(host.get(target)!.resourceId!==id,'the Java wrapper can be rebound for a new race');
+  assert.equal(jvm.natives.invoke('java.util.resource.ResourceRef','id',alias,[])!.value,0,'old aliases cannot follow a rebound wrapper');
+  assert.throws(()=>jvm.natives.invoke('java.util.resource.ResourceRef','id',ref('GameRef'),[]),/no native handle/,'an uninitialized reference still reports a real binding error');
+  host.dispose();
+});

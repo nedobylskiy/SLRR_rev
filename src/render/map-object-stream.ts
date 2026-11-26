@@ -2,13 +2,41 @@ import {allocateMapPlacementIds,setMapPlacementIds} from './map-placement-ids';
 import {CpuWorkProfile} from '../runtime/cpu-work-profile';
 import {GlobalFacadeBatches} from './global-facade-batches';
 import {MapCachedCells} from './map-cached-cells';
-import { Box3, Color, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
+import { Box3, type BufferGeometry, Color, type Material, Frustum, Group, InstancedMesh, Matrix4, Mesh, Sphere, Texture, Vector3, type Camera } from 'three';
 import { MapMaterialPool } from './map-material-pool';
 import { splitMapGeometry } from './map-geometry-chunks';
 import {mergeStaticMapParts} from './map-static-batches';
-import {MapAutoLod} from './map-auto-lod';
+import {LodLibrary} from './lod-library';
+import {lodLevel,lodReach} from './lod-distance';
 
-export interface StreamPlacement { matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+/** Generated level drawn by shadow-only caster copies (60% of the triangles, error within 4% of the model). */
+const SHADOW_LOD_LEVEL=4;
+/**
+ * Opaque surfaces only. Blended parts sort per triangle, and cutout parts are leaf and fence cards: dropping one
+ * card removes a whole visible clump, so a low-poly tree pops between levels instead of thinning out.
+ */
+const simplifiable=(material:Material)=>!material.transparent&&!(material.alphaTest>0);
+/**
+ * Every generated level of a part is one more instanced draw in the colour and shadow passes, re-uploaded as
+ * placements change level while driving. Below this many triangles per part the saving never pays for that.
+ */
+export const MAP_LOD_MIN_TRIANGLES=1000;
+/**
+ * A level is chosen from the distance to the placement; baked city blocks span hundreds of metres from that
+ * point, so only parts small next to the 40 m full-detail radius are simplified.
+ */
+export const MAP_LOD_MAX_RADIUS=25;
+const lodPart=(mesh:InstancedMesh)=>{
+  const material=Array.isArray(mesh.material)?undefined:mesh.material;
+  return !!material&&simplifiable(material)&&!mesh.userData.mergedStatic&&!mesh.name.endsWith(' / layer2')
+    &&(mesh.geometry.index?.count??mesh.geometry.getAttribute('position').count)>=MAP_LOD_MIN_TRIANGLES*3
+    &&(mesh.geometry.boundingSphere??(mesh.geometry.computeBoundingSphere(),mesh.geometry.boundingSphere!)).radius<=MAP_LOD_MAX_RADIUS;
+};
+import {useWholeObjectBounds} from './map-object-bounds';
+
+export interface StreamPlacement { movable?:boolean; matrix: Matrix4; position: Vector3; paintColor?: number; radius?: number; bounds?: { minX: number; maxX: number; minZ: number; maxZ: number } }
+/** Objects nearer than this are never size-culled, however small. */
+export const FAR_CULL_NEAR_M=40;
 function distanceTo(placement: StreamPlacement, camera: Vector3) {
   const b = placement.bounds;
   if (b) return Math.hypot(Math.max(b.minX - camera.x, 0, camera.x - b.maxX), Math.max(b.minZ - camera.z, 0, camera.z - b.maxZ));
@@ -24,6 +52,8 @@ interface StreamType {
   cachedCells?:MapCachedCells;
   loadPromise?:Promise<void>;
   category?:MapObjectCategory;
+  /** Alternate day or night render of the same object (lit windows): drawn only in its part of the day. */
+  daypart?:'day'|'night';
   placements: StreamPlacement[];
   placementIds:number[];
   shadowSelection?:Set<number>;
@@ -34,12 +64,19 @@ interface StreamType {
   baseMeshes?:InstancedMesh[];
   chunkMeshes?:InstancedMesh[];
   mergedMeshes?:InstancedMesh[];
-  lodMeshes:Map<InstancedMesh,InstancedMesh>;
-  farSlots:Set<number>;
+  /** Per source part, one instanced batch per distinct generated level geometry. */
+  lodMeshes:Map<InstancedMesh,Map<BufferGeometry,InstancedMesh>>;
+  /** Generated detail level per placement (0 = original). */
+  lodLevels:Map<number,number>;
+  /** Parts worth simplifying, cached per selected mesh list: most map models have none. */
+  lodParts?:{meshes:InstancedMesh[];parts:Set<InstancedMesh>;bases:Map<InstancedMesh,InstancedMesh>};
   meshDrawn:Map<InstancedMesh,number[]>;
   auxiliary:Map<InstancedMesh,InstancedMesh>;
   chunkBounds:Map<InstancedMesh,Map<number,Box3>>;
   loading: boolean;
+  /** Meshes exist but their shader programs are still compiling in the background. */
+  warming?: boolean;
+  warmPromise?: Promise<void>;
   failed: boolean;
   active: number[];
   slots: Map<number, number>;
@@ -74,6 +111,7 @@ export class MapObjectStream {
   get hasPendingWork(){return this.scanQueue.size>0||this.drawQueue.size>0;}
   get queueInfo(){return `budget ${Number.isFinite(this.frameBudgetMs)?this.frameBudgetMs+' ms':'unlimited'} · scan queue ${this.scanQueue.size} · draw queue ${this.drawQueue.size}`;}
   private types: StreamType[] = [];
+  private placementTypes=new WeakMap<StreamPlacement,{type:StreamType;index:number}>();
   private ordered: StreamType[] = [];
   private lastCell = '';
   private dirty = true;
@@ -94,6 +132,10 @@ export class MapObjectStream {
   private tightFrustum=true;
   private materialSharing=true;
   private readonly hiddenCategories=new Set<MapObjectCategory>();
+  private night=false;
+  /** Swap day and night variants; both stay resident, so the switch needs no loading. */
+  setNight(night:boolean){if(this.night===night)return;this.night=night;this.viewDirty=this.dirty=true;}
+  private daypartHidden(type:StreamType){return !!type.daypart&&(type.daypart==='night')!==this.night;}
   setCategoryHidden(category:MapObjectCategory,hidden:boolean){
     if(hidden)this.hiddenCategories.add(category);else this.hiddenCategories.delete(category);
     this.viewDirty=true;
@@ -117,7 +159,7 @@ export class MapObjectStream {
     if(this.cellPreparation){await this.cellPreparation;if(!this.cachedCellsEnabled||this.disposed)return;}
     if(!this.cachedCellsEnabled||this.disposed)return;
     const generation=this.cellGeneration,size=this.cachedCellSize;
-    const queue=this.types.filter(t=>t.category&&!t.cachedCells);
+    const queue=this.types.filter(t=>t.category&&!t.cachedCells&&!t.placements.some(p=>p.movable));
     const prepare=async()=>{
       for(;;){const type=queue.shift();if(!type||this.disposed||!this.cachedCellsEnabled||generation!==this.cellGeneration)return;
         if(!type.baseMeshes&&!type.failed)await (type.loadPromise??this.load(type,true));
@@ -134,15 +176,31 @@ export class MapObjectStream {
       for(;;){const type=queue.shift();if(!type||this.disposed)return;await (type.loadPromise??this.load(type));}
     }));
   }
+  /** Initial scene barrier; later movement keeps using the normal frame budget. */
+  async prepareNear(focus:Vector3){
+    const nearby=this.types.filter(type=>!type.globalCompiled&&type.placements.some(p=>distanceTo(p,focus)<=this.distance));
+    for(const type of nearby){this.scanType(type,focus);this.scanQueue.delete(type);}
+    this.ordered=this.types.filter(type=>!type.globalCompiled).sort((a,b)=>a.priority-b.priority);
+    const queue=nearby.filter(type=>!type.meshes&&!type.failed&&(type.preload||type.pending.length));
+    await Promise.all(Array.from({length:4},async()=>{
+      for(;;){const type=queue.shift();if(!type||this.disposed)return;await(type.loadPromise??this.load(type));}
+    }));
+    while(!this.disposed){
+      this.update(focus);
+      if(!nearby.some(type=>type.meshes&&!type.globalCompiled&&!this.useCached(type)&&type.pending.length))break;
+      await new Promise(resolve=>setTimeout(resolve,0));
+    }
+  }
   private globalFacades?:GlobalFacadeBatches;
   compileGlobalFacades(){
     if(this.disposed||this.globalFacades)return;
-    this.globalFacades=new GlobalFacadeBatches(this.parent,this.types.filter(t=>t.preload).flatMap(t=>(t.baseMeshes??[]).map(mesh=>({mesh,placements:t.placements}))));
+    // Day/night variants must stay switchable, so they never join the static all-day facade batches.
+    this.globalFacades=new GlobalFacadeBatches(this.parent,this.types.filter(t=>t.preload&&!t.daypart).flatMap(t=>(t.baseMeshes??[]).map(mesh=>({mesh,placements:t.placements}))));
     for(const type of this.types){
       type.globalCompiled=!!type.baseMeshes?.length&&type.baseMeshes.every(m=>m.userData.globalFacadeSource);
       for(const mesh of type.baseMeshes??[])if(mesh.userData.globalFacadeSource){
-        const proxy=type.auxiliary.get(mesh),lod=type.lodMeshes.get(mesh);
-        if(proxy){proxy.visible=false;proxy.removeFromParent();}if(lod){lod.visible=false;lod.removeFromParent();}
+        const proxy=type.auxiliary.get(mesh);
+        if(proxy){proxy.visible=false;proxy.removeFromParent();}for(const lod of type.lodMeshes.get(mesh)?.values()??[]){lod.visible=false;lod.removeFromParent();}
       }
       if(type.globalCompiled){type.pending=[];type.drawn=[];type.candidates=[];type.primaryVisible=0;this.prepareBatches.delete(type);this.prepareChunks.delete(type);}
       type.boundsDirty=true;
@@ -150,12 +208,37 @@ export class MapObjectStream {
     this.dirty=this.viewDirty=true;this.invalidateOcclusion();
   }
   get globalFacadeInfo(){const g=this.globalFacades;return `Global facade batches: ${g?'on':'off'}${g?` · source parts ${g.sources.size} / copies ${g.sourceCopies} → batches ${g.meshes.length} · visible ${g.visibleBatches} · ${g.triangles.toLocaleString('en-US')} triangles cached · buffers ${(g.geometryBytes/1048576).toFixed(1)} MiB · uncombined sources ${g.skippedSources}`:''}`;}
+  private lodPartsOf(type:StreamType){
+    if(type.lodParts?.meshes!==type.meshes){
+      const parts=new Set(type.meshes!.filter(lodPart)),byName=new Map([...parts].map(mesh=>[mesh.name,mesh])),bases=new Map<InstancedMesh,InstancedMesh>();
+      // A layer pass draws its base part's simplified triangles, so both passes stay coplanar.
+      for(const mesh of type.meshes!){const base=mesh.name.endsWith(' / layer2')?byName.get(mesh.name.slice(0,-9)):undefined;if(base&&base!==mesh)bases.set(mesh,base);}
+      type.lodParts={meshes:type.meshes!,parts,bases};
+    }
+    return type.lodParts!;
+  }
+  private lodBatches(type:StreamType){return [...type.lodMeshes.values()].flatMap(levels=>[...levels.values()]);}
+  /** One job per model: its parts share an error threshold, so small details collapse first. */
+  private requestLod(type:StreamType){
+    this.lod.request([...this.lodPartsOf(type).parts].map(mesh=>mesh.geometry),type.priority);
+  }
   private useCached(type:StreamType){return this.cachedCellsEnabled&&!!type.category&&!!type.cachedCells;}
   get cachedCellInfo(){const caches=this.types.flatMap(t=>t.cachedCells?[t.cachedCells]:[]);return `Precached object cells: ${this.cachedCellsEnabled?'on':'off'} · ${this.cachedCellSize} m · ${this.cellPreparation?'preparing':'ready'} · cells ${caches.reduce((n,c)=>n+c.cellCount,0)} · visible ${this.cachedCellsEnabled?caches.reduce((n,c)=>n+c.visibleCells,0):0} · cached batches ${caches.reduce((n,c)=>n+c.batchCount,0)} · instance buffers ${(caches.reduce((n,c)=>n+c.instanceBytes,0)/1048576).toFixed(1)} MiB`;}
   setMaterialSharing(enabled:boolean){this.materialSharing=enabled;}
   setTightFrustum(enabled:boolean){this.tightFrustum=enabled;this.viewDirty=true;}
   private prepareBatches=new Set<StreamType>();
-  private readonly lod=new MapAutoLod(()=>{this.viewDirty=true;});
+  private lod=new LodLibrary();
+  private ownsLod=true;
+  private lodListener=this.lod.onChange(()=>{this.viewDirty=true;});
+  private lodRequested=new WeakSet<StreamType>();
+  /** Share generated chains (and workers) with vehicles. */
+  private shaderWarmup?:(meshes:InstancedMesh[])=>Promise<unknown>;
+  /**
+   * Compile a freshly loaded model's programs off the main thread before its placements draw. A first draw
+   * otherwise blocks on the driver for every new program (~30 ms each on ANGLE), which stutters while driving.
+   */
+  setShaderWarmup(warmup:((meshes:InstancedMesh[])=>Promise<unknown>)|undefined){this.shaderWarmup=warmup;}
+  setLodLibrary(library:LodLibrary){if(this.ownsLod)this.lod.dispose();this.lodListener();this.lod=library;this.ownsLod=false;this.lodListener=library.onChange(()=>{this.viewDirty=true;});this.viewDirty=true;}
   setStaticBatching(enabled:boolean){
     this.mergeStatic=enabled;
     for(const type of this.types)if(type.baseMeshes){
@@ -164,7 +247,10 @@ export class MapObjectStream {
     this.viewDirty=true;
   }
   setAutoLod(enabled:boolean){this.autoLod=enabled;this.viewDirty=true;}
-  get optimizationInfo(){const prepared=this.types.filter(t=>t.mergedMeshes);return `Per-part frustum: ${this.tightFrustum?'on':'off'}; Static batching: ${this.mergeStatic?'on':'off'}${this.geometryCutoff?' (paused by geometry cutoff)':''} · ${this.prepareBatches.size} models queued · prepared parts ${prepared.reduce((n,t)=>n+(t.baseMeshes?.length??0),0)} → ${prepared.reduce((n,t)=>n+t.mergedMeshes!.length,0)}; Auto LOD ${this.autoLod?'on (far 200 m / near 160 m)':'off'} · ${this.lod.info}`;}
+  private lodStrength=1;
+  /** 1 reaches the coarsest level at the view distance; higher values reach it closer to the camera. */
+  setLodStrength(strength:number){this.lodStrength=strength;this.viewDirty=true;}
+  get optimizationInfo(){const prepared=this.types.filter(t=>t.mergedMeshes);return `Per-part frustum: ${this.tightFrustum?'on':'off'}; Static batching: ${this.mergeStatic?'on':'off'}${this.geometryCutoff?' (paused by geometry cutoff)':''} · ${this.prepareBatches.size} models queued · prepared parts ${prepared.reduce((n,t)=>n+(t.baseMeshes?.length??0),0)} → ${prepared.reduce((n,t)=>n+t.mergedMeshes!.length,0)}; Auto LOD ${this.autoLod?`on (8 levels: 100% to 40 m, 20% at ${Math.round(lodReach(this.distance,this.lodStrength))} m)`:'off'} · ${this.lod.info}`;}
   private prepareChunks=new Set<StreamType>();
   setGeometryCutoff(enabled:boolean){
     this.geometryCutoff=enabled;this.prepareChunks.clear();
@@ -188,14 +274,44 @@ export class MapObjectStream {
     this.shadowRange = value; this.viewDirty = true;
   }
 
-  add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false) {
-    this.types.push({ placementIds:allocateMapPlacementIds(placements.length),preload, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
-      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),farSlots:new Set() });
+  add(placements: StreamPlacement[], load: (wanted: () => boolean) => Promise<Mesh[]>, category:MapObjectCategory|boolean=false,preload=false,daypart?:'day'|'night') {
+    const type:StreamType={ placementIds:allocateMapPlacementIds(placements.length),preload,daypart, category:category===true?'trees':category===false?undefined:category, placements, load, priority: Infinity, loading: false, failed: false, active: [], slots: new Map(), pending: [], boundsDirty: false,
+      drawn: [], candidates: [], instanceBounds: new Map(), primaryVisible:0,meshDrawn:new Map(),auxiliary:new Map(),chunkBounds:new Map(),lodMeshes:new Map(),lodLevels:new Map() };
+    this.types.push(type);placements.forEach((placement,index)=>this.placementTypes.set(placement,{type,index}));
     this.dirty = true;
   }
 
+  /** A moved prop invalidates its small model batch, not the city's static buffers. */
+  placementsMoved(placements:readonly StreamPlacement[]){
+    const affected=new Set<StreamType>();
+    for(const placement of placements){const entry=this.placementTypes.get(placement);if(entry){entry.type.instanceBounds.delete(entry.index);affected.add(entry.type);}}
+    for(const type of affected){type.meshDrawn.clear();type.chunkBounds.clear();type.boundsDirty=true;this.drawQueue.add(type);this.scanQueue.add(type);}
+    if([...affected].some(type=>!type.placements.every(p=>p.movable)))this.shadowRevision++;
+    this.viewDirty=true;
+  }
+
+  /**
+   * Far size cull, after OpenSLRR #252: beyond FAR_CULL_NEAR_M, an object whose bounding sphere spans fewer than
+   * this many pixels on screen is not drawn. Such objects are sub-pixel detail that still costs vertices and a
+   * place in an instanced draw. 0 disables it.
+   */
+  farCullPixels=4;
+  /** Viewport height in CSS pixels, set by the owner on resize. */
+  screenHeight=0;
+  /** cot(fov / 2) × viewport height: projected diameter in pixels = radius × this / distance. */
+  private pixelScale=0;
+  setFarCullPixels(value:number){if(Number.isFinite(value)&&value>=0&&value!==this.farCullPixels){this.farCullPixels=value;this.viewDirty=true;}}
+  /** True when the sphere is far enough and small enough on screen to skip. */
+  private tooSmall(bounds:Sphere,focus:Vector3){
+    if(!(this.farCullPixels>0&&this.pixelScale>0))return false;
+    const distance=bounds.center.distanceTo(focus);
+    return distance-bounds.radius>=FAR_CULL_NEAR_M&&bounds.radius*this.pixelScale/distance<this.farCullPixels;
+  }
   update(camera: Vector3, view?: Camera,continuation=false) {
     if (this.disposed) return;
+    const projection=(view as {projectionMatrix?:Matrix4}|undefined)?.projectionMatrix;
+    const scale=projection?Math.abs(projection.elements[5])*this.screenHeight:0;
+    if(scale!==this.pixelScale){this.pixelScale=scale;this.viewDirty=true;}
     const started=this.clock(),deadline=started+this.frameBudgetMs;
     const profile=this.workProfile;let stamp=profile.start();profile.add("updates_count");
     if(continuation)profile.add("continuation_updates_count");
@@ -211,7 +327,7 @@ export class MapObjectStream {
           mesh.userData={...part.userData};mesh.layers.mask=part.layers.mask;mesh.matrixAutoUpdate=false;mesh.count=0;mesh.visible=false;
           if(pending.placements.some(p=>p.paintColor!==undefined))mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));
           return mesh;
-        });this.selectMeshes(pending);
+        });if(pending.category==='trees')useWholeObjectBounds(pending.mergedMeshes);this.selectMeshes(pending);
       }
     }
     const next=this.prepareChunks.values().next().value;
@@ -250,7 +366,7 @@ export class MapObjectStream {
     profile.end("dispatch_disposal_ms",stamp);stamp=profile.start();
     let remaining = this.budget;
     for (const type of ordered) {
-      if (!type.meshes||type.globalCompiled||this.useCached(type)) continue;
+      if (!type.meshes||type.warming||type.globalCompiled||this.useCached(type)) continue;
       while (remaining && type.pending.length) {
         const index = type.pending.shift()!;
         if (type.slots.has(index)) continue;
@@ -275,18 +391,18 @@ export class MapObjectStream {
     profile.end("view_frustum_ms",stamp);stamp=profile.start();
     // Residency and rendering are independent: keep nearby off-screen instances
     // in RAM, but submit only the visible ones, even for a city-wide model type.
-    for(const type of this.types)if(type.meshes&&(!continuation&&viewChanged||type.boundsDirty))this.drawQueue.add(type);
+    for(const type of this.types)if(type.meshes&&!type.warming&&(!continuation&&viewChanged||type.boundsDirty))this.drawQueue.add(type);
     let drawn=0;
     for(const type of this.drawQueue){
       if(drawn&&this.clock()>=deadline)break;
-      this.drawQueue.delete(type);if(!type.meshes)continue;
+      this.drawQueue.delete(type);if(!type.meshes||type.warming)continue;
       this.draw(type,camera,!!view);drawn++;
     }
     profile.add('draw_groups_processed_count',drawn);
     profile.add('scan_queue_remaining_count',this.scanQueue.size);profile.add('draw_queue_remaining_count',this.drawQueue.size);
     if(this.hasPendingWork)profile.add('budget_yields_count');
     profile.end("draw_batches_ms",stamp);stamp=profile.start();
-    if(!continuation&&this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange,this.markOcclusion))this.revision++;
+    if(!continuation&&this.globalFacades&&(viewChanged||this.dirty)&&this.globalFacades.update(view&&!this.inspectResident?this.frustum:undefined,camera,this.shadowRange,this.markOcclusion,this.inspectResident?Infinity:this.distance))this.revision++;
     profile.end("global_facades_ms",stamp);
   }
 
@@ -312,14 +428,14 @@ export class MapObjectStream {
   private draw(type: StreamType, focus: Vector3, cull: boolean) {
     const profile=this.workProfile;const selectStart=profile.start();profile.add("types_drawn_count");
     if(type.globalCompiled){
-      for(const mesh of [...type.meshes!,...type.auxiliary.values(),...type.lodMeshes.values()]){mesh.visible=false;mesh.removeFromParent();}
+      for(const mesh of [...type.meshes!,...type.auxiliary.values(),...this.lodBatches(type)]){mesh.visible=false;mesh.removeFromParent();}
       type.boundsDirty=false;return;
     }
     if(this.useCached(type)){
-      for(const mesh of [...type.meshes!,...type.lodMeshes.values(),...type.auxiliary.values()])mesh.visible=false;
+      for(const mesh of [...type.meshes!,...this.lodBatches(type),...type.auxiliary.values()])mesh.visible=false;
       const cache=type.cachedCells!;
       const cachedStart=profile.start();
-      if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category),this.markOcclusion))this.revision++;
+      if(cache.update(focus,this.distance,cull?this.frustum:undefined,this.shadowRange,this.inspectResident,!!type.category&&this.hiddenCategories.has(type.category)||this.daypartHidden(type),this.markOcclusion))this.revision++;
       profile.end("cached_cells_ms",cachedStart);
       if(type.cachedShadowRevision!==cache.shadowRevision){type.cachedShadowRevision=cache.shadowRevision;this.shadowRevision++;profile.add('shadow_invalidations_count');}
       type.primaryVisible=cache.visibleInstances;type.boundsDirty=false;return;
@@ -329,17 +445,17 @@ export class MapObjectStream {
     const auxiliary:number[]=[];
     type.primaryVisible=0;
     profile.add("visibility_placements_count",type.active.length);
+    const lodParts=this.autoLod&&!this.geometryCutoff&&!this.inspectResident?this.lodPartsOf(type):undefined,lodTypes=!!lodParts?.parts.size;
     for (const index of type.active) {
-      if(type.category&&this.hiddenCategories.has(type.category))continue;
+      if(type.category&&this.hiddenCategories.has(type.category)||this.daypartHidden(type))continue;
       let primary=distanceTo(type.placements[index], focus)<=this.distance;
       if (primary && cull) {
         let bounds = type.instanceBounds.get(index);
         if (!bounds) { bounds = type.localBounds!.clone().applyMatrix4(type.placements[index].matrix); type.instanceBounds.set(index, bounds); }
-        if (!this.frustum.intersectsSphere(bounds)) primary=false;
+        if (!this.frustum.intersectsSphere(bounds)||this.tooSmall(bounds,focus)) primary=false;
       }
       if(primary)type.primaryVisible++;
-      if(this.autoLod){const distance=distanceTo(type.placements[index],focus);
-        if(distance>200)type.farSlots.add(index);else if(distance<160)type.farSlots.delete(index);}
+      if(lodTypes)type.lodLevels.set(index,lodLevel(distanceTo(type.placements[index],focus),lodReach(this.distance,this.lodStrength),type.lodLevels.get(index)??0));
       if(this.shadowRange>0&&distanceTo(type.placements[index],focus)<=Math.min(this.distance,this.shadowRange))auxiliary.push(index);
       if(!primary&&!this.inspectResident)continue;
       visible.push(index);
@@ -353,13 +469,15 @@ export class MapObjectStream {
       const partStart=profile.start();profile.add("parts_selected_count");
       let selected=visible;
       let extra=auxiliary;
-      if(this.tightFrustum&&cull&&!this.inspectResident&&!this.geometryCutoff){
+      const terrain=mesh.userData.mapOcclusionRole==='terrain';
+      if((this.tightFrustum&&cull||terrain)&&!this.inspectResident&&!this.geometryCutoff){
         if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();
         const cache=type.chunkBounds.get(mesh)??new Map<number,Box3>();type.chunkBounds.set(mesh,cache);
         selected=visible.filter(index=>{
           let box=cache.get(index);
           if(!box){box=mesh.geometry.boundingBox!.clone().applyMatrix4(type.placements[index].matrix);cache.set(index,box);}
-          return this.frustum.intersectsBox(box);
+          const distance=Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z));
+          return (!terrain||distance<=this.distance)&&(!cull||this.frustum.intersectsBox(box));
         });
       }
       if(this.geometryCutoff&&!this.inspectResident){
@@ -377,23 +495,41 @@ export class MapObjectStream {
       if(extra.length){const mainSet=new Set(selected);extra=extra.filter(index=>!mainSet.has(index));}
       const batches:[InstancedMesh,number[]][]=[];
       const material=Array.isArray(mesh.material)?undefined:mesh.material;
-      const lodGeometry=this.autoLod&&!this.geometryCutoff&&!this.inspectResident&&!mesh.userData.mergedStatic
-        &&material&&!material.transparent&&!material.alphaTest?this.lod.get(mesh.geometry):undefined;
-      let lodMesh=type.lodMeshes.get(mesh);
-      if(lodGeometry&&!lodMesh){
-        lodMesh=new InstancedMesh(lodGeometry,mesh.material,type.placements.length);
-        lodMesh.name=`${mesh.name} / generated LOD`;lodMesh.renderOrder=mesh.renderOrder;lodMesh.castShadow=mesh.castShadow;lodMesh.receiveShadow=mesh.receiveShadow;
-        lodMesh.userData.staticMapCaster=mesh.userData.staticMapCaster;lodMesh.userData.mapOcclusionRole=mesh.userData.mapOcclusionRole;lodMesh.matrixAutoUpdate=false;lodMesh.visible=false;lodMesh.count=0;
-        if(mesh.instanceColor)lodMesh.setColorAt(0,this.instanceColor.setHex(0xffffff));
-        type.lodMeshes.set(mesh,lodMesh);this.parent.add(lodMesh);
-        const release=()=>{lodMesh!.removeFromParent();lodMesh!.dispose();type.meshDrawn.delete(lodMesh!);type.lodMeshes.delete(mesh);mesh.removeEventListener('dispose',release);};
-        mesh.addEventListener('dispose',release);
+      let levelMeshes=type.lodMeshes.get(mesh),shadowGeometry=mesh.geometry;
+      if(lodTypes&&material){
+        const base=lodParts!.bases.get(mesh),topology=base?base.geometry:lodParts!.parts.has(mesh)?mesh.geometry:undefined;
+        if(topology&&!this.lodRequested.has(type)){this.lodRequested.add(type);this.requestLod(type);}
+        if(topology){
+          // Shadow-only copies of off-screen placements never reach the colour pass; a 4%-error level is lost in the shadow map.
+          shadowGeometry=this.lod.view(mesh.geometry,topology,SHADOW_LOD_LEVEL);
+          const levels=new Map<BufferGeometry,number[]>(),full:number[]=[],views=new Map<number,BufferGeometry>();
+          for(const index of selected){
+            const level=type.lodLevels.get(index)??0;
+            let view=views.get(level);if(!view){view=level?this.lod.view(mesh.geometry,topology,level):mesh.geometry;views.set(level,view);}
+            if(view===mesh.geometry){full.push(index);continue;}
+            let list=levels.get(view);if(!list)levels.set(view,list=[]);list.push(index);
+          }
+          selected=full;
+          if(levels.size&&!levelMeshes){
+            const owned=levelMeshes=new Map<BufferGeometry,InstancedMesh>();type.lodMeshes.set(mesh,owned);
+            const release=()=>{for(const lod of owned.values()){lod.removeFromParent();lod.dispose();type.meshDrawn.delete(lod);}type.lodMeshes.delete(mesh);mesh.removeEventListener('dispose',release);};
+            mesh.addEventListener('dispose',release);
+          }
+          for(const [view,indices] of levels){
+            let lodMesh=levelMeshes!.get(view);
+            if(!lodMesh){
+              lodMesh=new InstancedMesh(view,mesh.material,type.placements.length);
+              lodMesh.name=`${mesh.name} / generated LOD`;lodMesh.renderOrder=mesh.renderOrder;lodMesh.castShadow=mesh.castShadow;lodMesh.receiveShadow=mesh.receiveShadow;
+              lodMesh.userData.staticMapCaster=mesh.userData.staticMapCaster;lodMesh.userData.mapOcclusionRole=mesh.userData.mapOcclusionRole;lodMesh.matrixAutoUpdate=false;lodMesh.visible=false;lodMesh.count=0;
+              if(mesh.instanceColor)lodMesh.setColorAt(0,this.instanceColor.setHex(0xffffff));
+              levelMeshes!.set(view,lodMesh);this.parent.add(lodMesh);
+            }
+            batches.push([lodMesh,indices]);
+          }
+        }
       }
-      if(lodMesh){
-        const far=lodGeometry?selected.filter(i=>type.farSlots.has(i)):[];
-        if(far.length){const farSet=new Set(far);selected=selected.filter(i=>!farSet.has(i));}
-        batches.push([lodMesh,far]);
-      }
+      // Levels no placement uses this frame still need their previous instances cleared.
+      for(const lodMesh of levelMeshes?.values()??[])if(!batches.some(([batch])=>batch===lodMesh))batches.push([lodMesh,[]]);
       batches.push([mesh,selected]);
       let proxy=type.auxiliary.get(mesh);
       if(extra.length&&!proxy){
@@ -407,7 +543,7 @@ export class MapObjectStream {
         const release=()=>{proxy!.removeFromParent();proxy!.dispose();type.meshDrawn.delete(proxy!);type.auxiliary.delete(mesh);mesh.removeEventListener('dispose',release);};
         mesh.addEventListener('dispose',release);
       }
-      if(proxy)batches.push([proxy,extra]);
+      if(proxy){if(proxy.geometry!==shadowGeometry)proxy.geometry=shadowGeometry;batches.push([proxy,extra]);}
       profile.end("part_selection_ms",partStart);
       for(const [batch,indices] of batches){
         const previous=type.meshDrawn.get(batch);
@@ -465,7 +601,18 @@ export class MapObjectStream {
         return;
       }
       if (!parts.length) { this.dirty = true; return; }
-      if(this.materialSharing)this.materials.acquire(parts);
+      const ground=parts.every(part=>part.userData.mapOcclusionRole==='terrain');
+      if(this.materialSharing||ground)this.materials.acquire(parts);
+      if(ground){
+        // Compiled ground sections repeat the same materials hundreds of times.
+        // This is the normal loading path, independent of experimental prop
+        // batching. Buffers remain resident; the renderer submits one compatible
+        // material batch instead of one draw for every original section.
+        const original=parts;parts=mergeStaticMapParts(original,Infinity);
+        const retained=new Set(parts.map(part=>part.geometry));
+        for(const geometry of new Set(original.map(part=>part.geometry)))if(!retained.has(geometry))geometry.dispose();
+      }
+      if(type.category==='trees')useWholeObjectBounds(parts);
       type.localBounds = new Sphere().makeEmpty();
       type.meshes = parts.map(part => {
         if (!part.geometry.boundingSphere) part.geometry.computeBoundingSphere();
@@ -485,9 +632,15 @@ export class MapObjectStream {
       if(this.mergeStatic)this.prepareBatches.add(type);
       if(this.geometryCutoff)this.prepareChunks.add(type);
       type.loading = false;
+      if(this.shaderWarmup){
+        const meshes=type.meshes;type.warming=true;
+        const ready=()=>{if(type.meshes!==meshes&&type.baseMeshes!==meshes)return;type.warming=false;type.warmPromise=undefined;type.boundsDirty=true;this.dirty=this.viewDirty=true;};
+        // Loads (and prepareNear behind loading screens) complete only once the programs are ready.
+        type.warmPromise=this.shaderWarmup(meshes).then(ready,ready);
+      }
       // Pending placements already describe the current focus. Completing one
       // model must not rescan the entire city index on the next frame.
-    })).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); }).finally(()=>{type.loadPromise=undefined;});
+    })).then(()=>type.warmPromise).catch(error => { type.loading = false; type.failed = true; this.dirty = true; console.warn('Map object stream:', error); }).finally(()=>{type.loadPromise=undefined;});
     type.loadPromise=work;return work;
   }
 
@@ -505,6 +658,7 @@ export class MapObjectStream {
         if(base.instanceColor)mesh.setColorAt(0,this.instanceColor.setHex(0xffffff));return mesh;
       });
     });
+    if(type.category==='trees'&&type.chunkMeshes)useWholeObjectBounds(type.chunkMeshes);
     const selected=this.geometryCutoff?type.chunkMeshes!:this.mergeStatic&&type.mergedMeshes?type.mergedMeshes:type.baseMeshes;
     const retained=new Set(selected);
     for(const mesh of type.meshes??[])if(!retained.has(mesh)){
@@ -539,8 +693,8 @@ export class MapObjectStream {
     for (const geometry of geometries as Set<import('three').BufferGeometry>) geometry.dispose();
     for (const texture of textures) texture.dispose();
     type.meshes = undefined; type.unusedSince = undefined; type.localBounds = undefined;
-    type.baseMeshes=type.chunkMeshes=type.mergedMeshes=undefined;type.shadowSelection=undefined;type.cachedShadowRevision=undefined;type.meshDrawn.clear();type.chunkBounds.clear();type.farSlots.clear();
+    type.baseMeshes=type.chunkMeshes=type.mergedMeshes=undefined;type.warming=false;type.warmPromise=undefined;type.shadowSelection=undefined;type.cachedShadowRevision=undefined;type.meshDrawn.clear();type.chunkBounds.clear();type.lodLevels.clear();
     type.drawn.length = type.candidates.length = 0; type.instanceBounds.clear();
   }
-  dispose() { this.disposed = true;this.occlusionDirty.clear();this.scanQueue.clear();this.drawQueue.clear(); this.globalFacades?.dispose();this.globalFacades=undefined;for (const type of this.types) this.release(type);this.lod.dispose(); this.types = []; this.ordered = []; }
+  dispose() { this.disposed = true;this.occlusionDirty.clear();this.scanQueue.clear();this.drawQueue.clear(); this.globalFacades?.dispose();this.globalFacades=undefined;for (const type of this.types) this.release(type);this.lodListener();if(this.ownsLod)this.lod.dispose(); this.types = []; this.ordered = []; }
 }

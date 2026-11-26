@@ -5,12 +5,16 @@ import type {StreamPlacement} from './map-object-stream';
 export interface FacadeSource {mesh:InstancedMesh;placements:StreamPlacement[]}
 export interface FacadeContribution {name:string;copies:number;triangles:number}
 interface Pending {contributions:Map<InstancedMesh,FacadeContribution>;material:MeshStandardMaterial;source:InstancedMesh;geometries:BufferGeometry[];vertices:number}
-/** One-time expansion by material across model/instance boundaries. No runtime instance compaction. */
+/**
+ * One-time expansion by material across model/instance boundaries, grouped into square map cells. Without the
+ * cells a batch filled in placement order spans the whole city, so its bounds always intersect the view and
+ * every facade is drawn at any distance; per cell, frustum and range tests drop what the camera cannot see.
+ */
 export class GlobalFacadeBatches {
   readonly meshes:InstancedMesh[]=[];
   readonly sources=new Set<InstancedMesh>();
   sourceCopies=0;triangles=0;geometryBytes=0;skippedSources=0;
-  constructor(private readonly parent:Group,sources:FacadeSource[],vertexLimit=250000,totalVertexLimit=4000000){
+  constructor(private readonly parent:Group,sources:FacadeSource[],vertexLimit=250000,totalVertexLimit=4000000,readonly cellSize=256){
     const pending=new Map<string,Pending>(),color=new Color();let totalVertices=0;
     const flush=(entry:Pending)=>{
       if(!entry.geometries.length)return;
@@ -35,12 +39,13 @@ export class GlobalFacadeBatches {
         if(!(material instanceof MeshStandardMaterial)||!material.userData.slrrUnifiedBuilding||!placements.length||!mesh.geometry.getAttribute('slrrBuildingPaintTint'))continue;
         const vertices=mesh.geometry.getAttribute('position').count;
         if(vertices>vertexLimit||totalVertices+vertices*placements.length>totalVertexLimit){this.skippedSources++;continue;}
-        const key=JSON.stringify([material.userData.slrrBuildingTexture.uuid,material.customProgramCacheKey(),material.side,material.shadowSide,
+        const materialKey=JSON.stringify([material.userData.slrrBuildingTexture.uuid,material.customProgramCacheKey(),material.side,material.shadowSide,
           material.roughness,material.metalness,material.depthTest,material.depthWrite,material.blending,material.polygonOffset,material.polygonOffsetFactor,material.polygonOffsetUnits,
           mesh.layers.mask,mesh.renderOrder,mesh.castShadow,mesh.receiveShadow,mesh.userData.staticMapCaster,Object.keys(mesh.geometry.attributes).sort(),!!mesh.geometry.index]);
-        let entry=pending.get(key);if(!entry){entry={material,source:mesh,geometries:[],vertices:0,contributions:new Map()};pending.set(key,entry);}
         const palette=placements.some(p=>p.paintColor!==undefined);
         for(const placement of placements){
+          const e=placement.matrix.elements,key=`${materialKey}|${Math.floor(e[12]/cellSize)},${Math.floor(e[14]/cellSize)}`;
+          let entry=pending.get(key);if(!entry){entry={material,source:mesh,geometries:[],vertices:0,contributions:new Map()};pending.set(key,entry);}
           if(entry.vertices+vertices>vertexLimit)flush(entry);
           const geometry=mesh.geometry.clone();geometry.applyMatrix4(placement.matrix);
           if(palette){color.setHex(placement.paintColor??0xffffff);const tint=geometry.getAttribute('slrrBuildingPaintTint');
@@ -55,11 +60,13 @@ export class GlobalFacadeBatches {
       for(const source of this.sources){source.userData.globalFacadeSource=true;source.visible=false;source.removeFromParent();}
     }catch(error){for(const entry of pending.values())for(const g of entry.geometries)g.dispose();this.dispose();throw error;}
   }
-  update(frustum?:Frustum,focus?:Vector3,shadowRange=0,onChange?:(mesh:InstancedMesh)=>void){
+  /** `range` is the view distance: a cell whose nearest point is farther is not drawn in the main view. */
+  update(frustum?:Frustum,focus?:Vector3,shadowRange=0,onChange?:(mesh:InstancedMesh)=>void,range=Infinity){
     let changed=false;
     for(const mesh of this.meshes){
-      const box=mesh.geometry.boundingBox!,primary=!frustum||frustum.intersectsBox(box);
+      const box=mesh.geometry.boundingBox!;
       const distance=focus?Math.hypot(Math.max(box.min.x-focus.x,0,focus.x-box.max.x),Math.max(box.min.z-focus.z,0,focus.z-box.max.z)):Infinity;
+      const primary=(!frustum||frustum.intersectsBox(box))&&(!focus||distance<=range);
       const visible=primary||shadowRange>0&&distance<=shadowRange;
       if(mesh.visible!==visible||mesh.userData.streamAuxiliary!==!primary){changed=true;onChange?.(mesh);}
       mesh.userData.streamAuxiliary=!primary;

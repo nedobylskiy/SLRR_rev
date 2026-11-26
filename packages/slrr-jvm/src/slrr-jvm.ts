@@ -21,6 +21,12 @@ export interface SlrrJvmOptions {
   allowNumericNarrowing?: boolean;
   /** Compatibility for game sources passing numbers to interpreted String parameters. */
   allowNumericStringArguments?: boolean;
+  /** Original SLRR scripts pass ResourceRef templates to GameRef source parameters.
+   * Both wrap the same native handle; this does not make arbitrary Java downcasts valid. */
+  allowResourceHandleArguments?: boolean;
+  /** Host-validated source reference views (e.g. a native car GameRef as Part).
+   * Called only after normal reference assignability fails; never for null or primitives. */
+  isSourceReferenceCompatible?(parameter: string, argument: JavaValue): boolean;
   /** Resolve a resource literal to the integer used by the source file's owning RPK. */
   resolveResourceId?(resource: ResourceIdentity, sourcePath: string): number | undefined;
   budget?: number;
@@ -97,8 +103,25 @@ export class SlrrJvm implements JavaHost {
     this.globals.set(name, value);
   }
 
-  /** Preloads explicit imports so execution itself stays synchronous. */
+  /** Preloads explicit imports so execution itself stays synchronous.
+   * A class is registered before its imports and parent finish loading, so
+   * that cyclic imports resolve. A concurrent load can therefore find it
+   * half-loaded; this public entry waits until no load is pending, so code
+   * never runs against a class whose ancestors are still missing. */
   async loadClass(className: string, importedBy?: string): Promise<SourceClass | null> {
+    const parsed = await this.loadDependency(className, importedBy);
+    await this.settleLoading();
+    return parsed;
+  }
+
+  /** Wait for every class load in flight (and those they start). */
+  private async settleLoading(): Promise<void> {
+    while (this.loading.size) await Promise.allSettled([...this.loading.values()]);
+  }
+
+  /** Loader-internal: a class already registered by this or another load
+   * returns at once, which keeps cyclic imports from waiting on themselves. */
+  private async loadDependency(className: string, importedBy?: string): Promise<SourceClass | null> {
     const known = this.classes.get(className);
     if (known) return known.parsed;
     const pending = this.loading.get(className);
@@ -142,12 +165,12 @@ export class SlrrJvm implements JavaHost {
         const dependency = imported, alias = dependency.split('.').at(-1)!;
         if (imports.has(alias) && imports.get(alias) !== dependency) throw new Error(`Ambiguous Java import ${alias}`);
         imports.set(alias, dependency);
-        await this.loadClass(dependency, location.path);
+        await this.loadDependency(dependency, location.path);
       }
       await this.loadTypeHints(entry, declaration, hintedMethods, program, wildcards);
       if (parsed.parent) {
         const parent = imports.get(parsed.parent) ?? (program.packageName ? `${program.packageName}.${parsed.parent}` : parsed.parent);
-        if (!this.classes.has(parent) && !this.natives.hasClass(parent)) await this.loadClass(parent, location.path);
+        if (!this.classes.has(parent) && !this.natives.hasClass(parent)) await this.loadDependency(parent, location.path);
       }
       return parsed;
     } catch (error) {
@@ -161,14 +184,14 @@ export class SlrrJvm implements JavaHost {
     program: ReturnType<typeof parseSlrrSource>, wildcards: string[]): Promise<void> {
     for (const simple of sourceTypeHints(declaration, selected)) {
       const sibling = program.classes.find(cls => cls.name === simple);
-      if (sibling && sibling.fullName !== entry.name) { await this.loadClass(sibling.fullName, entry.path); continue; }
+      if (sibling && sibling.fullName !== entry.name) { await this.loadDependency(sibling.fullName, entry.path); continue; }
       if (entry.imports.has(simple) || sibling || simple === declaration.name || simple === 'String' || simple === 'Object') continue;
       const candidates = [program.packageName, 'java.lang', ...wildcards].filter(Boolean).map(prefix => `${prefix}.${simple}`);
       for (const candidate of candidates) {
         const resolved = await this.options.resolveImport({ className: candidate, importedBy: entry.path });
         if (!resolved && !this.natives.hasClass(candidate)) continue;
         entry.imports.set(simple, candidate);
-        await this.loadClass(candidate, entry.path);
+        await this.loadDependency(candidate, entry.path);
         break;
       }
     }
@@ -193,6 +216,7 @@ export class SlrrJvm implements JavaHost {
   async constructAsync(name: string, args: JavaValue[]): Promise<JavaValue> {
     const className = this.resolveName(name);
     if (!this.classes.has(className) && this.sourceLocations.has(className)) await this.loadClass(className);
+    else if (this.loading.size) await this.settleLoading(); // It may be registered but not yet complete.
     const entry = this.classes.get(className);
     if (!entry) {
       const native = await this.natives.invokeAsync(className, '<init>', jv('class', className), args);
@@ -646,7 +670,12 @@ export class SlrrJvm implements JavaHost {
     if (parameter === 'int' && ['float', 'double'].includes(argument.type) && argument.numericLiteral) return 4;
     if (this.options.allowNumericNarrowing && parameter === 'int' && ['float', 'double'].includes(argument.type)) return 6;
     if (sourceCall && this.options.allowNumericStringArguments && (parameter === 'String' || parameter === 'java.lang.String')
-      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 8;
+      // Dialect compatibility is a fallback. It must not beat a valid Java
+      // overload such as (Object,int) for an OSD handler and command number.
+      && ['int', 'float', 'double'].includes(argument.type) && typeof argument.value === 'number') return 1000;
+    if(sourceCall&&this.options.allowResourceHandleArguments
+      &&this.resolveName(parameter)==='java.util.resource.GameRef'
+      &&this.resolveName(argument.type)==='java.util.resource.ResourceRef')return 8;
     if (parameter === 'Object' || parameter === 'java.lang.Object') return 20;
     const object = this.object(argument), entry = object && this.classes.get(object.className);
     if (entry) {
@@ -656,6 +685,7 @@ export class SlrrJvm implements JavaHost {
       const implementedAt = lineage.findIndex(cls => this.implementsInterface(cls, wanted));
       if (implementedAt >= 0) return implementedAt + 1;
     }
+    if(sourceCall&&object&&this.options.isSourceReferenceCompatible?.(this.resolveName(parameter),argument))return 8;
     return Infinity;
   }
 

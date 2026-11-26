@@ -22,12 +22,24 @@ export function normalizeResourcePackPath(pack: string) {
   return normalizePath(`${/[\\/]/.test(name) ? name : name.replaceAll('.', '/')}.rpk`);
 }
 
+/** Session textures are a registry, never a pack to read from the game folder. */
+export async function resourceTextureSource(assets: Assets, key: { pack: string; id: number }): Promise<string | undefined> {
+  if (normalizeResourcePackPath(key.pack) === '__runtime/legacy-textures.rpk') return;
+  if (normalizeResourcePackPath(key.pack) === '__runtime/textures.rpk')
+    return assets.runtimeTextureSource(key.id);
+  return entryProperties((await assets.resource(key.pack, key.id)).entry)
+    .find(property => property.key === 'sourcefile')?.value;
+}
+
 /** Browser-side virtual filesystem: source files are read lazily. */
 export class Assets {
   readonly byPath = new Map<string, Asset>();
   private packs = new Map<string, Promise<RpkPack>>();
   private readonly textureFiles = new Map<string, number>();
   private readonly texturePack: RpkPack = { version: 0x200, dependencies: [], entries: [], warnings: [] };
+  runtimeTextureSource(id: number): string | undefined {
+    return this.texturePack.entries.find(entry => entry.typeId === id)?.alias;
+  }
   /** Runtime textures share the ordinary resource/sourcefile path; pixels remain lazy. */
   registerTexture(path: string): { pack: string; id: number } {
     path = normalizePath(path);
@@ -91,7 +103,8 @@ export class Assets {
         const replacement = this.resourceOverride(resolved.packPath, sourceId, overrides);
         const texture = await this.resource(replacement?.pack ?? resolved.packPath, replacement?.id ?? sourceId);
         const file = entryProperties(texture.entry).find(p => p.key === 'sourcefile')?.value;
-        if (file) textures.push(file);
+        // Empty native texture resources still occupy an authored material slot.
+        textures.push(file ?? '');
       } catch { textures.push(''); } // Preserve material indices when one texture is missing.
     }
     if (source && /\.sc[xy]$/i.test(source)) {
@@ -104,6 +117,39 @@ export class Assets {
     const replacement = this.resourceOverride(resolved.packPath, sourceId, overrides);
     const model = await this.modelForResource(replacement?.pack ?? resolved.packPath, replacement?.id ?? sourceId, visited);
     return { path: model.path, textures: textures.length ? textures : model.textures };
+  }
+
+  /**
+   * Reverse lookup for a bare SCX path: find the mesh resource whose sourcefile names it, then the
+   * render resource that points at that mesh, and return its RSD texture slots. Packs in ancestor
+   * folders are searched first, then the rest of the same top-level folder.
+   */
+  async texturesForModelSource(path: string): Promise<string[] | undefined> {
+    const wanted = new Set([normalizePath(path), normalizePath(path.replace(/\.scx$/i, '.scy'))]);
+    const directory = (file: string) => file.slice(0, file.lastIndexOf('/') + 1);
+    const folder = directory(normalizePath(path)), top = folder.split('/')[0] + '/';
+    const packs = [...this.byPath.keys()].filter(file => file.endsWith('.rpk') && file.startsWith(top))
+      .sort((a, b) => Number(folder.startsWith(directory(b))) - Number(folder.startsWith(directory(a)))
+        || directory(b).length - directory(a).length);
+    for (const packPath of packs) {
+      let pack: RpkPack;
+      try { pack = await this.pack(packPath); } catch { continue; }
+      const meshes = pack.entries.filter(entry => {
+        const source = entryProperties(entry).find(p => p.key === 'sourcefile')?.value;
+        if (!source) return false;
+        try { return wanted.has(normalizePath(source)); } catch { return false; }
+      });
+      for (const mesh of meshes) for (const entry of pack.entries) {
+        const reference = entryProperties(entry).find(p => p.key === 'mesh');
+        if (!reference) continue;
+        try {
+          const location = await this.resourceLocation(packPath, parseRid(reference.value));
+          if (location.id !== mesh.typeId || normalizePath(location.packPath) !== normalizeResourcePackPath(packPath)) continue;
+          const model = await this.modelForResource(packPath, entry.typeId);
+          if (model.textures.length) return model.textures;
+        } catch { /* An unrelated broken render entry must not hide a valid one. */ }
+      }
+    }
   }
 
   private resourceOverride(packPath: string, localId: number, overrides?: ResourceOverrides) {

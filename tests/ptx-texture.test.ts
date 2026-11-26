@@ -4,6 +4,8 @@ import { parsePtx } from '../src/formats/ptx';
 import { ptxTexture } from '../src/render/ptx-texture';
 import { textureAlphaMode } from '../src/render/texture-alpha';
 import { diffuseTextureIndex } from '../src/render/diffuse-texture';
+import { OsdLayer } from '../src/osd/osd-layer';
+import { Assets } from '../src/assets';
 
 const jpeg = (id: number) => Buffer.from([255,216,id,255,217]);
 function fixture(alpha = false) {
@@ -29,7 +31,7 @@ test('PTX parses opaque/alpha mip chains smallest first and rejects truncated or
 });
 
 test('PTX texture uses the largest JPEG and optional alpha, retaining opaque colour and image orientation', async () => {
-  const bitmap = globalThis.createImageBitmap, document = globalThis.document;
+  const bitmap = globalThis.createImageBitmap, document = globalThis.document, observer = globalThis.ResizeObserver;
   const decoded: number[] = [], closed: number[] = [];
   globalThis.createImageBitmap = (async (blob: Blob) => {
     const id = new Uint8Array(await blob.arrayBuffer())[2];decoded.push(id);
@@ -37,12 +39,15 @@ test('PTX texture uses the largest JPEG and optional alpha, retaining opaque col
   }) as any;
   globalThis.document = {createElement() {
     let current = new Uint8ClampedArray(64);
-    return {width:0,height:0,getContext(){return {
+    return {width:0,height:0,style:{},append(){},remove(){},clientWidth:1600,clientHeight:900,
+      toBlob(callback: (blob:Blob)=>void, type:string){callback(new Blob([current.slice().buffer],{type}));},
+      getContext(){return {
       drawImage(image: {id:number}) { for (let i=0;i<64;i+=4) current.set(image.id===4?[128,128,128,255]:[32,64,96,255],i); },
       getImageData(){return {data:current.slice()};},
       putImageData(image: {data:Uint8ClampedArray}){current=new Uint8ClampedArray(image.data);},
     };}};
   }} as any;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} } as any;
   try {
     for (const alpha of [false,true]) {
       decoded.length=closed.length=0;
@@ -54,7 +59,20 @@ test('PTX texture uses the largest JPEG and optional alpha, retaining opaque col
       assert.equal(textureAlphaMode(fixture(alpha),'battery.ptx',{width:4,height:4,data:pixels}),alpha?'blend':'opaque');
       texture.dispose();
     }
-  } finally { globalThis.createImageBitmap=bitmap;globalThis.document=document; }
+    const bytes = fixture(true), path = 'frontend/textures/slider_knob.ptx';
+    let reads = 0;
+    const assets = new Assets([{path,size:bytes.length}],async()=>{reads++;return bytes;});
+    const resource = assets.registerTexture(path);
+    const layer = new OsdLayer({append(){}} as any,assets);
+    try {
+      const url = await layer.imageUrl(resource);
+      assert.equal(await layer.imageUrl(resource),url);
+      assert.equal(reads,1);
+      const blob = await (await fetch(url)).blob();
+      assert.equal(blob.type,'image/png');
+      assert.deepEqual(Array.from(new Uint8Array(await blob.arrayBuffer()).slice(0,4)),[32,64,96,128]);
+    } finally { layer.dispose(); }
+  } finally { globalThis.createImageBitmap=bitmap;globalThis.document=document;globalThis.ResizeObserver=observer; }
 });
 
 test('single-atlas diffuse binding handles stale export slots without guessing missing multi-texture bindings', () => {

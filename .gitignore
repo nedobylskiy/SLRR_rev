@@ -4,3 +4,5 @@ dist/
 local/
 .codex-remote-attachments/
 *.log
+src-tauri/target/
+src-tauri/gen/schemas/

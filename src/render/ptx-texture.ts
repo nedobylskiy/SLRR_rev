@@ -3,6 +3,13 @@ import { parsePtx } from '../formats/ptx';
 
 /** Decode the full-resolution mip, preserving straight RGB/alpha for Three materials. */
 export async function ptxTexture(bytes: Uint8Array): Promise<CanvasTexture> {
+  const texture = new CanvasTexture(await ptxCanvas(bytes));
+  texture.flipY = false;
+  return texture;
+}
+
+/** Shared decoder for WebGL textures and HTML OSD images. */
+export async function ptxCanvas(bytes: Uint8Array): Promise<HTMLCanvasElement> {
   const image = parsePtx(bytes), level = image.levels.at(-1)!;
   const decode = (data: Uint8Array) => createImageBitmap(new Blob([Uint8Array.from(data)],{type:'image/jpeg'}));
   const color = await decode(level.color);
@@ -22,6 +29,6 @@ export async function ptxTexture(bytes: Uint8Array): Promise<CanvasTexture> {
       for (let i=0;i<pixels.data.length;i+=4) pixels.data[i+3] = mask.data[i];
       context.putImageData(pixels,0,0);
     }
-    const texture = new CanvasTexture(canvas);texture.flipY = false;return texture;
+    return canvas;
   } finally { color.close();alpha?.close(); }
 }

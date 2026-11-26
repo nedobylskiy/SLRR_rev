@@ -61,13 +61,45 @@ export function javaTrackIsCurrent(result: BootResult, scene: JavaTrackScene): b
   return result.jvm.get(jv('class', 'java.game.GameLogic'), 'actualState').value === scene.state.value;
 }
 
+/** Original fake_racers are native CFG cars, without a scripted Part assembly. */
+export function isNativeJavaCar(result: BootResult, ref: JavaValue): boolean {
+  const object = ref?.value;
+  if (!object || typeof object !== 'object' || !('className' in object)
+    || !['GameRef', 'java.util.resource.GameRef'].includes(String(object.className))) return false;
+  const node = result.gameTypes.get(ref);
+  return !!node?.resourcePack && result.gameTypes.catalogResource(node.resourcePack, node.typeId)?.nativeType === 'car';
+}
+
+/** Valocity creates rival `dummycar`s with create_native from a scripted chassis
+ * type (`native car` plus `script` in the RPK), and City.cleanupRace / Bot's
+ * leave-traffic handler wrap them in `new Vehicle(dummycar)`. Unlike a fake
+ * racer, that CFG is only the body shell: its stock parts come from the
+ * chassis' stock declarations, and the bare GameRef has no Java Part tree. */
+export function isUnscriptedJavaChassis(result: BootResult, chassis: JavaValue): boolean {
+  const object = chassis?.value;
+  if (!object || typeof object !== 'object' || !('className' in object)) return false;
+  if (!['GameRef', 'java.util.resource.GameRef'].includes(String(object.className))) return false;
+  const node = result.gameTypes.get(chassis);
+  if (!node?.resourcePack || result.jvm.isInstance(chassis, 'java.game.parts.Part')) return false;
+  return !!result.gameTypes.catalogResource(node.resourcePack, node.typeId)?.script;
+}
+
+/** Accept both Vehicle wrappers and ParkingCar.gr without creating another native car. */
+export function javaVehicleChassis(result: BootResult, ref: JavaValue): JavaValue {
+  return isNativeJavaCar(result, ref) ? ref : result.jvm.get(ref, 'chassis');
+}
+
 /** Project the installed Java assembly; stock lists only describe the factory recipe. */
 export async function javaStockSelection(result: BootResult, assets: Assets, chassisPack: string,
   vehicle?: JavaValue): Promise<JavaStockSelection> {
   const { jvm } = result;
   const car = vehicle ?? jvm.get(jvm.get(jv('class', 'java.game.GameLogic'), 'player'), 'car');
-  const chassis = jvm.get(car, 'chassis');
+  const chassis = javaVehicleChassis(result, car);
   if (chassis.value == null) throw new Error('Java vehicle has no chassis');
+  if (isNativeJavaCar(result, chassis)) return {
+    nativeOnly: true, nativeId: result.gameTypes.getResource(chassis)?.resourceId,
+    body: [], mechanical: [], tyres: [], wheelRefs: [], installed: [],
+  };
   const values = (name: string): number[] => {
     const field = jvm.get(chassis, name);
     if (field.value == null) return [];
@@ -87,6 +119,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
     parentSlot: native.parentSlot, ownSlot: native.ownSlot,
     positions: native.positions,
     render: native.renderType ? await resolve(native.renderType, native.node.resourcePack ?? chassisPack) : undefined,
+    paintColor:native.paintColor,paintStrokes:native.paintStrokes,
     texture: native.texture?.value ? native.texture.resource ?? await resolve(Number(native.texture.value), native.node.resourcePack ?? chassisPack) : undefined,
     wear: native.wear,
     children: await Promise.all(native.children.map(project)),
@@ -117,7 +150,7 @@ export async function javaStockSelection(result: BootResult, assets: Assets, cha
   };
   const texture = result.parts.textureFor?.(chassis);
   const rootTexture = texture?.value ? texture.resource ?? await resolve(Number(texture.value)) : undefined;
-  return { rootWear: result.parts.wearFor?.(chassis), damage: result.parts.damageFor?.(chassis), nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
+  return { rootPaintStrokes:result.parts.paintStrokesFor?.(chassis),rootPaintColor:result.parts.paintColorFor?.(chassis), rootWear: result.parts.wearFor?.(chassis), damage: result.parts.damageFor?.(chassis), nativeId: result.gameTypes.getResource(chassis)?.resourceId, rootTexture, body, mechanical, tyres, wheelRefs, installed, powertrain, rootPositions: result.parts.slotOverrides(chassis) };
 }
 
 /** Vehicle controls come from the ControlSet bindings installed by the active Java Player. */
@@ -136,11 +169,16 @@ export function javaDrivingControls(result: BootResult): { sample(): DrivingInpu
     sample() {
       const current = controller();
       const axis = (id: number) => current?.value == null ? 0 : controllers.read(current, id);
-      const gear = axis(50);
+      const player=jvm.get(jv('class','java.game.GameLogic'),'player');
+      const car=player.value==null?null:jvm.get(player,'car');
+      // City uses stop/idle before the countdown and start at GO. The pedal
+      // remains live for revving, but the drivetrain cannot engage early.
+      const transmissionLocked=car?.value!=null&&gameTypes.latestCommand(car,['stop','start'])==='stop';
+      const gear = transmissionLocked?0:axis(50);
       const analogSteering=current?.value!=null&&controllers.bindings(current).some(binding=>
         binding.virtualAxis===1&&binding.device!==0&&Math.abs(controllers.read(current,1,binding.device))>1e-4);
       return { throttle: Math.max(0, axis(28)), throttleMode: 'pedal', steerDigital: !analogSteering, steer: Math.max(-1, Math.min(1, axis(1))),
-        ...drivingBrakeAxes(axis(29),axis(48)), clutch: axis(49) > 0.2,
+        ...drivingBrakeAxes(transmissionLocked?1:axis(29),axis(48)), clutch: transmissionLocked||axis(49) > 0.2, transmissionLocked,
         gearUp: gear > 0.2, gearDown: gear < -0.2 };
     },
     timeOfDay() { return Number(jvm.get(jv('class', 'java.game.GameLogic'), 'time').value); },

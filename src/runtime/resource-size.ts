@@ -3,6 +3,7 @@ import { Box3, Vector3 } from 'three';
 import type { Assets } from '../assets';
 import { normalizePath } from '../assets';
 import { parsePartConfig, secondaryRenders } from '../formats/cfg';
+import {entryProperties} from '../formats/rpk';
 
 import { poseMatrix } from '../engine/transforms';
 import type { GameTypeNative } from './game-type-native';
@@ -29,6 +30,13 @@ export function resourceBoundsReader(assets: Assets, resources: () => GameTypeNa
           // not solid geometry and must not affect the inventory camera size.
           const resource = await assets.resource(pack, render.resource);
           if (resource.entry.type === 13) continue;
+          // Stock 2.2.1's racer_default_steering_wheel is a type-14
+          // placeholder containing only shd_* settings, with no mesh at all.
+          // It is valid auxiliary render data, not an embedded map mesh.
+          if(resource.entry.type===14&&resource.entry.data){
+            const props=entryProperties(resource.entry);
+            if(props.length>0&&props.every(prop=>prop.key.startsWith('shd_')))continue;
+          }
           const source = await assets.modelForResource(pack, render.resource);
           const model = await parseScxAsync(await assets.read(normalizePath(source.path)));
           const transform = render.pose && poseMatrix(render.pose);

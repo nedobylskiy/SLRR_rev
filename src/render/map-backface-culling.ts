@@ -19,11 +19,35 @@ export function hasFrontWinding(geometry:BufferGeometry){
   return reliable>0;
 }
 
+/** Ground overlays have upward-facing triangles, unlike vertical signs or foliage cards. */
+export function hasGroundWinding(geometry:BufferGeometry){
+  const p=geometry.getAttribute('position'),index=geometry.index;
+  if(!p)return false;
+  const a=new Vector3(),b=new Vector3(),c=new Vector3();let count=0;
+  for(let i=0;i<(index?.count??p.count);i+=3){
+    a.fromBufferAttribute(p,index?index.getX(i):i);
+    b.fromBufferAttribute(p,index?index.getX(i+1):i+1);
+    c.fromBufferAttribute(p,index?index.getX(i+2):i+2);
+    b.sub(a).cross(c.sub(a));
+    const length=b.length();if(length<1e-8)continue;
+    if(b.y/length<.7)return false;
+    count++;
+  }
+  return count>0;
+}
+
 export class MapBackfaceCulling {
   enabled=false;
   private readonly materials=new Set<MeshStandardMaterial>();
   configure(material:MeshStandardMaterial,geometry:BufferGeometry){
-    if(material.transparent||material.opacity<1||material.alphaTest>0||material.alphaMap||!hasFrontWinding(geometry))return;
+    const alpha=material.transparent||material.opacity<1||material.alphaTest>0||!!material.alphaMap;
+    if(alpha){
+      if(hasGroundWinding(geometry)){
+        material.side=FrontSide;material.userData.slrrGroundOverlay=true;material.needsUpdate=true;
+      }
+      return;
+    }
+    if(!hasFrontWinding(geometry))return;
     material.userData.slrrMapBackfaceCandidate=true;
     // Preserve full two-sided casters, independently of the color pass experiment.
     material.shadowSide=DoubleSide;

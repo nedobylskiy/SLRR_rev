@@ -25,6 +25,32 @@ for (const [letters, start] of [['QWERTYUIOP', 16], ['ASDFGHJKL', 30], ['ZXCVBNM
   [...letters].forEach((letter, index) => { codes[`Key${letter}`] = start + index; });
 for (let n = 1; n <= 10; n++) codes[`F${n}`] = 58 + n;
 codes.F11 = 87; codes.F12 = 88;
+/** DirectInput key names for Input.axisName on the keyboard (device 0, DIK scan codes). */
+const keyNames: Record<number, string> = {
+  1: 'Esc', 12: '-', 13: '=', 14: 'Backspace', 15: 'Tab', 26: '[', 27: ']', 28: 'Enter', 29: 'Left Ctrl',
+  39: ';', 40: "'", 41: '`', 42: 'Left Shift', 43: '\\', 51: ',', 52: '.', 53: '/', 54: 'Right Shift',
+  55: 'Num *', 56: 'Left Alt', 57: 'Space', 58: 'Caps Lock', 69: 'Num Lock', 70: 'Scroll Lock',
+  71: 'Num 7', 72: 'Num 8', 73: 'Num 9', 74: 'Num -', 75: 'Num 4', 76: 'Num 5', 77: 'Num 6', 78: 'Num +',
+  79: 'Num 1', 80: 'Num 2', 81: 'Num 3', 82: 'Num 0', 83: 'Num Del', 87: 'F11', 88: 'F12',
+  156: 'Num Enter', 157: 'Right Ctrl', 181: 'Num /', 184: 'Right Alt', 197: 'Pause', 199: 'Home',
+  200: 'Up', 201: 'Page Up', 203: 'Left', 205: 'Right', 207: 'End', 208: 'Down', 209: 'Page Down',
+  210: 'Insert', 211: 'Delete',
+};
+for (let n = 1; n <= 9; n++) keyNames[n + 1] = String(n);
+keyNames[11] = '0';
+for (let n = 1; n <= 10; n++) keyNames[58 + n] = `F${n}`;
+for (const [letters, start] of [['QWERTYUIOP', 16], ['ASDFGHJKL', 30], ['ZXCVBNM', 44]] as const)
+  [...letters].forEach((letter, index) => { keyNames[start + index] = letter; });
+/** Mouse (device 1): ControlSet.defaults binds X/Y to 0/1, the wheel to 2 and buttons from 3. */
+const mouseAxisNames = ['Mouse X', 'Mouse Y', 'Mouse Wheel'];
+
+/** Input.axisName(device, axis): the label OptionsDialog shows for a control binding. */
+export function inputAxisName(device: number, axis: number): string {
+  if (device === 0) return keyNames[axis] ?? `Key ${axis}`;
+  if (device === 1) return mouseAxisNames[axis] ?? `Mouse Button ${axis - 2}`;
+  return `Device ${device} Axis ${axis}`;
+}
+
 const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> = {
   Digit1: { cameraAxis: codes.F1, command: 7 },
   Digit2: { cameraAxis: codes.F2, command: 0 },
@@ -34,6 +60,11 @@ const cameraShortcuts: Record<string, { cameraAxis: number; command: number }> =
 
 /** Physical input samples and hotkey registrations; Java handlers receive the events. */
 export class InputNative {
+  private pickedPosition=[0,0,0];
+  private picked?:{id:number;local:number[];world:number[];normal?:number[]};
+  setPickedTarget(hit?:{id:number;local:number[];world:number[];normal?:number[]}){this.picked=hit;if(hit)this.pickedPosition=[...hit.world];}
+  pickedTarget(){return this.picked;}
+  private cursorPosition=[0,0,0];
   private readonly axes = new Map<string, number>();
   private readonly pressedKeys: number[] = [];
   private readonly cheatRing = new Uint8Array(16);
@@ -47,9 +78,18 @@ export class InputNative {
   constructor(private readonly jvm: SlrrJvm, private readonly controllers: ControllerNative,
     private readonly events: GameTypeNative) {
     const owner = 'java.io.Input';
+    for(const method of ['getPos','getPickedPos'])for(const parameters of [[],['Vector3']])jvm.natives.register('java.io.MouseCursor',method,parameters,({args})=>{
+      const target=args[0]??jv('Vector3',{className:'java.lang.Vector3',fields:new Map(['x','y','z'].map(axis=>[axis,jv('float',0)]))});
+      const position=method==='getPos'?this.cursorPosition:this.pickedPosition;
+      for(const [i,axis]of ['x','y','z'].entries())jvm.set(target,axis,jv('float',Math.fround(position[i])));return target;
+    });
     const voidValue = () => jv('void', undefined);
     jvm.natives.register(owner, 'getAxis', ['int', 'int'], ({ args }) =>
       jv('float', this.physicalAxis(Number(args[0].value), Number(args[1].value))));
+    jvm.natives.register(owner, 'axisName', ['int', 'int'], ({ args }) =>
+      jv('String', inputAxisName(Number(args[0].value), Number(args[1].value))));
+    // OptionsDialog's "redefine control" polls this for the axis being pressed.
+    jvm.natives.register(owner, 'activeAxis', ['int'], ({ args }) => jv('int', this.activeAxis(Number(args[0].value))));
     jvm.natives.register(owner, 'lastKey', [], () => {
       const key = this.pressedKeys.shift() ?? 0;
       const character = (key >>> 16) & 0xff;
@@ -102,21 +142,38 @@ export class InputNative {
   }
 
   physicalAxis(device: number, axis: number): number { return this.axes.get(`${device}:${axis}`) ?? 0; }
+  /** First pressed axis of a device, or -1. Mouse X/Y/wheel hold the cursor and
+   * wheel samples rather than a press, so only mouse buttons (axis 3+) count. */
+  activeAxis(device: number): number {
+    let found = -1;
+    for (const [key, value] of this.axes) {
+      const [owner, axis] = key.split(':').map(Number);
+      if (owner !== device || Math.abs(value) <= 0.5 || device === 1 && axis < 3) continue;
+      if (found < 0 || axis < found) found = axis;
+    }
+    return found;
+  }
+  /** Java OSD uses [-1,1] screen coordinates, with Y increasing toward the bottom. */
+  setCursorPosition(x:number,y:number){if(Number.isFinite(x)&&Number.isFinite(y))this.cursorPosition=[Math.max(-1,Math.min(1,x)),Math.max(-1,Math.min(1,y)),0];}
 
   mouseCursor(): JavaValue | undefined {
     try { return this.jvm.get(jv('class', 'java.io.Input'), 'cursor'); } catch { return undefined; }
   }
 
   /** Forward native cursor events to the handlers subscribed by Java MouseCursor. */
-  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[] }): void {
+  cursorEvent(code: number, hit?: { id: number; physicsId?: number; local: number[]; world: number[]; normal?:number[] },targetNotifications=false): void {
+    if(hit&&code!==16)this.setPickedTarget(hit);
+    if(code===16&&hit?.id===this.picked?.id)this.setPickedTarget();
+    if(hit?.world.length===3&&hit.world.every(Number.isFinite))this.pickedPosition=[...hit.world];
     const cursor = this.mouseCursor();
     if (!cursor?.value) return;
     const native = this.jvm.get(cursor, 'cursor');
     if (!this.events.getResource(native)) return;
     const node = hit && this.events.getByResourceId(hit.id);
     const suffix = hit ? code === 15 ? `${hit.id} ${hit.physicsId ?? 0}` : code === 16 ? `${hit.id}` : `${hit.id} ${hit.local.join(' ')} ${hit.world.join(' ')}` : '';
-    this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,
-      jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`));
+    const payload=jv('String', `${code} ${this.events.getResource(native)!.resourceId} ${suffix}`);
+    this.events.queueStringEvent(native, node ? this.events.reference(node) : native, 65536,payload);
+    if(targetNotifications&&node){const target=this.events.reference(node);this.events.queueStringEvent(target,target,65536,payload);}
     this.events.dispatchQueuedEventsCooperative();
   }
 
@@ -180,8 +237,13 @@ export class InputNative {
     this.axes.set(`0:${axis}`, direct || aliased ? 1 : 0);
   }
 
-  attachBrowserKeyboard(target: Window): () => void {
+  clearPhysicalInput():void {
+    this.pressedCodes.clear();this.cameraAliases.clear();this.axes.clear();this.pressedKeys.length=0;
+    for(const item of this.hotkeys){item.armed=false;item.down=false;}
+  }
+  attachBrowserKeyboard(target: Window,enabled:()=>boolean=()=>true): () => void {
     const down = (event: KeyboardEvent) => {
+      if(!enabled())return;
       const element = document.activeElement as HTMLElement | null;
       if (element?.matches('input, textarea, select, [contenteditable="true"]') || event.isComposing) return;
       const character = event.ctrlKey || event.metaKey || event.altKey ? 0

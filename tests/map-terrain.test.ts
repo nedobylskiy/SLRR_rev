@@ -6,6 +6,14 @@ import type { ScxModel } from '../src/formats/scx';
 import { Box3, Matrix4, Vector3 } from 'three';
 import { MapCollision } from '../src/engine/map-collision';
 
+test('parked placement ignores roadside collision-box tops but keeps the map deck',()=>{
+  const objects=new MapCollision();objects.support=()=>({height:1.5,normal:new Vector3(0,1,0)});
+  const terrain=new MapTerrain(objects);
+  terrain.add({version:3,warnings:[],meshes:[{name:'sidewalk',positions:new Float32Array([0,20,0,1000,20,0,0,20,1000]),normals:new Float32Array(9),uv:new Float32Array(6),indices:new Uint32Array([0,1,2]),diffuse:[1,1,1,1],textureIndex:0}]});
+  assert.equal(terrain.height(2,3,4),1.5,'normal physics still supports solid objects');
+  assert.ok(Math.abs(terrain.placementHeight(2,3,4)-.2)<1e-6,'parking uses the sidewalk below the object');
+});
+
 test('map terrain samples original triangle height and slope in metres', () => {
   const model: ScxModel = { version: 3, warnings: [], meshes: [{ name: 'road',
     positions: new Float32Array([0, 0, 0, 1000, 0, 0, 0, 100, 1000]),

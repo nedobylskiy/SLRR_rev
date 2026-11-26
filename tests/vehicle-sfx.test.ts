@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { engineBlendWeights, engineSfxLevels, parseEngineSfx } from '../src/audio/vehicle-sfx';
 
+test('decompiled SfxTable local names retain independent engine and exhaust tables',()=>{
+  const source=`SfxTable local1; SfxTable local2;
+    if ((local1 = the_car.getSfxTable(0))) {
+      local1.addItem(new ResourceRef(parts.engines.Test:0xa2r), 1500.0, 500.0, 6500.0, 0.42, 0.52);
+    }
+    if ((local2 = the_car.getSfxTable(2))) {
+      local2.addItem(new ResourceRef(parts.engines.Test:0xacr), 900.0, 500.0, 1350.0, 1.0, 1.0);
+      local1.clear();
+      local1.addItem(new ResourceRef(parts.engines.Test:0xa9r), 5000.0, 3000.0, 18000.0, 0.62, 1.0);
+    }`;
+  assert.deepEqual(parseEngineSfx(source).items.map(s=>[s.table,s.id]),[[2,0xac],[0,0xa9]]);
+});
+
 test('engine sample tables follow the selected Java block and retain its RPM ranges', () => {
   const source = `void updatevariables() {
     if (tab = the_car.getSfxTable(0)) {

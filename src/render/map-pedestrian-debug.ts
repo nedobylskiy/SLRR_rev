@@ -1,3 +1,5 @@
+import {pedestrianRun} from '../engine/pedestrian-run';
+import {pedestrianFloor} from '../formats/pedestrian';
 import {BufferGeometry,Color,Float32BufferAttribute,Group,LineBasicMaterial,LineSegments,type Object3D} from 'three';
 import type {PedestrianRecord,PedestrianRest,PedestrianWalk} from '../formats/pedestrian';
 export type PedestrianDebugLayer='graph'|'rest';
@@ -11,10 +13,10 @@ export class MapPedestrianDebug {
     for(const row of walk){
       const y=(row.box[1]+row.box[4])/2;
       const visit=(record:PedestrianRecord)=>{
-        if(record.points)for(let i=1;i<record.points.length;i++)line(record.points[i-1],record.points[i],0x39e6d2);
+        if(record.points){const run=pedestrianRun(record);for(let i=1;i<run.length;i++)line(run[i-1].toArray(),run[i].toArray(),0x39e6d2);}
         // Junction quads are relative to the row's XZ origin. Corridor rows
         // have a zero origin; their quads and type-23 points are already world-space.
-        else if(record.quad)line([record.quad[0]+row.origin[0],y,record.quad[1]+row.origin[1]],[record.quad[2]+row.origin[0],y,record.quad[3]+row.origin[1]],record.kind===21?0xffdf62:0x679cff);
+        else if(record.quad){const q=record.quad,x=q[0]+row.origin[0],z=q[1]+row.origin[1],ex=q[2]+row.origin[0],ez=q[3]+row.origin[1];line([x,pedestrianFloor(row,x,z),z],[ex,pedestrianFloor(row,ex,ez),ez],record.id===-1||record.kind===21?0xffdf62:0x679cff);}
         if(record.child)visit(record.child);
       };row.records.forEach(visit);
     }

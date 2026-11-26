@@ -4,7 +4,11 @@ import { FULL_OSD_VIEWPORT, osdDepth, projectOsdBounds, type OsdViewport } from 
 import type { PhysicsRefNative } from './physics-ref-native';
 
 interface HitBox { physics: JavaValue; group: JavaValue; width: number; height: number; label: string;
-  position?: { x: number; y: number; z: number }; element?: OsdElement }
+  position?: { x: number; y: number; z: number }; element?: OsdElement;
+  bounds?: { x: number; y: number; width: number; height: number; depth: number }; background?: OsdElement }
+
+/** Osd.COLOR_DISABLED (0x70C0C0C0), the label tint Gadget.disable applies. */
+const OSD_COLOR_DISABLED = 0x70c0c0c0;
 
 /** At equal Java depth, a small control wins over a broad dialog shield or ghost area. */
 export function osdHitDepth(z: number, width: number, height: number): number {
@@ -35,7 +39,7 @@ export class OsdButtonNative {
   setWorldPhysics(physics: PhysicsRefNative): void { this.worldPhysics = physics; }
 
   constructor(private readonly jvm: SlrrJvm,
-    private readonly layer?: Pick<OsdLayer, 'createHitTarget'>,
+    private readonly layer?: Pick<OsdLayer, 'createHitTarget'> & Partial<Pick<OsdLayer, 'createRectangle'>>,
     private readonly report: (error: Error) => void = () => {},
     private readonly viewportLayout: (group: JavaValue) => OsdViewport = () => FULL_OSD_VIEWPORT,
     private readonly stageAspect: () => number = () => 16 / 9) {
@@ -83,6 +87,7 @@ export class OsdButtonNative {
       const height = box.height / 1.469;
       const depth = osdDepth(viewport.priority,
         osdHitDepth(Number(position.fields.get('z')?.value ?? 0), width, height));
+      box.bounds = { ...projected, width, height, depth: osdDepth(viewport.priority, 0) };
       if (box.element) box.element.setBounds(projected.x, projected.y, width, height, depth);
       else {
         box.element = this.layer?.createHitTarget(box.label, projected.x, projected.y, width, height, depth,
@@ -239,9 +244,17 @@ export class OsdButtonNative {
     const osd = this.object(this.requireObject(box.group).fields.get('osd'));
     const active = this.object(osd?.fields.get('actGadget'));
     // Publish the active editor before dispatching a different gadget's command.
-    // Do not send its submit command: that would also wake a modal dialog's wait.
-    if (osd && active && active !== gadget && this.jvm.isInstance(jv('Gadget', active), 'java.render.osd.StringInput'))
+    if (osd && active && active !== gadget && this.jvm.isInstance(jv('Gadget', active), 'java.render.osd.StringInput')) {
       this.jvm.set(jv('Osd', osd), 'stringValue', active.fields.get('inputString') ?? jv('String', ''));
+      const handler = this.object(osd.fields.get('globalHandler'));
+      if (Number(gadget.fields.get('cmd')?.value) === 0 && handler &&
+          this.jvm.isInstance(jv(handler.className, handler), 'java.render.osd.dialog.FileRequesterDialog')) {
+        // FileRequester stores fileName only on its editor's command. Keep
+        // actGadget set while publishing it: clearing focus would auto-submit
+        // the requester and then submit it a second time with the Save click.
+        await this.jvm.invokeAsync(jv(active.className, active), 'sendMessage');
+      }
+    }
     await this.jvm.invokeAsync(jv(gadget.className.split('.').at(-1)!, gadget), 'click');
   }
 
@@ -249,13 +262,16 @@ export class OsdButtonNative {
     const box = this.boxes.get(this.requireObject(physics));
     if (!box || !this.visible(box)) return;
     const gadget = await this.findGadget(box, physics);
-    if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0) || Number(gadget.fields.get('nofocus')?.value ?? 0)) return;
+    // Disabled gadgets still focus on mouse hover: the original Gadget.focus
+    // draws HIGHLIGHT_DISABLED (the crossed-out overlay). Only activation is blocked.
+    if (!gadget || Number(gadget.fields.get('nofocus')?.value ?? 0)) return;
     const group = this.requireObject(box.group);
     const osd = this.object(group.fields.get('osd'));
     if (!osd || osd.fields.get('pointedGadget')?.value === gadget) return;
     if (osd.fields.get('pointedGadget')?.value)
       await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
     await this.jvm.invokeAsync(jv('Osd', osd), 'activateText', [jv('Group', group), jv('Gadget', gadget)]);
+    await this.keepDisabledLabel(gadget);
     this.cursorEvent?.(15, physics);
     this.clearFocus();
     const panel = this.object(osd.fields.get('globalHandler'));
@@ -284,6 +300,18 @@ export class OsdButtonNative {
     const osd = this.object(this.requireObject(box.group).fields.get('osd'));
     if (gadget && osd?.fields.get('pointedGadget')?.value === gadget)
       await this.jvm.invokeAsync(jv('Osd', osd), 'deactivateText');
+    if (gadget) await this.keepDisabledLabel(gadget);
+  }
+
+  /** Gadget.focus/unfocus recolour the label to SELECTED/UNSELECTED even when
+   * the gadget is disabled, which erased the grey that Gadget.disable set
+   * (e.g. night-race opponents whose stake exceeds the player's money looked
+   * clickable). Restore Osd.COLOR_DISABLED after a mouse focus change. */
+  private async keepDisabledLabel(gadget: JavaObject): Promise<void> {
+    if (!Number(gadget.fields.get('disabled')?.value ?? 0)) return;
+    const label = this.object(gadget.fields.get('label'));
+    const text = label?.fields.get('txt');
+    if (text?.value) await this.jvm.invokeAsync(text, 'changeColor', [jv('int', OSD_COLOR_DISABLED)]);
   }
 
   private async findGadget(box: HitBox, physics: JavaValue): Promise<JavaObject | undefined> {
@@ -305,7 +333,34 @@ export class OsdButtonNative {
     for (const box of this.activeBoxes) {
       if (this.visible(box)) box.element?.show();
       else box.element?.hide();
+      this.syncNightRaceBackground(box);
     }
+  }
+
+  /** 2.2.1 City uses RRT_TEST (= RRT_NONE) for these two menus. Keep other
+   * transparent controls intact and place the darken texture behind their text. */
+  private syncNightRaceBackground(box: HitBox): void {
+    if (!this.visible(box)) { box.background?.hide(); return; }
+    const group = this.requireObject(box.group);
+    const osd = this.object(group.fields.get('osd'));
+    const owner = this.object(osd?.fields.get('globalHandler'));
+    const groups = osd?.fields.get('groups');
+    const bounds = box.bounds;
+    if (!owner || !groups || !bounds || !this.jvm.isInstance(jv(owner.className, owner), 'java.game.City')) {
+      box.background?.hide(); return;
+    }
+    const count = Number(this.jvm.invoke(groups, 'size').value);
+    const matches = ['nightRaceGroup', 'nrWatchingGroup'].some(name => {
+      const index = Number(owner.fields.get(name)?.value ?? -1);
+      return index >= 0 && index < count && this.object(this.jvm.invoke(groups, 'elementAt', [jv('int', index)])) === group;
+    });
+    if (!matches) { box.background?.hide(); return; }
+    const { x, y, width, height, depth } = bounds;
+    if (!box.background) {
+      box.background = this.layer?.createRectangle?.(x, y, width, height, depth, { pack: 'frontend.rpk', id: 0xa2 });
+      if (box.background) this.live.add(box.background);
+    } else box.background.setBounds(x, y, width, height, depth);
+    box.background?.show();
   }
 
   private visible(box: HitBox): boolean {

@@ -4,13 +4,14 @@ import type { Assets } from '../assets';
 import type { GameTypeNative } from './game-type-native';
 import { gameSoundVolume } from '../audio/audio-settings';
 
-interface Voice { stopped: boolean; source?: AudioBufferSourceNode }
+interface Voice { stopped: boolean; source?: AudioBufferSourceNode; loopKey?:string }
 
 /** Plays the original RPK sound resources requested by Java SfxRef. */
 export class SfxRefNative {
   private context?: AudioContext;
   private readonly buffers = new Map<string, Promise<AudioBuffer>>();
   private readonly voices = new Map<number, Voice>();
+  private readonly ownedLoops = new Map<string,number>();
   private nextVoice = 1;
 
   constructor(jvm: SlrrJvm, private readonly assets: Assets, private readonly resources: GameTypeNative,
@@ -18,16 +19,23 @@ export class SfxRefNative {
     private readonly report: (error: Error) => void = () => {}) {
     const owner = 'java.util.resource.SfxRef';
     jvm.natives.register(owner, 'nplay', ['Vector3', 'float', 'float', 'float', 'int', 'int'], ({ receiver, args }) => {
+      const resource = this.resources.getResource(receiver),emitter=Number(args[5].value);
+      // Painter refreshes the same cursor-owned loop from control(). Reuse its
+      // handle so stop(spraySfxID) stops the one loop rather than leaving copies.
+      const loopKey=(Number(args[4].value)&1)&&emitter&&resource
+        ?`${resource.resourcePack}:${resource.resourceId}:${emitter}`:undefined;
+      const existing=loopKey&&this.ownedLoops.get(loopKey);
+      if(existing&&this.voices.has(existing))return jv('int',existing);
       const id = this.nextVoice++;
-      const voice: Voice = { stopped: false };
+      const voice: Voice = { stopped: false,loopKey };
       this.voices.set(id, voice);
-      const resource = this.resources.getResource(receiver);
+      if(loopKey)this.ownedLoops.set(loopKey,id);
       if (resource?.resourceId && typeof AudioContext !== 'undefined') {
         this.context ??= new AudioContext({ latencyHint: 'interactive' });
         void this.context.resume().catch(() => {});
         void this.play(id, voice, resource.resourcePack ?? 'frontend.rpk', resource.resourceId & 0xffff, args)
-          .catch(error => this.report(error instanceof Error ? error : new Error(String(error))));
-      } else this.voices.delete(id);
+          .catch(error => {this.release(id,voice);this.report(error instanceof Error ? error : new Error(String(error)));});
+      } else this.release(id,voice);
       return jv('int', id);
     });
     jvm.natives.register(owner, 'stop', ['int'], ({ args }) => {
@@ -35,10 +43,15 @@ export class SfxRefNative {
       if (voice) {
         voice.stopped = true;
         try { voice.source?.stop(); } catch { /* The voice may already have ended. */ }
-        this.voices.delete(id);
+        this.release(id,voice);
       }
       return jv('void', undefined);
     });
+  }
+
+  private release(id:number,voice:Voice){
+    this.voices.delete(id);
+    if(voice.loopKey&&this.ownedLoops.get(voice.loopKey)===id)this.ownedLoops.delete(voice.loopKey);
   }
 
   private async buffer(pack: string, id: number): Promise<AudioBuffer> {
@@ -73,10 +86,10 @@ export class SfxRefNative {
       panner.positionY.value = Number(position.fields.get('y')?.value ?? 0);
       panner.positionZ.value = Number(position.fields.get('z')?.value ?? 0);
       gain.connect(panner); panner.connect(context.destination);
-      source.onended = () => { this.voices.delete(handle); source.disconnect(); gain.disconnect(); panner.disconnect(); };
+      source.onended = () => { this.release(handle,voice); source.disconnect(); gain.disconnect(); panner.disconnect(); };
     } else {
       gain.connect(context.destination);
-      source.onended = () => { this.voices.delete(handle); source.disconnect(); gain.disconnect(); };
+      source.onended = () => { this.release(handle,voice); source.disconnect(); gain.disconnect(); };
     }
     source.start();
   }
@@ -87,6 +100,7 @@ export class SfxRefNative {
       try { voice.source?.stop(); } catch { /* Already stopped. */ }
     }
     this.voices.clear();
+    this.ownedLoops.clear();
     void this.context?.close();
   }
 }

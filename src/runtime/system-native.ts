@@ -8,19 +8,44 @@ export class SystemNative {
   private gameTimeSeconds = 0;
   private lastSample: number;
   private warp = 1;
+  get timeScale(){return this.sceneLoading?0:this.warp;}
+  private sceneLoading=false;
+  setSceneLoading(loading:boolean):void {this.sampleSimulation();this.sceneLoading=loading;}
   private loadPriority = 0;
   private loading = false;
+  private loadingReader?:()=>boolean;
+  /** Pending host assets extend the original Java LoadingScreen wait. */
+  setLoadingReader(reader:(()=>boolean)|undefined):void {this.loadingReader=reader;}
   private distanceMeasure = 1000;
+  private exitRequested = false;
+  private exitHandler?: () => void;
+  /** The host's response to System.exit(): close the app, or stop the game in a browser. */
+  setExitHandler(handler: (() => void) | undefined): void { this.exitHandler = handler; }
 
   constructor(jvm: SlrrJvm, private readonly report: (event: BootEvent) => void,
     private readonly now: () => number = () => performance.now(),
     private readonly memoryBytes: () => number = () => {
       const browserPerformance = globalThis.performance as (Performance & { memory?: { usedJSHeapSize?: number } }) | undefined;
       return browserPerformance?.memory?.usedJSHeapSize ?? 0;
-    }) {
+    },
+    private readonly showAlert:(message:string)=>void=message=>globalThis.alert(message)) {
     this.startedAt = this.now();
     this.lastSample = this.startedAt;
     const owner = 'java.lang.System';
+    jvm.natives.register(owner,'exit',['String'],({args})=>{
+      this.showAlert(String(args[0].value??''));
+      return jv('void',undefined);
+    });
+    // MainMenu's "Exit game" (Gates.run) fades to black and calls System.exit().
+    // Its loop keeps running afterwards, so only the first call reaches the host.
+    jvm.natives.register(owner,'exit',[],()=>{
+      if(!this.exitRequested){
+        this.exitRequested=true;
+        this.report({level:'info',message:'System.exit(): the game asked to quit'});
+        this.exitHandler?.();
+      }
+      return jv('void',undefined);
+    });
     jvm.natives.register(owner, 'currentTime', [], () => jv('float', Math.fround((this.now() - this.startedAt) / 1000)));
     jvm.natives.register(owner, 'simTime', [], () => jv('float', Math.fround(this.sampleSimulation())));
     jvm.natives.register(owner, 'syncGameTime', ['float'], ({ args }) => {
@@ -60,7 +85,7 @@ export class SystemNative {
       this.loading = false;
       return jv('void', undefined);
     });
-    jvm.natives.register(owner, 'isLoading', [], () => jv('int', Number(this.loading)));
+    jvm.natives.register(owner, 'isLoading', [], () => jv('int', Number(this.loading || (this.loadingReader?.()??false))));
     for (const name of ['gc', 'runFinalization'])
       jvm.natives.register(owner, name, [], () => jv('int', 0));
     jvm.natives.register(owner, 'compileAll', ['String'], () => jv('int', 0));
@@ -86,7 +111,7 @@ export class SystemNative {
 
   private sampleSimulation(): number {
     const now = this.now();
-    this.simulationSeconds += Math.max(0, now - this.lastSample) / 1000 * this.warp;
+    if(!this.sceneLoading)this.simulationSeconds += Math.max(0, now - this.lastSample) / 1000 * this.warp;
     this.lastSample = now;
     return this.simulationSeconds;
   }

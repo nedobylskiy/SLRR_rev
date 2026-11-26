@@ -150,6 +150,13 @@ function describeThrown(error: unknown): string {
   return description || 'Empty thrown value';
 }
 
+/** SLRR permits non-void placeholder methods with no return (e.g. InventoryItem.getInfo). */
+function methodResult(method: SourceMethod, flow: Flow): JavaValue {
+  if (flow?.value && flow.value.type !== 'void') return flow.value;
+  if (method.result === 'void') return jv('void', undefined);
+  return jv(method.result, /^(byte|short|int|long|float|double|char|boolean)$/.test(method.result) ? 0 : null);
+}
+
 export class JavaSourceMachine {
   private remaining = 0; private depth = 0; private singleIteration = false;
   private readonly arrayResourceOrigins = new WeakMap<unknown[], Map<number, Pick<JavaValue, 'resource' | 'resourceId'>>>();
@@ -160,7 +167,7 @@ export class JavaSourceMachine {
     if (this.depth >= this.maxDepth) throw new Error('Java call depth exceeded');
     this.depth++;
     const scope = new Scope(); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
-    try { const flow = this.statement(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
+    try { return methodResult(method, this.statement(method.body, scope, receiver, method)); }
     catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${describeThrown(e)}`, { cause: e }); }
     finally { this.depth--; }
   }
@@ -184,7 +191,7 @@ export class JavaSourceMachine {
       yield() { finish(); parent?.yield(); },
     };
     const scope = new Scope(undefined, continuation); method.parameters.forEach((p, i) => scope.values.set(p.name, coerce(p.type, args[i])));
-    try { const flow = await this.statementAsync(method.body, scope, receiver, method); return flow?.value ?? jv('void', undefined); }
+    try { return methodResult(method, await this.statementAsync(method.body, scope, receiver, method)); }
     catch (e) { throw new Error(`${method.owner}.${method.name} (source line ${e instanceof JavaSourceLocationError ? e.line : method.line}): ${describeThrown(e)}`, { cause: e }); }
     finally { finish(); this.depth--; }
   }
