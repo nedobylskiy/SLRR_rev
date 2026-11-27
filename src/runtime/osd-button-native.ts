@@ -234,6 +234,31 @@ export class OsdButtonNative {
     return true;
   }
 
+  /** Touch screens cannot reliably drag inventory gadgets onto drop buttons
+   * (Mechanic "Repair Part"/"Sell Part"), so a long press lists the visible,
+   * enabled drop targets by their tooltips; choosing one calls dropOn. Only
+   * gadgets of an InventoryPanel qualify, so ordinary buttons keep their press. */
+  async dropTargets(source: JavaValue): Promise<{ physics: JavaValue; label: string }[]> {
+    const sourceObject = this.object(source), origin = sourceObject && this.boxes.get(sourceObject);
+    if (!origin || !this.visible(origin)) return [];
+    const sourceGadget = await this.findGadget(origin, source);
+    if (!sourceGadget || Number(sourceGadget.fields.get('disabled')?.value ?? 0)) return [];
+    const osd = this.object(this.requireObject(origin.group).fields.get('osd'));
+    const panel = this.object(osd?.fields.get('globalHandler'));
+    if (!panel || !this.jvm.isInstance(jv(panel.className, panel), 'java.game.InventoryPanel')) return [];
+    const targets: { physics: JavaValue; label: string }[] = [];
+    for (const box of this.activeBoxes) {
+      if (box === origin || !this.visible(box)) continue;
+      const gadget = await this.findGadget(box, box.physics);
+      if (!gadget || gadget === sourceGadget || Number(gadget.fields.get('disabled')?.value ?? 0) ||
+          !Number(gadget.fields.get('dropEnabled')?.value ?? 0)) continue;
+      const tooltip = gadget.fields.get('tooltip')?.value;
+      const label = (typeof tooltip === 'string' ? tooltip : '').trim() || box.label.trim() || 'Drop here';
+      targets.push({ physics: box.physics, label });
+    }
+    return targets;
+  }
+
   async activate(physics: JavaValue): Promise<void> {
     const box = this.boxes.get(this.requireObject(physics));
     if (!box) return;

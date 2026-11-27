@@ -325,3 +325,48 @@ test('mouse focus on a disabled button keeps its label tinted Osd.COLOR_DISABLED
     assert.equal(color(), 0x70c0c0c0, 'leaving must not reset the label to the enabled grey');
   } finally { bridge.dispose(); resources.dispose(); }
 });
+
+test('a long press lists the enabled drop targets for inventory gadgets by their tooltips', async () => {
+  const sources: Record<string, string> = {
+    'java.render.Button': `package java.render;
+      class Gadget {}
+      class Button extends Gadget { Osd osd; void drop(Gadget value) { osd.drops++; } }
+      class Group {}
+      class Osd { int drops; }
+      class Vector { Object[] elements; int size() { return elements.length; } Object elementAt(int i) { return elements[i]; } }`,
+    'java.game.InventoryPanel': `package java.game; class InventoryPanel {}`,
+  };
+  const jvm = new SlrrJvm({ resolveImport: ({ className }) => sources[className] ? { path: `${className}.java`, source: sources[className] } : null });
+  await jvm.loadClass('java.render.Button'); await jvm.loadClass('java.render.Vector'); await jvm.loadClass('java.game.InventoryPanel');
+  const resources = new GameTypeNative(jvm, () => {}), physics = new PhysicsRefNative(jvm, resources);
+  const bridge = new OsdButtonNative(jvm); bridge.setWorldPhysics(physics);
+  const camera = object('java.render.Camera');
+  const inventoryOsd = object('java.render.Osd', { cam: camera, drops: jv('int', 0), globalHandler: object('java.game.InventoryPanel') });
+  const menuOsd = object('java.render.Osd', { cam: camera, drops: jv('int', 0), globalHandler: object('java.game.Mechanic') });
+  const hotspot = (osd: JavaValue, fields: Record<string, JavaValue>) => {
+    const phy = object('java.util.resource.PhysicsRef');
+    const button = object('java.render.Button', { osd, phy, disabled: jv('int', 0), dropEnabled: jv('int', 0), ...fields });
+    const group = object('java.render.Group', { osd, active: jv('int', 1),
+      gadget: object('java.render.Vector', { elements: jv('Object[]', [button]) }) });
+    jvm.natives.invoke('java.lang.GameType', 'createNativeInstance', group, []);
+    jvm.natives.invoke('java.util.resource.PhysicsRef', 'createBox', phy, [jv('ResourceRef', group.value), jv('float', 1), jv('float', 1), jv('float', 0.01), jv('String', '')]);
+    return { phy, button, group };
+  };
+  try {
+    const part = hotspot(inventoryOsd, {});
+    const repair = hotspot(menuOsd, { dropEnabled: jv('int', 1), tooltip: jv('String', 'Repair Part') });
+    hotspot(menuOsd, { tooltip: jv('String', 'Repair all the car') });
+    const sell = hotspot(menuOsd, { dropEnabled: jv('int', 1), tooltip: jv('String', 'Sell Part') });
+    const labels = async (source: JavaValue) => (await bridge.dropTargets(source)).map(target => target.label);
+    assert.deepEqual(await labels(part.phy), ['Repair Part', 'Sell Part']);
+    const [first] = await bridge.dropTargets(part.phy);
+    assert.equal(first.physics, repair.phy);
+    assert.equal(await bridge.dropOn(first.physics, { physics: part.phy }), true);
+    assert.equal(jvm.get(menuOsd, 'drops').value, 1);
+    assert.deepEqual(await labels(repair.phy), [], 'buttons outside an inventory panel keep their ordinary press');
+    jvm.set(sell.button, 'disabled', jv('int', 1));
+    assert.deepEqual(await labels(part.phy), ['Repair Part']);
+    jvm.set(repair.group, 'active', jv('int', 0));
+    assert.deepEqual(await labels(part.phy), []);
+  } finally { bridge.dispose(); resources.dispose(); }
+});

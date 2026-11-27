@@ -7,9 +7,12 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 import { normalizePath } from '../assets';
 import { readExeCursor, stockCursorIndex } from '../formats/exe-cursor';
 import { TwoFingerCamera } from './touch-camera';
+import { showDropMenu, type DropMenu } from './drop-menu';
 
 /** Pinch ratio that counts as one mouse-wheel notch. */
 export const PINCH_NOTCH = Math.log(1.12);
+/** A touch press held this long on an inventory part opens its drop-action menu. */
+export const LONG_PRESS_MS = 500;
 
 /** Font glyph UVs select the original pointer artwork, including modded fonts. */
 export function pointerUv(mesh: ScxMesh, character: string) {
@@ -40,6 +43,10 @@ export class JavaMouse {
   private touchDrag = false;
   private touchDragged = false;
   private pinch = 0;
+  /** Touch long press on an inventory gadget: offer its drop targets instead of a drag. */
+  private holdTimer?: ReturnType<typeof setTimeout>;
+  private closeMenu?: () => void;
+  showMenu: DropMenu = showDropMenu;
   constructor(private readonly viewport: HTMLElement, private readonly result: BootResult,
     private readonly assets: Assets, private readonly report: (message: string) => void,
     private readonly pick?: (x: number, y: number) => { id: number; local: number[]; world: number[] } | undefined) {
@@ -90,6 +97,7 @@ export class JavaMouse {
         // Capturing OSD buttons on press would swallow their normal browser click.
         // Capture only once movement actually becomes a drag.
         if (hit) this.result.input.cursorEvent(1, hit);
+        if (physics && event.pointerType === 'touch') this.startHold(this.pressed);
       }
       return;
     }
@@ -114,7 +122,7 @@ export class JavaMouse {
     const pressed = this.pressed;
     if (pressed && pressed.pointer === event.pointerId) {
       if (!pressed.dragged && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= 5) {
-        pressed.dragged = true; this.suppressClick = true;
+        pressed.dragged = true; this.suppressClick = true; this.stopHold();
         this.viewport.setPointerCapture(event.pointerId);
         if (pressed.hit) this.result.input.cursorEvent(9, pressed.hit);
       }
@@ -149,6 +157,7 @@ export class JavaMouse {
     }
     this.trackPosition(event);
     if (event.button === 0 && this.pressed && event.pointerId === this.pressed.pointer) {
+      this.stopHold();
       const pressed = this.pressed; this.pressed = undefined;
       if (pressed.dragged) {
         event.preventDefault();
@@ -181,6 +190,7 @@ export class JavaMouse {
   /** The second finger turns a one-finger press into a camera gesture: drop the
    * press without a click and hold the right button, as for a mouse orbit. */
   private beginTouchDrag() {
+    this.stopHold();
     const pressed = this.pressed; this.pressed = undefined;
     if (pressed) {
       if (pressed.dragged && pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
@@ -204,6 +214,26 @@ export class JavaMouse {
     const notches = Math.trunc(this.pinch / PINCH_NOTCH);
     if (notches) { this.pinch -= notches * PINCH_NOTCH; input.setPhysicalAxis(1, 2, Math.sign(notches)); }
   }
+  private startHold(pressed: NonNullable<JavaMouse['pressed']>) {
+    this.stopHold();
+    if (!pressed.physics || !this.result.osdButtons?.dropTargets) return;
+    this.holdTimer = setTimeout(() => { this.holdTimer = undefined; void this.longPress(pressed).catch(error =>
+      this.report(`Java drop menu: ${error instanceof Error ? error.message : String(error)}`)); }, LONG_PRESS_MS);
+  }
+  private stopHold() { if (this.holdTimer !== undefined) { clearTimeout(this.holdTimer); this.holdTimer = undefined; } }
+  /** The press becomes a menu only if the gadget has somewhere to go; otherwise it stays an ordinary press. */
+  private async longPress(pressed: NonNullable<JavaMouse['pressed']>) {
+    const source = pressed.physics!;
+    const targets = await this.result.osdButtons.dropTargets(source);
+    if (!targets.length || this.pressed !== pressed || pressed.dragged || this.disposed) return;
+    this.pressed = undefined; this.suppressClick = true;
+    this.closeMenu?.();
+    this.closeMenu = this.showMenu(this.viewport, pressed.x, pressed.y, targets.map(target => target.label), index => {
+      this.closeMenu = undefined;
+      void this.result.osdButtons.dropOn(targets[index].physics, { physics: source })
+        .catch(error => this.report(`Java drop: ${error instanceof Error ? error.message : String(error)}`));
+    });
+  }
   private endTouchDrag() {
     if (!this.touchDrag) return;
     this.touchDrag = false;
@@ -224,6 +254,7 @@ export class JavaMouse {
     this.suppressClick = false; event.preventDefault(); event.stopImmediatePropagation();
   };
   private cancel = () => {
+    this.stopHold();
     const pressed = this.pressed; this.pressed = undefined;
     if (pressed?.dragged) {
       if (pressed.hit) this.result.input.cursorEvent(10, pressed.hit);
@@ -306,7 +337,7 @@ export class JavaMouse {
     } finally { bitmap.close(); }
   }
   dispose() {
-    this.blur(); this.disposed = true; clearInterval(this.timer);
+    this.blur(); this.closeMenu?.(); this.closeMenu = undefined; this.disposed = true; clearInterval(this.timer);
     this.viewport.removeEventListener('pointerdown', this.down);
     this.viewport.removeEventListener('click', this.click, true);
     this.viewport.removeEventListener('pointermove', this.move);

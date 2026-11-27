@@ -167,3 +167,51 @@ test('two fingers on a Java-controlled camera act as a right-button drag, and a 
       if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name);
   }
 });
+
+test('a touch long press on an inventory gadget opens its drop menu instead of clicking', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  class Surface extends EventTarget {
+    dataset: Record<string,string> = {};
+    style = {cursor:'',removeProperty() {}};
+    setPointerCapture(_: number) {} hasPointerCapture(_: number) { return false; } releasePointerCapture(_: number) {}
+  }
+  const originals = ['HTMLCanvasElement','window'].map(name => [name,Object.getOwnPropertyDescriptor(globalThis,name)] as const);
+  Object.defineProperty(globalThis,'HTMLCanvasElement',{value:Surface,configurable:true});
+  Object.defineProperty(globalThis,'window',{value:new EventTarget(),configurable:true});
+  const surface = new Surface(), drops: unknown[] = [];
+  const gadget = {type:'PhysicsRef',value:{}}, button = {type:'PhysicsRef',value:{}}, repair = {type:'PhysicsRef',value:{}}, sell = {type:'PhysicsRef',value:{}};
+  const result = {input:{mouseCursor:()=>({value:{}}),cursorEvent() {},setPhysicalAxis() {},physicalAxis:()=>0},
+    jvm:{get:(_:unknown,key:string)=>({value:key==='visible'?0:{}})},
+    gameTypes:{lastCommand:()=>undefined},
+    osdButtons:{physicsAt:(x:number)=>x>=200?button:gadget,
+      dropTargets:async (source:unknown)=>source===gadget?[{physics:repair,label:'Repair Part'},{physics:sell,label:'Sell Part'}]:[],
+      dropOn:async (onto:unknown,source:unknown)=>{drops.push({onto,source});return true;}},
+  } as unknown as BootResult;
+  const mouse = new JavaMouse(surface as unknown as HTMLElement,result,{} as Assets,()=>{});
+  const menus: { labels: string[]; choose: (index: number) => void }[] = [];
+  mouse.showMenu = (_host, _x, _y, labels, choose) => { menus.push({labels,choose}); return () => {}; };
+  const pointer = (type:string,x:number) => {const event=new Event(type,{cancelable:true});Object.assign(event,{button:0,pointerId:1,pointerType:'touch',clientX:x,clientY:10});surface.dispatchEvent(event);return event;};
+  const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+  const click = () => {const event=new Event('click',{cancelable:true});surface.dispatchEvent(event);return event.defaultPrevented;};
+  try {
+    pointer('pointerdown',50); t.mock.timers.tick(499); await flush();
+    assert.equal(menus.length,0);
+    t.mock.timers.tick(1); await flush();
+    assert.deepEqual(menus.map(menu=>menu.labels),[['Repair Part','Sell Part']]);
+    pointer('pointerup',50);
+    assert.equal(click(),true,'the click after the long press is swallowed');
+    menus[0].choose(1); await flush();
+    assert.deepEqual(drops,[{onto:sell,source:{physics:gadget}}]);
+    // A short tap and a drag never open the menu.
+    pointer('pointerdown',50); t.mock.timers.tick(200); pointer('pointerup',50); t.mock.timers.tick(600); await flush();
+    assert.equal(click(),false); assert.equal(menus.length,1);
+    pointer('pointerdown',50); pointer('pointermove',80); t.mock.timers.tick(600); await flush();
+    assert.equal(menus.length,1); pointer('pointercancel',80);
+    // Without drop targets a long press stays an ordinary press.
+    pointer('pointerdown',250); t.mock.timers.tick(600); await flush(); pointer('pointerup',250);
+    assert.equal(menus.length,1); assert.equal(click(),false);
+  } finally {
+    mouse.dispose();
+    for(const [name,descriptor] of originals) if(descriptor)Object.defineProperty(globalThis,name,descriptor);else Reflect.deleteProperty(globalThis,name);
+  }
+});

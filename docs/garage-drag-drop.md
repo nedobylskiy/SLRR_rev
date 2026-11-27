@@ -18,6 +18,17 @@ Ordinary mounted parts must first be removed to the inventory. The host does
 not bypass these restrictions. Drops onto the 3D world are not implemented by
 this OSD transport.
 
+## Touch: long-press menu
+
+Dragging a gadget with a finger onto a drop button is unreliable on phones, so
+a touch press held for half a second on an inventory gadget (a gadget whose
+`Osd.globalHandler` is an `InventoryPanel`) opens a small menu instead. The menu
+lists every visible, enabled `enableDrop()` button by its tooltip, such as
+"Repair Part" and "Sell Part" at the mechanic. Choosing an item calls the same
+`Button.drop(Gadget)` as a drag; the target button is never clicked. Gadgets
+with no drop targets keep their ordinary press, and a tap or a drag never opens
+the menu (`src/render/drop-menu.ts`, `OsdButtonNative.dropTargets`).
+
 Regression coverage: `tests/java-mouse.test.ts` and
 `tests/osd-button-native.test.ts` exercise gesture transport, both Java overloads,
 drop context cleanup, click suppression, cancellation, and target eligibility.
