@@ -23,9 +23,12 @@ this OSD transport.
 Dragging a gadget with a finger onto a drop button is unreliable on phones, so
 a touch press held for half a second on an inventory gadget (a gadget whose
 `Osd.globalHandler` is an `InventoryPanel`) opens a small menu instead. The menu
-lists every visible, enabled `enableDrop()` button by its tooltip, such as
-"Repair Part" and "Sell Part" at the mechanic. Choosing an item calls the same
-`Button.drop(Gadget)` as a drag; the target button is never clicked. Gadgets
+shows the part's tooltip as its title and lists the visible, enabled
+`enableDrop()` buttons outside the panel by their tooltips, such as "Repair
+Part" and "Sell Part" at the mechanic (the panel's own slots, which accept
+swaps, are left out). Choosing an item calls the same `Button.drop(Gadget)` as
+a drag; the target button is never clicked. The menu is modal: only an item or
+Cancel closes it. Gadgets
 with no drop targets keep their ordinary press, and a tap or a drag never opens
 the menu (`src/render/drop-menu.ts`, `OsdButtonNative.dropTargets`).
 

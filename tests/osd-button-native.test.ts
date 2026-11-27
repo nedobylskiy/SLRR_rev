@@ -353,13 +353,17 @@ test('a long press lists the enabled drop targets for inventory gadgets by their
     return { phy, button, group };
   };
   try {
-    const part = hotspot(inventoryOsd, {});
+    const part = hotspot(inventoryOsd, { tooltip: jv('String', 'Rear left door (72%)') });
+    hotspot(inventoryOsd, { dropEnabled: jv('int', 1), tooltip: jv('String', 'Seat') });
+    hotspot(inventoryOsd, { dropEnabled: jv('int', 1) });
+    hotspot(menuOsd, { dropEnabled: jv('int', 1) });
     const repair = hotspot(menuOsd, { dropEnabled: jv('int', 1), tooltip: jv('String', 'Repair Part') });
     hotspot(menuOsd, { tooltip: jv('String', 'Repair all the car') });
     const sell = hotspot(menuOsd, { dropEnabled: jv('int', 1), tooltip: jv('String', 'Sell Part') });
-    const labels = async (source: JavaValue) => (await bridge.dropTargets(source)).map(target => target.label);
+    const labels = async (source: JavaValue) => (await bridge.dropTargets(source)).targets.map(target => target.label);
+    assert.equal((await bridge.dropTargets(part.phy)).title, 'Rear left door (72%)');
     assert.deepEqual(await labels(part.phy), ['Repair Part', 'Sell Part']);
-    const [first] = await bridge.dropTargets(part.phy);
+    const [first] = (await bridge.dropTargets(part.phy)).targets;
     assert.equal(first.physics, repair.phy);
     assert.equal(await bridge.dropOn(first.physics, { physics: part.phy }), true);
     assert.equal(jvm.get(menuOsd, 'drops').value, 1);

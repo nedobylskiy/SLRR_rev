@@ -224,11 +224,11 @@ export class JavaMouse {
   /** The press becomes a menu only if the gadget has somewhere to go; otherwise it stays an ordinary press. */
   private async longPress(pressed: NonNullable<JavaMouse['pressed']>) {
     const source = pressed.physics!;
-    const targets = await this.result.osdButtons.dropTargets(source);
+    const { title, targets } = await this.result.osdButtons.dropTargets(source);
     if (!targets.length || this.pressed !== pressed || pressed.dragged || this.disposed) return;
     this.pressed = undefined; this.suppressClick = true;
     this.closeMenu?.();
-    this.closeMenu = this.showMenu(this.viewport, pressed.x, pressed.y, targets.map(target => target.label), index => {
+    this.closeMenu = this.showMenu(this.viewport, pressed.x, pressed.y, title, targets.map(target => target.label), index => {
       this.closeMenu = undefined;
       void this.result.osdButtons.dropOn(targets[index].physics, { physics: source })
         .catch(error => this.report(`Java drop: ${error instanceof Error ? error.message : String(error)}`));

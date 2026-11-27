@@ -238,25 +238,27 @@ export class OsdButtonNative {
    * (Mechanic "Repair Part"/"Sell Part"), so a long press lists the visible,
    * enabled drop targets by their tooltips; choosing one calls dropOn. Only
    * gadgets of an InventoryPanel qualify, so ordinary buttons keep their press. */
-  async dropTargets(source: JavaValue): Promise<{ physics: JavaValue; label: string }[]> {
+  async dropTargets(source: JavaValue): Promise<{ title: string; targets: { physics: JavaValue; label: string }[] }> {
+    const none = { title: '', targets: [] };
     const sourceObject = this.object(source), origin = sourceObject && this.boxes.get(sourceObject);
-    if (!origin || !this.visible(origin)) return [];
+    if (!origin || !this.visible(origin)) return none;
     const sourceGadget = await this.findGadget(origin, source);
-    if (!sourceGadget || Number(sourceGadget.fields.get('disabled')?.value ?? 0)) return [];
+    if (!sourceGadget || Number(sourceGadget.fields.get('disabled')?.value ?? 0)) return none;
     const osd = this.object(this.requireObject(origin.group).fields.get('osd'));
     const panel = this.object(osd?.fields.get('globalHandler'));
-    if (!panel || !this.jvm.isInstance(jv(panel.className, panel), 'java.game.InventoryPanel')) return [];
+    if (!panel || !this.jvm.isInstance(jv(panel.className, panel), 'java.game.InventoryPanel')) return none;
+    const tooltip = (gadget: JavaObject) => { const text = gadget.fields.get('tooltip')?.value; return typeof text === 'string' ? text.trim() : ''; };
     const targets: { physics: JavaValue; label: string }[] = [];
     for (const box of this.activeBoxes) {
       if (box === origin || !this.visible(box)) continue;
+      // The panel's own slots accept drops too (swapping parts); the menu offers only outside actions.
+      if (this.object(this.requireObject(box.group).fields.get('osd')) === osd) continue;
       const gadget = await this.findGadget(box, box.physics);
-      if (!gadget || gadget === sourceGadget || Number(gadget.fields.get('disabled')?.value ?? 0) ||
-          !Number(gadget.fields.get('dropEnabled')?.value ?? 0)) continue;
-      const tooltip = gadget.fields.get('tooltip')?.value;
-      const label = (typeof tooltip === 'string' ? tooltip : '').trim() || box.label.trim() || 'Drop here';
-      targets.push({ physics: box.physics, label });
+      if (!gadget || Number(gadget.fields.get('disabled')?.value ?? 0) || !Number(gadget.fields.get('dropEnabled')?.value ?? 0)) continue;
+      const label = tooltip(gadget);
+      if (label) targets.push({ physics: box.physics, label });
     }
-    return targets;
+    return { title: tooltip(sourceGadget), targets };
   }
 
   async activate(physics: JavaValue): Promise<void> {

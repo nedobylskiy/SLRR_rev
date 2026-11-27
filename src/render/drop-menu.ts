@@ -1,7 +1,7 @@
 /** Long-press action menu for touch screens: lists OSD drop targets (Mechanic
  * "Repair Part", "Sell Part", ...) so a part can be repaired or sold without a
  * drag. It only reports the choice; the caller performs the Java drop. */
-export type DropMenu = (host: HTMLElement, x: number, y: number, labels: string[], choose: (index: number) => void) => () => void;
+export type DropMenu = (host: HTMLElement, x: number, y: number, title: string, labels: string[], choose: (index: number) => void) => () => void;
 
 const STYLE_ID = 'slrr-drop-menu-style';
 const STYLE = `
@@ -9,13 +9,14 @@ const STYLE = `
 .slrr-drop-menu { position: fixed; min-width: 180px; max-width: min(320px, 90vw); padding: 6px; display: grid; gap: 4px;
   background: rgba(16, 14, 12, .94); border: 1px solid rgba(255, 196, 64, .55); border-radius: 8px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, .6); font: 600 15px/1.2 system-ui, sans-serif; color: #f4ead2; }
+.slrr-drop-menu .title { padding: 8px 14px 6px; color: #ffc440; font-weight: 700; }
 .slrr-drop-menu button { all: unset; box-sizing: border-box; padding: 12px 14px; border-radius: 6px; cursor: pointer;
   background: rgba(255, 255, 255, .06); text-align: left; }
 .slrr-drop-menu button:active, .slrr-drop-menu button:hover { background: rgba(255, 196, 64, .28); }
 .slrr-drop-menu button.cancel { color: #b9ae96; font-weight: 500; }
 `;
 
-export const showDropMenu: DropMenu = (host, x, y, labels, choose) => {
+export const showDropMenu: DropMenu = (host, x, y, title, labels, choose) => {
   const document = host.ownerDocument;
   if (!document.getElementById(STYLE_ID)) {
     const style = document.createElement('style'); style.id = STYLE_ID; style.textContent = STYLE;
@@ -31,13 +32,16 @@ export const showDropMenu: DropMenu = (host, x, y, labels, choose) => {
     button.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); close(); action(); });
     menu.append(button);
   };
+  if (title) { const heading = document.createElement('div'); heading.className = 'title'; heading.textContent = title; menu.append(heading); }
   labels.forEach((label, index) => item(label, () => choose(index)));
   item('Cancel', () => {}, 'cancel');
-  // Keep these events away from the game's own pointer and click handlers on the viewport.
+  // Modal: only an item or Cancel closes it. The finger that opened it is still down, and
+  // the Android long-press (contextmenu) lands on the backdrop. Keep every event away
+  // from the game's pointer and click handlers on the viewport.
   for (const type of ['pointerdown', 'pointermove', 'pointerup', 'click', 'contextmenu', 'wheel'])
     backdrop.addEventListener(type, event => {
       event.stopPropagation();
-      if (event.target === backdrop && (type === 'pointerdown' || type === 'contextmenu')) { event.preventDefault(); close(); }
+      if (event.target === backdrop || type === 'contextmenu') event.preventDefault();
     });
   backdrop.append(menu); host.append(backdrop);
   // Open beside the finger, kept inside the window.

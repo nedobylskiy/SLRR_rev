@@ -184,12 +184,12 @@ test('a touch long press on an inventory gadget opens its drop menu instead of c
     jvm:{get:(_:unknown,key:string)=>({value:key==='visible'?0:{}})},
     gameTypes:{lastCommand:()=>undefined},
     osdButtons:{physicsAt:(x:number)=>x>=200?button:gadget,
-      dropTargets:async (source:unknown)=>source===gadget?[{physics:repair,label:'Repair Part'},{physics:sell,label:'Sell Part'}]:[],
+      dropTargets:async (source:unknown)=>source===gadget?{title:'Door',targets:[{physics:repair,label:'Repair Part'},{physics:sell,label:'Sell Part'}]}:{title:'',targets:[]},
       dropOn:async (onto:unknown,source:unknown)=>{drops.push({onto,source});return true;}},
   } as unknown as BootResult;
   const mouse = new JavaMouse(surface as unknown as HTMLElement,result,{} as Assets,()=>{});
-  const menus: { labels: string[]; choose: (index: number) => void }[] = [];
-  mouse.showMenu = (_host, _x, _y, labels, choose) => { menus.push({labels,choose}); return () => {}; };
+  const menus: { title: string; labels: string[]; choose: (index: number) => void }[] = [];
+  mouse.showMenu = (_host, _x, _y, title, labels, choose) => { menus.push({title,labels,choose}); return () => {}; };
   const pointer = (type:string,x:number) => {const event=new Event(type,{cancelable:true});Object.assign(event,{button:0,pointerId:1,pointerType:'touch',clientX:x,clientY:10});surface.dispatchEvent(event);return event;};
   const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
   const click = () => {const event=new Event('click',{cancelable:true});surface.dispatchEvent(event);return event.defaultPrevented;};
@@ -197,7 +197,7 @@ test('a touch long press on an inventory gadget opens its drop menu instead of c
     pointer('pointerdown',50); t.mock.timers.tick(499); await flush();
     assert.equal(menus.length,0);
     t.mock.timers.tick(1); await flush();
-    assert.deepEqual(menus.map(menu=>menu.labels),[['Repair Part','Sell Part']]);
+    assert.deepEqual(menus.map(menu=>[menu.title,...menu.labels]),[['Door','Repair Part','Sell Part']]);
     pointer('pointerup',50);
     assert.equal(click(),true,'the click after the long press is swallowed');
     menus[0].choose(1); await flush();
